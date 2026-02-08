@@ -1,0 +1,5 @@
+{
+  "name": "LupoHub - Wholesale Management",
+  "description": "A comprehensive responsive web dashboard for managing wholesale underwear inventory, orders, and sales visits. Features role-based access (Admin, Seller, Warehouse) and AI-powered inventory insights.",
+  "requestFramePermissions": []
+}
