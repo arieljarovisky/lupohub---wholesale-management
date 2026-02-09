@@ -60,7 +60,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return valA.localeCompare(valB);
    });
 
-   console.log(availableColors)
 
   function getProductColorCode(p: Product) {
     const val = ((p as any).color || '').toString().trim().toLowerCase();
@@ -176,7 +175,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const groupedProducts = baseSource.reduce((acc, product) => {
     const sku = (product.sku || 'SIN-CODIGO').toString();
     const parts = sku.split('-');
-    let baseSku = parts.length >= 2 ? parts[0] : sku;
+    let baseSku = sku;
+    if (parts.length >= 3) {
+      baseSku = parts.slice(0, -2).join('-');
+    } else if (parts.length === 2) {
+      baseSku = parts.join('-');
+    }
     
     const key = baseSku;
     if (!acc[key]) {
@@ -199,14 +203,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return;
     }
     if (filterColor === 'ALL') return;
-    const baseSkus = Array.from(new Set(products.map(product => {
+    const baseSkus: string[] = Array.from(new Set<string>(products.map(product => {
       const sku = (product.sku || 'SIN-CODIGO').toString();
       const parts = sku.split('-');
-      if (parts.length === 2) return parts[0];
       if (parts.length >= 3) return parts.slice(0, -2).join('-');
+      if (parts.length === 2) return parts.join('-');
       return sku;
     })));
-    const missing = baseSkus.filter(k => !loadedVariants[k]);
+    const missing: string[] = baseSkus.filter(k => !loadedVariants[k]);
     if (missing.length === 0) return;
     Promise.all(missing.map(async (groupName) => {
       try {
