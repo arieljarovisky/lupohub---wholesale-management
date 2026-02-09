@@ -66,8 +66,18 @@ const App: React.FC = () => {
       ]);
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
-      const colorAttrs = fetchedColors.map(c => ({ id: `color-${c.code}`, type: 'color', name: c.name, value: c.hex })) as any;
-      const sizeAttrs = fetchedSizes.map(s => ({ id: `size-${s.code}`, type: 'size', name: s.name })) as any;
+      const colorAttrs = fetchedColors.map((c, idx) => ({ 
+        id: c.code ? `color-${c.code}` : `color-idx-${idx}-${Date.now()}`, 
+        type: 'color', 
+        name: c.name, 
+        value: c.hex, 
+        code: c.code 
+      })) as any;
+      const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
+        id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
+        type: 'size', 
+        name: s.name 
+      })) as any;
       setAttributes([...sizeAttrs, ...colorAttrs]);
     } catch (error) {
       console.error("Error loading data form API", error);

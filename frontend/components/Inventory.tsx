@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
@@ -46,31 +46,138 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
-  // 1. Filter individual products first
-  const filteredProducts = products.filter(p => {
-    const name = (p.name || '').toString();
+  const availableSizes = attributes.filter(a => a.type === 'size');
+  
+  // Use only colors from the database (attributes loaded from API /colors)
+   // But ensure they are sorted numerically/alphabetically
+   const availableColors = attributes.filter(a => a.type === 'color').sort((a, b) => {
+      const valA = ((a as any).code || a.name || '').toString();
+      const valB = ((b as any).code || b.name || '').toString();
+      // Try numeric sort
+      const na = parseInt(valA);
+      const nb = parseInt(valB);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return valA.localeCompare(valB);
+   });
+
+   console.log(availableColors)
+
+  function getProductColorCode(p: Product) {
+    const val = ((p as any).color || '').toString().trim().toLowerCase();
+    if (val) return val;
+    
+    const sku = (p.sku || '').toString().trim();
+    // Try to find color code pattern (digits at the end or as last segment)
+    // 1. Try split by '-'
+    const parts = sku.split('-');
+    if (parts.length > 1) {
+      // Check if last part looks like a color code (digits, possibly with some letters but usually digits for colors like 111, 800)
+      // Or if it's a known color format.
+      // Assuming last part is color if >= 2 segments.
+      return parts[parts.length - 1].trim().toLowerCase();
+    }
+    
+    return '';
+  }
+
+  useEffect(() => {
+    try {
+      console.table(products.map(p => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        stock: (p as any).stock_total ?? (p as any).stock ?? 0,
+        price: (p as any).base_price ?? (p as any).price ?? 0
+      })));
+    } catch {
+      console.log('Productos', products);
+    }
+  }, [products]);
+
+  // Helper function to check color match, extracted to be reusable
+  function checkColorMatch(p: Product, filterColor: string) {
+    if (filterColor === 'ALL') return true;
+    
+    const parsedColor = getProductColorCode(p);
+    const filterColorStr = filterColor.toString().trim().toLowerCase();
+    
+    // Find the selected attribute to check against both code and name
+    const selectedAttr = availableColors.find(c => ((c as any).code || c.name) === filterColor);
+    const targetCode = (selectedAttr ? ((selectedAttr as any).code || '') : filterColor).toString().trim().toLowerCase();
+    const targetName = (selectedAttr ? (selectedAttr.name || '') : '').toString().trim().toLowerCase();
+
+    // Check explicit color property
+    const explicitColor = ((p as any).color || '').toString().trim().toLowerCase();
+    
+    // Check parsed color from SKU
+    const parsedColorStr = parsedColor.toString().trim().toLowerCase();
+
+    // Check if SKU contains the target code as a segment (more robust than just last part)
     const sku = (p.sku || '').toString();
-    const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const skuParts = sku.toLowerCase().split('-');
+    const skuHasCode = targetCode && skuParts.includes(targetCode);
+
+    if (
+        (explicitColor && (explicitColor === targetCode || explicitColor === targetName)) ||
+        (parsedColorStr === filterColorStr) || 
+        (parsedColorStr === targetCode) || 
+        (targetName && parsedColorStr === targetName) ||
+        skuHasCode
+    ) {
+      return true;
+    } else {
+      // Try numeric comparison to handle "03" vs "3" differences
+      const n1 = parseInt(parsedColor);
+      const n2 = parseInt(filterColorStr);
+      const n3 = parseInt(targetCode);
+      if ((!isNaN(n1) && !isNaN(n2) && n1 === n2) || (!isNaN(n1) && !isNaN(n3) && n1 === n3)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 1. Filter individual products first (incluye padres para poder evaluar variantes)
+  const filteredProducts = products.filter(p => {
+    const sku = (p.sku || '').toString();
+    const matchesSearch = sku.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
     const matchesSize = filterSize === 'ALL' || (p as any).size === filterSize;
-    const parts = (p.sku || '').toString().split('-');
-    const parsedColor = (p as any).color || (parts.length >= 3 ? parts[parts.length - 1] : '');
-    const matchesColor = filterColor === 'ALL' || parsedColor === filterColor;
+    
+    const isParent = sku.split('-').length <= 1;
+    const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
+
+    // Debug logging requested by user
+    if (filterColor !== 'ALL' && !matchesColor) {
+       // Log only occasionally or if needed
+       // console.log(`[FilterMismatch] SKU: ${sku}, Filter: '${filterColor}'`);
+    }
     
     let matchesStock = true;
     const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
     if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
     if (filterStockLevel === 'OUT') matchesStock = stockValue <= 0;
 
+    // If we are filtering by color and the product has no color info (likely a parent product),
+    // allow it to pass ONLY IF we cannot determine it's definitely NOT that color.
+    // However, usually we want strict filtering. 
+    // BUT, if the list contains PARENTS (no color) and we filter by color, we hide everything.
+    // STRATEGY: If parsedColor is empty, and SKU has no dashes (likely parent), we might want to include it 
+    // IF we are going to filter groups later.
+    // BUT groups.filter checks variants.
+    // So, let's keep strict filtering but ensure variants are detected.
+    
     return matchesSearch && matchesCategory && matchesSize && matchesColor && matchesStock;
   });
 
-  // 2. Group filtered products by BASE SKU (prefix before size/color suffix)
-  const groupedProducts = filteredProducts.reduce((acc, product) => {
+    // 2. Group filtered products by BASE SKU (prefix before size/color suffix)
+  const baseSource = filterColor === 'ALL' ? filteredProducts : products;
+  const groupedProducts = baseSource.reduce((acc, product) => {
     const sku = (product.sku || 'SIN-CODIGO').toString();
     const parts = sku.split('-');
-    const baseSku = parts.length >= 3 ? parts.slice(0, -2).join('-') : sku;
+    let baseSku = parts.length >= 2 ? parts[0] : sku;
+    
     const key = baseSku;
     if (!acc[key]) {
       acc[key] = [];
@@ -81,9 +188,47 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const categories = Array.from(new Set(products.map(p => p.category)));
   const sizes = Array.from(new Set(products.map(p => (p as any).size).filter(Boolean)));
-  
-  const availableSizes = attributes.filter(a => a.type === 'size');
-  const availableColors = attributes.filter(a => a.type === 'color');
+
+  const selectedColorItem = filterColor !== 'ALL' ? availableColors.find(c => (c as any).name === filterColor || (c as any).code === filterColor) : null;
+  const selectedColorLabel = selectedColorItem ? `${(selectedColorItem as any).name || ''}` : colorQuery;
+
+  // Prefetch variants for color filtering at group level
+  useEffect(() => {
+    if (filterColor === 'ALL') {
+      setLoadingVariantsByGroup({});
+      return;
+    }
+    if (filterColor === 'ALL') return;
+    const baseSkus = Array.from(new Set(products.map(product => {
+      const sku = (product.sku || 'SIN-CODIGO').toString();
+      const parts = sku.split('-');
+      if (parts.length === 2) return parts[0];
+      if (parts.length >= 3) return parts.slice(0, -2).join('-');
+      return sku;
+    })));
+    const missing = baseSkus.filter(k => !loadedVariants[k]);
+    if (missing.length === 0) return;
+    Promise.all(missing.map(async (groupName) => {
+      try {
+        const variants = await api.getVariantsBySku(groupName);
+        const mapped: Product[] = variants.map((v) => ({
+          id: v.variantId,
+          sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
+          name: groupedProducts[groupName]?.[0]?.name || '',
+          category: groupedProducts[groupName]?.[0]?.category || 'General',
+          price: groupedProducts[groupName]?.[0]?.price || 0,
+          description: '',
+          size: v.sizeCode,
+          color: v.colorName,
+          stock: v.stock,
+          integrations: groupedProducts[groupName]?.[0]?.integrations || { local: true }
+        }));
+        setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+      } catch {
+        // ignore
+      }
+    })).catch(() => {});
+  }, [filterColor, products]);
 
   const exportProductsToExcel = () => {
     const rows: any[] = [];
@@ -130,15 +275,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
+  const [loadingVariantsByGroup, setLoadingVariantsByGroup] = useState<Record<string, boolean>>({});
 
   const toggleGroup = (groupName: string) => {
     setExpandedGroups(prev => {
       const next = prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName];
       return next;
     });
-    if (!loadedVariants[groupName]) {
+    if (!loadedVariants[groupName] || (loadedVariants[groupName] && loadedVariants[groupName].length === 0)) {
+      setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: true }));
       api.getVariantsBySku(groupName).then(variants => {
-        const mapped: Product[] = variants.map((v, idx) => ({
+        const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
           name: groupedProducts[groupName]?.[0]?.name || '',
@@ -152,7 +299,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
       }).catch(() => {
-        // Silently ignore; will keep fallback group items
+        // keep fallback group items
+      }).finally(() => {
+        setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: false }));
       });
     }
   };
@@ -258,16 +407,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
         
         <button 
-          onClick={() => setShowFilters(!showFilters)}
-          className={`flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all ${
-            showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700'
-          }`}
-        >
-          <Filter size={16} />
-          <span className="text-sm font-semibold">Filtros</span>
-        </button>
-
-        <button 
           onClick={exportProductsToExcel}
           className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-green-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm"
         >
@@ -286,95 +425,101 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
       </div>
 
-      {/* Advanced Filters Panel */}
-      {showFilters && (
-        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in shadow-inner">
-           <div className="space-y-1">
-             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Categoría</label>
-             <select 
-               value={filterCategory} 
-               onChange={(e) => { setFilterCategory(e.target.value); setCurrentPage(1); }}
-               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-xs text-white outline-none appearance-none"
-             >
-               <option value="ALL">Todas las categorías</option>
-               {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-             </select>
-           </div>
-           <div className="space-y-1">
-             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Talle</label>
-             <select 
-               value={filterSize} 
-               onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
-               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-xs text-white outline-none appearance-none"
-             >
-               <option value="ALL">Todos los talles</option>
-               {sizes.map(s => <option key={s} value={s}>{s}</option>)}
-             </select>
-           </div>
-           <div className="space-y-1">
-             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Disponibilidad</label>
-             <select 
-               value={filterStockLevel} 
-               onChange={(e) => { setFilterStockLevel(e.target.value as any); setCurrentPage(1); }}
-               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-xs text-white outline-none appearance-none"
-             >
-               <option value="ALL">Cualquier estado</option>
-               <option value="LOW">Stock Bajo (Crítico)</option>
-               <option value="OUT">Sin Stock (Agotado)</option>
-             </select>
-           </div>
-           <div className="space-y-1 md:col-span-3 relative">
-             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Color</label>
-             <div className="relative">
-               <input
-                 type="text"
-                 value={filterColor === 'ALL' ? colorQuery : filterColor}
-                 onFocus={() => setColorOpen(true)}
-                 onChange={(e) => {
-                   setColorQuery(e.target.value);
-                   setFilterColor('ALL');
-                   setCurrentPage(1);
-                   setColorOpen(true);
-                 }}
-                 placeholder="Todos los colores"
-                 className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-xs text-white outline-none"
-               />
-               {colorOpen && (
-                 <div className="absolute z-30 mt-1 w-full max-h-48 overflow-auto bg-slate-900 border border-slate-700 rounded-lg">
-                   <button
-                     onClick={() => { setFilterColor('ALL'); setColorQuery(''); setColorOpen(false); setCurrentPage(1); }}
-                     className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800"
-                   >
-                     Todos los colores
-                   </button>
-                   {availableColors
-                     .filter(c => (c.name || '').toLowerCase().includes((colorQuery || '').toLowerCase()))
-                     .map(c => (
-                       <button
-                         key={c.name || `color-${Math.random()}`}
-                         onClick={() => { setFilterColor(c.name); setColorQuery(''); setColorOpen(false); setCurrentPage(1); }}
-                         className="w-full text-left px-3 py-2 text-xs text-white hover:bg-slate-800"
-                       >
-                         {c.name || 'Sin nombre'}
-                       </button>
-                     ))}
-                 </div>
-               )}
-             </div>
-           </div>
+      {/* Search Bar & Filters */}
+      <div className="space-y-4">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+            <input 
+              type="text" 
+              placeholder="Buscar Código de Producto..." 
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              className="w-full pl-10 pr-4 py-3.5 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm"
+            />
+          </div>
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`px-4 rounded-xl border flex items-center gap-2 font-bold transition-all ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+          >
+            <Filter size={18} />
+            <span className="hidden md:inline">Filtros</span>
+            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL') && (
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+            )}
+          </button>
         </div>
-      )}
 
-      {/* Search Bar */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-        <input 
-          type="text" 
-          placeholder="Buscar Modelo, SKU o Color..." 
-          value={searchTerm}
-          onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-          className="w-full pl-10 pr-4 py-3.5 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm"
-        />
+        {/* Filters Panel */}
+        {showFilters && (
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in">
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Categoría</label>
+                <div className="relative">
+                   <select 
+                     value={filterCategory}
+                     onChange={(e) => { setFilterCategory(e.target.value); setCurrentPage(1); }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
+                   >
+                     <option value="ALL">Todas</option>
+                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+             
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Talle</label>
+                <div className="relative">
+                   <select 
+                     value={filterSize}
+                     onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
+                   >
+                     <option value="ALL">Todos</option>
+                     {availableSizes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Color</label>
+                <div className="relative">
+                   <select 
+                     value={filterColor}
+                     onChange={(e) => { setFilterColor(e.target.value); setCurrentPage(1); }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
+                   >
+                     <option value="ALL">Todos</option>
+                     {availableColors.map(c => {
+                       const code = (c as any).code;
+                        const label = code ? `${code} ${c.name || ''}` : (c.name || '');
+                        const val = code || c.name;
+                        return <option key={c.id} value={val}>{label}</option>;
+                     })}
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Estado</label>
+                <div className="relative">
+                   <select 
+                     value={filterStockLevel}
+                     onChange={(e) => { setFilterStockLevel(e.target.value as any); setCurrentPage(1); }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
+                   >
+                     <option value="ALL">Todos</option>
+                     <option value="LOW">Poco Stock</option>
+                     <option value="OUT">Agotado</option>
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+          </div>
+        )}
       </div>
 
       {/* Grouped List Container */}
@@ -389,11 +534,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             return { groupKey, groupVariants, totalStock, category };
           });
           if (filterColor !== 'ALL') {
-            groups = groups.filter(g => g.groupVariants.some(v => {
-              const parts = (v.sku || '').toString().split('-');
-              const parsed = v.color || (parts.length >= 3 ? parts[parts.length - 1] : '');
-              return parsed === filterColor;
-            }));
+            groups = groups.filter(g => {
+              const variants = loadedVariants[g.groupKey];
+              if (!variants) return true; // mantener grupo visible hasta que carguen variantes
+              return variants.some(v => checkColorMatch(v, filterColor));
+            });
           }
           groups.sort((a, b) => {
             let cmp = 0;
@@ -408,13 +553,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const end = start + pageSize;
           const pageGroups = groups.slice(start, end);
           return pageGroups.map(({ groupKey, groupVariants, totalStock, category }) => {
-          const variantsToRender = loadedVariants[groupKey] || groupVariants;
+           const rawVariants = (loadedVariants[groupKey] && loadedVariants[groupKey].length > 0) ? loadedVariants[groupKey] : groupVariants;
+          let variantsToRender = rawVariants;
+          
+          if (filterColor !== 'ALL') {
+             variantsToRender = rawVariants.filter(p => checkColorMatch(p, filterColor));
+          }
+
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
           const displayName = skuLabel;
           
+          const filteredTotalStock = variantsToRender.reduce((sum, p) => {
+            const val = (p as any).stock_total ?? (p as any).stock ?? 0;
+            return sum + Number(val);
+          }, 0);
           const hasLowStock = variantsToRender.some(p => p.stock > 0 && p.stock < 20);
-          const isFullyOut = totalStock === 0;
+          const displayTotalStock = filterColor === 'ALL' ? totalStock : filteredTotalStock;
+          const isFullyOut = displayTotalStock === 0;
 
           return (
             <div key={groupKey} className={`bg-slate-800 rounded-2xl border transition-all overflow-hidden ${isExpanded ? 'border-blue-500/50 shadow-lg shadow-blue-900/10' : 'border-slate-700'}`}>
@@ -442,8 +598,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <div className="text-right hidden sm:block">
                       <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-0.5">Stock Total</div>
                       {isAdminOrWarehouse ? (
-                        <div className={`text-xl font-black ${isFullyOut ? 'text-red-500' : totalStock < 50 ? 'text-yellow-500' : 'text-green-400'}`}>
-                           {totalStock} <span className="text-xs text-slate-600">un.</span>
+                        <div className={`text-xl font-black ${isFullyOut ? 'text-red-500' : displayTotalStock < 50 ? 'text-yellow-500' : 'text-green-400'}`}>
+                           {displayTotalStock} <span className="text-xs text-slate-600">un.</span>
                         </div>
                       ) : (
                         <div className={`text-sm font-black uppercase ${isFullyOut ? 'text-red-500' : 'text-green-400'}`}>
@@ -489,6 +645,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {isExpanded && (
                 <div className="border-t border-slate-700 bg-slate-900/30 animate-fade-in">
                   <div className="p-2 sm:p-4 space-y-2">
+                    {loadingVariantsByGroup[groupKey] && (
+                      <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
+                        Cargando variantes...
+                      </div>
+                    )}
+                    {!loadingVariantsByGroup[groupKey] && variantsToRender.length === 0 && filterColor !== 'ALL' && (
+                      <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
+                        No hay variantes para el color seleccionado.
+                      </div>
+                    )}
                     {[...variantsToRender]
                       .sort((a, b) => {
                         const partsA = (a.sku || '').toString().split('-');
