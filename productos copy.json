@@ -1,0 +1,42 @@
+{
+    "producto": "Corpiño Push-up Estampado Con Aro Modelo 41276",
+    "id_producto": "240654348",
+    "variantes": [
+        {
+            "id": 1056437306,
+            "sku": "7890000000000",
+            "stock": 20,
+            "atributos": {
+                "color_base": "Gris - Floreado",
+                "talle": "P"
+            }
+        },
+        {
+            "id": 1056437313,
+            "sku": "7890000000000",
+            "stock": 20,
+            "atributos": {
+                "color_base": "Gris - Floreado",
+                "talle": "M"
+            }
+        },
+        {
+            "id": 1056437343,
+            "sku": "7890000000000",
+            "stock": 19,
+            "atributos": {
+                "color_base": "Gris - Floreado",
+                "talle": "G"
+            }
+        },
+        {
+            "id": 1056437348,
+            "sku": "7890000000000",
+            "stock": 20,
+            "atributos": {
+                "color_base": "Gris - Floreado",
+                "talle": "GG"
+            }
+        }
+    ]
+}

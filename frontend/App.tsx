@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Inventory from './components/Inventory';
@@ -23,7 +23,22 @@ const App: React.FC = () => {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState(() => {
+    const hv = window.location.hash ? window.location.hash.slice(1) : '';
+    const lv = localStorage.getItem('lupo_current_view');
+    return hv || lv || 'dashboard';
+  });
+
+  const baseView = currentView.split('?')[0];
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const v = window.location.hash ? window.location.hash.slice(1) : '';
+      if (v) setCurrentView(v);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   
   // Data State - Initialized empty for Products/Orders to fetch from DB
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,10 +65,37 @@ const App: React.FC = () => {
     if (savedToken) {
       setAuthToken(savedToken);
     }
+    // Restore last view if available and allowed
+    const savedView = localStorage.getItem('lupo_current_view');
+    if (savedView && currentUser) {
+      const role = currentUser.role;
+      const allowedByRole: Record<string, Role[]> = {
+        dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+        inventory: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER],
+        orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+        customers: [Role.ADMIN, Role.SELLER],
+        visits: [Role.ADMIN, Role.SELLER],
+        settings: [Role.ADMIN]
+      };
+      const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
+      if (!isSpecial && allowedByRole[savedView]?.includes(role)) {
+        setCurrentView(savedView);
+      }
+    }
     if (currentUser) {
       loadData();
     }
   }, [currentUser]);
+
+  // Persist current view on changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('lupo_current_view', currentView);
+      if (window.location.hash.slice(1) !== currentView) {
+        window.location.hash = currentView;
+      }
+    } catch {}
+  }, [currentView]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -73,10 +115,11 @@ const App: React.FC = () => {
         value: c.hex, 
         code: c.code 
       })) as any;
-      const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
+       const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
         id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
         type: 'size', 
-        name: s.name 
+         name: s.name,
+         code: s.code 
       })) as any;
       setAttributes([...sizeAttrs, ...colorAttrs]);
     } catch (error) {
@@ -339,7 +382,7 @@ const App: React.FC = () => {
     <div className="flex h-screen w-full bg-slate-950 text-slate-200 flex-col md:flex-row overflow-hidden">
       <div className="hidden md:block shrink-0">
         <Sidebar 
-          currentView={currentView} 
+          currentView={baseView} 
           onChangeView={setCurrentView} 
           userRole={currentUser.role}
           onLogout={handleLogout}
@@ -358,28 +401,28 @@ const App: React.FC = () => {
           <header className="mb-6 flex justify-between items-start">
              <div>
                <h1 className="text-2xl md:text-3xl font-bold text-white">
-                 {currentView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
-                 {currentView === 'inventory' && 'Inventario'}
-                 {currentView === 'orders' && 'Pedidos'}
-                 {currentView === 'customers' && 'Clientes'}
-                 {currentView === 'visits' && 'Visitas'}
-                 {currentView === 'settings' && 'Configuración'}
-                 {currentView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido')}
-                 {currentView === 'order_picking' && 'Preparando Pedido'}
+                 {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
+                 {baseView === 'inventory' && 'Inventario'}
+                 {baseView === 'orders' && 'Pedidos'}
+                 {baseView === 'customers' && 'Clientes'}
+                 {baseView === 'visits' && 'Visitas'}
+                 {baseView === 'settings' && 'Configuración'}
+                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido')}
+                 {baseView === 'order_picking' && 'Preparando Pedido'}
                </h1>
                <p className="text-xs md:text-sm text-slate-400 mt-0.5">
                  {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
                </p>
              </div>
-             {currentUser.role === Role.ADMIN && currentView !== 'settings' && (
+             {currentUser.role === Role.ADMIN && baseView !== 'settings' && (
                <button onClick={() => setCurrentView('settings')} className="md:hidden p-2 text-slate-400">
                   <SettingsIcon size={20} />
                </button>
              )}
           </header>
 
-          {currentView === 'dashboard' && <Dashboard products={products} orders={orders} role={currentUser.role} />}
-          {currentView === 'inventory' && (
+          {baseView === 'dashboard' && <Dashboard products={products} orders={orders} role={currentUser.role} />}
+          {baseView === 'inventory' && (
             <Inventory 
               products={products} 
               attributes={attributes} 
@@ -388,7 +431,7 @@ const App: React.FC = () => {
               onUpdateStock={handleUpdateStock}
             />
           )}
-          {currentView === 'orders' && (
+          {baseView === 'orders' && (
             <Orders 
               orders={orders} products={products} customers={getVisibleCustomers()} 
               users={users} role={currentUser.role} currentUserId={currentUser.id} 
@@ -399,7 +442,7 @@ const App: React.FC = () => {
             />
           )}
           
-          {currentView === 'customers' && (
+          {baseView === 'customers' && (
             <Customers 
               customers={getVisibleCustomers()} 
               role={currentUser.role} 
@@ -409,8 +452,8 @@ const App: React.FC = () => {
               products={products}
             />
           )}
-          {currentView === 'visits' && <Visits visits={MOCK_VISITS} role={currentUser.role} />}
-          {currentView === 'settings' && (
+          {baseView === 'visits' && <Visits visits={MOCK_VISITS} role={currentUser.role} />}
+          {baseView === 'settings' && (
             <Settings 
               attributes={attributes} 
               onCreateAttribute={handleCreateAttribute} 
@@ -424,7 +467,7 @@ const App: React.FC = () => {
               currentUser={currentUser}
             />
           )}
-          {currentView === 'create_order' && (
+          {baseView === 'create_order' && (
             <CreateOrder 
               products={products} 
               customers={getVisibleCustomers()} 
@@ -434,7 +477,7 @@ const App: React.FC = () => {
               initialOrder={editingOrder}
             />
           )}
-          {currentView === 'order_picking' && activePickingOrder && (
+          {baseView === 'order_picking' && activePickingOrder && (
             <OrderPicking order={activePickingOrder} products={products} currentUserId={currentUser.id} users={users} onFinishPicking={handleFinishPicking} onCancel={() => setCurrentView('orders')} />
           )}
         </div>
@@ -443,7 +486,7 @@ const App: React.FC = () => {
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 px-2 py-3 z-50 flex justify-around items-center backdrop-blur-md bg-opacity-90">
         {mobileNavItems.map(item => {
           if (!item.roles.includes(currentUser.role)) return null;
-          const isActive = currentView === item.id;
+          const isActive = baseView === item.id;
           return (
             <button 
               key={item.id}

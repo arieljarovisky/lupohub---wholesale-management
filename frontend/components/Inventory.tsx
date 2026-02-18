@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -31,6 +31,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [initialStock, setInitialStock] = useState('0');
+
+  // Linking Modal State
+  const [linkingVariant, setLinkingVariant] = useState<Product | null>(null);
+  const [linkTnId, setLinkTnId] = useState('');
+  const [linkTnVariantId, setLinkTnVariantId] = useState('');
+  const [linkMlId, setLinkMlId] = useState('');
 
   // Filter States
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -76,6 +82,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return parts[parts.length - 1].trim().toLowerCase();
     }
     
+    return '';
+  }
+  
+  function getProductSizeCode(p: Product) {
+    const val = ((p as any).size || '').toString().trim().toUpperCase();
+    if (val) return val;
+    const sku = (p.sku || '').toString().trim();
+    const parts = sku.split('-');
+    if (parts.length >= 3) {
+      return (parts[parts.length - 2] || '').toString().trim().toUpperCase();
+    }
     return '';
   }
 
@@ -142,7 +159,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const sku = (p.sku || '').toString();
     const matchesSearch = sku.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
-    const matchesSize = filterSize === 'ALL' || (p as any).size === filterSize;
+    const sizeCode = getProductSizeCode(p);
+    const matchesSize = filterSize === 'ALL' || sizeCode === filterSize;
     
     const isParent = sku.split('-').length <= 1;
     const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
@@ -192,6 +210,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const categories = Array.from(new Set(products.map(p => p.category)));
   const sizes = Array.from(new Set(products.map(p => (p as any).size).filter(Boolean)));
+  
+  const sizeOptions = (() => {
+    const attrSizes = attributes.filter(a => a.type === 'size');
+    const opts = attrSizes.map(a => {
+      const code = (((a as any).code || a.name || '') as string).toString().toUpperCase();
+      const label = (a as any).code ? `${((a as any).code || '').toString().toUpperCase()} - ${(a.name || '').toString()}` : (a.name || '').toString();
+      return { code, label };
+    }).filter(s => s.code);
+    if (opts.length > 0) {
+      const uniqueByCode = Array.from(new Map(opts.map(o => [o.code, o])).values());
+      return uniqueByCode;
+    }
+    const derived = Array.from(new Set(products.map(p => getProductSizeCode(p)).filter(Boolean)));
+    return derived.map(code => ({ code, label: code }));
+  })();
 
   const selectedColorItem = filterColor !== 'ALL' ? availableColors.find(c => (c as any).name === filterColor || (c as any).code === filterColor) : null;
   const selectedColorLabel = selectedColorItem ? `${(selectedColorItem as any).name || ''}` : colorQuery;
@@ -225,7 +258,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           size: v.sizeCode,
           color: v.colorName,
           stock: v.stock,
-          integrations: groupedProducts[groupName]?.[0]?.integrations || { local: true }
+          integrations: { 
+            local: true, 
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre 
+          },
+          externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
       } catch {
@@ -233,6 +271,51 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
     })).catch(() => {});
   }, [filterColor, products]);
+  
+  // Prefetch variants for visible groups on initial load (no color filter)
+  useEffect(() => {
+    if (filterColor !== 'ALL') return;
+    const baseSkus: string[] = Array.from(new Set<string>(filteredProducts.map(product => {
+      const sku = (product.sku || 'SIN-CODIGO').toString();
+      const parts = sku.split('-');
+      if (parts.length >= 3) return parts.slice(0, -2).join('-');
+      if (parts.length === 2) return parts.join('-');
+      return sku;
+    })));
+    const missing: string[] = baseSkus.filter(k => !loadedVariants[k]);
+    const limit = missing.slice(0, 50);
+    if (limit.length === 0) return;
+    setLoadingVariantsByGroup(prev => ({ ...prev, ...Object.fromEntries(limit.map(k => [k, true])) }));
+    Promise.all(limit.map(async (groupName) => {
+      try {
+        const variants = await api.getVariantsBySku(groupName);
+        const mapped: Product[] = variants.map((v) => ({
+          id: v.variantId,
+          sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
+          name: groupedProducts[groupName]?.[0]?.name || '',
+          category: groupedProducts[groupName]?.[0]?.category || 'General',
+          price: groupedProducts[groupName]?.[0]?.price || 0,
+          description: '',
+          size: v.sizeCode,
+          color: v.colorName,
+          stock: v.stock,
+          integrations: { 
+            local: true, 
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre 
+          },
+          externalIds: v.externalIds
+        }));
+        setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+      } catch {
+        // ignore
+      } finally {
+        setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: false }));
+      }
+    })).catch(() => {
+      setLoadingVariantsByGroup(prev => ({ ...prev, ...Object.fromEntries(limit.map(k => [k, false])) }));
+    });
+  }, [filteredProducts, filterColor]);
 
   const exportProductsToExcel = () => {
     const rows: any[] = [];
@@ -281,6 +364,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
   const [loadingVariantsByGroup, setLoadingVariantsByGroup] = useState<Record<string, boolean>>({});
 
+  const getGroupRawVariants = (groupKey: string, groupVariants: Product[]) => {
+    const lv = loadedVariants[groupKey];
+    return (lv && lv.length > 0) ? lv : groupVariants;
+  };
+  const getGroupFilteredVariants = (groupKey: string, groupVariants: Product[]) => {
+    const raw = getGroupRawVariants(groupKey, groupVariants);
+    if (filterColor === 'ALL') return raw;
+    return raw.filter(p => checkColorMatch(p, filterColor));
+  };
+  const getGroupDisplayStock = (groupKey: string, groupVariants: Product[]) => {
+    const variants = getGroupFilteredVariants(groupKey, groupVariants);
+    return variants.reduce((sum, p) => {
+      const val = (p as any).stock_total ?? (p as any).stock ?? 0;
+      return sum + Number(val);
+    }, 0);
+  };
+  const getGroupHasLowStock = (groupKey: string, groupVariants: Product[]) => {
+    const variants = getGroupFilteredVariants(groupKey, groupVariants);
+    return variants.some(p => {
+      const val = (p as any).stock_total ?? (p as any).stock ?? 0;
+      return val > 0 && val < 20;
+    });
+  };
+
   const toggleGroup = (groupName: string) => {
     setExpandedGroups(prev => {
       const next = prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName];
@@ -299,7 +406,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           size: v.sizeCode,
           color: v.colorName,
           stock: v.stock,
-          integrations: groupedProducts[groupName]?.[0]?.integrations || { local: true }
+          integrations: { 
+            local: true, 
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre 
+          },
+          externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
       }).catch(() => {
@@ -307,6 +419,92 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }).finally(() => {
         setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: false }));
       });
+    }
+  };
+
+  const handleOpenLinkModal = (product: Product) => {
+    setLinkingVariant(product);
+    setLinkTnId(product.externalIds?.tiendaNube || '');
+    setLinkTnVariantId(product.externalIds?.tiendaNubeVariant || '');
+    setLinkMlId(product.externalIds?.mercadoLibre || '');
+  };
+
+  const handleSaveLink = async () => {
+    if (!linkingVariant) return;
+    try {
+      // 1. Update Variant External IDs
+      await api.updateVariantExternalIds(linkingVariant.id, {
+        tiendaNubeVariantId: linkTnVariantId || undefined,
+        mercadoLibreVariantId: linkMlId || undefined // ML item ID is often used as variant ID for simple items or mapped
+      });
+
+      // 2. Update Product (Parent) External IDs if provided
+      // We don't have the parent ID easily here, but the backend getProductBySku returns it.
+      // However, linkingVariant is a mapped object.
+      // If we want to link the parent, we need the parent ID.
+      // The mapped object doesn't carry the parent ID directly, but we can assume 'linkTnId' is for the parent.
+      // We can iterate over the group to find the parent ID? No, the group key is SKU.
+      // Wait, 'getVariantsBySku' does not return parent DB ID.
+      // This is a small issue. But 'tienda_nube_id' is on the 'products' table.
+      // If I want to update it, I need the 'products.id'.
+      // But 'linkingVariant.id' is the 'product_variants.id'.
+      // I can't update parent with variant ID.
+      
+      // Solution: The user probably sets TN ID once per group.
+      // But here we are linking per variant.
+      // If I want to support Parent linking, I need to fetch the parent ID.
+      // OR, I can just update the variant mapping and assume the parent mapping is done elsewhere or not needed if I sync by variant ID?
+      // TN API needs Product ID + Variant ID.
+      // So I MUST store Parent ID.
+      // If I can't update Parent ID, I can't sync.
+      
+      // Let's modify 'getVariantsBySku' to return parent ID?
+      // Or 'getProducts' returns parent ID.
+      // 'groupedProducts' has the parent products from 'getProducts'.
+      // So I can find the parent product using the group key (SKU base).
+      
+      const parts = linkingVariant.sku.split('-');
+      const groupKey = parts.length >= 3 ? parts.slice(0, -2).join('-') : linkingVariant.sku;
+      const parentProduct = groupedProducts[groupKey]?.[0];
+      
+      if (parentProduct && linkTnId) {
+        await api.updateProductExternalIds(parentProduct.id, {
+          tiendaNubeId: linkTnId
+        });
+        // Also update ML ID on parent if ML uses Item ID as parent
+        if (linkMlId) {
+             await api.updateProductExternalIds(parentProduct.id, {
+                mercadoLibreId: linkMlId
+             });
+        }
+      }
+
+      // Update local state to reflect changes immediately
+      setLoadedVariants(prev => {
+        const group = prev[groupKey] || [];
+        return {
+          ...prev,
+          [groupKey]: group.map(p => p.id === linkingVariant.id ? {
+            ...p,
+            externalIds: {
+              ...p.externalIds,
+              tiendaNube: linkTnId,
+              tiendaNubeVariant: linkTnVariantId,
+              mercadoLibre: linkMlId
+            },
+            integrations: {
+                ...p.integrations,
+                tiendaNube: !!(linkTnId && linkTnVariantId),
+                mercadoLibre: !!linkMlId
+            }
+          } : p)
+        };
+      });
+
+      setLinkingVariant(null);
+    } catch (error) {
+      console.error(error);
+      alert("Error guardando vinculación");
     }
   };
 
@@ -481,7 +679,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
                      <option value="ALL">Todos</option>
-                     {availableSizes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                     {sizeOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
@@ -539,15 +737,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           });
           if (filterColor !== 'ALL') {
             groups = groups.filter(g => {
-              const variants = loadedVariants[g.groupKey];
-              if (!variants) return true; // mantener grupo visible hasta que carguen variantes
-              return variants.some(v => checkColorMatch(v, filterColor));
+              const variants = getGroupFilteredVariants(g.groupKey, g.groupVariants);
+              if (!loadedVariants[g.groupKey]) return true; // mantener visible hasta cargar
+              return variants.length > 0;
             });
           }
           groups.sort((a, b) => {
             let cmp = 0;
             if (sortKey === 'SKU') cmp = a.groupKey.localeCompare(b.groupKey);
-            else if (sortKey === 'STOCK') cmp = a.totalStock - b.totalStock;
+            else if (sortKey === 'STOCK') {
+              const sa = filterColor === 'ALL' ? a.totalStock : getGroupDisplayStock(a.groupKey, a.groupVariants);
+              const sb = filterColor === 'ALL' ? b.totalStock : getGroupDisplayStock(b.groupKey, b.groupVariants);
+              cmp = sa - sb;
+            }
             else if (sortKey === 'VARIANTS') cmp = a.groupVariants.length - b.groupVariants.length;
             return sortDir === 'asc' ? cmp : -cmp;
           });
@@ -557,22 +759,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const end = start + pageSize;
           const pageGroups = groups.slice(start, end);
           return pageGroups.map(({ groupKey, groupVariants, totalStock, category }) => {
-           const rawVariants = (loadedVariants[groupKey] && loadedVariants[groupKey].length > 0) ? loadedVariants[groupKey] : groupVariants;
-          let variantsToRender = rawVariants;
-          
-          if (filterColor !== 'ALL') {
-             variantsToRender = rawVariants.filter(p => checkColorMatch(p, filterColor));
-          }
+          const variantsToRender = getGroupFilteredVariants(groupKey, groupVariants);
 
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
-          const displayName = skuLabel;
+          const displayName = groupVariants[0]?.name || skuLabel;
           
-          const filteredTotalStock = variantsToRender.reduce((sum, p) => {
-            const val = (p as any).stock_total ?? (p as any).stock ?? 0;
-            return sum + Number(val);
-          }, 0);
-          const hasLowStock = variantsToRender.some(p => p.stock > 0 && p.stock < 20);
+          const filteredTotalStock = getGroupDisplayStock(groupKey, groupVariants);
+          const hasLowStock = getGroupHasLowStock(groupKey, groupVariants);
           const displayTotalStock = filterColor === 'ALL' ? totalStock : filteredTotalStock;
           const isFullyOut = displayTotalStock === 0;
 
@@ -594,6 +788,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                          {category}
                        </span>
                        <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-2 py-0.5 rounded-lg border border-blue-900/30">{skuLabel}</span>
+                       <span className="text-[10px] font-black text-green-400 bg-green-900/20 px-2 py-0.5 rounded-lg border border-green-900/30">
+                         ${groupVariants[0]?.price?.toLocaleString()}
+                       </span>
                     </div>
                   </div>
                 </div>
@@ -749,6 +946,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                          </span>
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
                                        </div>
+                                       <button 
+                                        onClick={() => handleOpenLinkModal(product)}
+                                        className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors"
+                                        title="Vincular con Mercado Libre / Tienda Nube"
+                                       >
+                                        <Link size={16} />
+                                       </button>
                                        <button 
                                         onClick={() => setEditingStockId(product.id)}
                                         className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors"
@@ -1016,6 +1220,78 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       {isVariantMode ? 'Agregar Variantes' : 'Generar Inventario'}
                     </button>
                  </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* LINK EXTERNAL IDS MODAL */}
+      {linkingVariant && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="bg-slate-900 rounded-3xl border border-slate-800 w-full max-w-md flex flex-col shadow-2xl animate-fade-in-up">
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
+                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Link size={20} className="text-indigo-400" />
+                    Vincular Producto
+                 </h3>
+                 <button onClick={() => setLinkingVariant(null)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition">
+                    <X size={20} />
+                 </button>
+              </div>
+              <div className="p-6 space-y-6">
+                 <div className="bg-blue-900/10 border border-blue-900/30 p-4 rounded-xl mb-4">
+                    <p className="text-xs text-blue-300 font-medium mb-1">Vinculando variante:</p>
+                    <p className="text-sm text-white font-mono">{linkingVariant.sku}</p>
+                 </div>
+
+                 <div className="space-y-4">
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Cloud size={12} className="text-blue-400"/> Tienda Nube (Producto ID)</label>
+                       <input 
+                         type="text" 
+                         value={linkTnId}
+                         onChange={(e) => setLinkTnId(e.target.value)}
+                         placeholder="ID del Producto (Parent)"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm"
+                       />
+                       <p className="text-[10px] text-slate-600 ml-1">Se aplicará a todo el grupo {linkingVariant.sku.split('-').slice(0,-2).join('-') || 'Base'}</p>
+                    </div>
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Cloud size={12} className="text-blue-400"/> Tienda Nube (Variante ID)</label>
+                       <input 
+                         type="text" 
+                         value={linkTnVariantId}
+                         onChange={(e) => setLinkTnVariantId(e.target.value)}
+                         placeholder="ID de la Variante"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm"
+                       />
+                    </div>
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Zap size={12} className="text-yellow-500"/> Mercado Libre (Item ID)</label>
+                       <input 
+                         type="text" 
+                         value={linkMlId}
+                         onChange={(e) => setLinkMlId(e.target.value)}
+                         placeholder="MLA..."
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm"
+                       />
+                    </div>
+                 </div>
+              </div>
+              <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
+                 <button 
+                   onClick={() => setLinkingVariant(null)}
+                   className="px-4 py-2 rounded-xl font-bold text-slate-400 hover:bg-slate-800 hover:text-white transition text-sm"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={handleSaveLink}
+                   className="px-6 py-2 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center gap-2 text-sm"
+                 >
+                   <CheckCircle2 size={16} />
+                   Guardar Vínculos
+                 </button>
               </div>
            </div>
         </div>

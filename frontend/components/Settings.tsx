@@ -1,8 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order } from '../types';
+import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
+
+const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-slide-up">
+        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+          <h3 className="font-bold text-white text-lg">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-6">
+          {children}
+        </div>
+        {footer && (
+          <div className="p-6 pt-0 flex justify-end gap-3">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface SettingsProps {
   attributes: Attribute[];
@@ -36,6 +61,88 @@ const Settings: React.FC<SettingsProps> = ({
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthResult, setHealthResult] = useState<'' | 'ok' | 'error'>('');
   const [healthMessage, setHealthMessage] = useState<string>('');
+
+  // Integration Logic
+  const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean }>({ mercadolibre: false, tiendanube: false });
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false);
+
+  const [loadingSync, setLoadingSync] = useState(false);
+  const [syncLogs, setSyncLogs] = useState<string[]>([]);
+  const [syncCompleted, setSyncCompleted] = useState(false);
+  const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0 });
+
+  // Modals State
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteStep, setDeleteStep] = useState(1); // 1: Warning, 2: Confirmation
+
+  useEffect(() => {
+    // Check for status params
+    const hash = window.location.hash;
+    if (hash.includes('status=success')) {
+       setSaved(true);
+       setTimeout(() => setSaved(false), 3000);
+    }
+    
+    // Fetch integration status
+    const fetchStatus = async () => {
+      setLoadingIntegrations(true);
+      try {
+        const status = await api.getIntegrationStatus();
+        setIntegrations(status);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingIntegrations(false);
+      }
+    };
+    fetchStatus();
+  }, []);
+
+  const handleConnect = async (platform: 'mercadolibre' | 'tiendanube') => {
+    try {
+      const { url } = await api.getAuthUrl(platform);
+      if (url) {
+        window.location.href = url;
+      } else {
+        alert('No se pudo obtener la URL de autenticación');
+      }
+    } catch (e) {
+      alert('Error iniciando conexión');
+    }
+  };
+
+  const handleSyncTiendaNube = async () => {
+    // This is now triggered from the modal
+    setLoadingSync(true);
+    setSyncLogs([]);
+    setSyncCompleted(false);
+    try {
+      const res = await api.syncProductsFromTiendaNube();
+      if (res.logs) {
+        setSyncLogs(res.logs);
+      }
+      setSyncStats({ imported: res.imported, updated: res.updated });
+      setSyncCompleted(true);
+    } catch (e: any) {
+      setSyncLogs(prev => [...prev, `ERROR: ${e.message || 'Error desconocido'}`]);
+    } finally {
+      setLoadingSync(false);
+    }
+  };
+
+  const handleDeleteAllProducts = async () => {
+    setLoadingSync(true);
+    try {
+      await api.deleteAllProducts();
+      setShowDeleteModal(false);
+      window.location.reload(); // Reload to refresh state
+    } catch (e: any) {
+      alert('Error eliminando productos: ' + (e.message || 'Error desconocido'));
+    } finally {
+      setLoadingSync(false);
+    }
+  };
 
   // User Creation State
   const [newUserName, setNewUserName] = useState('');
@@ -365,37 +472,87 @@ const Settings: React.FC<SettingsProps> = ({
 
       {activeTab === 'integrations' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Tienda Nube */}
           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
              <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
                 <div className="flex items-center gap-3">
                    <div className="bg-blue-600/20 p-2.5 rounded-2xl text-blue-400"><Cloud size={24} /></div>
                    <h3 className="font-black text-white text-lg">Tienda Nube</h3>
                 </div>
-                <button onClick={handleSaveConfig} className="p-2.5 bg-blue-600 rounded-xl text-white shadow-lg active:scale-95 transition-all hover:bg-blue-500"><Save size={20}/></button>
+                {integrations.tiendanube ? (
+                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                    <Check size={12} /> CONECTADO
+                  </span>
+                ) : (
+                  <button 
+                    onClick={() => handleConnect('tiendanube')}
+                    disabled={loadingIntegrations}
+                    className="px-4 py-2 bg-blue-600 rounded-xl text-white text-xs font-bold shadow-lg active:scale-95 transition-all hover:bg-blue-500 uppercase tracking-wide disabled:opacity-50"
+                  >
+                    {loadingIntegrations ? '...' : 'Conectar'}
+                  </button>
+                )}
              </div>
              <div className="p-6 space-y-5">
-                <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Store ID (Tienda)</label>
-                   <input 
-                      type="text" 
-                      value={apiConfig.tiendaNube.storeId}
-                      onChange={(e) => setApiConfig({...apiConfig, tiendaNube: {...apiConfig.tiendaNube, storeId: e.target.value}})}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                   />
-                </div>
-                <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">API Access Token</label>
-                   <input 
-                      type="password" 
-                      value={apiConfig.tiendaNube.accessToken}
-                      onChange={(e) => setApiConfig({...apiConfig, tiendaNube: {...apiConfig.tiendaNube, accessToken: e.target.value}})}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                   />
-                </div>
+                <p className="text-slate-400 text-sm">
+                  Vincula tu tienda de Tienda Nube para sincronizar automáticamente productos y stock.
+                </p>
+                {integrations.tiendanube && (
+                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-xs text-slate-500">Estado de sincronización</p>
+                        <p className="text-white font-bold">Activo</p>
+                      </div>
+                      <button 
+                        onClick={() => setShowSyncModal(true)}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                      >
+                        <RefreshCw size={14} />
+                        IMPORTAR PRODUCTOS
+                      </button>
+                    </div>
+                  </div>
+                )}
              </div>
           </div>
 
-           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+          {/* Mercado Libre */}
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+             <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                   <div className="bg-yellow-600/20 p-2.5 rounded-2xl text-yellow-500"><Zap size={24} /></div>
+                   <h3 className="font-black text-white text-lg">Mercado Libre</h3>
+                </div>
+                {integrations.mercadolibre ? (
+                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                    <Check size={12} /> CONECTADO
+                  </span>
+                ) : (
+                  <button 
+                    onClick={() => handleConnect('mercadolibre')}
+                    disabled={loadingIntegrations}
+                    className="px-4 py-2 bg-yellow-600 rounded-xl text-white text-xs font-bold shadow-lg active:scale-95 transition-all hover:bg-yellow-500 uppercase tracking-wide disabled:opacity-50"
+                  >
+                    {loadingIntegrations ? '...' : 'Conectar'}
+                  </button>
+                )}
+             </div>
+             <div className="p-6 space-y-5">
+                <p className="text-slate-400 text-sm">
+                  Conecta tu cuenta de Mercado Libre para mantener el stock y precios actualizados en tiempo real.
+                </p>
+                 {integrations.mercadolibre && (
+                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+                    <p className="text-xs text-slate-500">Estado de sincronización</p>
+                    <p className="text-white font-bold">Activo</p>
+                  </div>
+                )}
+             </div>
+          </div>
+
+           {/* API Interna */}
+           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl lg:col-span-2">
               <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
                <div className="flex items-center gap-3">
                  <div className="bg-indigo-600/20 p-2.5 rounded-2xl text-indigo-400"><Link size={24} /></div>
@@ -409,23 +566,39 @@ const Settings: React.FC<SettingsProps> = ({
                </div>
              </div>
              <div className="p-6 space-y-5">
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Base URL</label>
-                 <input 
-                   type="text" 
-                   value={apiBaseUrl}
-                   onChange={(e) => setApiBaseUrl(e.target.value)}
-                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                 />
+               <div className="bg-red-900/20 p-4 rounded-xl border border-red-800/50 flex justify-between items-center">
+                 <div>
+                   <p className="text-xs text-red-400 font-bold uppercase mb-1">Zona de Peligro</p>
+                   <p className="text-xs text-slate-400">Eliminar todo el inventario y stock.</p>
+                 </div>
+                 <button 
+                   onClick={() => { setShowDeleteModal(true); setDeleteStep(1); }}
+                   className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                 >
+                   <Trash2 size={14} />
+                   ELIMINAR TODO
+                 </button>
                </div>
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">API Token (Bearer)</label>
-                 <input 
-                   type="password" 
-                   value={apiToken}
-                   onChange={(e) => setApiTokenState(e.target.value)}
-                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                 />
+
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Base URL</label>
+                   <input 
+                     type="text" 
+                     value={apiBaseUrl}
+                     onChange={(e) => setApiBaseUrl(e.target.value)}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
+                   />
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">API Token (Bearer)</label>
+                   <input 
+                     type="password" 
+                     value={apiToken}
+                     onChange={(e) => setApiTokenState(e.target.value)}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
+                   />
+                 </div>
                </div>
                <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 flex items-center justify-between">
                  <div className="flex items-center gap-3">
@@ -438,36 +611,6 @@ const Settings: React.FC<SettingsProps> = ({
                </div>
              </div>
            </div>
-
-          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
-             <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                   <div className="bg-yellow-600/20 p-2.5 rounded-2xl text-yellow-500"><Zap size={24} /></div>
-                   <h3 className="font-black text-white text-lg">Mercado Libre</h3>
-                </div>
-                <button onClick={handleSaveConfig} className="p-2.5 bg-yellow-600 rounded-xl text-white shadow-lg active:scale-95 transition-all hover:bg-yellow-500"><Save size={20}/></button>
-             </div>
-             <div className="p-6 space-y-5">
-                <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">App User ID (Vendedor)</label>
-                   <input 
-                      type="text" 
-                      value={apiConfig.mercadoLibre.userId}
-                      onChange={(e) => setApiConfig({...apiConfig, mercadoLibre: {...apiConfig.mercadoLibre, userId: e.target.value}})}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                   />
-                </div>
-                <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Bearer Token</label>
-                   <input 
-                      type="password" 
-                      value={apiConfig.mercadoLibre.accessToken}
-                      onChange={(e) => setApiConfig({...apiConfig, mercadoLibre: {...apiConfig.mercadoLibre, accessToken: e.target.value}})}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white font-mono"
-                   />
-                </div>
-             </div>
-          </div>
         </div>
       )}
 
@@ -506,6 +649,121 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Sync Modal */}
+      <Modal 
+        isOpen={showSyncModal} 
+        onClose={() => { if (!loadingSync) setShowSyncModal(false); }} 
+        title={syncCompleted ? "¡Sincronización Exitosa!" : "Sincronizar Tienda Nube"}
+        footer={
+           !loadingSync && !syncCompleted ? (
+             <button onClick={handleSyncTiendaNube} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
+               Comenzar Importación
+             </button>
+           ) : syncCompleted ? (
+              <button onClick={() => setShowSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
+                Finalizar
+              </button>
+           ) : null
+        }
+      >
+        <div className="space-y-4">
+          {!syncCompleted ? (
+             <>
+                <p className="text-slate-300 text-sm">
+                   Esta acción descargará todos los productos y variantes de Tienda Nube y actualizará la base de datos local.
+                </p>
+                <div className="bg-yellow-900/20 p-3 rounded-lg border border-yellow-800/30 flex items-start gap-2">
+                  <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={16} />
+                  <p className="text-xs text-yellow-200/80">
+                     Si ya existen productos, se actualizarán sus precios y stock. Asegúrate de haber eliminado datos antiguos si quieres una importación limpia.
+                  </p>
+                </div>
+             </>
+          ) : (
+             <div className="bg-green-900/20 p-4 rounded-xl border border-green-800/30 flex flex-col items-center text-center gap-2">
+                <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white mb-2 shadow-lg shadow-green-900/50">
+                   <Check size={24} strokeWidth={3} />
+                </div>
+                <h4 className="text-white font-bold text-lg">Proceso Completado</h4>
+                <div className="flex gap-4 mt-2">
+                   <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/50 min-w-[80px]">
+                      <p className="text-[10px] text-slate-400 uppercase font-black">Importados</p>
+                      <p className="text-xl font-black text-white">{syncStats.imported}</p>
+                   </div>
+                   <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/50 min-w-[80px]">
+                      <p className="text-[10px] text-slate-400 uppercase font-black">Actualizados</p>
+                      <p className="text-xl font-black text-white">{syncStats.updated}</p>
+                   </div>
+                </div>
+             </div>
+          )}
+          
+          {loadingSync && (
+             <div className="py-4 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="animate-spin text-blue-500" size={32} />
+                <p className="text-sm text-blue-400 font-bold animate-pulse">Sincronizando productos...</p>
+             </div>
+          )}
+
+          {syncLogs.length > 0 && (
+             <div className="mt-2 bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px] text-green-400 shadow-inner">
+               {syncLogs.map((log, i) => (
+                 <div key={i} className="mb-1 border-b border-white/5 pb-0.5 last:border-0">{log}</div>
+               ))}
+             </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Delete Modal */}
+      <Modal 
+        isOpen={showDeleteModal} 
+        onClose={() => setShowDeleteModal(false)} 
+        title="Eliminar Todo el Inventario"
+        footer={
+           <div className="flex gap-2 w-full">
+             <button onClick={() => setShowDeleteModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-bold text-sm">
+               Cancelar
+             </button>
+             {deleteStep === 1 ? (
+                <button onClick={() => setDeleteStep(2)} className="flex-1 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm">
+                  Continuar
+                </button>
+             ) : (
+                <button onClick={handleDeleteAllProducts} disabled={loadingSync} className="flex-1 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-2">
+                  {loadingSync ? <Loader2 className="animate-spin" size={16}/> : <Trash2 size={16} />}
+                  CONFIRMAR ELIMINACIÓN
+                </button>
+             )}
+           </div>
+        }
+      >
+        <div className="space-y-4 text-center py-4">
+           <div className="w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mx-auto text-red-500 mb-2">
+             <AlertTriangle size={32} />
+           </div>
+           {deleteStep === 1 ? (
+             <>
+               <h4 className="text-white font-bold text-lg">¿Estás absolutamente seguro?</h4>
+               <p className="text-slate-400 text-sm">
+                 Esta acción eliminará <strong>TODOS</strong> los productos, variantes, stock, colores y talles de la base de datos local.
+               </p>
+               <p className="text-slate-400 text-sm">
+                 Esta acción <strong>NO</strong> se puede deshacer.
+               </p>
+             </>
+           ) : (
+             <>
+               <h4 className="text-red-500 font-black text-lg uppercase">¡Última Advertencia!</h4>
+               <p className="text-slate-300 text-sm">
+                 Estás a punto de borrar todo el inventario. ¿Confirmas que quieres proceder?
+               </p>
+             </>
+           )}
+        </div>
+      </Modal>
+
     </div>
   );
 };

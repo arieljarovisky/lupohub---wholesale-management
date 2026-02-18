@@ -29,20 +29,28 @@ export const api = {
         color: '', // normalizado: color por variante
         stock: Number(r.stock_total ?? 0),
         price: Number(r.base_price ?? 0),
-        description: ''
+        description: '',
+        externalIds: r.externalIds
       })) as Product[];
     }, MOCK_PRODUCTS, 'getProducts');
   },
 
-  getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number }>> => {
+  getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
     return handleRequest(async () => {
       const res = await request<any>(`/products/${sku}`, 'GET');
+      const parentExternalIds = res.externalIds || {};
       const variants = (res?.variants || []).map((v: any) => ({
         variantId: v.variant_id,
         colorCode: v.color_code,
         colorName: v.color_name,
         sizeCode: v.size_code,
         stock: Number(v.stock ?? 0),
+        externalIds: {
+          tiendaNube: parentExternalIds.tiendaNube,
+          mercadoLibre: parentExternalIds.mercadoLibre,
+          tiendaNubeVariant: v.tienda_nube_variant_id,
+          mercadoLibreVariant: v.mercado_libre_variant_id
+        }
       }));
       return variants;
     }, [], 'getVariantsBySku');
@@ -80,10 +88,28 @@ export const api = {
     }, product, 'updateProduct');
   },
 
+  deleteAllProducts: async (): Promise<void> => {
+    return handleRequest(async () => {
+      await request<void>('/products/all', 'DELETE');
+    }, undefined, 'deleteAllProducts');
+  },
+
   patchStock: async (args: { variantId?: string; sku?: string; colorCode?: string; sizeCode?: string; stock: number }): Promise<{ variantId: string; stock: number }> => {
     return handleRequest(async () => {
       return await request<{ variantId: string; stock: number }>(`/products/stock`, 'PATCH', args);
     }, { variantId: args.variantId || '', stock: args.stock }, 'patchStock');
+  },
+
+  updateProductExternalIds: async (id: string, ids: { tiendaNubeId?: string; mercadoLibreId?: string }): Promise<void> => {
+    return handleRequest(async () => {
+      await request<void>(`/products/${id}/external-ids`, 'PUT', ids);
+    }, undefined, 'updateProductExternalIds');
+  },
+
+  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string }): Promise<void> => {
+    return handleRequest(async () => {
+      await request<void>(`/products/variants/${variantId}/external-ids`, 'PUT', ids);
+    }, undefined, 'updateVariantExternalIds');
   },
 
   // --- ORDERS ---
@@ -116,5 +142,24 @@ export const api = {
     return handleRequest(async () => {
       await request<void>(`/orders/${id}/status`, 'PATCH', { status });
     }, undefined, 'updateOrderStatus');
+  },
+
+  // --- INTEGRATIONS ---
+  getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean }> => {
+    return handleRequest(async () => {
+      return await request<{ mercadolibre: boolean; tiendanube: boolean }>('/integrations/status', 'GET');
+    }, { mercadolibre: false, tiendanube: false }, 'getIntegrationStatus');
+  },
+
+  getAuthUrl: async (platform: 'mercadolibre' | 'tiendanube'): Promise<{ url: string }> => {
+    return handleRequest(async () => {
+      return await request<{ url: string }>(`/integrations/${platform}/auth`, 'GET');
+    }, { url: '' }, 'getAuthUrl');
+  },
+
+  syncProductsFromTiendaNube: async (): Promise<{ message: string; imported: number; updated: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; imported: number; updated: number }>('/integrations/tiendanube/sync', 'POST');
+    }, { message: 'Offline', imported: 0, updated: 0 }, 'syncProductsFromTiendaNube');
   }
 };
