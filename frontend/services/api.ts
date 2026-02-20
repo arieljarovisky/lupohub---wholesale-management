@@ -19,20 +19,47 @@ export const api = {
   // --- PRODUCTS ---
   getProducts: async (): Promise<Product[]> => {
     return handleRequest(async () => {
-      const rows = await request<any[]>('/products', 'GET');
-      return rows.map(r => ({
+      const res = await request<any>('/products', 'GET');
+      const rows = Array.isArray(res) ? res : res.items;
+      return rows.map((r: any) => ({
         id: r.id,
         sku: r.sku,
         name: r.name,
         category: r.category,
-        size: '', // normalizado: tamaño por variante
-        color: '', // normalizado: color por variante
-        stock: Number(r.stock_total ?? 0),
-        price: Number(r.base_price ?? 0),
+        size: '',
+        color: '',
+        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+        price: Number((r as any).base_price ?? (r as any).price ?? 0),
         description: '',
         externalIds: r.externalIds
       })) as Product[];
     }, MOCK_PRODUCTS, 'getProducts');
+  },
+
+  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc'): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
+    return handleRequest(async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        per_page: String(perPage),
+        ...(q ? { q } : {}),
+        ...(sort ? { sort } : {}),
+        ...(dir ? { dir } : {})
+      });
+      const res = await request<any>(`/products?${params.toString()}`, 'GET');
+      const items = (res.items || []).map((r: any) => ({
+        id: r.id,
+        sku: r.sku,
+        name: r.name,
+        category: r.category,
+        size: '',
+        color: '',
+        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+        price: Number((r as any).base_price ?? (r as any).price ?? 0),
+        description: '',
+        externalIds: r.externalIds
+      })) as Product[];
+      return { items, page: res.page, per_page: res.per_page, total: res.total };
+    }, { items: MOCK_PRODUCTS.slice(0, perPage), page, per_page: perPage, total: MOCK_PRODUCTS.length }, 'getProductsPaged');
   },
 
   getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
@@ -161,5 +188,11 @@ export const api = {
     return handleRequest(async () => {
       return await request<{ message: string; imported: number; updated: number }>('/integrations/tiendanube/sync', 'POST');
     }, { message: 'Offline', imported: 0, updated: 0 }, 'syncProductsFromTiendaNube');
+  },
+
+  disconnectIntegration: async (platform: 'mercadolibre' | 'tiendanube'): Promise<{ message: string; platform: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; platform: string }>(`/integrations/${platform}/disconnect`, 'DELETE');
+    }, { message: 'Offline', platform }, 'disconnectIntegration');
   }
 };

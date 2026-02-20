@@ -49,6 +49,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [serverMode, setServerMode] = useState(true);
+  const [serverItems, setServerItems] = useState<Product[]>([]);
+  const [serverTotal, setServerTotal] = useState(0);
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
@@ -154,8 +157,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return false;
   }
 
-  // 1. Filter individual products first (incluye padres para poder evaluar variantes)
-  const filteredProducts = products.filter(p => {
+  // 1. Server-side paging (fallback to client if API offline)
+  useEffect(() => {
+    if (!serverMode) return;
+    (async () => {
+      try {
+        const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
+        const res = await api.getProductsPaged(currentPage, pageSize, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir);
+        setServerItems(res.items);
+        setServerTotal(res.total);
+      } catch {
+        setServerMode(false);
+      }
+    })();
+  }, [serverMode, currentPage, pageSize, searchTerm, sortKey, sortDir]);
+
+  // 2. Filter individual products first (incluye padres para poder evaluar variantes)
+  const filteredProducts = (serverMode ? serverItems : products).filter(p => {
     const sku = (p.sku || '').toString();
     const matchesSearch = sku.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
@@ -189,8 +207,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   });
 
     // 2. Group filtered products by BASE SKU (prefix before size/color suffix)
-  const baseSource = filterColor === 'ALL' ? filteredProducts : products;
-  const groupedProducts = baseSource.reduce((acc, product) => {
+  const baseSource = React.useMemo(() => (filterColor === 'ALL' ? filteredProducts : (serverMode ? serverItems : products)), [filterColor, filteredProducts, serverMode, serverItems, products]);
+  const groupedProducts = React.useMemo(() => baseSource.reduce((acc, product) => {
     const sku = (product.sku || 'SIN-CODIGO').toString();
     const parts = sku.split('-');
     let baseSku = sku;
@@ -206,10 +224,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
     acc[key].push(product);
     return acc;
-  }, {} as Record<string, Product[]>);
+  }, {} as Record<string, Product[]>), [baseSource]);
 
-  const categories = Array.from(new Set(products.map(p => p.category)));
-  const sizes = Array.from(new Set(products.map(p => (p as any).size).filter(Boolean)));
+  const categories = React.useMemo(() => Array.from(new Set(products.map(p => p.category))), [products]);
+  const sizes = React.useMemo(() => Array.from(new Set(products.map(p => (p as any).size).filter(Boolean))), [products]);
   
   const sizeOptions = (() => {
     const attrSizes = attributes.filter(a => a.type === 'size');

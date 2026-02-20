@@ -2,10 +2,36 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { updateMercadoLibreStock } from './integrations.controller';
 
-export const getProducts = async (req: any, res: any) => {
+export const getProducts = async (req: Request, res: Response) => {
   try {
-    const rows = await query(`
+    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc' } = req.query as any;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const perPageNum = Math.min(100, Math.max(1, parseInt(per_page as string, 10) || 20));
+    const offset = (pageNum - 1) * perPageNum;
+    const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'name' : 'sku');
+    const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
+    const search = (q || '').toString().trim();
+
+    const whereClause = search ? `WHERE p.sku LIKE ? OR p.name LIKE ?` : '';
+    const params: any[] = [];
+    if (search) {
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const totalRow = await get(
+      `
+      SELECT COUNT(*) AS total
+      FROM products p
+      ${whereClause}
+      `,
+      params
+    );
+    const total = Number(totalRow?.total || 0);
+
+    const rows = await query(
+      `
       SELECT p.id, p.sku, p.name, p.category, p.base_price,
              p.tienda_nube_id, p.mercado_libre_id,
              COALESCE(SUM(st.stock), 0) AS stock_total
@@ -13,19 +39,28 @@ export const getProducts = async (req: any, res: any) => {
       LEFT JOIN product_colors pc ON pc.product_id = p.id
       LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks st ON st.variant_id = pv.id
+      ${whereClause}
       GROUP BY p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id
-    `);
+      ORDER BY ${sortCol} ${sortDir}
+      LIMIT ? OFFSET ?
+      `,
+      [...params, perPageNum, offset]
+    );
     
-    // Map database columns to externalIds object structure for frontend
     const mapped = rows.map((r: any) => ({
-      ...r,
+      id: r.id,
+      sku: r.sku,
+      name: r.name,
+      category: r.category,
+      base_price: Number(r.base_price ?? 0),
+      stock_total: Number(r.stock_total ?? 0),
       externalIds: {
         tiendaNube: r.tienda_nube_id,
         mercadoLibre: r.mercado_libre_id
       }
     }));
     
-    res.json(mapped);
+    res.json({ items: mapped, page: pageNum, per_page: perPageNum, total });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error fetching products" });
@@ -147,6 +182,21 @@ export const patchStock = async (req: any, res: any) => {
        ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
       [vId, stock]
     );
+    let targetSku = sku || null;
+    if (!targetSku) {
+      const row = await get(
+        `SELECT p.sku AS sku
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         WHERE pv.id = ?`,
+        [vId]
+      );
+      targetSku = row?.sku || null;
+    }
+    if (targetSku) {
+      updateMercadoLibreStock(targetSku, Number(stock)).catch(() => {});
+    }
     res.json({ variantId: vId, stock });
   } catch (error) {
     console.error(error);

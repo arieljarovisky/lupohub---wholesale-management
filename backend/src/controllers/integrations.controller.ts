@@ -8,6 +8,7 @@ const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
 const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
 const TN_TOKEN_URL = 'https://www.tiendanube.com/apps/authorize/token';
+const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
 export const getIntegrationStatus = async (req: Request, res: Response) => {
   try {
@@ -141,7 +142,7 @@ export const handleTiendaNubeCallback = async (req: Request, res: Response) => {
   }
 };
 
-const updateMercadoLibreStock = async (sku: string, newStock: number) => {
+export const updateMercadoLibreStock = async (sku: string, newStock: number) => {
   try {
     const integration = await get(`SELECT * FROM integrations WHERE platform = 'mercadolibre'`);
     if (!integration || !integration.access_token) return;
@@ -240,7 +241,7 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
         const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
           headers: {
             'Authentication': `bearer ${access_token}`,
-            'User-Agent': 'LupoHub (App)'
+            'User-Agent': TN_USER_AGENT
           },
           params: {
             page,
@@ -256,209 +257,169 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
 
         // Process each product
         for (const tnProduct of products) {
-          log(`[Sync] Processing Product: ${tnProduct.name.es || tnProduct.name} (ID: ${tnProduct.id})`);
-          
-          // Check if exists by Tienda Nube ID or SKU
-          const sku = tnProduct.variants?.[0]?.sku || `TN-${tnProduct.id}`;
-          
-          // Find existing product
-          let existingProduct = await get(`SELECT * FROM products WHERE tienda_nube_id = ?`, [tnProduct.id]);
-          if (!existingProduct && sku) {
-               existingProduct = await get(`SELECT * FROM products WHERE sku = ?`, [sku]);
-          }
-
-          let productId = existingProduct?.id;
-
-          if (existingProduct) {
-            // Update
-            await execute(`
-              UPDATE products SET 
-              name = ?, 
-              tienda_nube_id = ?,
-              description = COALESCE(?, description)
-              WHERE id = ?
-            `, [tnProduct.name.es || tnProduct.name.pt || tnProduct.name, tnProduct.id, tnProduct.description?.es || '', productId]);
-            updatedCount++;
-          } else {
-            // Create
-            productId = uuidv4();
-            await execute(`
-              INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `, [
-              productId, 
-              sku, 
-              tnProduct.name.es || tnProduct.name.pt || tnProduct.name, 
-              'General', // Default category
-              Number(tnProduct.variants?.[0]?.price || 0),
-              tnProduct.description?.es || '',
-              tnProduct.id
-            ]);
-            importedCount++;
-          }
-
-          // Process Variants for BOTH New and Updated Products
-          for (const variant of tnProduct.variants) {
-             const values = variant.values || [];
-             log(`  [Variant] ID: ${variant.id}, SKU: ${variant.sku}, Stock: ${variant.stock}, Values: ${JSON.stringify(values)}`);
-             
-             // 1. Identify Attributes (Size/Color)
-             let sizeName = 'U';
-             let colorName = 'Único';
-             
-             // Simple heuristic based on Tienda Nube response
-             if (values.length > 0) {
-               // The log shows: [{"es":"Gris"},{"es":"Floreado"},{"es":"P"}]
-               // We need to assume:
-               // - The LAST element is ALWAYS the Size.
-               // - Everything BEFORE the last element is the Color/Pattern.
-               
-               // Extract Size (Last element)
-               const lastVal = values[values.length - 1];
-               const extractedSize = lastVal?.es || lastVal?.pt || lastVal;
-               if (extractedSize) sizeName = extractedSize;
-               
-               // Extract Color (All elements except the last one)
-               if (values.length > 1) {
-                   const colorParts = values.slice(0, values.length - 1);
-                   const extractedColor = colorParts.map((v: any) => v.es || v.pt || v).join(' ');
-                   if (extractedColor) colorName = extractedColor;
-               } else {
-                   // If only 1 value, assume it's Size? Or Color?
-                   // If only 1 value, usually it's Size if apparel, or Color if accessory.
-                   // Let's stick to: 1 value = Size (and Color = Único), unless it looks like a color.
-                   // But previously we said 1 value = Color.
-                   // Let's assume 1 value = Color for now as per previous logic, or maybe Size.
-                   // Wait, if 1 value: [{"es": "Rojo"}] -> Is it size Rojo or Color Rojo? Likely Color.
-                   // If [{"es": "XL"}] -> Likely Size.
-                   // Let's keep it simple: If 1 val, it is Color. Size is U.
-                   const firstVal = values[0];
-                   const val = firstVal?.es || firstVal?.pt || firstVal;
-                   if (val) colorName = val;
-               }
-             }
-
-             // 2. Ensure Color Exists
-             let colorId = null;
-             // Check exact match
-             let colorRow = await get(`SELECT id FROM colors WHERE name = ?`, [colorName]);
-             if (!colorRow) {
-               // Create Color
-               colorId = `c-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-               
-               // Use a safe code derived from name, but now we have 100 chars space.
-               // We can use the name as code if we want, or a shortened version.
-               // Let's use the first 50 chars uppercase as code.
-               let code = colorName.substring(0, 50).toUpperCase();
-               
-               // Try insert
-               try {
-                  // Assuming 'hex' column exists now due to migration
-                  await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
-               } catch (e: any) {
-                  if (e.code === 'ER_DUP_ENTRY') {
-                     // If code duplicate, append random
-                     code = code.substring(0, 45) + Math.floor(Math.random() * 1000);
-                     try {
-                        await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
-                     } catch (e2: any) {
-                        // Fallback to finding existing by code if name failed but code exists?
-                        // Or just log error.
-                        console.error(`Failed to insert color ${colorName}`, e2);
-                     }
+          try {
+            log(`[Sync] Processing Product: ${tnProduct.name.es || tnProduct.name} (ID: ${tnProduct.id})`);
+            
+            const sku = tnProduct.variants?.[0]?.sku || `TN-${tnProduct.id}`;
+            
+            let existingProduct = await get(`SELECT * FROM products WHERE tienda_nube_id = ?`, [tnProduct.id]);
+            if (!existingProduct && sku) {
+                 existingProduct = await get(`SELECT * FROM products WHERE sku = ?`, [sku]);
+            }
+            let productId = existingProduct?.id;
+            if (existingProduct) {
+              await execute(`
+                UPDATE products SET 
+                name = ?, 
+                tienda_nube_id = ?,
+                description = COALESCE(?, description)
+                WHERE id = ?
+              `, [tnProduct.name.es || tnProduct.name.pt || tnProduct.name, tnProduct.id, tnProduct.description?.es || '', productId]);
+              updatedCount++;
+            } else {
+              productId = uuidv4();
+              await execute(`
+                INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+              `, [
+                productId, 
+                sku, 
+                tnProduct.name.es || tnProduct.name.pt || tnProduct.name, 
+                'General',
+                Number(tnProduct.variants?.[0]?.price || 0),
+                tnProduct.description?.es || '',
+                tnProduct.id
+              ]);
+              importedCount++;
+            }
+  
+            const processedVariantIds: string[] = [];
+            for (const variant of tnProduct.variants) {
+              try {
+                const values = variant.values || [];
+                log(`  [Variant] ID: ${variant.id}, SKU: ${variant.sku}, Stock: ${variant.stock}, Values: ${JSON.stringify(values)}`);
+                
+                let sizeName = 'U';
+                let colorName = 'Único';
+                if (values.length > 0) {
+                  const lastVal = values[values.length - 1];
+                  const extractedSize = lastVal?.es || lastVal?.pt || lastVal;
+                  if (extractedSize) sizeName = extractedSize;
+                  if (values.length > 1) {
+                      const colorParts = values.slice(0, values.length - 1);
+                      const extractedColor = colorParts.map((v: any) => v.es || v.pt || v).join(' ');
+                      if (extractedColor) colorName = extractedColor;
                   } else {
-                     // If 'hex' column is missing (migration didn't run?), fallback to old insert
-                     if (e.code === 'ER_BAD_FIELD_ERROR') {
-                         await execute(`INSERT INTO colors (id, name, code) VALUES (?, ?, ?)`, [colorId, colorName, code]);
-                     } else {
-                         throw e;
-                     }
+                      const firstVal = values[0];
+                      const val = firstVal?.es || firstVal?.pt || firstVal;
+                      if (val) colorName = val;
                   }
-               }
-             } else {
-               colorId = colorRow.id;
-             }
-
-             // 3. Ensure Size Exists
-               let sizeId = null;
-               // Try searching by name or size_code
-               // We prefer searching by 'name' if column exists, but we used 'size_code' before.
-               // Let's try to query by name first if we suspect the column exists.
-               // To be safe, let's query by size_code as we did, but now size_code is wider.
-               // But wait, we want to store the full name in 'name' column too.
-               
-               // Let's try to insert using full name as size_code (up to 100 chars).
-               const safeSizeCode = sizeName.substring(0, 100); 
-               
-               let sizeRow = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
-               
-               if (!sizeRow) {
-                 sizeId = `s-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                 
-                 try {
-                    // Try inserting with name column
-                    await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, safeSizeCode, sizeName]);
-                 } catch (e: any) {
-                    if (e.code === 'ER_BAD_FIELD_ERROR') {
-                        // Fallback if name column missing
-                        await execute(`INSERT INTO sizes (id, size_code) VALUES (?, ?)`, [sizeId, safeSizeCode]);
-                    } else if (e.code === 'ER_DUP_ENTRY') {
-                        const existing = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
-                        sizeId = existing?.id;
+                }
+  
+                let colorId = null;
+                let colorRow = await get(`SELECT id FROM colors WHERE name = ?`, [colorName]);
+                if (!colorRow) {
+                  colorId = `c-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  let code = colorName.substring(0, 50).toUpperCase();
+                  try {
+                    await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
+                  } catch (e: any) {
+                    if (e.code === 'ER_DUP_ENTRY') {
+                      code = code.substring(0, 45) + Math.floor(Math.random() * 1000);
+                      try {
+                        await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
+                      } catch (e2: any) {
+                        console.error(`Failed to insert color ${colorName}`, e2);
+                      }
+                    } else if (e.code === 'ER_BAD_FIELD_ERROR') {
+                      await execute(`INSERT INTO colors (id, name, code) VALUES (?, ?, ?)`, [colorId, colorName, code]);
                     } else {
-                        throw e;
+                      throw e;
                     }
-                 }
-               } else {
-                 sizeId = sizeRow.id;
-               }
-
-             // 4. Link Product -> Color
-             let productColorRow = await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]);
-             let productColorId = productColorRow?.id;
-             
-             if (!productColorId) {
-               productColorId = uuidv4();
-               await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-             }
-
-             // 5. Link ProductColor -> Variant (Size)
-             // IMPORTANT: Check if this size already exists for this color.
-             // If we have duplicate variants for same color/size (which shouldn't happen logically but might in data),
-             // we should update or reuse.
-             let variantRow = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-             let localVariantId = variantRow?.id;
-
-             if (!localVariantId) {
-                localVariantId = uuidv4();
+                  }
+                } else {
+                  colorId = colorRow.id;
+                }
+  
+                let sizeId = null;
+                const safeSizeCode = sizeName.substring(0, 100); 
+                let sizeRow = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
+                if (!sizeRow) {
+                  sizeId = `s-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  try {
+                    await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, safeSizeCode, sizeName]);
+                  } catch (e: any) {
+                    if (e.code === 'ER_BAD_FIELD_ERROR') {
+                      await execute(`INSERT INTO sizes (id, size_code) VALUES (?, ?)`, [sizeId, safeSizeCode]);
+                    } else if (e.code === 'ER_DUP_ENTRY') {
+                      const existing = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
+                      sizeId = existing?.id;
+                    } else {
+                      throw e;
+                    }
+                  }
+                } else {
+                  sizeId = sizeRow.id;
+                }
+  
+                let productColorRow = await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]);
+                let productColorId = productColorRow?.id;
+                if (!productColorId) {
+                  productColorId = uuidv4();
+                  await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+                }
+  
+                let variantRow = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+                let localVariantId = variantRow?.id;
+                if (!localVariantId) {
+                  localVariantId = uuidv4();
+                  await execute(`
+                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id) 
+                    VALUES (?, ?, ?, ?)
+                  `, [localVariantId, productColorId, sizeId, variant.id]);
+                } else {
+                  await execute(`UPDATE product_variants SET tienda_nube_variant_id = ? WHERE id = ?`, [variant.id, localVariantId]);
+                }
+                processedVariantIds.push(localVariantId);
+  
+                const stock = variant.stock !== null && variant.stock !== undefined ? Number(variant.stock) : 0;
                 await execute(`
-                  INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id) 
-                  VALUES (?, ?, ?, ?)
-                `, [localVariantId, productColorId, sizeId, variant.id]);
-             } else {
-                await execute(`UPDATE product_variants SET tienda_nube_variant_id = ? WHERE id = ?`, [variant.id, localVariantId]);
-             }
-
-             // 6. Update Stock
-             // Tienda Nube stock is usually master if we are importing.
-             // If inventory_management is true OR stock is present, update it.
-             // Check if stock is null or undefined, default to 0.
-             const stock = variant.stock !== null && variant.stock !== undefined ? Number(variant.stock) : 0;
-             
-             // Debug log (optional, remove in prod)
-             // console.log(`Updating stock for ${localVariantId}: ${stock}`);
-
-             await execute(`
-                INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-                ON DUPLICATE KEY UPDATE stock = VALUES(stock)
-             `, [localVariantId, stock]);
-
-             // 7. Push Stock to Mercado Libre (Auto Sync)
-             // Only if SKU exists and stock > 0 (or we want to zero it out too)
-             if (variant.sku) {
-                // Fire and forget - don't await to speed up TN sync
-                updateMercadoLibreStock(variant.sku, stock).catch(e => console.error(e));
-             }
+                  INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
+                  ON DUPLICATE KEY UPDATE stock = VALUES(stock)
+                `, [localVariantId, stock]);
+  
+                if (variant.sku) {
+                  updateMercadoLibreStock(variant.sku, stock).catch(e => console.error(e));
+                }
+              } catch (variantErr: any) {
+                log(`[ERROR] Variant ${variant.id}: ${variantErr?.response?.data?.message || variantErr?.message || 'Error desconocido'}`);
+              }
+            }
+            if (processedVariantIds.length > 0 && productId) {
+              try {
+                await execute(`
+                  DELETE st FROM stocks st
+                  JOIN product_variants pv ON st.variant_id = pv.id
+                  JOIN product_colors pc ON pv.product_color_id = pc.id
+                  WHERE pc.product_id = ? AND pv.id NOT IN (${processedVariantIds.map(() => '?').join(',')})
+                `, [productId, ...processedVariantIds]);
+                await execute(`
+                  DELETE pv FROM product_variants pv
+                  JOIN product_colors pc ON pv.product_color_id = pc.id
+                  WHERE pc.product_id = ? AND pv.id NOT IN (${processedVariantIds.map(() => '?').join(',')})
+                `, [productId, ...processedVariantIds]);
+                await execute(`
+                  DELETE pc FROM product_colors pc
+                  LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+                  WHERE pc.product_id = ? AND pv.id IS NULL
+                `, [productId]);
+                log(`  [Cleanup] Eliminadas variantes locales no presentes en Tienda Nube para producto ${tnProduct.id}`);
+              } catch (cleanupErr: any) {
+                log(`[ERROR] Cleanup producto ${tnProduct.id}: ${cleanupErr?.message || 'Error desconocido'}`);
+              }
+            }
+          } catch (prodErr: any) {
+            log(`[ERROR] Product ${tnProduct?.id}: ${prodErr?.response?.data?.message || prodErr?.message || 'Error desconocido'}`);
           }
         }
 
@@ -480,5 +441,18 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('Error syncing products:', error.response?.data || error.message);
     res.status(500).json({ message: 'Error sincronizando productos', error: error.message });
+  }
+};
+
+export const disconnectIntegration = async (req: Request, res: Response) => {
+  const { platform } = req.params as { platform: 'mercadolibre' | 'tiendanube' };
+  if (!platform || !['mercadolibre', 'tiendanube'].includes(platform)) {
+    return res.status(400).json({ message: 'Plataforma inválida' });
+  }
+  try {
+    await execute(`DELETE FROM integrations WHERE platform = ?`, [platform]);
+    return res.json({ message: 'Desconectado', platform });
+  } catch (error: any) {
+    return res.status(500).json({ message: 'Error desconectando', error: error.message });
   }
 };

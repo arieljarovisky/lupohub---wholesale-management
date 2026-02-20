@@ -70,6 +70,30 @@ const Settings: React.FC<SettingsProps> = ({
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const [syncCompleted, setSyncCompleted] = useState(false);
   const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0 });
+  const groupedLogs = React.useMemo(() => {
+    const groups: { product: string; variants: string[]; errors: string[] }[] = [];
+    let current: { product: string; variants: string[]; errors: string[] } | null = null;
+    for (const line of syncLogs) {
+      const trimmed = line.trim();
+      if (line.startsWith('[Sync] Processing Product:')) {
+        const namePart = line.split('[Sync] Processing Product:')[1] || '';
+        const productName = namePart.split('(ID:')[0].trim();
+        if (current) groups.push(current);
+        current = { product: productName || line, variants: [], errors: [] };
+      } else if (trimmed.startsWith('[Variant]')) {
+        if (!current) current = { product: 'Producto', variants: [], errors: [] };
+        current.variants.push(trimmed);
+      } else if (line.includes('[ERROR]')) {
+        if (!current) current = { product: 'Producto', variants: [], errors: [] };
+        current.errors.push(line);
+      } else {
+        if (!current) current = { product: 'Producto', variants: [], errors: [] };
+        current.variants.push(line);
+      }
+    }
+    if (current) groups.push(current);
+    return groups;
+  }, [syncLogs]);
 
   // Modals State
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -109,6 +133,15 @@ const Settings: React.FC<SettingsProps> = ({
       }
     } catch (e) {
       alert('Error iniciando conexión');
+    }
+  };
+
+  const handleDisconnect = async (platform: 'mercadolibre' | 'tiendanube') => {
+    try {
+      await api.disconnectIntegration(platform);
+      setIntegrations(prev => ({ ...prev, [platform]: false }));
+    } catch {
+      alert('Error desconectando');
     }
   };
 
@@ -480,9 +513,17 @@ const Settings: React.FC<SettingsProps> = ({
                    <h3 className="font-black text-white text-lg">Tienda Nube</h3>
                 </div>
                 {integrations.tiendanube ? (
-                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
-                    <Check size={12} /> CONECTADO
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                      <Check size={12} /> CONECTADO
+                    </span>
+                    <button 
+                      onClick={() => handleDisconnect('tiendanube')}
+                      className="px-3 py-1 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold"
+                    >
+                      Desconectar
+                    </button>
+                  </div>
                 ) : (
                   <button 
                     onClick={() => handleConnect('tiendanube')}
@@ -525,9 +566,17 @@ const Settings: React.FC<SettingsProps> = ({
                    <h3 className="font-black text-white text-lg">Mercado Libre</h3>
                 </div>
                 {integrations.mercadolibre ? (
-                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
-                    <Check size={12} /> CONECTADO
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                      <Check size={12} /> CONECTADO
+                    </span>
+                    <button 
+                      onClick={() => handleDisconnect('mercadolibre')}
+                      className="px-3 py-1 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold"
+                    >
+                      Desconectar
+                    </button>
+                  </div>
                 ) : (
                   <button 
                     onClick={() => handleConnect('mercadolibre')}
@@ -706,12 +755,22 @@ const Settings: React.FC<SettingsProps> = ({
              </div>
           )}
 
-          {syncLogs.length > 0 && (
-             <div className="mt-2 bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px] text-green-400 shadow-inner">
-               {syncLogs.map((log, i) => (
-                 <div key={i} className="mb-1 border-b border-white/5 pb-0.5 last:border-0">{log}</div>
-               ))}
-             </div>
+          {groupedLogs.length > 0 && (
+            <div className="mt-2 bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px] shadow-inner">
+              {groupedLogs.map((g, idx) => (
+                <div key={idx} className="mb-2">
+                  <div className="text-green-400 font-bold">{g.product}</div>
+                  <div className="mt-1 pl-2 border-l border-slate-700 space-y-0.5">
+                    {g.variants.map((v, i) => (
+                      <div key={i} className="text-green-300">{v}</div>
+                    ))}
+                    {g.errors.map((e, i) => (
+                      <div key={`e-${i}`} className="text-red-400">{e}</div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </Modal>

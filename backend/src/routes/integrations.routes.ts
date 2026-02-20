@@ -5,7 +5,8 @@ import {
   handleMercadoLibreCallback,
   getTiendaNubeAuthUrl,
   handleTiendaNubeCallback,
-  syncProductsFromTiendaNube
+  syncProductsFromTiendaNube,
+  disconnectIntegration
 } from '../controllers/integrations.controller';
 
 const router = Router();
@@ -20,5 +21,6 @@ router.get('/mercadolibre/callback', handleMercadoLibreCallback);
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
+router.delete('/:platform/disconnect', disconnectIntegration);
 
 export default router;
