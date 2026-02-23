@@ -374,11 +374,11 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
                 if (!localVariantId) {
                   localVariantId = uuidv4();
                   await execute(`
-                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id) 
-                    VALUES (?, ?, ?, ?)
-                  `, [localVariantId, productColorId, sizeId, variant.id]);
+                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id, sku) 
+                    VALUES (?, ?, ?, ?, ?)
+                  `, [localVariantId, productColorId, sizeId, variant.id, variant.sku || null]);
                 } else {
-                  await execute(`UPDATE product_variants SET tienda_nube_variant_id = ? WHERE id = ?`, [variant.id, localVariantId]);
+                  await execute(`UPDATE product_variants SET tienda_nube_variant_id = ?, sku = ? WHERE id = ?`, [variant.id, variant.sku || null, localVariantId]);
                 }
                 processedVariantIds.push(localVariantId);
   
@@ -454,5 +454,59 @@ export const disconnectIntegration = async (req: Request, res: Response) => {
     return res.json({ message: 'Desconectado', platform });
   } catch (error: any) {
     return res.status(500).json({ message: 'Error desconectando', error: error.message });
+  }
+};
+
+export const syncProductsFromMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT * FROM integrations WHERE platform = 'mercadolibre'`);
+    if (!integration || !integration.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Mercado Libre' });
+    }
+    const { access_token, user_id } = integration;
+    const logs: string[] = [];
+    let linkedVariants = 0;
+    const searchRes = await axios.get(`https://api.mercadolibre.com/users/${user_id}/items/search`, {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+    const items: string[] = searchRes.data.results || [];
+    for (const itemId of items) {
+      try {
+        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+          headers: { Authorization: `Bearer ${access_token}` }
+        });
+        const variations = itemRes.data.variations || [];
+        if (variations.length > 0) {
+          for (const v of variations) {
+            const sku = v.seller_custom_field || '';
+            if (!sku) continue;
+            const row = await get(
+              `SELECT pv.id AS variant_id, pc.product_id AS product_id FROM product_variants pv JOIN product_colors pc ON pv.product_color_id = pc.id WHERE pv.sku = ?`,
+              [sku]
+            );
+            if (row?.variant_id) {
+              await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [v.id, row.variant_id]);
+              await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [itemRes.data.id, row.product_id]);
+              linkedVariants++;
+              logs.push(`[ML Link] SKU ${sku} -> Item ${itemRes.data.id} Var ${v.id}`);
+            }
+          }
+        } else {
+          const sku = itemRes.data.seller_custom_field || itemRes.data.seller_sku || '';
+          if (sku) {
+            const prod = await get(`SELECT id FROM products WHERE sku = ?`, [sku]);
+            if (prod?.id) {
+              await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [itemRes.data.id, prod.id]);
+              logs.push(`[ML Link] Producto ${prod.id} <- Item ${itemRes.data.id}`);
+            }
+          }
+        }
+      } catch (e: any) {
+        logs.push(`[ML Item Error] ${itemId}: ${e?.response?.data?.message || e?.message || 'Error'}`);
+      }
+    }
+    res.json({ message: 'Sincronización ML completada', linkedVariants, logs });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Error sincronizando Mercado Libre', error: error.message });
   }
 };

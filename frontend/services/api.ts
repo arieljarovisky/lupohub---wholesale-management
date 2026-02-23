@@ -184,10 +184,16 @@ export const api = {
     }, { url: '' }, 'getAuthUrl');
   },
 
-  syncProductsFromTiendaNube: async (): Promise<{ message: string; imported: number; updated: number }> => {
+  syncProductsFromTiendaNube: async (): Promise<{ message: string; imported: number; updated: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; imported: number; updated: number }>('/integrations/tiendanube/sync', 'POST');
-    }, { message: 'Offline', imported: 0, updated: 0 }, 'syncProductsFromTiendaNube');
+      return await request<{ message: string; imported: number; updated: number; logs: string[] }>('/integrations/tiendanube/sync', 'POST');
+    }, { message: 'Offline', imported: 0, updated: 0, logs: [] }, 'syncProductsFromTiendaNube');
+  },
+  
+  syncProductsFromMercadoLibre: async (): Promise<{ message: string; linkedVariants: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; linkedVariants: number; logs: string[] }>('/integrations/mercadolibre/sync', 'POST');
+    }, { message: 'Offline', linkedVariants: 0, logs: [] }, 'syncProductsFromMercadoLibre');
   },
 
   disconnectIntegration: async (platform: 'mercadolibre' | 'tiendanube'): Promise<{ message: string; platform: string }> => {

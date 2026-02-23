@@ -8,6 +8,7 @@ import {
   syncProductsFromTiendaNube,
   disconnectIntegration
 } from '../controllers/integrations.controller';
+import { syncProductsFromMercadoLibre } from '../controllers/integrations.controller';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.get('/status', getIntegrationStatus);
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);
 router.get('/mercadolibre/callback', handleMercadoLibreCallback);
+router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 
 // Tienda Nube
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);

@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.disconnectIntegration = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.syncProductsFromMercadoLibre = exports.disconnectIntegration = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
@@ -368,12 +368,12 @@ const syncProductsFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
                                 if (!localVariantId) {
                                     localVariantId = (0, uuid_1.v4)();
                                     yield (0, db_1.execute)(`
-                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id) 
-                    VALUES (?, ?, ?, ?)
-                  `, [localVariantId, productColorId, sizeId, variant.id]);
+                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id, sku) 
+                    VALUES (?, ?, ?, ?, ?)
+                  `, [localVariantId, productColorId, sizeId, variant.id, variant.sku || null]);
                                 }
                                 else {
-                                    yield (0, db_1.execute)(`UPDATE product_variants SET tienda_nube_variant_id = ? WHERE id = ?`, [variant.id, localVariantId]);
+                                    yield (0, db_1.execute)(`UPDATE product_variants SET tienda_nube_variant_id = ?, sku = ? WHERE id = ?`, [variant.id, variant.sku || null, localVariantId]);
                                 }
                                 processedVariantIds.push(localVariantId);
                                 const stock = variant.stock !== null && variant.stock !== undefined ? Number(variant.stock) : 0;
@@ -455,3 +455,59 @@ const disconnectIntegration = (req, res) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 exports.disconnectIntegration = disconnectIntegration;
+const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const integration = yield (0, db_1.get)(`SELECT * FROM integrations WHERE platform = 'mercadolibre'`);
+        if (!integration || !integration.access_token) {
+            return res.status(400).json({ message: 'No estás conectado a Mercado Libre' });
+        }
+        const { access_token, user_id } = integration;
+        const logs = [];
+        let linkedVariants = 0;
+        const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${user_id}/items/search`, {
+            headers: { Authorization: `Bearer ${access_token}` }
+        });
+        const items = searchRes.data.results || [];
+        for (const itemId of items) {
+            try {
+                const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, {
+                    headers: { Authorization: `Bearer ${access_token}` }
+                });
+                const variations = itemRes.data.variations || [];
+                if (variations.length > 0) {
+                    for (const v of variations) {
+                        const sku = v.seller_custom_field || '';
+                        if (!sku)
+                            continue;
+                        const row = yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id AS product_id FROM product_variants pv JOIN product_colors pc ON pv.product_color_id = pc.id WHERE pv.sku = ?`, [sku]);
+                        if (row === null || row === void 0 ? void 0 : row.variant_id) {
+                            yield (0, db_1.execute)(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [v.id, row.variant_id]);
+                            yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [itemRes.data.id, row.product_id]);
+                            linkedVariants++;
+                            logs.push(`[ML Link] SKU ${sku} -> Item ${itemRes.data.id} Var ${v.id}`);
+                        }
+                    }
+                }
+                else {
+                    const sku = itemRes.data.seller_custom_field || itemRes.data.seller_sku || '';
+                    if (sku) {
+                        const prod = yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [sku]);
+                        if (prod === null || prod === void 0 ? void 0 : prod.id) {
+                            yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [itemRes.data.id, prod.id]);
+                            logs.push(`[ML Link] Producto ${prod.id} <- Item ${itemRes.data.id}`);
+                        }
+                    }
+                }
+            }
+            catch (e) {
+                logs.push(`[ML Item Error] ${itemId}: ${((_b = (_a = e === null || e === void 0 ? void 0 : e.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.message) || (e === null || e === void 0 ? void 0 : e.message) || 'Error'}`);
+            }
+        }
+        res.json({ message: 'Sincronización ML completada', linkedVariants, logs });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error sincronizando Mercado Libre', error: error.message });
+    }
+});
+exports.syncProductsFromMercadoLibre = syncProductsFromMercadoLibre;

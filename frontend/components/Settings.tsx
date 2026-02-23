@@ -135,6 +135,18 @@ const Settings: React.FC<SettingsProps> = ({
       alert('Error iniciando conexión');
     }
   };
+  
+  const handleSyncMercadoLibre = async () => {
+    try {
+      setLoadingIntegrations(true);
+      const res = await api.syncProductsFromMercadoLibre();
+      alert(`Sincronización ML: ${res.message}\nVinculadas: ${res.linkedVariants}`);
+    } catch (e: any) {
+      alert('Error sincronizando Mercado Libre');
+    } finally {
+      setLoadingIntegrations(false);
+    }
+  };
 
   const handleDisconnect = async (platform: 'mercadolibre' | 'tiendanube') => {
     try {
@@ -592,9 +604,18 @@ const Settings: React.FC<SettingsProps> = ({
                   Conecta tu cuenta de Mercado Libre para mantener el stock y precios actualizados en tiempo real.
                 </p>
                  {integrations.mercadolibre && (
-                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
-                    <p className="text-xs text-slate-500">Estado de sincronización</p>
-                    <p className="text-white font-bold">Activo</p>
+                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">Estado de sincronización</p>
+                      <p className="text-white font-bold">Activo</p>
+                    </div>
+                    <button 
+                      onClick={handleSyncMercadoLibre}
+                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                    >
+                      <RefreshCw size={14} />
+                      SINCRONIZAR ML
+                    </button>
                   </div>
                 )}
              </div>
