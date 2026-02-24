@@ -6,6 +6,7 @@ import {
   getTiendaNubeAuthUrl,
   handleTiendaNubeCallback,
   syncProductsFromTiendaNube,
+  normalizeSizesInTiendaNube,
   disconnectIntegration
 } from '../controllers/integrations.controller';
 import { syncProductsFromMercadoLibre } from '../controllers/integrations.controller';
@@ -23,6 +24,7 @@ router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
+router.post('/tiendanube/normalize-sizes', normalizeSizesInTiendaNube);
 router.delete('/:platform/disconnect', disconnectIntegration);
 
 export default router;

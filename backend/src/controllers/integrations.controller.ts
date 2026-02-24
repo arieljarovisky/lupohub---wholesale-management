@@ -293,6 +293,12 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
               importedCount++;
             }
   
+            // Atributos del producto en Tienda Nube: cada índice corresponde a variant.values[i]
+            // e.g. attributes: [{ es: "Color" }, { es: "Talle" }] -> values[0]=color, values[1]=talle
+            const productAttributes = tnProduct.attributes || [];
+            const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
+            const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
+
             const processedVariantIds: string[] = [];
             for (const variant of tnProduct.variants) {
               try {
@@ -302,17 +308,37 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
                 let sizeName = 'U';
                 let colorName = 'Único';
                 if (values.length > 0) {
-                  const lastVal = values[values.length - 1];
-                  const extractedSize = lastVal?.es || lastVal?.pt || lastVal;
-                  if (extractedSize) sizeName = extractedSize;
-                  if (values.length > 1) {
-                      const colorParts = values.slice(0, values.length - 1);
-                      const extractedColor = colorParts.map((v: any) => v.es || v.pt || v).join(' ');
+                  const sizeParts: string[] = [];
+                  const colorParts: string[] = [];
+                  for (let i = 0; i < values.length; i++) {
+                    const attr = productAttributes[i];
+                    const attrName = (attr && (attr.es || attr.en || attr.pt || (typeof attr === 'string' ? attr : '')))?.toString().trim() || '';
+                    const val = (values[i]?.es ?? values[i]?.pt ?? values[i]?.en ?? values[i])?.toString().trim() || '';
+                    if (!val) continue;
+                    if (isSizeAttr(attrName)) {
+                      sizeParts.push(val);
+                    } else if (isColorAttr(attrName)) {
+                      colorParts.push(val);
+                    } else {
+                      // Sin nombre de atributo o no reconocido: fallback por posición (último = talle, resto = color)
+                      if (i === values.length - 1) sizeParts.push(val);
+                      else colorParts.push(val);
+                    }
+                  }
+                  if (sizeParts.length > 0) sizeName = sizeParts.join(' ');
+                  if (colorParts.length > 0) colorName = colorParts.join(' ');
+                  // Si no se asignó nada por atributos (ej. attributes vacío), usar lógica legacy
+                  if (sizeName === 'U' && colorName === 'Único' && values.length > 0) {
+                    const lastVal = values[values.length - 1];
+                    const extractedSize = lastVal?.es || lastVal?.pt || lastVal;
+                    if (extractedSize) sizeName = extractedSize;
+                    if (values.length > 1) {
+                      const extractedColor = values.slice(0, values.length - 1).map((v: any) => v.es || v.pt || v).join(' ');
                       if (extractedColor) colorName = extractedColor;
-                  } else {
-                      const firstVal = values[0];
-                      const val = firstVal?.es || firstVal?.pt || firstVal;
+                    } else {
+                      const val = values[0]?.es || values[0]?.pt || values[0];
                       if (val) colorName = val;
+                    }
                   }
                 }
   
@@ -441,6 +467,127 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('Error syncing products:', error.response?.data || error.message);
     res.status(500).json({ message: 'Error sincronizando productos', error: error.message });
+  }
+};
+
+/** Talles estándar para el público: P, M, G, GG, XG, XXG, XXXG (+ U para único) */
+const STANDARD_SIZES = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG', 'U'] as const;
+
+/** Mapeo de nombres comunes a talle estándar (clave en mayúsculas/normalizada) */
+function normalizeSizeToStandard(raw: string): string {
+  const v = raw.trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!v) return 'U';
+  // Ya estándar
+  if (STANDARD_SIZES.includes(v as any)) return v;
+  // Único / sin talla
+  if (/^U$|UNICO|ÚNICO|LISO|UNICA|ÚNICA/i.test(v)) return 'U';
+  // Pequeño
+  if (/^P$|^S$|^PP$|^XS$|^1$|^2$|^34$|^36$|^35$|^XXS$/i.test(v)) return 'P';
+  // Mediano
+  if (/^M$|^3$|^4$|^38$|^40$/i.test(v)) return 'M';
+  // Grande
+  if (/^G$|^L$|^5$|^6$|^42$|^44$/i.test(v)) return 'G';
+  if (/^GG$|^7$|^8$|^46$/i.test(v)) return 'GG';
+  // Extra grande
+  if (/^XG$|^XL$|^9$|^10$|^48$/i.test(v)) return 'XG';
+  if (/^XXG$|^XXL$|^11$|^12$|^50$/i.test(v)) return 'XXG';
+  if (/^XXXG$|^XXXL$|^13$|^52$/i.test(v)) return 'XXXG';
+  // Por texto
+  if (/EXTRA\s*GRANDE|XXL|XX\s*L/i.test(v) && !/XXX/i.test(v)) return 'XXG';
+  if (/XXX|TRIPLE/i.test(v)) return 'XXXG';
+  if (/XL|EXTRA\s*LARGE/i.test(v)) return 'XG';
+  if (/GRANDE|LARGE|^L$/i.test(v)) return 'G';
+  if (/MEDIANO|MEDIUM|^M$/i.test(v)) return 'M';
+  if (/PEQUEÑO|SMALL|^S$|^P$/i.test(v)) return 'P';
+  return v; // dejar como está si no hay match
+}
+
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+export const normalizeSizesInTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration || !integration.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const { access_token, user_id: store_id } = integration;
+    const logs: string[] = [];
+    const log = (msg: string) => {
+      console.log(msg);
+      logs.push(msg);
+    };
+    let updatedVariants = 0;
+    let skippedProducts = 0;
+    let page = 1;
+    let hasMore = true;
+    const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
+
+    while (hasMore) {
+      const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
+        headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
+        params: { page, per_page: 50 }
+      });
+      const products = response.data;
+      if (!products?.length) {
+        hasMore = false;
+        break;
+      }
+      for (const tnProduct of products) {
+        const productAttributes = tnProduct.attributes || [];
+        let sizeAttrIndex = -1;
+        for (let i = 0; i < productAttributes.length; i++) {
+          const attr = productAttributes[i];
+          const name = (attr?.es ?? attr?.en ?? attr?.pt ?? (typeof attr === 'string' ? attr : '')).toString();
+          if (isSizeAttr(name)) {
+            sizeAttrIndex = i;
+            break;
+          }
+        }
+        if (sizeAttrIndex === -1) {
+          skippedProducts++;
+          continue;
+        }
+        for (const variant of tnProduct.variants || []) {
+          const values = variant.values || [];
+          if (sizeAttrIndex >= values.length) continue;
+          const sizeVal = values[sizeAttrIndex];
+          const current = (sizeVal?.es ?? sizeVal?.pt ?? sizeVal?.en ?? sizeVal)?.toString().trim() || '';
+          const normalized = normalizeSizeToStandard(current);
+          if (normalized === current) continue;
+          const newValues = values.map((obj: any, i: number) => {
+            if (i !== sizeAttrIndex) return obj;
+            const langKeys = obj && typeof obj === 'object' ? Object.keys(obj) : ['es'];
+            const next: Record<string, string> = {};
+            for (const lang of langKeys) next[lang] = normalized;
+            return next;
+          });
+          try {
+            await axios.put(
+              `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
+              { values: newValues },
+              { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
+            );
+            updatedVariants++;
+            log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
+            await delay(250);
+          } catch (err: any) {
+            log(`  [ERROR] Variante ${variant.id}: ${err.response?.data?.description || err.message}`);
+          }
+        }
+      }
+      page++;
+      if (page > 100) hasMore = false;
+    }
+
+    res.json({
+      message: 'Normalización de talles en Tienda Nube completada',
+      updatedVariants,
+      skippedProducts,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error normalizing sizes:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: error.message });
   }
 };
 

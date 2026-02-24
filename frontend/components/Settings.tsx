@@ -70,6 +70,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const [syncCompleted, setSyncCompleted] = useState(false);
   const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0 });
+  const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
+  const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
+  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
     let current: { product: string; variants: string[]; errors: string[] } | null = null;
@@ -154,6 +157,21 @@ const Settings: React.FC<SettingsProps> = ({
       setIntegrations(prev => ({ ...prev, [platform]: false }));
     } catch {
       alert('Error desconectando');
+    }
+  };
+
+  const handleNormalizeSizesTiendaNube = async () => {
+    setShowNormalizeSizesModal(true);
+    setLoadingNormalizeSizes(true);
+    setNormalizeSizesResult(null);
+    try {
+      const res = await api.normalizeSizesInTiendaNube();
+      setNormalizeSizesResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
+    } catch (e) {
+      console.error(e);
+      setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
+    } finally {
+      setLoadingNormalizeSizes(false);
     }
   };
 
@@ -552,19 +570,33 @@ const Settings: React.FC<SettingsProps> = ({
                 </p>
                 {integrations.tiendanube && (
                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <div>
                         <p className="text-xs text-slate-500">Estado de sincronización</p>
                         <p className="text-white font-bold">Activo</p>
                       </div>
-                      <button 
-                        onClick={() => setShowSyncModal(true)}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
-                      >
-                        <RefreshCw size={14} />
-                        IMPORTAR PRODUCTOS
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button 
+                          onClick={() => setShowSyncModal(true)}
+                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                        >
+                          <RefreshCw size={14} />
+                          IMPORTAR PRODUCTOS
+                        </button>
+                        <button 
+                          onClick={handleNormalizeSizesTiendaNube}
+                          disabled={loadingNormalizeSizes}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Convertir todos los talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG"
+                        >
+                          {loadingNormalizeSizes ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+                          NORMALIZAR TALLES
+                        </button>
+                      </div>
                     </div>
+                    <p className="text-[10px] text-slate-500">
+                      Normalizar talles: actualiza en Tienda Nube todas las variantes para usar solo P, M, G, GG, XG, XXG, XXXG (y U para único).
+                    </p>
                   </div>
                 )}
              </div>
@@ -791,6 +823,51 @@ const Settings: React.FC<SettingsProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Normalize sizes modal */}
+      <Modal
+        isOpen={showNormalizeSizesModal}
+        onClose={() => setShowNormalizeSizesModal(false)}
+        title="Normalizar talles en Tienda Nube"
+        footer={
+          <button onClick={() => setShowNormalizeSizesModal(false)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm">
+            Cerrar
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {normalizeSizesResult && (
+            <>
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-4">
+                <div className="flex-1">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
+                  <p className="text-xl font-black text-green-400">{normalizeSizesResult.updatedVariants}</p>
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos sin atributo Talle</p>
+                  <p className="text-xl font-black text-slate-400">{normalizeSizesResult.skippedProducts}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">
+                Los talles en Tienda Nube se convirtieron a: P, M, G, GG, XG, XXG, XXXG (y U para único). Volvé a &quot;Importar productos&quot; para reflejar los cambios en LupoHub.
+              </p>
+              {normalizeSizesResult.logs.length > 0 && (
+                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
+                  {normalizeSizesResult.logs.slice(-50).map((line, i) => (
+                    <div key={i} className={line.includes('[ERROR]') ? 'text-red-400' : 'text-green-300'}>{line}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {loadingNormalizeSizes && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-blue-500" size={32} />
+              <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube...</p>
             </div>
           )}
         </div>
