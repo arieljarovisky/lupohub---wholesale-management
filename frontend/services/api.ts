@@ -199,13 +199,85 @@ export const api = {
   
   syncProductsFromMercadoLibre: async (): Promise<{ message: string; linkedVariants: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; linkedVariants: number; logs: string[] }>('/integrations/mercadolibre/sync', 'POST');
+      // Timeout largo para sincronización (3 minutos)
+      return await request<{ message: string; linkedVariants: number; logs: string[] }>('/integrations/mercadolibre/sync', 'POST', undefined, undefined, 180000);
     }, { message: 'Offline', linkedVariants: 0, logs: [] }, 'syncProductsFromMercadoLibre');
+  },
+
+  testMercadoLibreConnection: async (): Promise<{ success: boolean; message: string; details: any }> => {
+    return handleRequest(async () => {
+      return await request<{ success: boolean; message: string; details: any }>('/integrations/mercadolibre/test', 'GET');
+    }, { success: false, message: 'Offline', details: null }, 'testMercadoLibreConnection');
   },
 
   disconnectIntegration: async (platform: 'mercadolibre' | 'tiendanube'): Promise<{ message: string; platform: string }> => {
     return handleRequest(async () => {
       return await request<{ message: string; platform: string }>(`/integrations/${platform}/disconnect`, 'DELETE');
     }, { message: 'Offline', platform }, 'disconnectIntegration');
+  },
+
+  // Sincronizar stock a plataformas externas
+  syncStockToTiendaNube: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 180000);
+    }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToTiendaNube');
+  },
+
+  syncStockToMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 180000);
+    }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
+  },
+
+  // Historial de movimientos de stock
+  getStockMovements: async (params?: { variantId?: string; type?: string; limit?: number }): Promise<any[]> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.variantId) queryParams.append('variantId', params.variantId);
+      if (params?.type) queryParams.append('type', params.type);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      const queryString = queryParams.toString();
+      return await request<any[]>(`/stock/movements${queryString ? '?' + queryString : ''}`, 'GET');
+    }, [], 'getStockMovements');
+  },
+
+  // Órdenes de Tienda Nube
+  getTiendaNubeOrders: async (params?: { page?: number; per_page?: number; status?: string; created_at_min?: string; created_at_max?: string }): Promise<{ orders: any[]; total: number }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.page) queryParams.append('page', params.page.toString());
+      if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
+      if (params?.status) queryParams.append('status', params.status);
+      if (params?.created_at_min) queryParams.append('created_at_min', params.created_at_min);
+      if (params?.created_at_max) queryParams.append('created_at_max', params.created_at_max);
+      const queryString = queryParams.toString();
+      return await request<{ orders: any[]; total: number }>(`/integrations/tiendanube/orders${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { orders: [], total: 0 }, 'getTiendaNubeOrders');
+  },
+
+  // Órdenes de Mercado Libre
+  getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string }): Promise<{ orders: any[]; total: number }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.status) queryParams.append('status', params.status);
+      if (params?.date_from) queryParams.append('date_from', params.date_from);
+      if (params?.date_to) queryParams.append('date_to', params.date_to);
+      const queryString = queryParams.toString();
+      return await request<{ orders: any[]; total: number }>(`/integrations/mercadolibre/orders${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { orders: [], total: 0 }, 'getMercadoLibreOrders');
+  },
+
+  // Stock de Mercado Libre
+  getMercadoLibreStock: async (params?: { offset?: number; limit?: number; status?: string }): Promise<{ items: any[]; total: number }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.status) queryParams.append('status', params.status || 'active');
+      const queryString = queryParams.toString();
+      return await request<{ items: any[]; total: number }>(`/integrations/mercadolibre/stock${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { items: [], total: 0 }, 'getMercadoLibreStock');
   }
 };

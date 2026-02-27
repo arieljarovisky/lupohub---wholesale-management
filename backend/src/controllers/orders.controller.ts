@@ -96,9 +96,34 @@ export const updateOrderStatus = async (req: any, res: any) => {
   const { status } = req.body;
 
   try {
+    // Obtener estado anterior
+    const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
+    const previousStatus = currentOrder?.status;
+
+    // Si pasa de Borrador a Confirmado, descontar stock
+    if (previousStatus === 'Borrador' && status === 'Confirmado') {
+      const { deductStockForOrder } = await import('./stock.controller');
+      const result = await deductStockForOrder(id);
+      
+      if (!result.success) {
+        console.error('Errores descontando stock:', result.errors);
+      }
+    }
+
+    // Si se cancela un pedido confirmado, restaurar stock
+    if (previousStatus === 'Confirmado' && status === 'Cancelado') {
+      const { restoreStockForOrder } = await import('./stock.controller');
+      const result = await restoreStockForOrder(id);
+      
+      if (!result.success) {
+        console.error('Errores restaurando stock:', result.errors);
+      }
+    }
+
     await execute("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
-    res.json({ id, status });
+    res.json({ id, status, previousStatus });
   } catch (error) {
+    console.error('Error updating order status:', error);
     res.status(500).json({ message: "Error updating order status" });
   }
 };

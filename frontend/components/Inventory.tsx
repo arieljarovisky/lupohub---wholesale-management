@@ -118,42 +118,77 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   function checkColorMatch(p: Product, filterColor: string) {
     if (filterColor === 'ALL') return true;
     
-    const parsedColor = getProductColorCode(p);
-    const filterColorStr = filterColor.toString().trim().toLowerCase();
+    const filterColorLower = filterColor.toString().trim().toLowerCase();
     
-    // Find the selected attribute to check against both code and name
+    // Find the selected attribute to get both code and name
     const selectedAttr = availableColors.find(c => ((c as any).code || c.name) === filterColor);
     const targetCode = (selectedAttr ? ((selectedAttr as any).code || '') : filterColor).toString().trim().toLowerCase();
-    const targetName = (selectedAttr ? (selectedAttr.name || '') : '').toString().trim().toLowerCase();
+    const targetName = (selectedAttr ? (selectedAttr.name || '') : filterColor).toString().trim().toLowerCase();
 
-    // Check explicit color property
+    // Get color from product's explicit color property (set when loading variants)
     const explicitColor = ((p as any).color || '').toString().trim().toLowerCase();
+    // Get colorCode if available (from loaded variants)
+    const explicitColorCode = ((p as any).colorCode || '').toString().trim().toLowerCase();
     
-    // Check parsed color from SKU
-    const parsedColorStr = parsedColor.toString().trim().toLowerCase();
-
-    // Check if SKU contains the target code as a segment (more robust than just last part)
+    // Get color from SKU (last segment)
     const sku = (p.sku || '').toString();
-    const skuParts = sku.toLowerCase().split('-');
-    const skuHasCode = targetCode && skuParts.includes(targetCode);
-
-    if (
-        (explicitColor && (explicitColor === targetCode || explicitColor === targetName)) ||
-        (parsedColorStr === filterColorStr) || 
-        (parsedColorStr === targetCode) || 
-        (targetName && parsedColorStr === targetName) ||
-        skuHasCode
-    ) {
-      return true;
-    } else {
-      // Try numeric comparison to handle "03" vs "3" differences
-      const n1 = parseInt(parsedColor);
-      const n2 = parseInt(filterColorStr);
-      const n3 = parseInt(targetCode);
-      if ((!isNaN(n1) && !isNaN(n2) && n1 === n2) || (!isNaN(n1) && !isNaN(n3) && n1 === n3)) {
+    const skuParts = sku.split('-');
+    const skuColorPart = skuParts.length >= 1 ? skuParts[skuParts.length - 1].toLowerCase() : '';
+    
+    // Match by explicit colorCode (most reliable for loaded variants)
+    if (explicitColorCode) {
+      if (explicitColorCode === targetCode || explicitColorCode === filterColorLower) {
         return true;
       }
     }
+    
+    // Match by explicit color name
+    if (explicitColor) {
+      if (explicitColor === targetName || explicitColor === targetCode || explicitColor === filterColorLower) {
+        return true;
+      }
+      // Partial match for color names (e.g., "Negro" matches "negro")
+      if (targetName && explicitColor.includes(targetName)) {
+        return true;
+      }
+      if (targetName && targetName.includes(explicitColor)) {
+        return true;
+      }
+    }
+    
+    // Match by SKU color segment
+    if (skuColorPart) {
+      if (skuColorPart === targetCode || skuColorPart === targetName || skuColorPart === filterColorLower) {
+        return true;
+      }
+      // Check if any SKU part matches the target code
+      if (targetCode && skuParts.some(part => part.toLowerCase() === targetCode)) {
+        return true;
+      }
+    }
+    
+    // Numeric comparison for codes like "03" vs "3"
+    const numExplicit = parseInt(explicitColor);
+    const numExplicitCode = parseInt(explicitColorCode);
+    const numSkuColor = parseInt(skuColorPart);
+    const numTarget = parseInt(targetCode);
+    const numFilter = parseInt(filterColorLower);
+    
+    if (!isNaN(numTarget)) {
+      if ((!isNaN(numExplicitCode) && numExplicitCode === numTarget) ||
+          (!isNaN(numExplicit) && numExplicit === numTarget) || 
+          (!isNaN(numSkuColor) && numSkuColor === numTarget)) {
+        return true;
+      }
+    }
+    if (!isNaN(numFilter)) {
+      if ((!isNaN(numExplicitCode) && numExplicitCode === numFilter) ||
+          (!isNaN(numExplicit) && numExplicit === numFilter) || 
+          (!isNaN(numSkuColor) && numSkuColor === numFilter)) {
+        return true;
+      }
+    }
+    
     return false;
   }
 
@@ -174,40 +209,46 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // 2. Filter individual products first (incluye padres para poder evaluar variantes)
   const filteredProducts = (serverMode ? serverItems : products).filter(p => {
-    const sku = (p.sku || '').toString();
-    const matchesSearch = sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const sku = (p.sku || '').toString().toLowerCase();
+    const name = (p.name || '').toString().toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
     const sizeCode = getProductSizeCode(p);
     const matchesSize = filterSize === 'ALL' || sizeCode === filterSize;
     
     const isParent = sku.split('-').length <= 1;
     const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
-
-    // Debug logging requested by user
-    if (filterColor !== 'ALL' && !matchesColor) {
-       // Log only occasionally or if needed
-       // console.log(`[FilterMismatch] SKU: ${sku}, Filter: '${filterColor}'`);
-    }
     
     let matchesStock = true;
     const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
     if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
     if (filterStockLevel === 'OUT') matchesStock = stockValue <= 0;
-
-    // If we are filtering by color and the product has no color info (likely a parent product),
-    // allow it to pass ONLY IF we cannot determine it's definitely NOT that color.
-    // However, usually we want strict filtering. 
-    // BUT, if the list contains PARENTS (no color) and we filter by color, we hide everything.
-    // STRATEGY: If parsedColor is empty, and SKU has no dashes (likely parent), we might want to include it 
-    // IF we are going to filter groups later.
-    // BUT groups.filter checks variants.
-    // So, let's keep strict filtering but ensure variants are detected.
     
     return matchesSearch && matchesCategory && matchesSize && matchesColor && matchesStock;
   });
 
     // 2. Group filtered products by BASE SKU (prefix before size/color suffix)
-  const baseSource = React.useMemo(() => (filterColor === 'ALL' ? filteredProducts : (serverMode ? serverItems : products)), [filterColor, filteredProducts, serverMode, serverItems, products]);
+  // When color filter is active, we still need to respect search and other filters
+  const baseSource = React.useMemo(() => {
+    if (filterColor === 'ALL') return filteredProducts;
+    // When filtering by color, apply all filters except color (color will be filtered at variant level)
+    const source = serverMode ? serverItems : products;
+    return source.filter(p => {
+      const sku = (p.sku || '').toString().toLowerCase();
+      const name = (p.name || '').toString().toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
+      const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
+      const sizeCode = getProductSizeCode(p);
+      const matchesSize = filterSize === 'ALL' || sizeCode === filterSize;
+      let matchesStock = true;
+      const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
+      if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
+      if (filterStockLevel === 'OUT') matchesStock = stockValue <= 0;
+      return matchesSearch && matchesCategory && matchesSize && matchesStock;
+    });
+  }, [filterColor, filteredProducts, serverMode, serverItems, products, searchTerm, filterCategory, filterSize, filterStockLevel]);
   const groupedProducts = React.useMemo(() => baseSource.reduce((acc, product) => {
     const sku = (product.sku || 'SIN-CODIGO').toString();
     const parts = sku.split('-');
@@ -275,6 +316,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           description: '',
           size: v.sizeCode,
           color: v.colorName,
+          colorCode: v.colorCode,
           stock: v.stock,
           integrations: { 
             local: true, 
@@ -316,6 +358,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           description: '',
           size: v.sizeCode,
           color: v.colorName,
+          colorCode: v.colorCode,
           stock: v.stock,
           integrations: { 
             local: true, 
@@ -423,6 +466,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           description: '',
           size: v.sizeCode,
           color: v.colorName,
+          colorCode: v.colorCode,
           stock: v.stock,
           integrations: { 
             local: true, 

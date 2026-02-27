@@ -8,6 +8,9 @@ import Settings from './components/Settings';
 import CreateOrder from './components/CreateOrder';
 import Customers from './components/Customers';
 import OrderPicking from './components/OrderPicking';
+import TiendaNubeOrders from './components/TiendaNubeOrders';
+import MercadoLibreOrders from './components/MercadoLibreOrders';
+import MercadoLibreStock from './components/MercadoLibreStock';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { MOCK_VISITS, MOCK_USERS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
@@ -118,7 +121,7 @@ const App: React.FC = () => {
        const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
         id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
         type: 'size', 
-         name: s.name,
+         name: s.name || s.code || 'Sin nombre',
          code: s.code 
       })) as any;
       setAttributes([...sizeAttrs, ...colorAttrs]);
@@ -403,7 +406,9 @@ const App: React.FC = () => {
                <h1 className="text-2xl md:text-3xl font-bold text-white">
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
-                 {baseView === 'orders' && 'Pedidos'}
+                 {baseView === 'orders' && 'Pedidos Mayoristas'}
+                 {baseView === 'tiendanube_orders' && 'Ventas Tienda Nube'}
+                 {baseView === 'mercadolibre_orders' && 'Ventas Mercado Libre'}
                  {baseView === 'customers' && 'Clientes'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
@@ -480,6 +485,9 @@ const App: React.FC = () => {
           {baseView === 'order_picking' && activePickingOrder && (
             <OrderPicking order={activePickingOrder} products={products} currentUserId={currentUser.id} users={users} onFinishPicking={handleFinishPicking} onCancel={() => setCurrentView('orders')} />
           )}
+          {baseView === 'tiendanube_orders' && <TiendaNubeOrders />}
+          {baseView === 'mercadolibre_orders' && <MercadoLibreOrders />}
+          {baseView === 'mercadolibre_stock' && <MercadoLibreStock />}
         </div>
       </main>
 

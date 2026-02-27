@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { updateMercadoLibreStock } from './integrations.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -123,12 +122,23 @@ export const getProductStockTotalBySku = async (sku: string): Promise<number> =>
 export const getProductBySku = async (req: any, res: any) => {
   const { sku } = req.params;
   try {
-    const product = await get(
+    // Buscar por SKU exacto o por SKU base (para agrupar variantes)
+    let product = await get(
       `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku = ?`,
       [sku]
     );
+    
+    // Si no se encuentra exacto, buscar por SKU base (productos cuyo SKU comienza con el parámetro)
+    if (!product) {
+      product = await get(
+        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`,
+        [`${sku}-%`]
+      );
+    }
+    
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
     
+    // Obtener todas las variantes del producto encontrado
     const variantsRows = await query(
       `SELECT p.sku, c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
@@ -139,9 +149,9 @@ export const getProductBySku = async (req: any, res: any) => {
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.sku=?
+       WHERE p.id=?
        ORDER BY c.code, s.size_code`,
-      [sku]
+      [product.id]
     );
     
     const variants = variantsRows.map((v: any) => ({
@@ -152,7 +162,7 @@ export const getProductBySku = async (req: any, res: any) => {
       }
     }));
 
-    const stock_total = await getProductStockTotalBySku(sku);
+    const stock_total = variants.reduce((sum: number, v: any) => sum + Number(v.stock || 0), 0);
     res.json({ 
       ...product, 
       externalIds: {
@@ -177,26 +187,15 @@ export const patchStock = async (req: any, res: any) => {
       vId = await getVariantIdBySkuColorSize(sku, colorCode, sizeCode);
       if (!vId) return res.status(404).json({ message: 'Variante no encontrada' });
     }
-    await execute(
-      `INSERT INTO stocks(variant_id, stock) VALUES (?,?)
-       ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
-      [vId, stock]
-    );
-    let targetSku = sku || null;
-    if (!targetSku) {
-      const row = await get(
-        `SELECT p.sku AS sku
-         FROM products p
-         JOIN product_colors pc ON pc.product_id = p.id
-         JOIN product_variants pv ON pv.product_color_id = pc.id
-         WHERE pv.id = ?`,
-        [vId]
-      );
-      targetSku = row?.sku || null;
+    
+    // Usar el nuevo sistema de stock con historial y sincronización
+    const { updateVariantStock } = await import('./stock.controller');
+    const success = await updateVariantStock(vId, Number(stock), 'AJUSTE_MANUAL');
+    
+    if (!success) {
+      return res.status(500).json({ message: 'Error actualizando stock' });
     }
-    if (targetSku) {
-      updateMercadoLibreStock(targetSku, Number(stock)).catch(() => {});
-    }
+    
     res.json({ variantId: vId, stock });
   } catch (error) {
     console.error(error);

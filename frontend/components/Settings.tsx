@@ -66,6 +66,16 @@ const Settings: React.FC<SettingsProps> = ({
   const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean }>({ mercadolibre: false, tiendanube: false });
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
 
+  // Mercado Libre Test Connection
+  const [mlTestLoading, setMlTestLoading] = useState(false);
+  const [mlTestResult, setMlTestResult] = useState<{ success: boolean; message: string; details: any } | null>(null);
+  const [showMlTestModal, setShowMlTestModal] = useState(false);
+
+  // Mercado Libre Sync
+  const [mlSyncLoading, setMlSyncLoading] = useState(false);
+  const [mlSyncResult, setMlSyncResult] = useState<{ message: string; linkedVariants: number; linkedProducts?: number; notFound?: number; totalItems?: number; logs: string[] } | null>(null);
+  const [showMlSyncModal, setShowMlSyncModal] = useState(false);
+
   const [loadingSync, setLoadingSync] = useState(false);
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const [syncCompleted, setSyncCompleted] = useState(false);
@@ -102,6 +112,12 @@ const Settings: React.FC<SettingsProps> = ({
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteStep, setDeleteStep] = useState(1); // 1: Warning, 2: Confirmation
+
+  // Stock Sync State
+  const [tnStockSyncLoading, setTnStockSyncLoading] = useState(false);
+  const [mlStockSyncLoading, setMlStockSyncLoading] = useState(false);
+  const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
+  const [showStockSyncModal, setShowStockSyncModal] = useState(false);
 
   useEffect(() => {
     // Check for status params
@@ -140,14 +156,16 @@ const Settings: React.FC<SettingsProps> = ({
   };
   
   const handleSyncMercadoLibre = async () => {
+    setShowMlSyncModal(true);
+    setMlSyncLoading(true);
+    setMlSyncResult(null);
     try {
-      setLoadingIntegrations(true);
       const res = await api.syncProductsFromMercadoLibre();
-      alert(`Sincronización ML: ${res.message}\nVinculadas: ${res.linkedVariants}`);
+      setMlSyncResult(res);
     } catch (e: any) {
-      alert('Error sincronizando Mercado Libre');
+      setMlSyncResult({ message: 'Error sincronizando', linkedVariants: 0, logs: [e.message || 'Error desconocido'] });
     } finally {
-      setLoadingIntegrations(false);
+      setMlSyncLoading(false);
     }
   };
 
@@ -157,6 +175,50 @@ const Settings: React.FC<SettingsProps> = ({
       setIntegrations(prev => ({ ...prev, [platform]: false }));
     } catch {
       alert('Error desconectando');
+    }
+  };
+
+  const handleTestMercadoLibre = async () => {
+    setShowMlTestModal(true);
+    setMlTestLoading(true);
+    setMlTestResult(null);
+    try {
+      const res = await api.testMercadoLibreConnection();
+      setMlTestResult(res);
+    } catch (e: any) {
+      setMlTestResult({ success: false, message: 'Error de conexión', details: e.message });
+    } finally {
+      setMlTestLoading(false);
+    }
+  };
+
+  // Sincronizar stock a Tienda Nube
+  const handleSyncStockToTiendaNube = async () => {
+    setShowStockSyncModal(true);
+    setTnStockSyncLoading(true);
+    setStockSyncResult(null);
+    try {
+      const res = await api.syncStockToTiendaNube();
+      setStockSyncResult({ platform: 'Tienda Nube', updated: res.updated, errors: res.errors, logs: res.logs });
+    } catch (e: any) {
+      setStockSyncResult({ platform: 'Tienda Nube', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+    } finally {
+      setTnStockSyncLoading(false);
+    }
+  };
+
+  // Sincronizar stock a Mercado Libre
+  const handleSyncStockToMercadoLibre = async () => {
+    setShowStockSyncModal(true);
+    setMlStockSyncLoading(true);
+    setStockSyncResult(null);
+    try {
+      const res = await api.syncStockToMercadoLibre();
+      setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
+    } catch (e: any) {
+      setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+    } finally {
+      setMlStockSyncLoading(false);
     }
   };
 
@@ -584,6 +646,15 @@ const Settings: React.FC<SettingsProps> = ({
                           IMPORTAR PRODUCTOS
                         </button>
                         <button 
+                          onClick={handleSyncStockToTiendaNube}
+                          disabled={tnStockSyncLoading}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Sincronizar stock local a Tienda Nube"
+                        >
+                          {tnStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          SINCRONIZAR STOCK
+                        </button>
+                        <button 
                           onClick={handleNormalizeSizesTiendaNube}
                           disabled={loadingNormalizeSizes}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
@@ -595,8 +666,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Normalizar talles: actualiza en Tienda Nube todas las variantes para usar solo P, M, G, GG, XG, XXG, XXXG (y U para único).
-                    </p>
+                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG.</p>
                   </div>
                 )}
              </div>
@@ -636,18 +706,38 @@ const Settings: React.FC<SettingsProps> = ({
                   Conecta tu cuenta de Mercado Libre para mantener el stock y precios actualizados en tiempo real.
                 </p>
                  {integrations.mercadolibre && (
-                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500">Estado de sincronización</p>
-                      <p className="text-white font-bold">Activo</p>
+                  <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-slate-500">Estado de sincronización</p>
+                        <p className="text-white font-bold">Activo</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button 
+                          onClick={handleTestMercadoLibre}
+                          disabled={mlTestLoading}
+                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {mlTestLoading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                          PROBAR CONEXIÓN
+                        </button>
+                        <button 
+                          onClick={handleSyncMercadoLibre}
+                          className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                        >
+                          <RefreshCw size={14} />
+                          VINCULAR PRODUCTOS
+                        </button>
+                        <button 
+                          onClick={handleSyncStockToMercadoLibre}
+                          disabled={mlStockSyncLoading}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          SINCRONIZAR STOCK
+                        </button>
+                      </div>
                     </div>
-                    <button 
-                      onClick={handleSyncMercadoLibre}
-                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
-                    >
-                      <RefreshCw size={14} />
-                      SINCRONIZAR ML
-                    </button>
                   </div>
                 )}
              </div>
@@ -739,15 +829,21 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-             {(activeTab === 'sizes' ? sizes : colors).map(attr => (
-               <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-slate-600 transition-colors">
-                  <div className="flex items-center gap-3">
-                    {attr.type === 'color' && <div className="w-5 h-5 rounded-full border border-white/10 shadow-sm" style={{background: attr.value}} />}
-                    <span className="text-sm font-black text-slate-200 tracking-tight">{attr.name}</span>
-                  </div>
-                  <button onClick={() => onDeleteAttribute(attr.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={16}/></button>
-               </div>
-             ))}
+             {(activeTab === 'sizes' ? sizes : colors).map(attr => {
+               const displayName = attr.name || (attr as any).code || 'Sin nombre';
+               const code = (attr as any).code;
+               return (
+                 <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-slate-600 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      {attr.type === 'color' && <div className="w-5 h-5 rounded-full border border-white/10 shadow-sm shrink-0" style={{background: attr.value || '#000'}} />}
+                      <span className="text-sm font-black text-slate-200 tracking-tight truncate" title={displayName}>
+                        {displayName}
+                      </span>
+                    </div>
+                    <button onClick={() => onDeleteAttribute(attr.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1 shrink-0"><Trash2 size={16}/></button>
+                 </div>
+               );
+             })}
           </div>
         </div>
       )}
@@ -869,6 +965,183 @@ const Settings: React.FC<SettingsProps> = ({
               <Loader2 className="animate-spin text-blue-500" size={32} />
               <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube...</p>
             </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Mercado Libre Test Modal */}
+      <Modal
+        isOpen={showMlTestModal}
+        onClose={() => setShowMlTestModal(false)}
+        title="Prueba de Conexión - Mercado Libre"
+        footer={
+          <button onClick={() => setShowMlTestModal(false)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
+            Cerrar
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {mlTestLoading && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-yellow-500" size={32} />
+              <p className="text-sm text-yellow-400 font-bold">Probando conexión con Mercado Libre...</p>
+            </div>
+          )}
+          {mlTestResult && !mlTestLoading && (
+            <>
+              <div className={`p-4 rounded-xl border flex items-center gap-3 ${mlTestResult.success ? 'bg-green-900/20 border-green-800/50' : 'bg-red-900/20 border-red-800/50'}`}>
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${mlTestResult.success ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                  {mlTestResult.success ? <Check size={24} strokeWidth={3} /> : <AlertCircle size={24} />}
+                </div>
+                <div>
+                  <p className={`font-bold ${mlTestResult.success ? 'text-green-400' : 'text-red-400'}`}>{mlTestResult.message}</p>
+                  {!mlTestResult.success && mlTestResult.details && typeof mlTestResult.details === 'string' && (
+                    <p className="text-xs text-slate-400 mt-1">{mlTestResult.details}</p>
+                  )}
+                </div>
+              </div>
+              {mlTestResult.success && mlTestResult.details && typeof mlTestResult.details === 'object' && (
+                <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">Usuario</p>
+                      <p className="text-white font-bold">{mlTestResult.details.nickname || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">User ID</p>
+                      <p className="text-white font-mono text-sm">{mlTestResult.details.userId || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">Email</p>
+                      <p className="text-white text-sm truncate">{mlTestResult.details.email || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">País</p>
+                      <p className="text-white font-bold">{mlTestResult.details.country || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">Publicaciones</p>
+                      <p className="text-yellow-400 font-black text-xl">{mlTestResult.details.totalItems || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-black">Token Expira</p>
+                      <p className="text-white text-xs">{mlTestResult.details.expiresAt || 'N/A'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Mercado Libre Sync Modal */}
+      <Modal
+        isOpen={showMlSyncModal}
+        onClose={() => { if (!mlSyncLoading) setShowMlSyncModal(false); }}
+        title="Sincronización Mercado Libre"
+        footer={
+          !mlSyncLoading && (
+            <button onClick={() => setShowMlSyncModal(false)} className="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
+              Cerrar
+            </button>
+          )
+        }
+      >
+        <div className="space-y-4">
+          {mlSyncLoading && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-yellow-500" size={32} />
+              <p className="text-sm text-yellow-400 font-bold">Sincronizando con Mercado Libre...</p>
+              <p className="text-xs text-slate-500">Esto puede tomar unos segundos</p>
+            </div>
+          )}
+          {mlSyncResult && !mlSyncLoading && (
+            <>
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Publicaciones ML</p>
+                  <p className="text-xl font-black text-white">{mlSyncResult.totalItems || 0}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Variantes Vinculadas</p>
+                  <p className="text-xl font-black text-green-400">{mlSyncResult.linkedVariants}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos Vinculados</p>
+                  <p className="text-xl font-black text-blue-400">{mlSyncResult.linkedProducts || 0}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">No Encontrados</p>
+                  <p className="text-xl font-black text-red-400">{mlSyncResult.notFound || 0}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">
+                La vinculación se hace por SKU. Asegúrate de que los SKUs en Mercado Libre coincidan con los de Tienda Nube.
+              </p>
+              {mlSyncResult.logs && mlSyncResult.logs.length > 0 && (
+                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px]">
+                  {mlSyncResult.logs.map((line, i) => (
+                    <div key={i} className={
+                      line.includes('VINCULADO') ? 'text-green-400' : 
+                      line.includes('NO encontrado') || line.includes('Error') ? 'text-red-400' : 
+                      line.includes('[ML Item]') ? 'text-yellow-400 font-bold mt-2' :
+                      line.includes('=====') ? 'text-blue-400 font-bold mt-2' :
+                      'text-slate-400'
+                    }>{line}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Stock Sync Modal */}
+      <Modal
+        isOpen={showStockSyncModal}
+        onClose={() => { if (!tnStockSyncLoading && !mlStockSyncLoading) setShowStockSyncModal(false); }}
+        title={`Sincronizar Stock a ${stockSyncResult?.platform || 'Plataforma'}`}
+        footer={
+          !tnStockSyncLoading && !mlStockSyncLoading && (
+            <button onClick={() => setShowStockSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
+              Cerrar
+            </button>
+          )
+        }
+      >
+        <div className="space-y-4">
+          {(tnStockSyncLoading || mlStockSyncLoading) && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-green-500" size={32} />
+              <p className="text-sm text-green-400 font-bold">Sincronizando stock...</p>
+              <p className="text-xs text-slate-500">Esto puede tomar unos minutos</p>
+            </div>
+          )}
+          {stockSyncResult && !tnStockSyncLoading && !mlStockSyncLoading && (
+            <>
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Variantes Actualizadas</p>
+                  <p className="text-xl font-black text-green-400">{stockSyncResult.updated}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores</p>
+                  <p className="text-xl font-black text-red-400">{stockSyncResult.errors}</p>
+                </div>
+              </div>
+              {stockSyncResult.logs && stockSyncResult.logs.length > 0 && (
+                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px]">
+                  {stockSyncResult.logs.map((line, i) => (
+                    <div key={i} className={
+                      line.includes('[OK]') ? 'text-green-400' : 
+                      line.includes('[ERROR]') ? 'text-red-400' : 
+                      'text-slate-400'
+                    }>{line}</div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </Modal>
