@@ -9,7 +9,8 @@ export type StockMovementType =
   | 'VENTA_MERCADO_LIBRE'
   | 'AJUSTE_MANUAL'
   | 'DEVOLUCION'
-  | 'IMPORTACION_TN';
+  | 'IMPORTACION_TN'
+  | 'SNAPSHOT_INICIAL';
 
 interface StockMovement {
   variantId: string;
@@ -322,5 +323,201 @@ export const forceSyncStock = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error forcing stock sync:', error);
     res.status(500).json({ message: 'Error sincronizando stock' });
+  }
+};
+
+// Endpoint: Crear snapshot inicial de todo el stock actual
+export const createStockSnapshot = async (req: Request, res: Response) => {
+  try {
+    // Verificar si ya existe un snapshot inicial
+    const existingSnapshot = await get(
+      `SELECT COUNT(*) as count FROM stock_movements WHERE movement_type = 'SNAPSHOT_INICIAL'`
+    );
+
+    if (existingSnapshot?.count > 0) {
+      return res.status(400).json({ 
+        message: 'Ya existe un snapshot inicial. Elimínalo primero si querés crear uno nuevo.',
+        existingCount: existingSnapshot.count
+      });
+    }
+
+    // Obtener todo el stock actual
+    const allStock = await query(`
+      SELECT 
+        s.variant_id,
+        s.stock,
+        pv.sku,
+        p.name as product_name
+      FROM stocks s
+      JOIN product_variants pv ON pv.id = s.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      WHERE s.stock > 0
+    `);
+
+    let created = 0;
+    for (const item of allStock) {
+      await execute(
+        `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
+         VALUES (UUID(), ?, 0, ?, ?, 'SNAPSHOT_INICIAL', ?, NOW())`,
+        [item.variant_id, item.stock, item.stock, `Stock inicial: ${item.sku || item.product_name}`]
+      );
+      created++;
+    }
+
+    res.json({ 
+      message: 'Snapshot inicial creado',
+      variantsProcessed: created
+    });
+  } catch (error: any) {
+    console.error('Error creating stock snapshot:', error);
+    res.status(500).json({ message: 'Error creando snapshot', error: error.message });
+  }
+};
+
+// Endpoint: Importar historial de ventas de TN y ML
+export const importSalesHistory = async (req: Request, res: Response) => {
+  try {
+    const { days = 60 } = req.body;
+    const logs: string[] = [];
+    let imported = 0;
+
+    // Calcular fecha desde
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - days);
+    const dateFromStr = dateFrom.toISOString().split('T')[0];
+
+    logs.push(`Importando ventas de los últimos ${days} días (desde ${dateFromStr})`);
+
+    // Importar de Tienda Nube
+    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (tnIntegration?.access_token) {
+      try {
+        const axios = (await import('axios')).default;
+        let page = 1;
+        let hasMore = true;
+
+        while (hasMore && page <= 10) {
+          const ordersRes = await axios.get(
+            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/orders?created_at_min=${dateFromStr}&per_page=50&page=${page}&status=paid`,
+            {
+              headers: {
+                'Authentication': `bearer ${tnIntegration.access_token}`,
+                'User-Agent': 'LupoHub (lupohub@example.com)'
+              }
+            }
+          );
+
+          const orders = ordersRes.data || [];
+          if (orders.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          for (const order of orders) {
+            // Verificar si ya existe este movimiento
+            const exists = await get(
+              `SELECT id FROM stock_movements WHERE reference LIKE ? AND movement_type = 'VENTA_TIENDA_NUBE'`,
+              [`%TN-${order.id}%`]
+            );
+            if (exists) continue;
+
+            for (const product of order.products || []) {
+              const tnVariantId = product.variant_id;
+              if (!tnVariantId) continue;
+
+              // Buscar variante local
+              const variant = await get(
+                `SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`,
+                [tnVariantId]
+              );
+
+              if (variant?.id) {
+                const qty = product.quantity || 1;
+                await execute(
+                  `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
+                   VALUES (UUID(), ?, 0, 0, ?, 'VENTA_TIENDA_NUBE', ?, ?)`,
+                  [variant.id, -qty, `Orden TN-${order.id} (histórico)`, order.created_at]
+                );
+                imported++;
+              }
+            }
+          }
+
+          page++;
+          if (orders.length < 50) hasMore = false;
+        }
+        logs.push(`✓ Tienda Nube: ${imported} movimientos importados`);
+      } catch (e: any) {
+        logs.push(`✗ Error Tienda Nube: ${e.message}`);
+      }
+    }
+
+    // Importar de Mercado Libre
+    const mlIntegration = await get(`SELECT access_token, user_id FROM integrations WHERE platform = 'mercadolibre'`);
+    if (mlIntegration?.access_token) {
+      try {
+        const axios = (await import('axios')).default;
+        let offset = 0;
+        let mlImported = 0;
+
+        while (offset < 500) {
+          const ordersRes = await axios.get(
+            `https://api.mercadolibre.com/orders/search?seller=${mlIntegration.user_id}&order.status=paid&order.date_created.from=${dateFromStr}T00:00:00.000-03:00&offset=${offset}&limit=50&sort=date_desc`,
+            {
+              headers: { 'Authorization': `Bearer ${mlIntegration.access_token}` }
+            }
+          );
+
+          const orders = ordersRes.data.results || [];
+          if (orders.length === 0) break;
+
+          for (const order of orders) {
+            // Verificar si ya existe
+            const exists = await get(
+              `SELECT id FROM stock_movements WHERE reference LIKE ? AND movement_type = 'VENTA_MERCADO_LIBRE'`,
+              [`%ML-${order.id}%`]
+            );
+            if (exists) continue;
+
+            for (const item of order.order_items || []) {
+              const mlVariationId = item.item?.variation_id;
+              if (!mlVariationId) continue;
+
+              const variant = await get(
+                `SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`,
+                [mlVariationId]
+              );
+
+              if (variant?.id) {
+                const qty = item.quantity || 1;
+                await execute(
+                  `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
+                   VALUES (UUID(), ?, 0, 0, ?, 'VENTA_MERCADO_LIBRE', ?, ?)`,
+                  [variant.id, -qty, `Orden ML-${order.id} (histórico)`, order.date_created]
+                );
+                mlImported++;
+              }
+            }
+          }
+
+          offset += 50;
+          if (orders.length < 50) break;
+        }
+        imported += mlImported;
+        logs.push(`✓ Mercado Libre: ${mlImported} movimientos importados`);
+      } catch (e: any) {
+        logs.push(`✗ Error Mercado Libre: ${e.message}`);
+      }
+    }
+
+    res.json({
+      message: 'Importación completada',
+      totalImported: imported,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error importing sales history:', error);
+    res.status(500).json({ message: 'Error importando historial', error: error.message });
   }
 };

@@ -9,9 +9,11 @@ import colorRoutes from './routes/colors.routes';
 import sizeRoutes from './routes/sizes.routes';
 import integrationRoutes from './routes/integrations.routes';
 import stockRoutes from './routes/stock.routes';
+import despachosRoutes from './routes/despachos.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
+import { addDespachosTable } from './database/add_despachos_table';
 
 dotenv.config();
 
@@ -34,6 +36,7 @@ app.use('/api/sizes', sizeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/stock', stockRoutes);
+app.use('/api/despachos', despachosRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -43,6 +46,7 @@ app.get('/health', (req, res) => {
 // Initialize database tables
 addStockMovementsTable().catch(console.error);
 fixIntegrationsTable().catch(console.error);
+addDespachosTable().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);

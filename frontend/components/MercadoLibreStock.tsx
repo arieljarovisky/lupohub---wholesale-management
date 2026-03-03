@@ -22,6 +22,8 @@ interface MLStockItem {
   }[];
 }
 
+type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
+
 const MercadoLibreStock: React.FC = () => {
   const [items, setItems] = useState<MLStockItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,13 +31,16 @@ const MercadoLibreStock: React.FC = () => {
   const [offset, setOffset] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>('title');
   const limit = 20;
 
   const fetchStock = async () => {
     setLoading(true);
     try {
       const res = await api.getMercadoLibreStock({ offset, limit, status: 'active' });
-      setItems(res.items || []);
+      // Ordenar por título para mantener consistencia
+      const sortedItems = (res.items || []).sort((a, b) => a.title.localeCompare(b.title));
+      setItems(sortedItems);
       setTotal(res.total || 0);
     } catch (error) {
       console.error('Error fetching ML stock:', error);
@@ -48,15 +53,30 @@ const MercadoLibreStock: React.FC = () => {
     fetchStock();
   }, [offset]);
 
-  const filteredItems = items.filter(item => {
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return (
-      item.id.toLowerCase().includes(search) ||
-      item.title.toLowerCase().includes(search) ||
-      item.variations.some(v => v.sku?.toLowerCase().includes(search))
-    );
-  });
+  const filteredItems = items
+    .filter(item => {
+      if (!searchTerm) return true;
+      const search = searchTerm.toLowerCase();
+      return (
+        item.id.toLowerCase().includes(search) ||
+        item.title.toLowerCase().includes(search) ||
+        item.variations.some(v => v.sku?.toLowerCase().includes(search))
+      );
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'title':
+          return a.title.localeCompare(b.title);
+        case 'stock_asc':
+          return a.totalStock - b.totalStock;
+        case 'stock_desc':
+          return b.totalStock - a.totalStock;
+        case 'sold_desc':
+          return b.soldTotal - a.soldTotal;
+        default:
+          return 0;
+      }
+    });
 
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = Math.ceil(total / limit);
@@ -139,22 +159,34 @@ const MercadoLibreStock: React.FC = () => {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search & Sort */}
       <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700/30">
-        <div className="relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Buscar por ID, título o SKU..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-yellow-500/50 transition-colors"
-          />
-          {searchTerm && (
-            <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
-              <X size={16} />
-            </button>
-          )}
+        <div className="flex flex-col md:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Buscar por ID, título o SKU..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-yellow-500/50 transition-colors"
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                <X size={16} />
+              </button>
+            )}
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-500/50 transition-colors cursor-pointer"
+          >
+            <option value="title">Ordenar: A-Z</option>
+            <option value="stock_asc">Ordenar: Menor stock</option>
+            <option value="stock_desc">Ordenar: Mayor stock</option>
+            <option value="sold_desc">Ordenar: Más vendidos</option>
+          </select>
         </div>
       </div>
 

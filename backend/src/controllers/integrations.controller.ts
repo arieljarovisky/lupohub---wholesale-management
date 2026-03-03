@@ -1138,6 +1138,9 @@ const processMercadoLibreOrder = async (orderId: string) => {
       return;
     }
 
+    // Enviar mensaje de agradecimiento al comprador
+    await sendThankYouMessage(orderId, order, mlToken.access_token);
+
     const { updateVariantStock } = await import('./stock.controller');
 
     for (const item of order.order_items || []) {
@@ -1172,6 +1175,116 @@ const processMercadoLibreOrder = async (orderId: string) => {
     }
   } catch (error: any) {
     console.error('[ML Order] Error procesando orden:', error.message);
+  }
+};
+
+// Enviar mensaje de agradecimiento al comprador de ML
+const sendThankYouMessage = async (orderId: string, order: any, accessToken: string) => {
+  try {
+    // Verificar si el mensaje automático está habilitado
+    const config = await get(`SELECT enabled, message_template FROM ml_auto_message_config WHERE id = 1`);
+    if (config && !config.enabled) {
+      console.log(`[ML Message] Mensaje automático deshabilitado, omitiendo orden ${orderId}`);
+      return;
+    }
+
+    const buyerId = order.buyer?.id;
+    if (!buyerId) {
+      console.log(`[ML Message] No se encontró buyer_id para orden ${orderId}`);
+      return;
+    }
+
+    // Verificar si ya enviamos mensaje para esta orden (evitar duplicados)
+    const alreadySent = await get(
+      `SELECT id FROM ml_messages_sent WHERE order_id = ?`,
+      [orderId]
+    );
+
+    if (alreadySent) {
+      console.log(`[ML Message] Ya se envió mensaje para orden ${orderId}, omitiendo`);
+      return;
+    }
+
+    // Obtener el nombre del comprador
+    const buyerName = order.buyer?.first_name || order.buyer?.nickname || 'Cliente';
+    
+    // Obtener los productos comprados para personalizar el mensaje
+    const productNames = (order.order_items || [])
+      .map((item: any) => item.item?.title)
+      .filter(Boolean)
+      .slice(0, 2) // Máximo 2 productos en el mensaje
+      .join(' y ');
+
+    // Usar plantilla personalizada o mensaje por defecto
+    let message: string;
+    if (config?.message_template) {
+      message = config.message_template
+        .replace('{nombre}', buyerName)
+        .replace('{productos}', productNames ? ` de ${productNames}` : '');
+    } else {
+      message = `¡Hola ${buyerName}! 🙌
+
+Muchas gracias por tu compra${productNames ? ` de ${productNames}` : ''}. 
+
+Tu pedido ya está siendo preparado con mucho cuidado. Te avisaremos apenas lo despachemos.
+
+Si tenés alguna consulta, no dudes en escribirnos. ¡Gracias por confiar en nosotros!
+
+Saludos,
+Equipo Lupo`;
+    }
+
+    // Enviar mensaje usando la API de mensajes de ML
+    // La API de mensajes usa el pack_id (si existe) o el order_id
+    const packId = order.pack_id || orderId;
+    
+    await axios.post(
+      `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${order.seller?.id || (await getValidMLToken())?.user_id}`,
+      {
+        from: {
+          user_id: order.seller?.id
+        },
+        to: {
+          user_id: buyerId
+        },
+        text: message
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    // Registrar que ya enviamos el mensaje
+    await execute(
+      `INSERT INTO ml_messages_sent (order_id, buyer_id, sent_at) VALUES (?, ?, NOW())`,
+      [orderId, buyerId]
+    );
+
+    console.log(`[ML Message] ✓ Mensaje de agradecimiento enviado para orden ${orderId} a ${buyerName}`);
+  } catch (error: any) {
+    // Si la tabla no existe, crearla
+    if (error.message?.includes('ml_messages_sent') || error.code === 'ER_NO_SUCH_TABLE') {
+      try {
+        await execute(`
+          CREATE TABLE IF NOT EXISTS ml_messages_sent (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            order_id VARCHAR(50) NOT NULL UNIQUE,
+            buyer_id VARCHAR(50),
+            sent_at DATETIME,
+            INDEX idx_order_id (order_id)
+          )
+        `);
+        console.log('[ML Message] Tabla ml_messages_sent creada');
+      } catch (tableError) {
+        console.error('[ML Message] Error creando tabla:', tableError);
+      }
+    }
+    
+    // Log del error pero no fallar el proceso principal
+    console.error(`[ML Message] Error enviando mensaje para orden ${orderId}:`, error.response?.data || error.message);
   }
 };
 
@@ -1499,71 +1612,81 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       return res.json({ items: [], total: 0 });
     }
 
-    // Obtener detalles de los items (máximo 20 por request con multiget)
+    // Obtener detalles completos de cada item (necesario para variaciones con atributos)
     const items: any[] = [];
-    for (let i = 0; i < itemIds.length; i += 20) {
-      const batch = itemIds.slice(i, i + 20);
-      const multigetUrl = `https://api.mercadolibre.com/items?ids=${batch.join(',')}&attributes=id,title,available_quantity,sold_quantity,status,price,permalink,thumbnail,variations`;
+    
+    // Procesar en paralelo pero limitado a 10 concurrent requests
+    const batchSize = 10;
+    for (let i = 0; i < itemIds.length; i += batchSize) {
+      const batch = itemIds.slice(i, i + batchSize);
       
-      const detailsRes = await axios.get(multigetUrl, {
-        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+      const itemPromises = batch.map(async (itemId: string) => {
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          return itemRes.data;
+        } catch (e) {
+          console.error(`Error fetching item ${itemId}:`, e);
+          return null;
+        }
       });
 
-      for (const result of detailsRes.data) {
-        if (result.code === 200 && result.body) {
-          const item = result.body;
-          
-          // Si tiene variaciones, obtener stock por variación
-          if (item.variations && item.variations.length > 0) {
-            let totalStock = 0;
-            const variations = item.variations.map((v: any) => {
-              totalStock += v.available_quantity || 0;
-              
-              // Extraer color y talle de los atributos
-              let color = '';
-              let size = '';
-              (v.attribute_combinations || []).forEach((attr: any) => {
-                if (attr.id === 'COLOR') color = attr.value_name;
-                if (attr.id === 'SIZE') size = attr.value_name;
-              });
-
-              return {
-                variationId: v.id,
-                sku: v.seller_custom_field || '',
-                color,
-                size,
-                stock: v.available_quantity || 0,
-                sold: v.sold_quantity || 0
-              };
+      const batchResults = await Promise.all(itemPromises);
+      
+      for (const item of batchResults) {
+        if (!item) continue;
+        
+        // Si tiene variaciones, obtener stock por variación
+        if (item.variations && item.variations.length > 0) {
+          let totalStock = 0;
+          const variations = item.variations.map((v: any) => {
+            totalStock += v.available_quantity || 0;
+            
+            // Extraer color y talle de los atributos
+            let color = '';
+            let size = '';
+            (v.attribute_combinations || []).forEach((attr: any) => {
+              if (attr.id === 'COLOR') color = attr.value_name;
+              if (attr.id === 'SIZE') size = attr.value_name;
             });
 
-            items.push({
-              id: item.id,
-              title: item.title,
-              status: item.status,
-              price: item.price,
-              totalStock,
-              soldTotal: item.sold_quantity || 0,
-              thumbnail: item.thumbnail,
-              permalink: item.permalink,
-              hasVariations: true,
-              variations
-            });
-          } else {
-            // Sin variaciones
-            items.push({
-              id: item.id,
-              title: item.title,
-              status: item.status,
-              price: item.price,
-              totalStock: item.available_quantity || 0,
-              soldTotal: item.sold_quantity || 0,
-              thumbnail: item.thumbnail,
-              permalink: item.permalink,
-              hasVariations: false,
-              variations: []
-            });
-          }
+            return {
+              variationId: v.id,
+              sku: v.seller_custom_field || '',
+              color,
+              size,
+              stock: v.available_quantity || 0,
+              sold: v.sold_quantity || 0
+            };
+          });
+
+          items.push({
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            price: item.price,
+            totalStock,
+            soldTotal: item.sold_quantity || 0,
+            thumbnail: item.thumbnail,
+            permalink: item.permalink,
+            hasVariations: true,
+            variations
+          });
+        } else {
+          // Sin variaciones
+          items.push({
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            price: item.price,
+            totalStock: item.available_quantity || 0,
+            soldTotal: item.sold_quantity || 0,
+            thumbnail: item.thumbnail,
+            permalink: item.permalink,
+            hasVariations: false,
+            variations: []
+          });
         }
       }
     }
@@ -1577,5 +1700,83 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching ML stock:', error.response?.data || error.message);
     res.status(500).json({ message: 'Error obteniendo stock de Mercado Libre', error: error.message });
+  }
+};
+
+// Obtener configuración de mensaje automático de ML
+export const getMLAutoMessageConfig = async (req: Request, res: Response) => {
+  try {
+    // Crear tabla si no existe
+    await execute(`
+      CREATE TABLE IF NOT EXISTS ml_auto_message_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        enabled BOOLEAN DEFAULT TRUE,
+        message_template TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
+    const config = await get(`SELECT * FROM ml_auto_message_config WHERE id = 1`);
+    
+    if (!config) {
+      // Insertar configuración por defecto
+      const defaultMessage = `¡Hola {nombre}! 🙌
+
+Muchas gracias por tu compra{productos}. 
+
+Tu pedido ya está siendo preparado con mucho cuidado. Te avisaremos apenas lo despachemos.
+
+Si tenés alguna consulta, no dudes en escribirnos. ¡Gracias por confiar en nosotros!
+
+Saludos,
+Equipo Lupo`;
+
+      await execute(
+        `INSERT INTO ml_auto_message_config (id, enabled, message_template) VALUES (1, TRUE, ?)`,
+        [defaultMessage]
+      );
+
+      return res.json({
+        enabled: true,
+        messageTemplate: defaultMessage
+      });
+    }
+
+    res.json({
+      enabled: config.enabled === 1,
+      messageTemplate: config.message_template
+    });
+  } catch (error: any) {
+    console.error('Error getting ML auto message config:', error.message);
+    res.status(500).json({ message: 'Error obteniendo configuración', error: error.message });
+  }
+};
+
+// Guardar configuración de mensaje automático de ML
+export const saveMLAutoMessageConfig = async (req: Request, res: Response) => {
+  try {
+    const { enabled, messageTemplate } = req.body;
+
+    // Crear tabla si no existe
+    await execute(`
+      CREATE TABLE IF NOT EXISTS ml_auto_message_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        enabled BOOLEAN DEFAULT TRUE,
+        message_template TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
+    await execute(
+      `INSERT INTO ml_auto_message_config (id, enabled, message_template) 
+       VALUES (1, ?, ?)
+       ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), message_template = VALUES(message_template)`,
+      [enabled ? 1 : 0, messageTemplate]
+    );
+
+    res.json({ success: true, message: 'Configuración guardada' });
+  } catch (error: any) {
+    console.error('Error saving ML auto message config:', error.message);
+    res.status(500).json({ message: 'Error guardando configuración', error: error.message });
   }
 };

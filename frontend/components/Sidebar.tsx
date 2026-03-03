@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship } from 'lucide-react';
 import { Role } from '../types';
 
 interface SidebarProps {
@@ -16,6 +16,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, 
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
         { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
+        { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'purple' },
+        { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN], color: 'indigo' },
       ]
     },
     {
@@ -51,6 +53,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, 
     if (isActive) {
       if (item.color === 'cyan') return 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/50';
       if (item.color === 'yellow') return 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/50';
+      if (item.color === 'purple') return 'bg-purple-600 text-white shadow-lg shadow-purple-900/50';
+      if (item.color === 'indigo') return 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50';
       return 'bg-blue-600 text-white shadow-lg shadow-blue-900/50';
     }
     return 'text-slate-400 hover:bg-slate-800/50 hover:text-white';
@@ -60,6 +64,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, 
     if (isActive) return 'text-white';
     if (item.color === 'cyan') return 'text-cyan-400';
     if (item.color === 'yellow') return 'text-yellow-400';
+    if (item.color === 'purple') return 'text-purple-400';
+    if (item.color === 'indigo') return 'text-indigo-400';
     return '';
   };
 

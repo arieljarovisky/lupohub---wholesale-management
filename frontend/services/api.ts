@@ -279,5 +279,117 @@ export const api = {
       const queryString = queryParams.toString();
       return await request<{ items: any[]; total: number }>(`/integrations/mercadolibre/stock${queryString ? '?' + queryString : ''}`, 'GET');
     }, { items: [], total: 0 }, 'getMercadoLibreStock');
+  },
+
+  // Configuración de mensaje automático de ML
+  getMLAutoMessageConfig: async (): Promise<{ enabled: boolean; messageTemplate: string }> => {
+    return handleRequest(async () => {
+      return await request<{ enabled: boolean; messageTemplate: string }>('/integrations/mercadolibre/auto-message', 'GET');
+    }, { enabled: true, messageTemplate: '' }, 'getMLAutoMessageConfig');
+  },
+
+  saveMLAutoMessageConfig: async (config: { enabled: boolean; messageTemplate: string }): Promise<{ success: boolean }> => {
+    return handleRequest(async () => {
+      return await request<{ success: boolean }>('/integrations/mercadolibre/auto-message', 'POST', config);
+    }, { success: false }, 'saveMLAutoMessageConfig');
+  },
+
+  // Historial de movimientos de stock
+  getStockMovements: async (params?: { 
+    variantId?: string; 
+    type?: string; 
+    from?: string; 
+    to?: string; 
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.variantId) queryParams.append('variantId', params.variantId);
+      if (params?.type) queryParams.append('type', params.type);
+      if (params?.from) queryParams.append('from', params.from);
+      if (params?.to) queryParams.append('to', params.to);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.offset) queryParams.append('offset', params.offset.toString());
+      const queryString = queryParams.toString();
+      return await request<any[]>(`/stock/movements${queryString ? '?' + queryString : ''}`, 'GET');
+    }, [], 'getStockMovements');
+  },
+
+  // Crear snapshot inicial del stock
+  createStockSnapshot: async (): Promise<{ message: string; variantsProcessed?: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; variantsProcessed?: number }>('/stock/snapshot', 'POST');
+    }, { message: 'Error' }, 'createStockSnapshot');
+  },
+
+  // Importar historial de ventas
+  importSalesHistory: async (days: number = 60): Promise<{ message: string; totalImported: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; totalImported: number; logs: string[] }>('/stock/import-history', 'POST', { days });
+    }, { message: 'Error', totalImported: 0, logs: [] }, 'importSalesHistory');
+  },
+
+  // ============ DESPACHOS DE IMPORTACIÓN ============
+
+  getDespachos: async (params?: { estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }): Promise<{ despachos: any[]; total: number }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.estado) queryParams.append('estado', params.estado);
+      if (params?.desde) queryParams.append('desde', params.desde);
+      if (params?.hasta) queryParams.append('hasta', params.hasta);
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      if (params?.offset) queryParams.append('offset', params.offset.toString());
+      const queryString = queryParams.toString();
+      return await request<{ despachos: any[]; total: number }>(`/despachos${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { despachos: [], total: 0 }, 'getDespachos');
+  },
+
+  getDespachoById: async (id: string): Promise<any> => {
+    return handleRequest(async () => {
+      return await request<any>(`/despachos/${id}`, 'GET');
+    }, null, 'getDespachoById');
+  },
+
+  createDespacho: async (data: any): Promise<{ message: string; id: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; id: string }>('/despachos', 'POST', data);
+    }, { message: 'Error', id: '' }, 'createDespacho');
+  },
+
+  updateDespacho: async (id: string, data: any): Promise<{ message: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string }>(`/despachos/${id}`, 'PUT', data);
+    }, { message: 'Error' }, 'updateDespacho');
+  },
+
+  deleteDespacho: async (id: string): Promise<{ message: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string }>(`/despachos/${id}`, 'DELETE');
+    }, { message: 'Error' }, 'deleteDespacho');
+  },
+
+  addDespachoItem: async (despachoId: string, item: any): Promise<{ message: string; id: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; id: string }>(`/despachos/${despachoId}/items`, 'POST', item);
+    }, { message: 'Error', id: '' }, 'addDespachoItem');
+  },
+
+  removeDespachoItem: async (despachoId: string, itemId: string): Promise<{ message: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string }>(`/despachos/${despachoId}/items/${itemId}`, 'DELETE');
+    }, { message: 'Error' }, 'removeDespachoItem');
+  },
+
+  getDespachoStats: async (): Promise<any> => {
+    return handleRequest(async () => {
+      return await request<any>('/despachos/stats', 'GET');
+    }, {}, 'getDespachoStats');
+  },
+
+  getProductosSinDespacho: async (): Promise<any[]> => {
+    return handleRequest(async () => {
+      return await request<any[]>('/despachos/productos-sin-despacho', 'GET');
+    }, [], 'getProductosSinDespacho');
   }
 };

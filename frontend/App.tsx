@@ -11,6 +11,8 @@ import OrderPicking from './components/OrderPicking';
 import TiendaNubeOrders from './components/TiendaNubeOrders';
 import MercadoLibreOrders from './components/MercadoLibreOrders';
 import MercadoLibreStock from './components/MercadoLibreStock';
+import StockHistory from './components/StockHistory';
+import Despachos from './components/Despachos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { MOCK_VISITS, MOCK_USERS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
@@ -488,6 +490,8 @@ const App: React.FC = () => {
           {baseView === 'tiendanube_orders' && <TiendaNubeOrders />}
           {baseView === 'mercadolibre_orders' && <MercadoLibreOrders />}
           {baseView === 'mercadolibre_stock' && <MercadoLibreStock />}
+          {baseView === 'stock_history' && <StockHistory />}
+          {baseView === 'despachos' && <Despachos />}
         </div>
       </main>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -37,6 +37,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkTnId, setLinkTnId] = useState('');
   const [linkTnVariantId, setLinkTnVariantId] = useState('');
   const [linkMlId, setLinkMlId] = useState('');
+
+  // Despacho Modal State
+  const [showDespachoModal, setShowDespachoModal] = useState(false);
+  const [selectedProductForDespacho, setSelectedProductForDespacho] = useState<any>(null);
+  const [despachosList, setDespachosList] = useState<any[]>([]);
+  const [selectedDespachoId, setSelectedDespachoId] = useState('');
+  const [despachoCantidad, setDespachoCantidad] = useState('');
+  const [despachoCosto, setDespachoCosto] = useState('');
+  const [savingDespacho, setSavingDespacho] = useState(false);
 
   // Filter States
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -191,6 +200,50 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     
     return false;
   }
+
+  // Cargar despachos para el modal
+  const loadDespachos = async () => {
+    try {
+      const res = await api.getDespachos({ limit: 100 });
+      setDespachosList(res.despachos || []);
+    } catch (e) {
+      console.error('Error loading despachos:', e);
+    }
+  };
+
+  const handleOpenDespachoModal = (product: any) => {
+    setSelectedProductForDespacho(product);
+    setSelectedDespachoId('');
+    setDespachoCantidad(product.stock?.toString() || '0');
+    setDespachoCosto('');
+    loadDespachos();
+    setShowDespachoModal(true);
+  };
+
+  const handleAssignDespacho = async () => {
+    if (!selectedDespachoId || !selectedProductForDespacho) {
+      alert('Seleccioná un despacho');
+      return;
+    }
+
+    setSavingDespacho(true);
+    try {
+      await api.addDespachoItem(selectedDespachoId, {
+        product_id: selectedProductForDespacho.productId || selectedProductForDespacho.id,
+        variant_id: selectedProductForDespacho.variantId || null,
+        cantidad: parseInt(despachoCantidad) || 0,
+        costo_unitario: despachoCosto ? parseFloat(despachoCosto) : null,
+        descripcion_item: `${selectedProductForDespacho.name} - ${selectedProductForDespacho.sku}`
+      });
+      
+      setShowDespachoModal(false);
+      alert('Producto asignado al despacho correctamente');
+    } catch (error: any) {
+      alert('Error: ' + (error.message || 'No se pudo asignar'));
+    } finally {
+      setSavingDespacho(false);
+    }
+  };
 
   // 1. Server-side paging (fallback to client if API offline)
   useEffect(() => {
@@ -1008,19 +1061,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                          </span>
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
                                        </div>
-                                       <button 
-                                        onClick={() => handleOpenLinkModal(product)}
-                                        className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors"
-                                        title="Vincular con Mercado Libre / Tienda Nube"
-                                       >
-                                        <Link size={16} />
-                                       </button>
-                                       <button 
-                                        onClick={() => setEditingStockId(product.id)}
-                                        className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors"
-                                       >
-                                        <Edit2 size={16} />
-                                       </button>
+                                      <button 
+                                       onClick={() => handleOpenLinkModal(product)}
+                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors"
+                                       title="Vincular con Mercado Libre / Tienda Nube"
+                                      >
+                                       <Link size={16} />
+                                      </button>
+                                      <button 
+                                       onClick={() => handleOpenDespachoModal(product)}
+                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors"
+                                       title="Asignar a Despacho de Importación"
+                                      >
+                                       <Ship size={16} />
+                                      </button>
+                                      <button 
+                                       onClick={() => setEditingStockId(product.id)}
+                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors"
+                                      >
+                                       <Edit2 size={16} />
+                                      </button>
                                     </div>
                                   )}
                                 </div>
@@ -1353,6 +1413,94 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  >
                    <CheckCircle2 size={16} />
                    Guardar Vínculos
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Modal Asignar a Despacho */}
+      {showDespachoModal && selectedProductForDespacho && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+           <div className="bg-slate-900 rounded-3xl w-full max-w-md border border-slate-800 shadow-2xl overflow-hidden">
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
+                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Ship size={20} className="text-amber-400" />
+                    Asignar a Despacho
+                 </h3>
+                 <button onClick={() => setShowDespachoModal(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition">
+                    <X size={20} />
+                 </button>
+              </div>
+              <div className="p-6 space-y-4">
+                 <div className="bg-amber-900/10 border border-amber-900/30 p-4 rounded-xl">
+                    <p className="text-sm text-amber-200 font-medium">{selectedProductForDespacho.name}</p>
+                    <p className="text-xs text-slate-400 mt-1 font-mono">{selectedProductForDespacho.sku}</p>
+                 </div>
+                 
+                 <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Despacho</label>
+                    <select
+                      value={selectedDespachoId}
+                      onChange={(e) => setSelectedDespachoId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-amber-500 outline-none text-sm"
+                    >
+                      <option value="">Seleccionar despacho...</option>
+                      {despachosList.map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.numero_despacho} - {d.pais_origen} ({d.estado})
+                        </option>
+                      ))}
+                    </select>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Cantidad</label>
+                       <input 
+                         type="number" 
+                         value={despachoCantidad}
+                         onChange={(e) => setDespachoCantidad(e.target.value)}
+                         placeholder="0"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-amber-500 outline-none text-sm"
+                       />
+                    </div>
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Costo Unit. (USD)</label>
+                       <input 
+                         type="number" 
+                         step="0.01"
+                         value={despachoCosto}
+                         onChange={(e) => setDespachoCosto(e.target.value)}
+                         placeholder="0.00"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-amber-500 outline-none text-sm"
+                       />
+                    </div>
+                 </div>
+              </div>
+              <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
+                 <button 
+                   onClick={() => setShowDespachoModal(false)}
+                   className="px-4 py-2 rounded-xl font-bold text-slate-400 hover:bg-slate-800 hover:text-white transition text-sm"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={handleAssignDespacho}
+                   disabled={savingDespacho || !selectedDespachoId}
+                   className="px-6 py-2 rounded-xl font-bold bg-amber-600 text-white hover:bg-amber-500 shadow-lg shadow-amber-900/20 active:scale-95 transition-all flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                   {savingDespacho ? (
+                     <>
+                       <RefreshCw size={16} className="animate-spin" />
+                       Guardando...
+                     </>
+                   ) : (
+                     <>
+                       <CheckCircle2 size={16} />
+                       Asignar
+                     </>
+                   )}
                  </button>
               </div>
            </div>

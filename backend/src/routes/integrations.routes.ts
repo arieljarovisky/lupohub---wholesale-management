@@ -17,7 +17,9 @@ import {
   syncAllStockToMercadoLibre,
   getTiendaNubeOrders,
   getMercadoLibreOrders,
-  getMercadoLibreStock
+  getMercadoLibreStock,
+  getMLAutoMessageConfig,
+  saveMLAutoMessageConfig
 } from '../controllers/integrations.controller';
 
 const router = Router();
@@ -31,6 +33,8 @@ router.get('/mercadolibre/test', testMercadoLibreConnection);
 router.get('/mercadolibre/debug', debugMercadoLibreItem);
 router.get('/mercadolibre/orders', getMercadoLibreOrders);
 router.get('/mercadolibre/stock', getMercadoLibreStock);
+router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
+router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
 router.post('/mercadolibre/webhook', handleMercadoLibreWebhook);

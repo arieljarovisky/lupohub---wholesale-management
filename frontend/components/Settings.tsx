@@ -119,6 +119,12 @@ const Settings: React.FC<SettingsProps> = ({
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
 
+  // ML Auto Message Config
+  const [mlAutoMessageEnabled, setMlAutoMessageEnabled] = useState(true);
+  const [mlAutoMessageTemplate, setMlAutoMessageTemplate] = useState('');
+  const [mlAutoMessageLoading, setMlAutoMessageLoading] = useState(false);
+  const [mlAutoMessageSaved, setMlAutoMessageSaved] = useState(false);
+
   useEffect(() => {
     // Check for status params
     const hash = window.location.hash;
@@ -140,6 +146,18 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
     fetchStatus();
+
+    // Fetch ML auto message config
+    const fetchMLAutoMessage = async () => {
+      try {
+        const config = await api.getMLAutoMessageConfig();
+        setMlAutoMessageEnabled(config.enabled);
+        setMlAutoMessageTemplate(config.messageTemplate);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchMLAutoMessage();
   }, []);
 
   const handleConnect = async (platform: 'mercadolibre' | 'tiendanube') => {
@@ -735,6 +753,56 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                           SINCRONIZAR STOCK
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Mensaje Automático */}
+                    <div className="border-t border-slate-700/50 pt-4 mt-2">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Mail size={16} className="text-yellow-400" />
+                          <p className="text-white font-bold text-sm">Mensaje Automático de Agradecimiento</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={mlAutoMessageEnabled}
+                            onChange={(e) => setMlAutoMessageEnabled(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600"></div>
+                        </label>
+                      </div>
+                      <p className="text-slate-500 text-xs mb-3">
+                        Envía un mensaje automático al comprador cuando se confirma una venta. Usa {'{nombre}'} para el nombre del cliente y {'{productos}'} para los productos.
+                      </p>
+                      <textarea
+                        value={mlAutoMessageTemplate}
+                        onChange={(e) => setMlAutoMessageTemplate(e.target.value)}
+                        rows={6}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:ring-2 focus:ring-yellow-500 outline-none resize-none font-mono text-xs"
+                        placeholder="¡Hola {nombre}! Gracias por tu compra..."
+                      />
+                      <div className="flex justify-end mt-3">
+                        <button
+                          onClick={async () => {
+                            setMlAutoMessageLoading(true);
+                            try {
+                              await api.saveMLAutoMessageConfig({ enabled: mlAutoMessageEnabled, messageTemplate: mlAutoMessageTemplate });
+                              setMlAutoMessageSaved(true);
+                              setTimeout(() => setMlAutoMessageSaved(false), 3000);
+                            } catch (e) {
+                              alert('Error guardando configuración');
+                            } finally {
+                              setMlAutoMessageLoading(false);
+                            }
+                          }}
+                          disabled={mlAutoMessageLoading}
+                          className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {mlAutoMessageLoading ? <Loader2 size={14} className="animate-spin" /> : mlAutoMessageSaved ? <Check size={14} /> : <Save size={14} />}
+                          {mlAutoMessageSaved ? 'GUARDADO' : 'GUARDAR MENSAJE'}
                         </button>
                       </div>
                     </div>
