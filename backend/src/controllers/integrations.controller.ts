@@ -1622,8 +1622,11 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
     }
 
     const { offset = '0', limit = '20', status, date_from, date_to } = req.query;
+    // API de ML permite máximo 50 (51 según el error limit.maximum_exceeded)
+    const limitNum = Math.min(Math.max(1, parseInt(limit as string) || 20), 50);
+    const offsetNum = Math.max(0, parseInt(offset as string) || 0);
 
-    let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offset}&limit=${limit}&sort=date_desc`;
+    let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
     if (status) {
       url += `&order.status=${status}`;
     }
@@ -1701,8 +1704,8 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
 
     res.json({
       orders,
-      offset: parseInt(offset as string),
-      limit: parseInt(limit as string),
+      offset: offsetNum,
+      limit: limitNum,
       total: ordersRes.data.paging?.total || orders.length
     });
   } catch (error: any) {

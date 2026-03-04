@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList, Clock } from 'lucide-react';
+import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList, Clock, ChevronDown, ChevronRight, User, MapPin } from 'lucide-react';
 import { Product, Order, OrderStatus, Role } from '../types';
 import { api } from '../services/api';
 
@@ -21,6 +21,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   const [productCount, setProductCount] = useState(0);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [dateRange, setDateRange] = useState<DateRange>('60');
+  const [expandedTnOrderId, setExpandedTnOrderId] = useState<number | null>(null);
+  const [expandedMlOrderId, setExpandedMlOrderId] = useState<number | null>(null);
 
   const getDateRange = (days: number) => {
     const to = new Date();
@@ -47,7 +49,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
         const [productsRes, tnRes, mlRes] = await Promise.all([
           api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
           api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [], total: 0 })),
-          api.getMercadoLibreOrders({ limit: 100, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
+          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
         ]);
         setAllProducts(productsRes.items || []);
         setProductCount(productsRes.total || productsRes.items?.length || 0);
@@ -334,70 +336,153 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
             </div>
           </div>
         </div>
-        {/* Pedidos Tienda Nube y Mercado Libre por despachar */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Cloud size={18} className="text-cyan-400" />
-                <h3 className="font-bold text-white">Tienda Nube · Por despachar</h3>
-              </div>
-              {tnToShip.length > 0 && (
-                <span className="text-xs font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded">{tnToShip.length}</span>
-              )}
+        {/* Sección Tienda Nube · Por despachar */}
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cloud size={18} className="text-cyan-400" />
+              <h3 className="font-bold text-white">Tienda Nube · Por despachar</h3>
             </div>
-            <div className="p-4">
-              {tnToShip.length > 0 ? (
-                <ul className="space-y-2">
-                  {tnToShip.slice(0, 8).map((o: any) => (
-                    <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
-                      <span className="text-white text-sm">#{o.number ?? o.id}</span>
-                      <span className="text-slate-500 text-xs">{formatOrderDate(o.createdAt)}</span>
-                    </li>
-                  ))}
-                  {tnToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {tnToShip.length - 8} más</li>}
-                </ul>
-              ) : (
-                <p className="text-slate-500 text-center py-8">No hay pedidos TN pendientes de despacho</p>
-              )}
-            </div>
+            {tnToShip.length > 0 && (
+              <span className="text-xs font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded">{tnToShip.length}</span>
+            )}
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Zap size={18} className="text-yellow-400" />
-                <h3 className="font-bold text-white">Mercado Libre · Por despachar</h3>
-              </div>
-              {mlToShip.length > 0 && (
-                <span className="text-xs font-bold text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded">{mlToShip.length}</span>
-              )}
-            </div>
-            <div className="p-4">
-              {mlToShip.length > 0 ? (
-                <>
-                  <p className="text-slate-400 text-xs mb-3 flex items-center gap-1">
-                    <Clock size={12} />
-                    <strong className="text-amber-400">Flex:</strong> se pueden despachar hasta las 16:00
-                  </p>
-                  <ul className="space-y-2">
-                    {mlToShip.slice(0, 8).map((o: any) => (
-                      <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
-                        <span className="text-white text-sm flex items-center gap-2">
-                          #{o.id}
-                          {o.isFlex && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">Flex</span>
-                          )}
+          <div className="p-4">
+            {tnToShip.length > 0 ? (
+              <ul className="space-y-1">
+                {tnToShip.slice(0, 8).map((o: any) => {
+                  const isExpanded = expandedTnOrderId === o.id;
+                  return (
+                    <li key={o.id} className="border-b border-slate-700/50 last:border-0">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTnOrderId(isExpanded ? null : o.id)}
+                        className="w-full flex items-center justify-between py-3 text-left hover:bg-slate-700/30 rounded-lg px-2 -mx-2 transition-colors"
+                      >
+                        <span className="text-white text-sm font-medium">#{o.number ?? o.id}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-slate-500 text-xs">{formatOrderDate(o.createdAt)}</span>
+                          {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                         </span>
-                        <span className="text-slate-500 text-xs">{formatOrderDate(o.dateCreated)}</span>
-                      </li>
-                    ))}
-                    {mlToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {mlToShip.length - 8} más</li>}
-                  </ul>
-                </>
-              ) : (
-                <p className="text-slate-500 text-center py-8">No hay pedidos ML pendientes de despacho</p>
-              )}
+                      </button>
+                      {isExpanded && (
+                        <div className="pb-3 pt-0 px-2 space-y-3 bg-slate-900/40 rounded-lg border border-slate-700/50 mx-2 mb-2">
+                          {o.customer?.name && (
+                            <div className="flex items-start gap-2 text-sm">
+                              <User size={14} className="text-cyan-400 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-slate-400 text-xs uppercase font-semibold">Cliente</p>
+                                <p className="text-white">{o.customer.name}</p>
+                                {o.customer.phone && <p className="text-slate-500 text-xs">{o.customer.phone}</p>}
+                              </div>
+                            </div>
+                          )}
+                          {o.shippingAddress && (
+                            <div className="flex items-start gap-2 text-sm">
+                              <MapPin size={14} className="text-cyan-400 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-slate-400 text-xs uppercase font-semibold">Envío</p>
+                                <p className="text-white text-sm">{o.shippingAddress.address}</p>
+                                <p className="text-slate-500 text-xs">{[o.shippingAddress.city, o.shippingAddress.province].filter(Boolean).join(', ')} {o.shippingAddress.zipcode || ''}</p>
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-slate-400 text-xs uppercase font-semibold mb-1">Productos</p>
+                            <ul className="space-y-1">
+                              {(o.products || []).map((p: any, idx: number) => (
+                                <li key={idx} className="flex justify-between text-sm">
+                                  <span className="text-white truncate max-w-[180px]" title={p.name}>{p.name || 'Producto'}</span>
+                                  <span className="text-cyan-400 font-medium shrink-0">×{p.quantity || 1}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+                {tnToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {tnToShip.length - 8} más</li>}
+              </ul>
+            ) : (
+              <p className="text-slate-500 text-center py-8">No hay pedidos de Tienda Nube pendientes de despacho</p>
+            )}
+          </div>
+        </div>
+        {/* Sección Mercado Libre · Por despachar */}
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap size={18} className="text-yellow-400" />
+              <h3 className="font-bold text-white">Mercado Libre · Por despachar</h3>
             </div>
+            {mlToShip.length > 0 && (
+              <span className="text-xs font-bold text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded">{mlToShip.length}</span>
+            )}
+          </div>
+          <div className="p-4">
+            {mlToShip.length > 0 ? (
+              <>
+                <p className="text-slate-400 text-xs mb-3 flex items-center gap-1">
+                  <Clock size={12} />
+                  <strong className="text-amber-400">Flex:</strong> se pueden despachar hasta las 16:00
+                </p>
+                <ul className="space-y-1">
+                  {mlToShip.slice(0, 8).map((o: any) => {
+                    const isExpanded = expandedMlOrderId === o.id;
+                    return (
+                      <li key={o.id} className="border-b border-slate-700/50 last:border-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedMlOrderId(isExpanded ? null : o.id)}
+                          className="w-full flex items-center justify-between py-3 text-left hover:bg-slate-700/30 rounded-lg px-2 -mx-2 transition-colors"
+                        >
+                          <span className="text-white text-sm font-medium flex items-center gap-2">
+                            #{o.id}
+                            {o.isFlex && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">Flex</span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-slate-500 text-xs">{formatOrderDate(o.dateCreated)}</span>
+                            {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
+                          </span>
+                        </button>
+                        {isExpanded && (
+                          <div className="pb-3 pt-0 px-2 space-y-3 bg-slate-900/40 rounded-lg border border-slate-700/50 mx-2 mb-2">
+                            {o.buyer && (
+                              <div className="flex items-start gap-2 text-sm">
+                                <User size={14} className="text-yellow-400 shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="text-slate-400 text-xs uppercase font-semibold">Comprador</p>
+                                  <p className="text-white">{o.buyer.firstName} {o.buyer.lastName}</p>
+                                  {o.buyer.nickname && <p className="text-slate-500 text-xs">@{o.buyer.nickname}</p>}
+                                </div>
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-slate-400 text-xs uppercase font-semibold mb-1">Productos</p>
+                              <ul className="space-y-1">
+                                {(o.items || []).map((item: any, idx: number) => (
+                                  <li key={idx} className="flex justify-between text-sm">
+                                    <span className="text-white truncate max-w-[180px]" title={item.title}>{item.title || 'Producto'}</span>
+                                    <span className="text-yellow-400 font-medium shrink-0">×{item.quantity || 1}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {mlToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {mlToShip.length - 8} más</li>}
+                </ul>
+              </>
+            ) : (
+              <p className="text-slate-500 text-center py-8">No hay pedidos de Mercado Libre pendientes de despacho</p>
+            )}
           </div>
         </div>
       </div>
