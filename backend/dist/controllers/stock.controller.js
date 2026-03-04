@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.importSalesHistory = exports.createStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateMercadoLibreStockByVariant = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
+const integrations_controller_1 = require("./integrations.controller");
 // Registrar movimiento de stock en historial
 const logStockMovement = (variantId, previousStock, newStock, movementType, reference) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -147,6 +148,10 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
         if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
             yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, newStock);
         }
+        else if (variant.sku) {
+            // Fallback por SKU cuando no tenemos mapeo de IDs de ML
+            yield (0, integrations_controller_1.updateMercadoLibreStock)(variant.sku, newStock);
+        }
     }
     catch (error) {
         console.error('Error syncing stock to external platforms:', error);
@@ -178,30 +183,70 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
     }
 });
 exports.updateTiendaNubeStock = updateTiendaNubeStock;
-// Actualizar stock en Mercado Libre por variante
+// Actualizar stock en Mercado Libre por variante.
+// Prueba primero PUT a la subrecurso; si ML devuelve error, usa GET item + PUT item con array variations (formato que exige la API en muchos casos).
 const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
+    const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+    if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+        console.log('[ML Stock] No hay integración configurada');
+        return false;
+    }
+    const headers = {
+        'Authorization': `Bearer ${integration.access_token}`,
+        'Content-Type': 'application/json'
+    };
+    // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
     try {
-        const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
-        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
-            console.log('[ML Stock] No hay integración configurada');
-            return false;
-        }
-        const response = yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`, { available_quantity: stock }, {
-            headers: {
-                'Authorization': `Bearer ${integration.access_token}`,
-                'Content-Type': 'application/json'
-            }
-        });
+        yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`, { available_quantity: stock }, { headers });
         console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
         return true;
     }
-    catch (error) {
-        console.error('[ML Stock] Error:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+    catch (subError) {
+        const status = (_a = subError.response) === null || _a === void 0 ? void 0 : _a.status;
+        const data = (_b = subError.response) === null || _b === void 0 ? void 0 : _b.data;
+        // Si es 400/404/405, probar método completo (GET + PUT con todas las variaciones)
+        if (status === 400 || status === 404 || status === 405 || (status >= 400 && status < 500)) {
+            try {
+                return yield updateMercadoLibreStockByItemUpdate(itemId, variationId, stock, integration.access_token);
+            }
+            catch (fullError) {
+                console.error('[ML Stock] Error método completo:', ((_c = fullError.response) === null || _c === void 0 ? void 0 : _c.data) || fullError.message);
+                return false;
+            }
+        }
+        console.error('[ML Stock] Error:', data || subError.message);
         return false;
     }
 });
 exports.updateMercadoLibreStockByVariant = updateMercadoLibreStockByVariant;
+// Fallback: obtener ítem de ML, actualizar solo la variación indicada y enviar PUT con todas las variaciones (requerido por la API).
+function updateMercadoLibreStockByItemUpdate(itemId, variationId, newStock, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const headers = {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        };
+        const getRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+        const item = getRes.data;
+        const variations = item.variations || [];
+        if (variations.length === 0) {
+            // Ítem sin variaciones: ML usa available_quantity a nivel ítem
+            yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: newStock }, { headers });
+            console.log(`[ML Stock] Actualizado item ${itemId} (sin variaciones) a ${newStock} unidades`);
+            return true;
+        }
+        const variationsPayload = variations.map((v) => {
+            var _a;
+            const isTarget = String(v.id) === String(variationId);
+            const qty = isTarget ? newStock : ((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0);
+            return { id: v.id, available_quantity: Math.max(0, qty) };
+        });
+        yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: variationsPayload }, { headers });
+        console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${newStock} unidades (vía PUT item)`);
+        return true;
+    });
+}
 // Endpoint: Obtener historial de movimientos de stock
 const getStockMovements = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -224,7 +269,8 @@ const getStockMovements = (req, res) => __awaiter(void 0, void 0, void 0, functi
             whereClause += ' AND sm.created_at <= ?';
             params.push(to);
         }
-        params.push(parseInt(limit) || 50);
+        const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+        params.push(limitNum);
         const movements = yield (0, db_1.query)(`SELECT sm.*, pv.sku, p.name as product_name
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
@@ -321,7 +367,7 @@ const createStockSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createStockSnapshot = createStockSnapshot;
 // Endpoint: Importar historial de ventas de TN y ML
 const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const { days = 60 } = req.body;
         const logs = [];
@@ -357,12 +403,19 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
                             continue;
                         for (const product of order.products || []) {
                             const tnVariantId = product.variant_id;
-                            if (!tnVariantId)
-                                continue;
-                            // Buscar variante local
-                            const variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
+                            const qty = product.quantity || 1;
+                            const itemSku = (product.sku || product.variant_sku || '').toString().trim();
+                            let variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
+                            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+                            }
+                            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv
+                   JOIN product_colors pc ON pc.id = pv.product_color_id
+                   JOIN products p ON p.id = pc.product_id
+                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`, [itemSku, `${itemSku}%`]);
+                            }
                             if (variant === null || variant === void 0 ? void 0 : variant.id) {
-                                const qty = product.quantity || 1;
                                 yield (0, db_1.execute)(`INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
                    VALUES (UUID(), ?, 0, 0, ?, 'VENTA_TIENDA_NUBE', ?, ?)`, [variant.id, -qty, `Orden TN-${order.id} (histórico)`, order.created_at]);
                                 imported++;
@@ -400,11 +453,22 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
                             continue;
                         for (const item of order.order_items || []) {
                             const mlVariationId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.variation_id;
-                            if (!mlVariationId)
-                                continue;
-                            const variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+                            const qty = item.quantity || 1;
+                            const itemSku = (((_b = item.item) === null || _b === void 0 ? void 0 : _b.sku) || item.sku || '').toString().trim();
+                            let variant = null;
+                            if (mlVariationId) {
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+                            }
+                            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+                            }
+                            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv
+                   JOIN product_colors pc ON pc.id = pv.product_color_id
+                   JOIN products p ON p.id = pc.product_id
+                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`, [itemSku, `${itemSku}%`]);
+                            }
                             if (variant === null || variant === void 0 ? void 0 : variant.id) {
-                                const qty = item.quantity || 1;
                                 yield (0, db_1.execute)(`INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
                    VALUES (UUID(), ?, 0, 0, ?, 'VENTA_MERCADO_LIBRE', ?, ?)`, [variant.id, -qty, `Orden ML-${order.id} (histórico)`, order.date_created]);
                                 mlImported++;

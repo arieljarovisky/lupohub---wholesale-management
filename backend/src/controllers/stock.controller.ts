@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import axios from 'axios';
+import { updateMercadoLibreStock } from './integrations.controller';
 
 // Tipos de movimiento de stock
 export type StockMovementType = 
@@ -178,6 +179,9 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
         variant.mercado_libre_variant_id,
         newStock
       );
+    } else if (variant.sku) {
+      // Fallback por SKU cuando no tenemos mapeo de IDs de ML
+      await updateMercadoLibreStock(variant.sku, newStock);
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);

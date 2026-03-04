@@ -1019,6 +1019,7 @@ exports.syncProductsFromMercadoLibre = syncProductsFromMercadoLibre;
 // ==================== WEBHOOKS ====================
 // Webhook de Tienda Nube para órdenes/ventas
 const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const { event, store_id } = req.body;
         console.log(`[TN Webhook] Evento: ${event}, Store: ${store_id}`);
@@ -1030,8 +1031,9 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         // Procesar solo cuando la orden se paga (descontar stock una sola vez)
         if (event === 'order/paid') {
-            const orderId = req.body.id;
-            yield processTiendaNubeOrder(orderId);
+            const orderId = (_b = (_a = req.body.id) !== null && _a !== void 0 ? _a : req.body.order_id) !== null && _b !== void 0 ? _b : (_c = req.body.order) === null || _c === void 0 ? void 0 : _c.id;
+            if (orderId)
+                yield processTiendaNubeOrder(String(orderId));
         }
         res.status(200).json({ received: true });
     }
@@ -1066,21 +1068,39 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
             console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
             return;
         }
-        const { updateVariantStock, logStockMovement } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+        const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         for (const item of order.products || []) {
             const tnVariantId = item.variant_id;
             const quantity = item.quantity;
-            // Buscar variante local por TN variant ID
-            const variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
-         FROM product_variants pv
-         LEFT JOIN stocks s ON s.variant_id = pv.id
-         WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
+            const itemSku = (item.sku || item.variant_sku || '').toString().trim();
+            let variant = null;
+            if (tnVariantId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.sku = ?`, [itemSku]);
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           JOIN products p ON p.id = (SELECT product_id FROM product_colors WHERE id = pv.product_color_id)
+           WHERE p.sku = ? OR pv.sku LIKE ?`, [itemSku, `${itemSku}%`]);
+            }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                 const currentStock = variant.current_stock || 0;
                 const newStock = Math.max(0, currentStock - quantity);
-                yield updateVariantStock(variant.id, newStock, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`, false // No sincronizar de vuelta a TN (ya se vendió ahí)
-                );
+                yield updateVariantStock(variant.id, newStock, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`, false);
                 console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}`);
+            }
+            else {
+                console.log(`[TN Order] Variante no encontrada para TN variant_id=${tnVariantId} sku=${itemSku}`);
             }
         }
     }
@@ -1114,7 +1134,7 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
 exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken)
@@ -1135,19 +1155,36 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
         for (const item of order.order_items || []) {
             const mlVariationId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.variation_id;
             const quantity = item.quantity;
-            if (!mlVariationId)
-                continue;
-            // Buscar variante local por ML variation ID
-            const variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
-         FROM product_variants pv
-         LEFT JOIN stocks s ON s.variant_id = pv.id
-         WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+            const itemSku = (((_b = item.item) === null || _b === void 0 ? void 0 : _b.sku) || item.sku || '').toString().trim();
+            let variant = null;
+            if (mlVariationId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.sku = ?`, [itemSku]);
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+           FROM product_variants pv
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           WHERE p.sku = ? OR pv.sku LIKE ?`, [itemSku, `${itemSku}%`]);
+            }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                 const currentStock = variant.current_stock || 0;
                 const newStock = Math.max(0, currentStock - quantity);
-                yield updateVariantStock(variant.id, newStock, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`, false // No sincronizar de vuelta a ML (ya se vendió ahí)
-                );
+                yield updateVariantStock(variant.id, newStock, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`, false);
                 console.log(`[ML Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}`);
+            }
+            else if (mlVariationId || itemSku) {
+                console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);
             }
         }
     }
@@ -1297,14 +1334,10 @@ const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0,
     }
 });
 exports.syncAllStockToTiendaNube = syncAllStockToTiendaNube;
-// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
+// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
 const syncAllStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
     try {
-        const mlToken = yield getValidMLToken();
-        if (!mlToken) {
-            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
-        }
+        const { updateMercadoLibreStockByVariant } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         const variants = yield (0, db_1.query)(`
       SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku
       FROM product_variants pv
@@ -1317,19 +1350,14 @@ const syncAllStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 
         let errors = 0;
         const logs = [];
         for (const v of variants) {
-            try {
-                yield axios_1.default.put(`https://api.mercadolibre.com/items/${v.mercado_libre_id}/variations/${v.mercado_libre_variant_id}`, { available_quantity: v.stock || 0 }, {
-                    headers: {
-                        'Authorization': `Bearer ${mlToken.access_token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
+            const ok = yield updateMercadoLibreStockByVariant(v.mercado_libre_id, v.mercado_libre_variant_id, v.stock || 0);
+            if (ok) {
                 updated++;
                 logs.push(`[OK] ${v.sku}: ${v.stock || 0} unidades`);
             }
-            catch (e) {
+            else {
                 errors++;
-                logs.push(`[ERROR] ${v.sku}: ${((_b = (_a = e.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.message) || e.message}`);
+                logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
             }
         }
         res.json({
