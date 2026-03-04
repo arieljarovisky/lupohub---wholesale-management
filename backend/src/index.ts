@@ -10,6 +10,7 @@ import sizeRoutes from './routes/sizes.routes';
 import integrationRoutes from './routes/integrations.routes';
 import stockRoutes from './routes/stock.routes';
 import despachosRoutes from './routes/despachos.routes';
+import usersRoutes from './routes/users.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
@@ -40,6 +41,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/despachos', despachosRoutes);
+app.use('/api/users', usersRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {

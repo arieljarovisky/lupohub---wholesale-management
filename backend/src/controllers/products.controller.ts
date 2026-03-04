@@ -5,19 +5,34 @@ import { v4 as uuidv4 } from 'uuid';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc' } = req.query as any;
+    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(100, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
     const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'name' : 'sku');
     const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
     const search = (q || '').toString().trim();
+    const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
+    const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
+    const filterSyncNone = sync_none === '1' || sync_none === 'true';
 
-    const whereClause = search ? `WHERE p.sku LIKE ? OR p.name LIKE ?` : '';
+    const conditions: string[] = [];
     const params: any[] = [];
     if (search) {
+      conditions.push('(p.sku LIKE ? OR p.name LIKE ?)');
       params.push(`%${search}%`, `%${search}%`);
     }
+    if (filterSyncNone) {
+      conditions.push('(p.mercado_libre_id IS NULL OR p.mercado_libre_id = \'\') AND (p.tienda_nube_id IS NULL OR p.tienda_nube_id = \'\')');
+    } else {
+      if (filterSyncMl) {
+        conditions.push('p.mercado_libre_id IS NOT NULL AND p.mercado_libre_id != \'\'');
+      }
+      if (filterSyncTn) {
+        conditions.push('p.tienda_nube_id IS NOT NULL AND p.tienda_nube_id != \'\'');
+      }
+    }
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const totalRow = await get(
       `

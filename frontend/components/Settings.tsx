@@ -36,8 +36,8 @@ interface SettingsProps {
   role: Role;
   users?: User[];
   onUpdateUser?: (user: User) => void;
-  onCreateUser?: (user: User) => void;
-  onDeleteUser?: (id: string) => void;
+  onCreateUser?: (user: User) => void | Promise<void>;
+  onDeleteUser?: (id: string) => void | Promise<void>;
   orders?: Order[];
   currentUser?: User;
 }
@@ -310,6 +310,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPass, setNewUserPass] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>(Role.SELLER);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const config = getApiConfig();
@@ -365,7 +367,7 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleCreateUser = () => {
+  const handleCreateUser = async () => {
     if (!newUserName || !newUserEmail || !newUserPass || !onCreateUser) return;
     
     const newUser: User = {
@@ -377,13 +379,16 @@ const Settings: React.FC<SettingsProps> = ({
       commissionPercentage: 0
     };
 
-    onCreateUser(newUser);
-    
-    // Reset Form
-    setNewUserName('');
-    setNewUserEmail('');
-    setNewUserPass('');
-    setNewUserRole(Role.SELLER);
+    setCreatingUser(true);
+    try {
+      await Promise.resolve(onCreateUser(newUser));
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPass('');
+      setNewUserRole(Role.SELLER);
+    } finally {
+      setCreatingUser(false);
+    }
   };
 
   const handleCheckHealth = async () => {
@@ -522,10 +527,10 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       <button 
                         onClick={handleCreateUser}
-                        disabled={!newUserName || !newUserEmail || !newUserPass}
-                        className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                        disabled={!newUserName || !newUserEmail || !newUserPass || creatingUser}
+                        className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center justify-center"
                       >
-                         <Save size={20} />
+                         {creatingUser ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
                       </button>
                     </div>
                  </div>
@@ -549,20 +554,29 @@ const Settings: React.FC<SettingsProps> = ({
                              <span className="w-1 h-1 rounded-full bg-slate-600"></span>
                              <span className="uppercase font-bold tracking-wider">{u.role}</span>
                           </div>
-                          {u.password && (
-                             <div className="mt-1 text-[10px] text-slate-600 font-mono bg-slate-950 inline-block px-2 py-0.5 rounded border border-slate-800">
-                                Pass: {u.password}
+                          {u.commissionPercentage != null && u.commissionPercentage > 0 && (
+                             <div className="mt-1 text-[10px] text-slate-500">
+                                Comisión: {u.commissionPercentage}%
                              </div>
                           )}
                        </div>
                     </div>
                     {currentUser?.id !== u.id && (
                        <button 
-                         onClick={() => onDeleteUser && onDeleteUser(u.id)}
-                         className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-900/10 rounded-lg transition-all"
+                         onClick={async () => {
+                           if (!onDeleteUser) return;
+                           setDeletingUserId(u.id);
+                           try {
+                             await Promise.resolve(onDeleteUser(u.id));
+                           } finally {
+                             setDeletingUserId(null);
+                           }
+                         }}
+                         disabled={deletingUserId === u.id}
+                         className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-900/10 rounded-lg transition-all disabled:opacity-50"
                          title="Eliminar usuario"
                        >
-                          <Trash2 size={18} />
+                         {deletingUserId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                        </button>
                     )}
                  </div>

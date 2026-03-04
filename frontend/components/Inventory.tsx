@@ -51,6 +51,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [filterCategory, setFilterCategory] = useState('ALL');
   const [filterSize, setFilterSize] = useState('ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
+  const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'>('ALL');
   const [filterColor, setFilterColor] = useState('ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
@@ -251,14 +252,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     (async () => {
       try {
         const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
-        const res = await api.getProductsPaged(currentPage, pageSize, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir);
+        const res = await api.getProductsPaged(currentPage, pageSize, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
         setServerItems(res.items);
         setServerTotal(res.total);
       } catch {
         setServerMode(false);
       }
     })();
-  }, [serverMode, currentPage, pageSize, searchTerm, sortKey, sortDir]);
+  }, [serverMode, currentPage, pageSize, searchTerm, sortKey, sortDir, filterSync]);
 
   // 2. Filter individual products first (incluye padres para poder evaluar variantes)
   const filteredProducts = (serverMode ? serverItems : products).filter(p => {
@@ -801,7 +802,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
-            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL') && (
+            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL') && (
               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             )}
           </button>
@@ -871,6 +872,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                      <option value="ALL">Todos</option>
                      <option value="LOW">Poco Stock</option>
                      <option value="OUT">Agotado</option>
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Sincronización</label>
+                <div className="relative">
+                   <select 
+                     value={filterSync}
+                     onChange={(e) => { setFilterSync(e.target.value as any); setCurrentPage(1); }}
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
+                   >
+                     <option value="ALL">Todos</option>
+                     <option value="ML">Mercado Libre</option>
+                     <option value="TN">Tienda Nube</option>
+                     <option value="BOTH">En ambos</option>
+                     <option value="NONE">No sincronizado</option>
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>

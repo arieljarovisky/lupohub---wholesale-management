@@ -16,6 +16,32 @@ export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
   },
+
+  // --- USERS (solo ADMIN, requiere token) ---
+  getUsers: async (): Promise<User[]> => {
+    const rows = await request<any[]>('/users', 'GET');
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      commissionPercentage: r.commissionPercentage != null ? Number(r.commissionPercentage) : undefined
+    })) as User[];
+  },
+  createUser: async (data: { name: string; email: string; password: string; role: string; commissionPercentage?: number }): Promise<User> => {
+    const created = await request<any>('/users', 'POST', data);
+    return {
+      id: created.id,
+      name: created.name,
+      email: created.email,
+      role: created.role,
+      commissionPercentage: created.commissionPercentage != null ? Number(created.commissionPercentage) : undefined
+    } as User;
+  },
+  deleteUser: async (id: string): Promise<void> => {
+    await request<void>(`/users/${id}`, 'DELETE');
+  },
+
   // --- PRODUCTS ---
   getProducts: async (): Promise<Product[]> => {
     return handleRequest(async () => {
@@ -36,14 +62,20 @@ export const api = {
     }, MOCK_PRODUCTS, 'getProducts');
   },
 
-  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc'): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
+  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
     return handleRequest(async () => {
+      const syncMl = syncFilter === 'ML' || syncFilter === 'BOTH';
+      const syncTn = syncFilter === 'TN' || syncFilter === 'BOTH';
+      const syncNone = syncFilter === 'NONE';
       const params = new URLSearchParams({
         page: String(page),
         per_page: String(perPage),
         ...(q ? { q } : {}),
         ...(sort ? { sort } : {}),
-        ...(dir ? { dir } : {})
+        ...(dir ? { dir } : {}),
+        ...(syncMl ? { sync_ml: '1' } : {}),
+        ...(syncTn ? { sync_tn: '1' } : {}),
+        ...(syncNone ? { sync_none: '1' } : {})
       });
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const items = (res.items || []).map((r: any) => ({

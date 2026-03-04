@@ -14,7 +14,7 @@ import MercadoLibreStock from './components/MercadoLibreStock';
 import StockHistory from './components/StockHistory';
 import Despachos from './components/Despachos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap } from 'lucide-react';
-import { MOCK_VISITS, MOCK_USERS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
+import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
@@ -49,8 +49,8 @@ const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
-  // Mocks for data not yet in backend
-  const [users, setUsers] = useState<User[]>(MOCK_USERS);
+  // Users from API when admin is logged in; empty otherwise
+  const [users, setUsers] = useState<User[]>([]);
   const [attributes, setAttributes] = useState<Attribute[]>(MOCK_ATTRIBUTES);
   const [customers, setCustomers] = useState<Customer[]>(MOCK_CUSTOMERS);
   
@@ -128,6 +128,16 @@ const App: React.FC = () => {
          code: s.code 
       })) as any;
       setAttributes([...sizeAttrs, ...colorAttrs]);
+      if (currentUser?.role === Role.ADMIN) {
+        try {
+          const fetchedUsers = await api.getUsers();
+          setUsers(fetchedUsers);
+        } catch {
+          setUsers([]);
+        }
+      } else {
+        setUsers([]);
+      }
     } catch (error) {
       console.error("Error loading data form API", error);
       alert("Error conectando con el servidor. Verifica que el backend esté corriendo.");
@@ -235,13 +245,30 @@ const App: React.FC = () => {
   };
 
   // --- USER MANAGEMENT (Local State for now) ---
-  const handleCreateUser = (newUser: User) => {
-    setUsers(prev => [...prev, newUser]);
+  const handleCreateUser = async (newUser: User) => {
+    try {
+      await api.createUser({
+        name: newUser.name,
+        email: newUser.email,
+        password: newUser.password || '',
+        role: newUser.role,
+        commissionPercentage: newUser.commissionPercentage
+      });
+      const fetchedUsers = await api.getUsers();
+      setUsers(fetchedUsers);
+    } catch (err: any) {
+      alert(err?.message || 'Error al crear usuario');
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    if (userId === currentUser?.id) return; 
-    setUsers(prev => prev.filter(u => u.id !== userId));
+  const handleDeleteUser = async (userId: string) => {
+    if (userId === currentUser?.id) return;
+    try {
+      await api.deleteUser(userId);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (err: any) {
+      alert(err?.message || 'Error al eliminar usuario');
+    }
   };
 
   const handleUpdateUser = (updatedUser: User) => {
