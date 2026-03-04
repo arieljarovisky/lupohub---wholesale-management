@@ -8,19 +8,19 @@ import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-slide-up">
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-          <h3 className="font-bold text-white text-lg">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto">
+      <div className="bg-slate-900 border-0 sm:border border-slate-700 rounded-none sm:rounded-3xl w-full max-w-md min-h-[100dvh] sm:min-h-0 max-h-[100dvh] sm:max-h-[90vh] shadow-2xl overflow-hidden animate-slide-up flex flex-col my-0 sm:my-4">
+        <div className="p-4 sm:p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
+          <h3 className="font-bold text-white text-lg truncate pr-2">{title}</h3>
+          <button onClick={onClose} className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white transition-colors touch-manipulation rounded-xl -mr-2" aria-label="Cerrar">
             <X size={20} />
           </button>
         </div>
-        <div className="p-6">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1">
           {children}
         </div>
         {footer && (
-          <div className="p-6 pt-0 flex justify-end gap-3">
+          <div className="p-4 sm:p-6 pt-0 flex justify-end gap-3 shrink-0 border-t border-slate-800/50">
             {footer}
           </div>
         )}
@@ -116,6 +116,7 @@ const Settings: React.FC<SettingsProps> = ({
   // Stock Sync State
   const [tnStockSyncLoading, setTnStockSyncLoading] = useState(false);
   const [mlStockSyncLoading, setMlStockSyncLoading] = useState(false);
+  const [mlStockSyncIsImport, setMlStockSyncIsImport] = useState(false);
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
 
@@ -225,13 +226,30 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  // Sincronizar stock a Mercado Libre
+  // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
   const handleSyncStockToMercadoLibre = async () => {
     setShowStockSyncModal(true);
     setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(false);
     setStockSyncResult(null);
     try {
       const res = await api.syncStockToMercadoLibre();
+      setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
+    } catch (e: any) {
+      setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+    } finally {
+      setMlStockSyncLoading(false);
+    }
+  };
+
+  // Opcional: importar stock desde ML a la app (alinear una vez con lo publicado en ML)
+  const handleImportStockFromMercadoLibre = async () => {
+    setShowStockSyncModal(true);
+    setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(true);
+    setStockSyncResult(null);
+    try {
+      const res = await api.importStockFromMercadoLibre();
       setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
     } catch (e: any) {
       setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
@@ -752,9 +770,21 @@ const Settings: React.FC<SettingsProps> = ({
                           className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          SINCRONIZAR STOCK
+                          SINCRONIZAR STOCK A ML
                         </button>
                       </div>
+                      <p className="text-slate-500 text-xs mt-2">
+                        La app es la fuente de verdad. Este botón envía tu stock local a ML.{' '}
+                        <button
+                          type="button"
+                          onClick={handleImportStockFromMercadoLibre}
+                          disabled={mlStockSyncLoading}
+                          className="text-yellow-400 hover:text-yellow-300 underline disabled:opacity-50"
+                        >
+                          Importar desde ML
+                        </button>
+                        {' '}(traer lo publicado en ML a la app, uso ocasional).
+                      </p>
                     </div>
 
                     {/* Mensaje Automático */}
@@ -1169,7 +1199,7 @@ const Settings: React.FC<SettingsProps> = ({
       <Modal
         isOpen={showStockSyncModal}
         onClose={() => { if (!tnStockSyncLoading && !mlStockSyncLoading) setShowStockSyncModal(false); }}
-        title={`Sincronizar Stock a ${stockSyncResult?.platform || 'Plataforma'}`}
+        title={mlStockSyncLoading || stockSyncResult?.platform === 'Mercado Libre' ? (mlStockSyncIsImport ? 'Importar stock desde Mercado Libre' : 'Sincronizar stock a Mercado Libre') : (tnStockSyncLoading || stockSyncResult?.platform === 'Tienda Nube') ? 'Sincronizar Stock a Tienda Nube' : 'Sincronizar Stock'}
         footer={
           !tnStockSyncLoading && !mlStockSyncLoading && (
             <button onClick={() => setShowStockSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
@@ -1182,7 +1212,7 @@ const Settings: React.FC<SettingsProps> = ({
           {(tnStockSyncLoading || mlStockSyncLoading) && (
             <div className="py-6 flex flex-col items-center gap-3">
               <Loader2 className="animate-spin text-green-500" size={32} />
-              <p className="text-sm text-green-400 font-bold">Sincronizando stock...</p>
+              <p className="text-sm text-green-400 font-bold">{mlStockSyncLoading ? (mlStockSyncIsImport ? 'Importando stock desde Mercado Libre...' : 'Sincronizando stock a Mercado Libre...') : 'Sincronizando stock...'}</p>
               <p className="text-xs text-slate-500">Esto puede tomar unos minutos</p>
             </div>
           )}

@@ -220,16 +220,16 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Dashboard</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Dashboard</h2>
           <p className="text-slate-500 text-sm">Resumen de tu negocio</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1 shrink-0">
             {(['7', '15', '30', '60', '90'] as DateRange[]).map((d) => (
               <button
                 key={d}
                 onClick={() => setDateRange(d)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                className={`min-h-[44px] px-3 py-2 rounded-md text-xs font-medium transition-colors touch-manipulation ${
                   dateRange === d ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'
                 }`}
               >
@@ -239,7 +239,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
           </div>
           <button
             onClick={loadDashboardData}
-            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
+            className="p-2.5 min-h-[44px] min-w-[44px] bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors touch-manipulation shrink-0"
+            aria-label="Actualizar"
           >
             <RefreshCw size={18} />
           </button>
@@ -252,7 +253,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 rounded-xl p-5 border border-emerald-500/20">
           <div className="flex items-center justify-between mb-3">
             <span className="text-emerald-400 text-xs font-semibold uppercase">Facturado</span>
@@ -442,10 +443,10 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
 
         <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
           <h3 className="font-bold text-white mb-4">Por Canal</h3>
-          <div className="h-64 flex items-center">
+          <div className="h-64 flex flex-col sm:flex-row items-center">
             {salesByChannel.length > 0 ? (
               <>
-                <div className="w-1/2 h-full">
+                <div className="w-full sm:w-1/2 h-48 sm:h-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={salesByChannel} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
@@ -460,7 +461,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="w-1/2 space-y-4">
+                <div className="w-full sm:w-1/2 space-y-4 pt-4 sm:pt-0">
                   {salesByChannel.map((item, i) => (
                     <div key={i} className="flex items-center gap-3">
                       <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>

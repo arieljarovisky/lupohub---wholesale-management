@@ -30,6 +30,8 @@ const MercadoLibreStock: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
+  const [allItemsForSearch, setAllItemsForSearch] = useState<MLStockItem[] | null>(null);
+  const [loadingSearch, setLoadingSearch] = useState(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('title');
   const limit = 20;
@@ -53,7 +55,43 @@ const MercadoLibreStock: React.FC = () => {
     fetchStock();
   }, [offset]);
 
-  const filteredItems = items
+  // Cuando hay búsqueda, cargar todas las publicaciones para filtrar en toda la lista
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setAllItemsForSearch(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchAllForSearch = async () => {
+      setLoadingSearch(true);
+      setAllItemsForSearch(null);
+      try {
+        const all: MLStockItem[] = [];
+        let off = 0;
+        const pageSize = 50;
+        while (true) {
+          const res = await api.getMercadoLibreStock({ offset: off, limit: pageSize, status: 'active' });
+          const list = res.items || [];
+          if (cancelled) return;
+          all.push(...list);
+          if (list.length < pageSize) break;
+          off += pageSize;
+        }
+        if (!cancelled) {
+          const sorted = all.sort((a, b) => a.title.localeCompare(b.title));
+          setAllItemsForSearch(sorted);
+        }
+      } catch (e) {
+        if (!cancelled) setAllItemsForSearch([]);
+      } finally {
+        if (!cancelled) setLoadingSearch(false);
+      }
+    };
+    fetchAllForSearch();
+    return () => { cancelled = true; };
+  }, [searchTerm]);
+
+  const filteredItems = (searchTerm.trim() ? (allItemsForSearch ?? []) : items)
     .filter(item => {
       if (!searchTerm) return true;
       const search = searchTerm.toLowerCase();
@@ -78,8 +116,12 @@ const MercadoLibreStock: React.FC = () => {
       }
     });
 
-  const currentPage = Math.floor(offset / limit) + 1;
-  const totalPages = Math.ceil(total / limit);
+  const currentPage = searchTerm
+    ? 1
+    : Math.floor(offset / limit) + 1;
+  const totalPages = searchTerm
+    ? 1
+    : Math.ceil(total / limit);
 
   const stats = {
     totalItems: total,
@@ -196,10 +238,17 @@ const MercadoLibreStock: React.FC = () => {
           <Loader2 className="animate-spin text-yellow-500 mb-4" size={48} />
           <p className="text-slate-400">Cargando stock de Mercado Libre...</p>
         </div>
+      ) : searchTerm.trim() && loadingSearch ? (
+        <div className="flex flex-col items-center justify-center py-16">
+          <Loader2 className="animate-spin text-yellow-500 mb-4" size={48} />
+          <p className="text-slate-400">Buscando en todas las publicaciones...</p>
+        </div>
       ) : filteredItems.length === 0 ? (
         <div className="bg-slate-800/30 rounded-2xl p-16 text-center border border-slate-700/30">
           <Package className="mx-auto text-slate-600 mb-4" size={56} />
-          <p className="text-slate-400 text-lg font-medium">No hay publicaciones</p>
+          <p className="text-slate-400 text-lg font-medium">
+            {searchTerm.trim() ? `Ninguna publicación coincide con "${searchTerm}"` : 'No hay publicaciones'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -216,41 +265,37 @@ const MercadoLibreStock: React.FC = () => {
               >
                 {/* Item Header */}
                 <div 
-                  className="p-4 cursor-pointer"
+                  className="p-4 cursor-pointer touch-manipulation"
                   onClick={() => setExpandedItem(isExpanded ? null : item.id)}
                 >
-                  <div className="flex items-center gap-4">
-                    {/* Thumbnail */}
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                     <img 
                       src={item.thumbnail} 
                       alt={item.title}
-                      className="w-16 h-16 rounded-xl object-cover bg-slate-700"
+                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover bg-slate-700 shrink-0"
                     />
-                    
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-bold truncate">{item.title}</p>
-                      <p className="text-slate-500 text-xs mt-1">
-                        ID: {item.id} · ${item.price?.toLocaleString('es-AR')}
-                      </p>
+                    <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-white font-bold truncate">{item.title}</p>
+                        <p className="text-slate-500 text-xs mt-1">
+                          ID: {item.id} · ${item.price?.toLocaleString('es-AR')}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 sm:gap-6">
+                        <div className="text-right">
+                          <p className={`text-xl sm:text-2xl font-black ${stockColor}`}>{item.totalStock}</p>
+                          <p className="text-slate-500 text-xs">disponibles</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-slate-400">{item.soldTotal}</p>
+                          <p className="text-slate-600 text-xs">vendidos</p>
+                        </div>
+                      </div>
                     </div>
-
-                    {/* Stock */}
-                    <div className="text-right">
-                      <p className={`text-2xl font-black ${stockColor}`}>{item.totalStock}</p>
-                      <p className="text-slate-500 text-xs">disponibles</p>
-                    </div>
-
-                    {/* Sold */}
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-slate-400">{item.soldTotal}</p>
-                      <p className="text-slate-600 text-xs">vendidos</p>
-                    </div>
-
                     {item.hasVariations && (
                       <ChevronDown 
                         size={20} 
-                        className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
+                        className={`text-slate-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`} 
                       />
                     )}
                   </div>
@@ -260,8 +305,8 @@ const MercadoLibreStock: React.FC = () => {
                 {isExpanded && item.hasVariations && (
                   <div className="px-4 pb-4 border-t border-slate-700/30 pt-4">
                     <p className="text-yellow-400 text-xs font-bold mb-3">VARIACIONES ({item.variations.length})</p>
-                    <div className="bg-slate-900/30 rounded-xl overflow-hidden">
-                      <table className="w-full">
+                    <div className="bg-slate-900/30 rounded-xl overflow-x-auto">
+                      <table className="w-full min-w-[400px]">
                         <thead>
                           <tr className="border-b border-slate-700/30">
                             <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
@@ -311,42 +356,50 @@ const MercadoLibreStock: React.FC = () => {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-2">
-          <button
-            onClick={() => setOffset(0)}
-            disabled={offset === 0}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
-          >
-            <ChevronLeft size={18} className="text-white" />
-            <ChevronLeft size={18} className="text-white -ml-3" />
-          </button>
-          <button
-            onClick={() => setOffset(o => Math.max(0, o - limit))}
-            disabled={offset === 0}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
-          >
-            <ChevronLeft size={18} className="text-white" />
-          </button>
-          
-          <span className="px-4 text-white font-bold">
-            {currentPage} / {totalPages}
-          </span>
+        <div className="flex justify-center items-center gap-1 sm:gap-2 pt-2">
+          <div className="flex items-center gap-1 rounded-2xl bg-slate-800/60 border border-slate-700/50 shadow-lg shadow-black/20 p-1.5">
+            <button
+              onClick={() => setOffset(0)}
+              disabled={offset === 0}
+              className="p-2.5 rounded-xl text-white/90 hover:bg-yellow-500/20 hover:text-yellow-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              title="Primera página"
+            >
+              <ChevronLeft size={18} className="text-white" />
+              <ChevronLeft size={18} className="text-white -ml-3" />
+            </button>
+            <button
+              onClick={() => setOffset(o => Math.max(0, o - limit))}
+              disabled={offset === 0}
+              className="p-2.5 rounded-xl text-white/90 hover:bg-yellow-500/20 hover:text-yellow-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              title="Anterior"
+            >
+              <ChevronLeft size={18} className="text-white" />
+            </button>
 
-          <button
-            onClick={() => setOffset(o => o + limit)}
-            disabled={currentPage >= totalPages}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
-          >
-            <ChevronRight size={18} className="text-white" />
-          </button>
-          <button
-            onClick={() => setOffset((totalPages - 1) * limit)}
-            disabled={currentPage >= totalPages}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
-          >
-            <ChevronRight size={18} className="text-white" />
-            <ChevronRight size={18} className="text-white -ml-3" />
-          </button>
+            <span className="min-w-[4rem] text-center px-4 py-2 text-sm font-bold text-white bg-slate-700/50 rounded-xl border border-slate-600/50">
+              <span className="text-yellow-400">{currentPage}</span>
+              <span className="text-slate-500 mx-1">/</span>
+              <span>{totalPages}</span>
+            </span>
+
+            <button
+              onClick={() => setOffset(o => o + limit)}
+              disabled={currentPage >= totalPages}
+              className="p-2.5 rounded-xl text-white/90 hover:bg-yellow-500/20 hover:text-yellow-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              title="Siguiente"
+            >
+              <ChevronRight size={18} className="text-white" />
+            </button>
+            <button
+              onClick={() => setOffset((totalPages - 1) * limit)}
+              disabled={currentPage >= totalPages}
+              className="p-2.5 rounded-xl text-white/90 hover:bg-yellow-500/20 hover:text-yellow-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              title="Última página"
+            >
+              <ChevronRight size={18} className="text-white" />
+              <ChevronRight size={18} className="text-white -ml-3" />
+            </button>
+          </div>
         </div>
       )}
     </div>

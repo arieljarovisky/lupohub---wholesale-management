@@ -502,6 +502,46 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     });
   };
 
+  // Grupos ya filtrados y ordenados + total de páginas (para que el paginado refleje los filtros)
+  const displayGroupsInfo = React.useMemo(() => {
+    let groups = Object.entries(groupedProducts).map(([groupKey, groupVariants]: [string, Product[]]) => {
+      const totalStock = groupVariants.reduce((sum, p) => {
+        const val = (p as any).stock_total ?? (p as any).stock ?? 0;
+        return sum + Number(val);
+      }, 0);
+      const category = groupVariants[0]?.category || 'General';
+      return { groupKey, groupVariants, totalStock, category };
+    });
+    if (filterColor !== 'ALL') {
+      groups = groups.filter(g => {
+        const variants = getGroupFilteredVariants(g.groupKey, g.groupVariants);
+        if (!loadedVariants[g.groupKey]) return true;
+        return variants.length > 0;
+      });
+    }
+    groups.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'SKU') cmp = a.groupKey.localeCompare(b.groupKey);
+      else if (sortKey === 'STOCK') {
+        const sa = filterColor === 'ALL' ? a.totalStock : getGroupDisplayStock(a.groupKey, a.groupVariants);
+        const sb = filterColor === 'ALL' ? b.totalStock : getGroupDisplayStock(b.groupKey, b.groupVariants);
+        cmp = sa - sb;
+      }
+      else if (sortKey === 'VARIANTS') cmp = a.groupVariants.length - b.groupVariants.length;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
+    const safePage = Math.min(currentPage, totalPages);
+    return { displayGroups: groups, totalPages, safePage };
+  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants]);
+
+  // Si tras filtrar la página actual supera el total, volver a la última página válida
+  React.useEffect(() => {
+    if (displayGroupsInfo.totalPages > 0 && currentPage > displayGroupsInfo.totalPages) {
+      setCurrentPage(displayGroupsInfo.totalPages);
+    }
+  }, [displayGroupsInfo.totalPages, currentPage]);
+
   const toggleGroup = (groupName: string) => {
     setExpandedGroups(prev => {
       const next = prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName];
@@ -744,20 +784,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Search Bar & Filters */}
       <div className="space-y-4">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1 w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
             <input 
               type="text" 
               placeholder="Buscar Código de Producto..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full pl-10 pr-4 py-3.5 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm"
+              className="w-full pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm"
             />
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
-            className={`px-4 rounded-xl border flex items-center gap-2 font-bold transition-all ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+            className={`min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
@@ -842,37 +882,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* Grouped List Container */}
       <div className="space-y-4">
         {(() => {
-          let groups = Object.entries(groupedProducts).map(([groupKey, groupVariants]: [string, Product[]]) => {
-            const totalStock = groupVariants.reduce((sum, p) => {
-              const val = (p as any).stock_total ?? (p as any).stock ?? 0;
-              return sum + Number(val);
-            }, 0);
-            const category = groupVariants[0]?.category || 'General';
-            return { groupKey, groupVariants, totalStock, category };
-          });
-          if (filterColor !== 'ALL') {
-            groups = groups.filter(g => {
-              const variants = getGroupFilteredVariants(g.groupKey, g.groupVariants);
-              if (!loadedVariants[g.groupKey]) return true; // mantener visible hasta cargar
-              return variants.length > 0;
-            });
-          }
-          groups.sort((a, b) => {
-            let cmp = 0;
-            if (sortKey === 'SKU') cmp = a.groupKey.localeCompare(b.groupKey);
-            else if (sortKey === 'STOCK') {
-              const sa = filterColor === 'ALL' ? a.totalStock : getGroupDisplayStock(a.groupKey, a.groupVariants);
-              const sb = filterColor === 'ALL' ? b.totalStock : getGroupDisplayStock(b.groupKey, b.groupVariants);
-              cmp = sa - sb;
-            }
-            else if (sortKey === 'VARIANTS') cmp = a.groupVariants.length - b.groupVariants.length;
-            return sortDir === 'asc' ? cmp : -cmp;
-          });
-          const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
-          const safePage = Math.min(currentPage, totalPages);
+          const { displayGroups, totalPages, safePage } = displayGroupsInfo;
           const start = (safePage - 1) * pageSize;
           const end = start + pageSize;
-          const pageGroups = groups.slice(start, end);
+          const pageGroups = displayGroups.slice(start, end);
           return pageGroups.map(({ groupKey, groupVariants, totalStock, category }) => {
           const variantsToRender = getGroupFilteredVariants(groupKey, groupVariants);
 
@@ -1110,13 +1123,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         })()}
       </div>
 
-      <div className="flex justify-between items-center mt-4">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mt-4">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Ordenar</span>
           <select 
             value={sortKey}
             onChange={(e) => { setSortKey(e.target.value as any); setCurrentPage(1); }}
-            className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none appearance-none"
+            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
           >
             <option value="SKU">Código</option>
             <option value="STOCK">Stock Total</option>
@@ -1124,37 +1137,43 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           </select>
           <button 
             onClick={() => { setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'); setCurrentPage(1); }}
-            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300"
+            className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 touch-manipulation"
           >
             {sortDir === 'asc' ? 'ASC' : 'DESC'}
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por página</span>
-          <select 
-            value={pageSize}
-            onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
-            className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white outline-none appearance-none"
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-          </select>
-          <button 
-            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300"
-          >
-            Prev
-          </button>
-          <button 
-            onClick={() => setCurrentPage(prev => prev + 1)}
-            className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300"
-          >
-            Next
-          </button>
-        </div>
+        {displayGroupsInfo.totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              Página {displayGroupsInfo.safePage} de {displayGroupsInfo.totalPages}
+            </span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por página</span>
+            <select 
+              value={pageSize}
+              onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
+              className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+            <button 
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={displayGroupsInfo.safePage <= 1}
+              className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+            >
+              Prev
+            </button>
+            <button 
+              onClick={() => setCurrentPage(prev => prev + 1)}
+              disabled={displayGroupsInfo.safePage >= displayGroupsInfo.totalPages}
+              className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
-
       {Object.keys(groupedProducts).length === 0 && (
         <div className="text-center py-24 bg-slate-900/30 rounded-3xl border-2 border-dashed border-slate-800">
            <Box size={48} className="mx-auto text-slate-800 mb-3 opacity-20" />

@@ -1343,7 +1343,7 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   }
 };
 
-// Sincronizar todo el stock local a Mercado Libre
+// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
 export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -1385,7 +1385,7 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     }
 
     res.json({
-      message: 'Sincronización completada',
+      message: 'Stock sincronizado a Mercado Libre',
       updated,
       errors,
       total: variants.length,
@@ -1393,7 +1393,91 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     });
   } catch (error: any) {
     console.error('Error syncing stock to ML:', error);
-    res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+    res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+  }
+};
+
+// Opcional: importar stock desde Mercado Libre a la app (útil para alinear una vez o si ML fue actualizado fuera de la app)
+export const importStockFromMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const { updateVariantStock } = await import('./stock.controller');
+
+    let updated = 0;
+    let errors = 0;
+    const logs: string[] = [];
+    const limit = 50;
+    let offset = 0;
+
+    while (true) {
+      const itemsRes = await axios.get(
+        `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
+        { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }
+      );
+      const itemIds: string[] = itemsRes.data.results || [];
+      if (itemIds.length === 0) break;
+
+      const batchSize = 10;
+      for (let i = 0; i < itemIds.length; i += batchSize) {
+        const batch = itemIds.slice(i, i + batchSize);
+        const itemPromises = batch.map((itemId: string) =>
+          axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          }).then(r => r.data).catch(() => null)
+        );
+        const items = await Promise.all(itemPromises);
+
+        for (const item of items) {
+          if (!item) continue;
+          if (item.variations && item.variations.length > 0) {
+            for (const v of item.variations) {
+              const mlQty = v.available_quantity ?? 0;
+              const row = await get(
+                `SELECT pv.id as variant_id FROM product_variants pv
+                 JOIN product_colors pc ON pc.id = pv.product_color_id
+                 JOIN products p ON p.id = pc.product_id
+                 WHERE p.mercado_libre_id = ? AND pv.mercado_libre_variant_id = ?`,
+                [item.id, v.id]
+              );
+              if (row?.variant_id) {
+                const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
+                if (ok) { updated++; logs.push(`[OK] ${v.seller_custom_field || v.id}: ${mlQty}`); }
+                else { errors++; logs.push(`[ERROR] ${v.seller_custom_field || v.id}`); }
+              }
+            }
+          } else {
+            const mlQty = item.available_quantity ?? 0;
+            const variantRow = await get(
+              `SELECT pv.id as variant_id FROM product_variants pv
+               JOIN product_colors pc ON pc.id = pv.product_color_id
+               JOIN products p ON p.id = pc.product_id
+               WHERE p.mercado_libre_id = ? LIMIT 1`,
+              [item.id]
+            );
+            if (variantRow?.variant_id) {
+              const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
+              if (ok) { updated++; logs.push(`[OK] ${item.id}: ${mlQty}`); }
+              else { errors++; logs.push(`[ERROR] ${item.id}`); }
+            }
+          }
+        }
+      }
+      if (itemIds.length < limit) break;
+      offset += limit;
+    }
+
+    res.json({
+      message: 'Stock importado desde Mercado Libre',
+      updated,
+      errors,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error importing stock from ML:', error);
+    res.status(500).json({ message: 'Error importando stock desde Mercado Libre', error: error.message });
   }
 };
 

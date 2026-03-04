@@ -13,7 +13,7 @@ import MercadoLibreOrders from './components/MercadoLibreOrders';
 import MercadoLibreStock from './components/MercadoLibreStock';
 import StockHistory from './components/StockHistory';
 import Despachos from './components/Despachos';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap } from 'lucide-react';
 import { MOCK_VISITS, MOCK_USERS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
 import { api } from './services/api';
@@ -56,6 +56,7 @@ const App: React.FC = () => {
   
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Fetch Data on Login
   useEffect(() => {
@@ -383,6 +384,26 @@ const App: React.FC = () => {
     { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
   ];
 
+  const allMobileNavSections = [
+    { title: 'Principal', items: [
+      { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+      { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
+      { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
+    ]},
+    { title: 'Pedidos y canales', items: [
+      { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+      { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN] },
+      { id: 'mercadolibre_orders', label: 'Ventas ML', icon: Zap, roles: [Role.ADMIN] },
+      { id: 'mercadolibre_stock', label: 'Stock ML', icon: Package, roles: [Role.ADMIN] },
+    ]},
+    { title: 'CRM y sistema', items: [
+      { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
+      { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
+      { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN] },
+    ]},
+  ];
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-200 flex-col md:flex-row overflow-hidden">
       <div className="hidden md:block shrink-0">
@@ -394,7 +415,7 @@ const App: React.FC = () => {
         />
       </div>
       
-      <main className={`flex-1 h-full overflow-y-auto p-4 md:p-8 md:ml-64 relative`}>
+      <main className={`flex-1 h-full overflow-y-auto p-4 md:p-8 md:ml-64 relative min-h-0`}>
         {isLoading && (
           <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
@@ -402,10 +423,10 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto pb-24 md:pb-8">
-          <header className="mb-6 flex justify-between items-start">
-             <div>
-               <h1 className="text-2xl md:text-3xl font-bold text-white">
+        <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden">
+          <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+             <div className="min-w-0">
+               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
                  {baseView === 'orders' && 'Pedidos Mayoristas'}
@@ -495,7 +516,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 px-2 py-3 z-50 flex justify-around items-center backdrop-blur-md bg-opacity-90">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex justify-around items-stretch backdrop-blur-md">
         {mobileNavItems.map(item => {
           if (!item.roles.includes(currentUser.role)) return null;
           const isActive = baseView === item.id;
@@ -503,14 +524,63 @@ const App: React.FC = () => {
             <button 
               key={item.id}
               onClick={() => setCurrentView(item.id)}
-              className={`flex flex-col items-center gap-1 transition-colors ${isActive ? 'text-blue-500' : 'text-slate-500'}`}
+              className={`flex flex-col items-center justify-center gap-1 min-h-[56px] flex-1 py-2 transition-colors touch-manipulation ${isActive ? 'text-blue-500' : 'text-slate-500 active:bg-slate-800/50 rounded-xl'}`}
             >
-              <item.icon size={20} />
+              <item.icon size={22} aria-hidden />
               <span className="text-[10px] font-medium">{item.label}</span>
             </button>
           );
         })}
+        <button
+          onClick={() => setMobileMenuOpen(true)}
+          className={`flex flex-col items-center justify-center gap-1 min-h-[56px] flex-1 py-2 transition-colors touch-manipulation text-slate-500 active:bg-slate-800/50 rounded-xl ${baseView !== 'dashboard' && !mobileNavItems.some(i => i.id === baseView) ? 'text-blue-500' : ''}`}
+          aria-label="Más opciones"
+        >
+          <Menu size={22} aria-hidden />
+          <span className="text-[10px] font-medium">Más</span>
+        </button>
       </nav>
+
+      {/* Mobile full menu drawer */}
+      {mobileMenuOpen && (
+        <>
+          <div className="md:hidden fixed inset-0 bg-black/60 z-[60] backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} aria-hidden />
+          <div className="md:hidden fixed inset-0 z-[70] flex flex-col bg-slate-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+              <h2 className="text-lg font-bold text-white">Menú</h2>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-3 -mr-2 text-slate-400 hover:text-white rounded-xl touch-manipulation" aria-label="Cerrar">
+                <span className="text-2xl leading-none">×</span>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+              {allMobileNavSections.map(section => {
+                const items = section.items.filter(i => i.roles.includes(currentUser.role));
+                if (items.length === 0) return null;
+                return (
+                  <div key={section.title}>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 px-1">{section.title}</p>
+                    <div className="space-y-1">
+                      {items.map(item => {
+                        const isActive = baseView === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => { setCurrentView(item.id); setMobileMenuOpen(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left touch-manipulation min-h-[48px] ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-200 hover:bg-slate-700/50'}`}
+                          >
+                            <item.icon size={20} />
+                            <span className="font-medium">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

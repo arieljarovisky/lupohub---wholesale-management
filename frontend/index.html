@@ -2,7 +2,7 @@
 <html lang="es" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5, user-scalable=yes" />
     <title>LupoHub Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -23,10 +23,14 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+      /* Safe area for notched devices */
       body {
         font-family: 'Inter', sans-serif;
         background-color: #020617; /* Slate 950 */
         color: #e2e8f0; /* Slate 200 */
+        padding-bottom: env(safe-area-inset-bottom, 0);
+        padding-left: env(safe-area-inset-left, 0);
+        padding-right: env(safe-area-inset-right, 0);
       }
       /* Custom Scrollbar Dark */
       ::-webkit-scrollbar {
@@ -42,6 +46,9 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #475569;
+      }
+      @media (max-width: 640px) {
+        .touch-manipulation { touch-action: manipulation; }
       }
     </style>
   <script type="importmap">

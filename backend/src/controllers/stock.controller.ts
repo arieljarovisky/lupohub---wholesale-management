@@ -10,6 +10,7 @@ export type StockMovementType =
   | 'AJUSTE_MANUAL'
   | 'DEVOLUCION'
   | 'IMPORTACION_TN'
+  | 'IMPORTACION_ML'
   | 'SNAPSHOT_INICIAL';
 
 interface StockMovement {

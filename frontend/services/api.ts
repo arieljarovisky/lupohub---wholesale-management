@@ -229,16 +229,10 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
   },
 
-  // Historial de movimientos de stock
-  getStockMovements: async (params?: { variantId?: string; type?: string; limit?: number }): Promise<any[]> => {
+  importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
     return handleRequest(async () => {
-      const queryParams = new URLSearchParams();
-      if (params?.variantId) queryParams.append('variantId', params.variantId);
-      if (params?.type) queryParams.append('type', params.type);
-      if (params?.limit) queryParams.append('limit', params.limit.toString());
-      const queryString = queryParams.toString();
-      return await request<any[]>(`/stock/movements${queryString ? '?' + queryString : ''}`, 'GET');
-    }, [], 'getStockMovements');
+      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);
+    }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'importStockFromMercadoLibre');
   },
 
   // Órdenes de Tienda Nube
