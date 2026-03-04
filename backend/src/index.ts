@@ -14,6 +14,7 @@ import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
+import { initSchema } from './database/init_schema';
 import { testConnection } from './database/db';
 
 dotenv.config();
@@ -53,6 +54,7 @@ async function initDatabase() {
       console.log(`[DB] Intento ${attempt}/${maxAttempts} de conectar a MySQL...`);
       await testConnection();
       console.log('[DB] Conexión OK, creando/verificando tablas...');
+      await initSchema();
       await addStockMovementsTable();
       await fixIntegrationsTable();
       await addDespachosTable();
