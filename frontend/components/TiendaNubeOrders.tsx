@@ -39,6 +39,7 @@ const TiendaNubeOrders: React.FC = () => {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('');
+  const [showAllOrders, setShowAllOrders] = useState(false); // por defecto solo pagados y por enviar
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [showDateFilter, setShowDateFilter] = useState(false);
@@ -50,6 +51,7 @@ const TiendaNubeOrders: React.FC = () => {
     setLoading(true);
     try {
       const params: any = { page, per_page: perPage };
+      if (!showAllOrders) params.only_paid_pending_shipment = true;
       if (filterStatus) params.status = filterStatus;
       if (dateFrom) params.created_at_min = dateFrom;
       if (dateTo) params.created_at_max = dateTo;
@@ -66,7 +68,7 @@ const TiendaNubeOrders: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, filterStatus, dateFrom, dateTo]);
+  }, [page, filterStatus, dateFrom, dateTo, showAllOrders]);
 
   const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
     open: { label: 'Abierta', color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30', icon: Clock },
@@ -244,13 +246,23 @@ const TiendaNubeOrders: React.FC = () => {
           </button>
 
           {/* Status Filter */}
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <button
+              onClick={() => { setShowAllOrders(!showAllOrders); setPage(1); }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                showAllOrders
+                  ? 'bg-slate-600 text-slate-300 border border-slate-500'
+                  : 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/30'
+              }`}
+            >
+              {showAllOrders ? 'Ver todas las órdenes' : 'Solo pagados por enviar'}
+            </button>
             {[
               { value: '', label: 'Todas', count: total },
               { value: 'open', label: 'Abiertas' },
               { value: 'closed', label: 'Cerradas' },
               { value: 'cancelled', label: 'Canceladas' },
-            ].map((status) => (
+            ].filter(s => showAllOrders || s.value === '').map((status) => (
               <button
                 key={status.value}
                 onClick={() => { setFilterStatus(status.value); setPage(1); }}

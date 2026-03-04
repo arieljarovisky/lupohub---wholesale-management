@@ -275,7 +275,7 @@ export const api = {
   },
 
   // Órdenes de Tienda Nube
-  getTiendaNubeOrders: async (params?: { page?: number; per_page?: number; status?: string; created_at_min?: string; created_at_max?: string }): Promise<{ orders: any[]; total: number }> => {
+  getTiendaNubeOrders: async (params?: { page?: number; per_page?: number; status?: string; created_at_min?: string; created_at_max?: string; only_paid_pending_shipment?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
       const queryParams = new URLSearchParams();
       if (params?.page) queryParams.append('page', params.page.toString());
@@ -283,13 +283,14 @@ export const api = {
       if (params?.status) queryParams.append('status', params.status);
       if (params?.created_at_min) queryParams.append('created_at_min', params.created_at_min);
       if (params?.created_at_max) queryParams.append('created_at_max', params.created_at_max);
+      if (params?.only_paid_pending_shipment) queryParams.append('only_paid_pending_shipment', '1');
       const queryString = queryParams.toString();
       return await request<{ orders: any[]; total: number }>(`/integrations/tiendanube/orders${queryString ? '?' + queryString : ''}`, 'GET');
     }, { orders: [], total: 0 }, 'getTiendaNubeOrders');
   },
 
   // Órdenes de Mercado Libre
-  getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string }): Promise<{ orders: any[]; total: number }> => {
+  getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string; only_pending_shipment_and_cancelled?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
       const queryParams = new URLSearchParams();
       if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
@@ -297,6 +298,7 @@ export const api = {
       if (params?.status) queryParams.append('status', params.status);
       if (params?.date_from) queryParams.append('date_from', params.date_from);
       if (params?.date_to) queryParams.append('date_to', params.date_to);
+      if (params?.only_pending_shipment_and_cancelled) queryParams.append('only_pending_shipment_and_cancelled', '1');
       const queryString = queryParams.toString();
       return await request<{ orders: any[]; total: number }>(`/integrations/mercadolibre/orders${queryString ? '?' + queryString : ''}`, 'GET');
     }, { orders: [], total: 0 }, 'getMercadoLibreOrders');

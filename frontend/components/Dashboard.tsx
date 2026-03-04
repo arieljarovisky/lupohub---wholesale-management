@@ -48,8 +48,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
         const dates = getDateRange(15);
         const [productsRes, tnRes, mlRes] = await Promise.all([
           api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
-          api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [], total: 0 })),
-          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
+          api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to, only_paid_pending_shipment: true }).catch(() => ({ orders: [], total: 0 })),
+          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to, only_pending_shipment_and_cancelled: true }).catch(() => ({ orders: [], total: 0 }))
         ]);
         setAllProducts(productsRes.items || []);
         setProductCount(productsRes.total || productsRes.items?.length || 0);
@@ -58,8 +58,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       } else {
         const [productsRes, tnRes, mlRes] = await Promise.all([
           api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
-          api.getTiendaNubeOrders({ per_page: 50, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [], total: 0 })),
-          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
+          api.getTiendaNubeOrders({ per_page: 50, created_at_min: dates.from, created_at_max: dates.to, only_paid_pending_shipment: true }).catch(() => ({ orders: [], total: 0 })),
+          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to, only_pending_shipment_and_cancelled: true }).catch(() => ({ orders: [], total: 0 }))
         ]);
         setAllProducts(productsRes.items || []);
         setProductCount(productsRes.total || productsRes.items?.length || 0);

@@ -36,6 +36,7 @@ const MercadoLibreOrders: React.FC = () => {
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('');
+  const [showAllSales, setShowAllSales] = useState(false); // por defecto solo por despachar + canceladas
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [showDateFilter, setShowDateFilter] = useState(false);
@@ -47,6 +48,7 @@ const MercadoLibreOrders: React.FC = () => {
     setLoading(true);
     try {
       const params: any = { offset, limit };
+      if (!showAllSales) params.only_pending_shipment_and_cancelled = true;
       if (filterStatus) params.status = filterStatus;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
@@ -63,7 +65,7 @@ const MercadoLibreOrders: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [offset, filterStatus, dateFrom, dateTo]);
+  }, [offset, filterStatus, dateFrom, dateTo, showAllSales]);
 
   const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
     paid: { label: 'Pagada', color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30', icon: CheckCircle },
@@ -247,13 +249,23 @@ const MercadoLibreOrders: React.FC = () => {
           </button>
 
           {/* Status Filter */}
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-center">
+            <button
+              onClick={() => { setShowAllSales(!showAllSales); setOffset(0); }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                showAllSales
+                  ? 'bg-slate-600 text-slate-300 border border-slate-500'
+                  : 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/30'
+              }`}
+            >
+              {showAllSales ? 'Ver todas las ventas' : 'Solo por despachar + canceladas'}
+            </button>
             {[
               { value: '', label: 'Todas' },
               { value: 'paid', label: 'Pagadas' },
               { value: 'confirmed', label: 'Confirmadas' },
               { value: 'cancelled', label: 'Canceladas' },
-            ].map((status) => (
+            ].filter(s => showAllSales || s.value === '').map((status) => (
               <button
                 key={status.value}
                 onClick={() => { setFilterStatus(status.value); setOffset(0); }}

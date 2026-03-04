@@ -1529,9 +1529,11 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'No se encontró el store_id de Tienda Nube' });
     }
 
-    const { page = '1', per_page = '20', status, created_at_min, created_at_max } = req.query;
+    const { page = '1', per_page = '20', status, created_at_min, created_at_max, only_paid_pending_shipment } = req.query;
+    const perPageNum = Math.min(100, Math.max(1, parseInt(per_page as string) || 20));
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
 
-    let url = `https://api.tiendanube.com/v1/${storeId}/orders?page=${page}&per_page=${per_page}`;
+    let url = `https://api.tiendanube.com/v1/${storeId}/orders?page=${pageNum}&per_page=${perPageNum}`;
     if (status) {
       url += `&status=${status}`;
     }
@@ -1549,7 +1551,7 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       }
     });
 
-    const orders = ordersRes.data.map((order: any) => {
+    let orders = ordersRes.data.map((order: any) => {
       // Extraer nombre del cliente de diferentes fuentes
       let customerName = 'Sin nombre';
       if (order.customer) {
@@ -1601,11 +1603,19 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       updatedAt: order.updated_at
     }});
 
+    if (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') {
+      orders = orders.filter((o: any) =>
+        o.paymentStatus === 'paid' &&
+        o.shippingStatus !== 'shipped' &&
+        o.shippingStatus !== 'delivered'
+      );
+    }
+
     res.json({
       orders,
-      page: parseInt(page as string),
-      per_page: parseInt(per_page as string),
-      total: ordersRes.headers['x-total-count'] || orders.length
+      page: pageNum,
+      per_page: perPageNum,
+      total: (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') ? orders.length : (ordersRes.headers['x-total-count'] || orders.length)
     });
   } catch (error: any) {
     console.error('Error fetching TN orders:', error.response?.data || error.message);
@@ -1621,57 +1631,26 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
     }
 
-    const { offset = '0', limit = '20', status, date_from, date_to } = req.query;
-    // API de ML permite máximo 50 (51 según el error limit.maximum_exceeded)
+    const { offset = '0', limit = '20', status, date_from, date_to, only_pending_shipment_and_cancelled } = req.query;
     const limitNum = Math.min(Math.max(1, parseInt(limit as string) || 20), 50);
     const offsetNum = Math.max(0, parseInt(offset as string) || 0);
+    const onlyPendingAndCancelled = only_pending_shipment_and_cancelled === '1' || only_pending_shipment_and_cancelled === 'true';
 
-    let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
-    if (status) {
-      url += `&order.status=${status}`;
-    }
-    if (date_from) {
-      url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
-    }
-    if (date_to) {
-      url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
-    }
-
-    const ordersRes = await axios.get(url, {
-      headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-    });
-
-    const orders = (ordersRes.data.results || []).map((order: any) => {
-      // Determinar estado del envío
+    const mapOrder = (order: any) => {
       let shippingStatus = null;
       if (order.shipping) {
-        // El status puede venir en diferentes lugares
         shippingStatus = order.shipping.status || order.shipping.substatus || null;
-        
-        // Si no hay status, inferir del estado de la orden
-        if (!shippingStatus) {
-          if (order.status === 'paid' && order.shipping.id) {
-            shippingStatus = 'ready_to_ship';
-          }
+        if (!shippingStatus && order.status === 'paid' && order.shipping.id) {
+          shippingStatus = 'ready_to_ship';
         }
       }
-      
-      // Mapear estados de ML a nuestros estados
       const statusMap: Record<string, string> = {
-        'to_be_agreed': 'pending',
-        'pending': 'pending',
-        'handling': 'handling',
-        'ready_to_ship': 'ready_to_ship',
-        'shipped': 'shipped',
-        'delivered': 'delivered',
-        'not_delivered': 'not_delivered',
-        'cancelled': 'cancelled'
+        'to_be_agreed': 'pending', 'pending': 'pending', 'handling': 'handling',
+        'ready_to_ship': 'ready_to_ship', 'shipped': 'shipped', 'delivered': 'delivered',
+        'not_delivered': 'not_delivered', 'cancelled': 'cancelled'
       };
-
-      // Mercado Envíos Flex: logistic_type "self_service" → se pueden despachar hasta las 16:00
       const logisticType = order.shipping?.logistic_type || null;
       const isFlex = logisticType === 'self_service';
-
       return {
         id: order.id,
         status: order.status,
@@ -1700,13 +1679,55 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
         dateCreated: order.date_created,
         dateClosed: order.date_closed
       };
-    });
+    };
+
+    let orders: any[];
+    let total: number;
+
+    if (onlyPendingAndCancelled) {
+      // Solo por despachar + canceladas: traer pagadas y canceladas, filtrar pagadas por envío
+      const baseParams = `seller=${mlToken.user_id}&limit=50&sort=date_desc`;
+      const dateFrom = date_from ? `&order.date_created.from=${date_from}T00:00:00.000-03:00` : '';
+      const dateTo = date_to ? `&order.date_created.to=${date_to}T23:59:59.999-03:00` : '';
+      const [paidRes, cancelledRes] = await Promise.all([
+        axios.get(`https://api.mercadolibre.com/orders/search?${baseParams}&order.status=paid${dateFrom}${dateTo}`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        }),
+        axios.get(`https://api.mercadolibre.com/orders/search?${baseParams}&order.status=cancelled${dateFrom}${dateTo}`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        })
+      ]);
+      const paid = paidRes.data.results || [];
+      const cancelled = cancelledRes.data.results || [];
+      const merged = [...paid, ...cancelled].sort(
+        (a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime()
+      );
+      const filtered = merged.filter((o: any) => {
+        if (o.status === 'cancelled') return true;
+        if (o.status !== 'paid') return false;
+        const sh = o.shipping?.status || o.shipping?.substatus;
+        return ['ready_to_ship', 'pending', 'handling'].includes(sh) || !sh;
+      });
+      total = filtered.length;
+      orders = filtered.slice(offsetNum, offsetNum + limitNum).map(mapOrder);
+    } else {
+      let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
+      if (status) url += `&order.status=${status}`;
+      if (date_from) url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
+      if (date_to) url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
+      const ordersRes = await axios.get(url, {
+        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+      });
+      const raw = ordersRes.data.results || [];
+      total = ordersRes.data.paging?.total ?? raw.length;
+      orders = raw.map(mapOrder);
+    }
 
     res.json({
       orders,
       offset: offsetNum,
       limit: limitNum,
-      total: ordersRes.data.paging?.total || orders.length
+      total
     });
   } catch (error: any) {
     console.error('Error fetching ML orders:', error.response?.data || error.message);
