@@ -209,7 +209,66 @@ const MercadoLibreOrders: React.FC = () => {
 
       {/* Filters Bar */}
       <div className="bg-slate-800/30 rounded-2xl p-4 border border-slate-700/30 space-y-4">
-        <div className="flex flex-col lg:flex-row gap-4">
+        {/* Vista principal: segmento único para que solo uno esté activo */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider self-center sm:self-auto">Vista</span>
+          <div className="inline-flex p-1 bg-slate-900/60 rounded-xl border border-slate-700/50">
+            <button
+              type="button"
+              onClick={() => { if (showAllSales) { setShowAllSales(false); setFilterStatus(''); setOffset(0); } }}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all min-w-[140px] ${
+                !showAllSales
+                  ? 'bg-yellow-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              Por despachar + canceladas
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (!showAllSales) { setShowAllSales(true); setOffset(0); } }}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all min-w-[140px] ${
+                showAllSales
+                  ? 'bg-yellow-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              Todas las ventas
+            </button>
+          </div>
+          {!showAllSales && (
+            <p className="text-xs text-slate-500 self-center sm:self-auto">Solo órdenes por enviar y canceladas</p>
+          )}
+        </div>
+
+        {/* Filtro por estado: solo cuando "Todas las ventas" está activo */}
+        {showAllSales && (
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estado</span>
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { value: '', label: 'Todas' },
+                { value: 'paid', label: 'Pagadas' },
+                { value: 'confirmed', label: 'Confirmadas' },
+                { value: 'cancelled', label: 'Canceladas' },
+              ].map((status) => (
+                <button
+                  key={status.value}
+                  onClick={() => { setFilterStatus(status.value); setOffset(0); }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    filterStatus === status.value
+                      ? 'bg-yellow-600 text-white'
+                      : 'bg-slate-800/80 text-slate-400 hover:text-white border border-slate-600'
+                  }`}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col lg:flex-row gap-4 pt-1 border-t border-slate-700/30">
           {/* Search */}
           <div className="relative flex-1">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -230,7 +289,7 @@ const MercadoLibreOrders: React.FC = () => {
           {/* Date Filter Toggle */}
           <button
             onClick={() => setShowDateFilter(!showDateFilter)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shrink-0 ${
               hasDateFilter
                 ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/30'
                 : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white border border-slate-700/50'
@@ -247,38 +306,6 @@ const MercadoLibreOrders: React.FC = () => {
               </span>
             )}
           </button>
-
-          {/* Status Filter */}
-          <div className="flex gap-2 flex-wrap items-center">
-            <button
-              onClick={() => { setShowAllSales(!showAllSales); setOffset(0); }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                showAllSales
-                  ? 'bg-slate-600 text-slate-300 border border-slate-500'
-                  : 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/30'
-              }`}
-            >
-              {showAllSales ? 'Ver todas las ventas' : 'Solo por despachar + canceladas'}
-            </button>
-            {[
-              { value: '', label: 'Todas' },
-              { value: 'paid', label: 'Pagadas' },
-              { value: 'confirmed', label: 'Confirmadas' },
-              { value: 'cancelled', label: 'Canceladas' },
-            ].filter(s => showAllSales || s.value === '').map((status) => (
-              <button
-                key={status.value}
-                onClick={() => { setFilterStatus(status.value); setOffset(0); }}
-                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                  filterStatus === status.value
-                    ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/30'
-                    : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white border border-slate-700/50'
-                }`}
-              >
-                {status.label}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Date Filter Panel */}
@@ -411,7 +438,7 @@ const MercadoLibreOrders: React.FC = () => {
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${status.bg} ${status.color}`}>
                             {status.label.toUpperCase()}
                           </span>
-                          {shipping && (
+                          {shipping && order.status !== 'cancelled' && (
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-700/50 ${shipping.color} flex items-center gap-1`}>
                               <Truck size={10} />
                               {shipping.label}
