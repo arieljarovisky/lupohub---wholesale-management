@@ -15,6 +15,7 @@ import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
 import { initSchema } from './database/init_schema';
+import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
 
 dotenv.config();
@@ -55,6 +56,7 @@ async function initDatabase() {
       await testConnection();
       console.log('[DB] Conexión OK, creando/verificando tablas...');
       await initSchema();
+      await ensureAdminUser();
       await addStockMovementsTable();
       await fixIntegrationsTable();
       await addDespachosTable();

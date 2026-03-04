@@ -2,7 +2,16 @@ import axios, { AxiosRequestConfig, Method } from 'axios';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-let baseUrl: string = (import.meta.env?.VITE_API_URL as string) || localStorage.getItem('lupo_api_base') || 'http://127.0.0.1:3010/api';
+/** Asegura que la URL base tenga protocolo para que no se trate como ruta relativa (ej. en Vercel). */
+function normalizeBaseUrl(url: string): string {
+  const u = (url || '').trim();
+  if (!u) return 'http://127.0.0.1:3010/api';
+  if (u.startsWith('http://') || u.startsWith('https://')) return u.replace(/\/$/, '');
+  return `https://${u.replace(/\/$/, '')}`;
+}
+
+const stored = (import.meta.env?.VITE_API_URL as string) || localStorage.getItem('lupo_api_base') || 'http://127.0.0.1:3010/api';
+let baseUrl: string = normalizeBaseUrl(stored);
 
 console.log('🔌 API Base URL:', baseUrl);
 let authToken: string | null = localStorage.getItem('lupo_api_token') || null;
@@ -33,8 +42,8 @@ axios.interceptors.response.use(
 );
 
 export const setBaseUrl = (url: string) => {
-  baseUrl = url;
-  localStorage.setItem('lupo_api_base', url);
+  baseUrl = normalizeBaseUrl(url);
+  localStorage.setItem('lupo_api_base', baseUrl);
 };
 
 export const setAuthToken = (token: string | null) => {
@@ -46,7 +55,7 @@ export const setAuthToken = (token: string | null) => {
 const DEFAULT_TIMEOUT = 15000; // 15s
 
 export const request = async <T = any>(path: string, method: HttpMethod = 'GET', body?: any, extraHeaders?: Record<string, string>, timeout = DEFAULT_TIMEOUT): Promise<T> => {
-  const url = path.startsWith('http') ? path : `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
 
   const headers: Record<string, string> = {
     'Accept': 'application/json',

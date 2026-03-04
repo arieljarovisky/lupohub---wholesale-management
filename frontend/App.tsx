@@ -323,6 +323,7 @@ const App: React.FC = () => {
                  <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                  <input 
                   type="email" 
+                  autoComplete="email"
                   autoFocus
                   required
                   placeholder="usuario@lupo.ar"
@@ -339,6 +340,7 @@ const App: React.FC = () => {
                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                  <input 
                   type="password" 
+                  autoComplete="current-password"
                   required
                   placeholder="••••••••"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl py-4 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder-slate-600"
