@@ -743,8 +743,8 @@ const Settings: React.FC<SettingsProps> = ({
                 </p>
                  {integrations.mercadolibre && (
                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                      <div>
+                    <div className="flex flex-wrap justify-between items-start gap-3">
+                      <div className="min-w-0">
                         <p className="text-xs text-slate-500">Estado de sincronización</p>
                         <p className="text-white font-bold">Activo</p>
                       </div>
@@ -773,19 +773,19 @@ const Settings: React.FC<SettingsProps> = ({
                           SINCRONIZAR STOCK A ML
                         </button>
                       </div>
-                      <p className="text-slate-500 text-xs mt-2">
-                        La app es la fuente de verdad. Este botón envía tu stock local a ML.{' '}
-                        <button
-                          type="button"
-                          onClick={handleImportStockFromMercadoLibre}
-                          disabled={mlStockSyncLoading}
-                          className="text-yellow-400 hover:text-yellow-300 underline disabled:opacity-50"
-                        >
-                          Importar desde ML
-                        </button>
-                        {' '}(traer lo publicado en ML a la app, uso ocasional).
-                      </p>
                     </div>
+                    <p className="text-slate-500 text-xs">
+                      La app es la fuente de verdad. El botón anterior envía tu stock local a ML.{' '}
+                      <button
+                        type="button"
+                        onClick={handleImportStockFromMercadoLibre}
+                        disabled={mlStockSyncLoading}
+                        className="text-yellow-400 hover:text-yellow-300 underline disabled:opacity-50"
+                      >
+                        Importar desde ML
+                      </button>
+                      {' '}(traer lo publicado en ML a la app, uso ocasional).
+                    </p>
 
                     {/* Mensaje Automático */}
                     <div className="border-t border-slate-700/50 pt-4 mt-2">

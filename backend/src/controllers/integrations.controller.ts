@@ -10,6 +10,9 @@ const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
 const TN_TOKEN_URL = 'https://www.tiendanube.com/apps/authorize/token';
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
+/** URL del frontend para redirigir después del OAuth (producción: tu dominio Vercel). */
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+
 // Función para obtener un token válido de Mercado Libre (refresca automáticamente si expiró)
 async function getValidMLToken(): Promise<{ access_token: string; user_id: string } | null> {
   const integration = await get(`SELECT access_token, refresh_token, expires_at, user_id FROM integrations WHERE platform = 'mercadolibre'`);
@@ -129,10 +132,10 @@ export const handleMercadoLibreCallback = async (req: Request, res: Response) =>
     `, [access_token, refresh_token, expiresAt, user_id]);
 
     // Redirect to frontend settings page with success
-    res.redirect('http://localhost:3000/#settings?status=success&platform=mercadolibre');
+    res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=mercadolibre`);
   } catch (error: any) {
     console.error('Error in Mercado Libre callback:', error.response?.data || error.message);
-    res.redirect('http://localhost:3000/#settings?status=error&platform=mercadolibre');
+    res.redirect(`${FRONTEND_URL}/#settings?status=error&platform=mercadolibre`);
   }
 };
 
@@ -191,10 +194,10 @@ export const handleTiendaNubeCallback = async (req: Request, res: Response) => {
       updated_at = CURRENT_TIMESTAMP
     `, [access_token, response.data.refresh_token || null, expiresAt, user_id, user_id]);
 
-    res.redirect('http://localhost:3000/#settings?status=success&platform=tiendanube');
+    res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=tiendanube`);
   } catch (error: any) {
     console.error('Error in Tienda Nube callback:', error.response?.data || error.message);
-    res.redirect('http://localhost:3000/#settings?status=error&platform=tiendanube');
+    res.redirect(`${FRONTEND_URL}/#settings?status=error&platform=tiendanube`);
   }
 };
 
