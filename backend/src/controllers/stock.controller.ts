@@ -308,22 +308,38 @@ export const getStockMovements = async (req: Request, res: Response) => {
 export const forceSyncStock = async (req: Request, res: Response) => {
   try {
     const { variantId } = req.params;
-
-    const stockRow = await get(
-      `SELECT stock FROM stocks WHERE variant_id = ?`,
-      [variantId]
-    );
-
-    if (!stockRow) {
-      return res.status(404).json({ message: 'Variante no encontrada' });
-    }
-
+    const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+    if (!stockRow) return res.status(404).json({ message: 'Variante no encontrada' });
     await syncStockToExternalPlatforms(variantId, stockRow.stock);
-
     res.json({ message: 'Sincronización iniciada', variantId, stock: stockRow.stock });
   } catch (error: any) {
     console.error('Error forcing stock sync:', error);
     res.status(500).json({ message: 'Error sincronizando stock' });
+  }
+};
+
+// Endpoint: Ajuste manual de stock (Admin o Depósito)
+export const updateVariantStockEndpoint = async (req: Request, res: Response) => {
+  try {
+    const { variantId } = req.params;
+    const { stock } = req.body;
+    const user = (req as any).user;
+    const userId = user?.id || 'sistema';
+    if (typeof stock !== 'number' || stock < 0) {
+      return res.status(400).json({ message: 'stock debe ser un número >= 0' });
+    }
+    const ok = await updateVariantStock(
+      variantId,
+      Math.floor(stock),
+      'AJUSTE_MANUAL',
+      `Ajuste por usuario ${userId}`,
+      true
+    );
+    if (!ok) return res.status(500).json({ message: 'Error actualizando stock' });
+    res.json({ variantId, stock: Math.floor(stock) });
+  } catch (error: any) {
+    console.error('Error updating variant stock:', error);
+    res.status(500).json({ message: 'Error actualizando stock' });
   }
 };
 

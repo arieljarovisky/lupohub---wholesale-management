@@ -111,6 +111,15 @@ const Orders: React.FC<OrdersProps> = ({
                     )}
                   </div>
                   <div className="text-md font-bold text-slate-200">{customer?.businessName || 'Cliente desconocido'}</div>
+                  {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
+                    <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                      <Truck size={12} />
+                      Sacado por <span className="text-slate-400 font-medium">{users.find(u => u.id === order.pickedBy)?.name || order.pickedBy}</span>
+                      {order.dispatchedAt && (
+                        <> el {new Date(order.dispatchedAt).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {role === Role.ADMIN && (

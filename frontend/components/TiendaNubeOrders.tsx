@@ -111,7 +111,7 @@ const TiendaNubeOrders: React.FC = () => {
     total: orders.length,
     paid: orders.filter(o => o.paymentStatus === 'paid').length,
     pending: orders.filter(o => o.paymentStatus === 'pending').length,
-    totalAmount: orders.reduce((sum, o) => sum + parseFloat(o.total || '0'), 0)
+    porDespachar: orders.filter(o => o.paymentStatus === 'paid' && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered').length
   };
 
   const setQuickDate = (days: number) => {
@@ -192,11 +192,11 @@ const TiendaNubeOrders: React.FC = () => {
         <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-cyan-500/10 rounded-xl">
-              <DollarSign size={20} className="text-cyan-400" />
+              <Truck size={20} className="text-cyan-400" />
             </div>
             <div>
-              <p className="text-2xl font-black text-cyan-400">${formatCurrency(stats.totalAmount.toString())}</p>
-              <p className="text-xs text-slate-500">Facturado</p>
+              <p className="text-2xl font-black text-cyan-400">{stats.porDespachar}</p>
+              <p className="text-xs text-slate-500">Por despachar</p>
             </div>
           </div>
         </div>
@@ -407,11 +407,11 @@ const TiendaNubeOrders: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Right: Total & Actions */}
+                    {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <p className="text-2xl font-black text-white">${formatCurrency(order.total)}</p>
-                        <p className="text-xs text-slate-500">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
+                        <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
+                        <p className="text-xs text-slate-500">#{order.number}</p>
                       </div>
                       <ChevronDown 
                         size={20} 
@@ -477,8 +477,6 @@ const TiendaNubeOrders: React.FC = () => {
                               <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Producto</th>
                               <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
                               <th className="text-center text-[10px] text-slate-500 font-bold uppercase p-3">Cant.</th>
-                              <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Precio</th>
-                              <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Subtotal</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -486,18 +484,10 @@ const TiendaNubeOrders: React.FC = () => {
                               <tr key={i} className="border-b border-slate-700/20 last:border-0">
                                 <td className="p-3 text-white text-sm">{product.name}</td>
                                 <td className="p-3 text-slate-400 text-xs font-mono">{product.sku || '-'}</td>
-                                <td className="p-3 text-center text-white font-bold">{product.quantity}</td>
-                                <td className="p-3 text-right text-slate-400 text-sm">${formatCurrency(product.price)}</td>
-                                <td className="p-3 text-right text-white font-bold">${formatCurrency((parseFloat(product.price) * product.quantity).toString())}</td>
+                                <td className="p-3 text-center text-cyan-400 font-bold">{product.quantity}</td>
                               </tr>
                             ))}
                           </tbody>
-                          <tfoot>
-                            <tr className="bg-slate-800/50">
-                              <td colSpan={4} className="p-3 text-right text-slate-400 font-bold">TOTAL</td>
-                              <td className="p-3 text-right text-cyan-400 font-black text-lg">${formatCurrency(order.total)}</td>
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
                     </div>

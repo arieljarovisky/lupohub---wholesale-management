@@ -24,6 +24,7 @@ export const getOrders = async (req: any, res: any) => {
         status: order.status,
         total: order.total,
         pickedBy: order.picked_by,
+        dispatchedAt: order.dispatched_at,
         items: items
       };
     }));
@@ -93,7 +94,7 @@ export const createOrder = async (req: any, res: any) => {
 
 export const updateOrderStatus = async (req: any, res: any) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, pickedBy } = req.body;
 
   try {
     // Obtener estado anterior
@@ -120,7 +121,17 @@ export const updateOrderStatus = async (req: any, res: any) => {
       }
     }
 
-    await execute("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+    // Documentar quién prepara/despacha y cuándo
+    if (status === 'Preparación' && pickedBy) {
+      await execute("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
+    } else if (status === 'Despachado') {
+      await execute(
+        "UPDATE orders SET status = ?, picked_by = COALESCE(?, picked_by), dispatched_at = NOW() WHERE id = ?",
+        [status, pickedBy || null, id]
+      );
+    } else {
+      await execute("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+    }
     res.json({ id, status, previousStatus });
   } catch (error) {
     console.error('Error updating order status:', error);

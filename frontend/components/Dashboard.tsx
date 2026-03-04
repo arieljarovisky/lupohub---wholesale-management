@@ -201,6 +201,12 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   };
   orderCounts.total = orderCounts.tn + orderCounts.ml + orderCounts.may;
 
+  // Por despachar (sacar y no despachado) — sin total facturado
+  const tnToShipCount = tnOrders.filter((o: any) => o.paymentStatus === 'paid' && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered').length;
+  const mlToShipCount = mlOrders.filter((o: any) => o.status === 'paid' && o.shipping?.status && ['ready_to_ship', 'pending', 'handling'].includes(o.shipping.status)).length;
+  const mayToShipCount = orders.filter(o => o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.PREPARATION).length;
+  const totalToShip = tnToShipCount + mlToShipCount + mayToShipCount;
+
   const formatMoney = (n: number) => {
     if (n >= 1000000) return `$${(n / 1000000).toFixed(1)}M`;
     if (n >= 1000) return `$${Math.round(n / 1000)}K`;
@@ -208,9 +214,9 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   };
 
   const salesByChannel = [
-    { name: 'Tienda Nube', value: facturacion.tn, color: '#06b6d4' },
-    { name: 'Mercado Libre', value: facturacion.ml, color: '#eab308' },
-    { name: 'Mayoristas', value: facturacion.may, color: '#3b82f6' }
+    { name: 'Tienda Nube', value: tnToShipCount, color: '#06b6d4' },
+    { name: 'Mercado Libre', value: mlToShipCount, color: '#eab308' },
+    { name: 'Mayoristas', value: mayToShipCount, color: '#3b82f6' }
   ].filter(d => d.value > 0);
 
   if (loading) {
@@ -526,15 +532,15 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
         <span>Últimos <strong className="text-white">{dateRange} días</strong></span>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs — solo por despachar, sin total facturado */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 rounded-xl p-5 border border-emerald-500/20">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-emerald-400 text-xs font-semibold uppercase">Facturado</span>
-            <DollarSign size={20} className="text-emerald-400" />
+            <span className="text-emerald-400 text-xs font-semibold uppercase">Por despachar</span>
+            <Package size={20} className="text-emerald-400" />
           </div>
-          <p className="text-2xl font-bold text-white">{formatMoney(facturacion.total)}</p>
-          <p className="text-slate-500 text-xs mt-2">Órdenes pagadas</p>
+          <p className="text-2xl font-bold text-white">{totalToShip}</p>
+          <p className="text-slate-500 text-xs mt-2">TN · ML · May</p>
         </div>
 
         <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-5 border border-blue-500/20">
@@ -565,7 +571,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
         </div>
       </div>
 
-      {/* Por Canal */}
+      {/* Por canal — solo por despachar, sin montos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 flex items-center gap-4">
           <div className="p-3 bg-cyan-500/10 rounded-xl">
@@ -573,13 +579,10 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
           </div>
           <div className="flex-1">
             <p className="text-slate-500 text-xs">Tienda Nube</p>
-            <p className="text-xl font-bold text-white">{formatMoney(facturacion.tn)}</p>
+            <p className="text-xl font-bold text-white">{tnToShipCount} por despachar</p>
           </div>
           <div className="text-right">
-            <p className="text-cyan-400 text-sm font-bold">
-              {facturacion.total > 0 ? Math.round((facturacion.tn / facturacion.total) * 100) : 0}%
-            </p>
-            <p className="text-slate-600 text-xs">{orderCounts.tn} órdenes</p>
+            <p className="text-cyan-400 text-sm font-bold">{totalToShip > 0 ? Math.round((tnToShipCount / totalToShip) * 100) : 0}%</p>
           </div>
         </div>
 
@@ -589,13 +592,10 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
           </div>
           <div className="flex-1">
             <p className="text-slate-500 text-xs">Mercado Libre</p>
-            <p className="text-xl font-bold text-white">{formatMoney(facturacion.ml)}</p>
+            <p className="text-xl font-bold text-white">{mlToShipCount} por despachar</p>
           </div>
           <div className="text-right">
-            <p className="text-yellow-400 text-sm font-bold">
-              {facturacion.total > 0 ? Math.round((facturacion.ml / facturacion.total) * 100) : 0}%
-            </p>
-            <p className="text-slate-600 text-xs">{orderCounts.ml} órdenes</p>
+            <p className="text-yellow-400 text-sm font-bold">{totalToShip > 0 ? Math.round((mlToShipCount / totalToShip) * 100) : 0}%</p>
           </div>
         </div>
 
@@ -605,13 +605,10 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
           </div>
           <div className="flex-1">
             <p className="text-slate-500 text-xs">Mayoristas</p>
-            <p className="text-xl font-bold text-white">{formatMoney(facturacion.may)}</p>
+            <p className="text-xl font-bold text-white">{mayToShipCount} por despachar</p>
           </div>
           <div className="text-right">
-            <p className="text-blue-400 text-sm font-bold">
-              {facturacion.total > 0 ? Math.round((facturacion.may / facturacion.total) * 100) : 0}%
-            </p>
-            <p className="text-slate-600 text-xs">{orderCounts.may} pedidos</p>
+            <p className="text-blue-400 text-sm font-bold">{totalToShip > 0 ? Math.round((mayToShipCount / totalToShip) * 100) : 0}%</p>
           </div>
         </div>
       </div>
@@ -638,7 +635,6 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                     <p className="flex-1 text-white text-sm truncate">{p.name}</p>
                     <div className="text-right">
                       <p className="text-white font-bold text-sm">{p.qty} uds</p>
-                      <p className="text-slate-500 text-xs">{formatMoney(p.rev)}</p>
                     </div>
                   </div>
                 ))}
@@ -716,7 +712,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
         </div>
 
         <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
-          <h3 className="font-bold text-white mb-4">Por Canal</h3>
+          <h3 className="font-bold text-white mb-4">Por canal (por despachar)</h3>
           <div className="h-64 flex flex-col sm:flex-row items-center">
             {salesByChannel.length > 0 ? (
               <>
@@ -730,7 +726,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                       </Pie>
                       <Tooltip
                         contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}
-                        formatter={(value: number) => [formatMoney(value), '']}
+                        formatter={(value: number) => [`${value} por despachar`, '']}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -741,10 +737,10 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                       <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
                       <div className="flex-1">
                         <p className="text-white text-sm">{item.name}</p>
-                        <p className="text-slate-500 text-xs">{formatMoney(item.value)}</p>
+                        <p className="text-slate-500 text-xs">{item.value} por despachar</p>
                       </div>
                       <p className="text-white font-bold text-sm">
-                        {facturacion.total > 0 ? Math.round((item.value / facturacion.total) * 100) : 0}%
+                        {totalToShip > 0 ? Math.round((item.value / totalToShip) * 100) : 0}%
                       </p>
                     </div>
                   ))}

@@ -180,18 +180,13 @@ const App: React.FC = () => {
   };
 
   const handleUpdateStock = async (productId: string, newStock: number) => {
-    // Optimistic Update
     const previousProducts = [...products];
     setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: newStock } : p));
-
     try {
-      // NOTE: Backend does not expose an updateProduct endpoint yet.
-      // For now we rely on the optimistic local update only.
-      // TODO: Add updateProduct endpoint to backend and call it here.
+      await api.updateVariantStock(productId, newStock);
     } catch (error) {
-      console.error(error);
-      setProducts(previousProducts); // Rollback
-      alert("Error al actualizar stock en servidor");
+      setProducts(previousProducts);
+      alert("Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).");
     }
   };
 
@@ -201,13 +196,11 @@ const App: React.FC = () => {
     return customers.filter(c => c.sellerId === currentUser.id);
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
-     // Optimistic
+  const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
      const previousOrders = [...orders];
-     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-
+     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, ...(pickedBy ? { pickedBy } : {}), ...(status === OrderStatus.DISPATCHED ? { dispatchedAt: new Date().toISOString() } : {}) } : o));
      try {
-       await api.updateOrderStatus(orderId, status);
+       await api.updateOrderStatus(orderId, status, pickedBy);
      } catch (error) {
        setOrders(previousOrders);
        alert("Error actualizando estado del pedido");
@@ -308,8 +301,19 @@ const App: React.FC = () => {
     setCustomers(prev => [...prev, newCustomer]);
   };
 
-  const handleStartPicking = (order: Order) => {
-    setActivePickingOrder(order);
+  const handleStartPicking = async (order: Order) => {
+    if (currentUser?.role === Role.WAREHOUSE) {
+      try {
+        await api.updateOrderStatus(order.id, OrderStatus.PREPARATION, currentUser.id);
+        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, pickedBy: currentUser.id } : o));
+        setActivePickingOrder({ ...order, pickedBy: currentUser.id });
+      } catch {
+        alert('Error al registrar preparación del pedido');
+        return;
+      }
+    } else {
+      setActivePickingOrder(order);
+    }
     setCurrentView('order_picking');
   };
 
@@ -326,10 +330,11 @@ const App: React.FC = () => {
       ...o, 
       items: updatedItems,
       status: newStatus,
-      pickedBy: currentUser?.id 
+      pickedBy: currentUser?.id,
+      dispatchedAt: newStatus === OrderStatus.DISPATCHED ? new Date().toISOString() : o.dispatchedAt
     } : o));
 
-    await handleUpdateOrderStatus(orderId, newStatus);
+    await handleUpdateOrderStatus(orderId, newStatus, currentUser?.id);
 
     setActivePickingOrder(null);
     setCurrentView('orders');

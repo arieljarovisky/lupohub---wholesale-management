@@ -197,10 +197,17 @@ export const api = {
   },
 
 
-  updateOrderStatus: async (id: string, status: OrderStatus): Promise<void> => {
+  updateOrderStatus: async (id: string, status: OrderStatus, pickedBy?: string): Promise<void> => {
     return handleRequest(async () => {
-      await request<void>(`/orders/${id}/status`, 'PATCH', { status });
+      await request<void>(`/orders/${id}/status`, 'PATCH', { status, pickedBy });
     }, undefined, 'updateOrderStatus');
+  },
+
+  // Ajuste manual de stock por variante (Admin o Depósito)
+  updateVariantStock: async (variantId: string, stock: number): Promise<void> => {
+    return handleRequest(async () => {
+      await request<void>(`/stock/variant/${variantId}`, 'PUT', { stock });
+    }, undefined, 'updateVariantStock');
   },
 
   // --- INTEGRATIONS ---

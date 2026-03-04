@@ -467,13 +467,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
-    onUpdateStock(productId, Math.max(0, currentStock + delta));
+    const newStock = Math.max(0, currentStock + delta);
+    setLoadedVariants(prev => {
+      const next = { ...prev };
+      for (const gk of Object.keys(next)) {
+        const idx = next[gk].findIndex((p: any) => p.id === productId);
+        if (idx >= 0) {
+          next[gk] = [...next[gk]];
+          (next[gk][idx] as any).stock = newStock;
+          break;
+        }
+      }
+      return next;
+    });
+    onUpdateStock(productId, newStock);
   };
 
   const handleManualStockChange = (productId: string, value: string) => {
     if (!onUpdateStock) return;
     const num = parseInt(value);
-    if (!isNaN(num)) onUpdateStock(productId, Math.max(0, num));
+    if (isNaN(num)) return;
+    const newStock = Math.max(0, num);
+    setLoadedVariants(prev => {
+      const next = { ...prev };
+      for (const gk of Object.keys(next)) {
+        const idx = next[gk].findIndex((p: any) => p.id === productId);
+        if (idx >= 0) {
+          next[gk] = [...next[gk]];
+          (next[gk][idx] as any).stock = newStock;
+          break;
+        }
+      }
+      return next;
+    });
+    onUpdateStock(productId, newStock);
   };
 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});

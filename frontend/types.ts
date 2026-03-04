@@ -78,7 +78,8 @@ export interface Order {
   id: string;
   customerId: string;
   sellerId: string; // User ID
-  pickedBy?: string; // Warehouse User ID who claimed/prepared the order
+  pickedBy?: string; // Usuario de depósito que preparó/despachó
+  dispatchedAt?: string; // Fecha/hora en que se despachó
   items: OrderItem[];
   total: number;
   status: OrderStatus;

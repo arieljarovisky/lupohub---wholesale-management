@@ -114,7 +114,7 @@ const MercadoLibreOrders: React.FC = () => {
     total: orders.length,
     paid: orders.filter(o => o.status === 'paid').length,
     pending: orders.filter(o => o.status === 'pending' || o.status === 'confirmed').length,
-    totalAmount: orders.reduce((sum, o) => sum + (o.total || 0), 0)
+    porDespachar: orders.filter(o => o.status === 'paid' && o.shipping?.status && ['ready_to_ship', 'pending', 'handling'].includes(o.shipping.status)).length
   };
 
   const setQuickDate = (days: number) => {
@@ -195,11 +195,11 @@ const MercadoLibreOrders: React.FC = () => {
         <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-700/50">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-yellow-500/10 rounded-xl">
-              <DollarSign size={20} className="text-yellow-400" />
+              <Truck size={20} className="text-yellow-400" />
             </div>
             <div>
-              <p className="text-2xl font-black text-yellow-400">${formatCurrency(stats.totalAmount)}</p>
-              <p className="text-xs text-slate-500">Facturado</p>
+              <p className="text-2xl font-black text-yellow-400">{stats.porDespachar}</p>
+              <p className="text-xs text-slate-500">Por despachar</p>
             </div>
           </div>
         </div>
@@ -414,11 +414,11 @@ const MercadoLibreOrders: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Right: Total & Actions */}
+                    {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <p className="text-2xl font-black text-white">${formatCurrency(order.total)}</p>
-                        <p className="text-xs text-slate-500">{order.items.length} producto{order.items.length !== 1 ? 's' : ''}</p>
+                        <p className="text-sm font-bold text-white">{order.items.length} producto{order.items.length !== 1 ? 's' : ''}</p>
+                        <p className="text-xs text-slate-500">#{order.id}</p>
                       </div>
                       <ChevronDown 
                         size={20} 
@@ -486,8 +486,6 @@ const MercadoLibreOrders: React.FC = () => {
                               <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Producto</th>
                               <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
                               <th className="text-center text-[10px] text-slate-500 font-bold uppercase p-3">Cant.</th>
-                              <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Precio</th>
-                              <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Subtotal</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -498,18 +496,10 @@ const MercadoLibreOrders: React.FC = () => {
                                   <p className="text-slate-500 text-[10px]">ID: {item.id}</p>
                                 </td>
                                 <td className="p-3 text-slate-400 text-xs font-mono">{item.sku || '-'}</td>
-                                <td className="p-3 text-center text-white font-bold">{item.quantity}</td>
-                                <td className="p-3 text-right text-slate-400 text-sm">${formatCurrency(item.unitPrice)}</td>
-                                <td className="p-3 text-right text-white font-bold">${formatCurrency(item.unitPrice * item.quantity)}</td>
+                                <td className="p-3 text-center text-yellow-400 font-bold">{item.quantity}</td>
                               </tr>
                             ))}
                           </tbody>
-                          <tfoot>
-                            <tr className="bg-slate-800/50">
-                              <td colSpan={4} className="p-3 text-right text-slate-400 font-bold">TOTAL</td>
-                              <td className="p-3 text-right text-yellow-400 font-black text-lg">${formatCurrency(order.total)}</td>
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
                     </div>

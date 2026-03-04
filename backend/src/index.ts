@@ -13,6 +13,7 @@ import despachosRoutes from './routes/despachos.routes';
 import usersRoutes from './routes/users.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
+import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
 import { initSchema } from './database/init_schema';
@@ -60,6 +61,7 @@ async function initDatabase() {
       await initSchema();
       await ensureAdminUser();
       await addStockMovementsTable();
+      await addDispatchedAtToOrders();
       await fixIntegrationsTable();
       await addDespachosTable();
       console.log('[DB] Tablas inicializadas correctamente');
