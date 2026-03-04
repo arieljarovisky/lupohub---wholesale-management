@@ -1,0 +1,12 @@
+{
+  "name": "LupoHub - Gestión Mayorista",
+  "short_name": "LupoHub",
+  "description": "Gestión mayorista, inventario y pedidos",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "scope": "/",
+  "lang": "es"
+}
