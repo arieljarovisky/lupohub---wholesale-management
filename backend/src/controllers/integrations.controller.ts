@@ -1742,7 +1742,7 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
         const statuses = await Promise.all(
           shipmentIds.map((id) => (id ? getShipmentStatus(id) : Promise.resolve(null)))
         );
-        batch.forEach((order, idx) => {
+        batch.forEach((order: any, idx: number) => {
           const st = statuses[idx];
           if (st && POR_ENVIAR_STATUSES.includes(st)) {
             order._shipment_status = st;

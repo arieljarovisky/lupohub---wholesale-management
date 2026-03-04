@@ -25,6 +25,7 @@ const stock_routes_1 = __importDefault(require("./routes/stock.routes"));
 const despachos_routes_1 = __importDefault(require("./routes/despachos.routes"));
 const users_routes_1 = __importDefault(require("./routes/users.routes"));
 const add_stock_movements_table_1 = require("./database/add_stock_movements_table");
+const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
 const init_schema_1 = require("./database/init_schema");
@@ -67,6 +68,7 @@ function initDatabase() {
                 yield (0, init_schema_1.initSchema)();
                 yield (0, ensure_admin_user_1.ensureAdminUser)();
                 yield (0, add_stock_movements_table_1.addStockMovementsTable)();
+                yield (0, add_dispatched_at_orders_1.addDispatchedAtToOrders)();
                 yield (0, fix_integrations_table_1.fixIntegrationsTable)();
                 yield (0, add_despachos_table_1.addDespachosTable)();
                 console.log('[DB] Tablas inicializadas correctamente');

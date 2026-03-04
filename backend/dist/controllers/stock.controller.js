@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importSalesHistory = exports.createStockSnapshot = exports.forceSyncStock = exports.getStockMovements = exports.updateMercadoLibreStockByVariant = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importSalesHistory = exports.createStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateMercadoLibreStockByVariant = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
 // Registrar movimiento de stock en historial
@@ -246,9 +246,8 @@ const forceSyncStock = (req, res) => __awaiter(void 0, void 0, void 0, function*
     try {
         const { variantId } = req.params;
         const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-        if (!stockRow) {
+        if (!stockRow)
             return res.status(404).json({ message: 'Variante no encontrada' });
-        }
         yield (0, exports.syncStockToExternalPlatforms)(variantId, stockRow.stock);
         res.json({ message: 'Sincronización iniciada', variantId, stock: stockRow.stock });
     }
@@ -258,6 +257,27 @@ const forceSyncStock = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.forceSyncStock = forceSyncStock;
+// Endpoint: Ajuste manual de stock (Admin o Depósito)
+const updateVariantStockEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { variantId } = req.params;
+        const { stock } = req.body;
+        const user = req.user;
+        const userId = (user === null || user === void 0 ? void 0 : user.id) || 'sistema';
+        if (typeof stock !== 'number' || stock < 0) {
+            return res.status(400).json({ message: 'stock debe ser un número >= 0' });
+        }
+        const ok = yield (0, exports.updateVariantStock)(variantId, Math.floor(stock), 'AJUSTE_MANUAL', `Ajuste por usuario ${userId}`, true);
+        if (!ok)
+            return res.status(500).json({ message: 'Error actualizando stock' });
+        res.json({ variantId, stock: Math.floor(stock) });
+    }
+    catch (error) {
+        console.error('Error updating variant stock:', error);
+        res.status(500).json({ message: 'Error actualizando stock' });
+    }
+});
+exports.updateVariantStockEndpoint = updateVariantStockEndpoint;
 // Endpoint: Crear snapshot inicial de todo el stock actual
 const createStockSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {

@@ -182,7 +182,7 @@ const getTiendaNubeAuthUrl = (req, res) => {
 };
 exports.getTiendaNubeAuthUrl = getTiendaNubeAuthUrl;
 const handleTiendaNubeCallback = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { code } = req.query;
     const appId = process.env.TIENDA_NUBE_APP_ID;
     const clientSecret = process.env.TIENDA_NUBE_CLIENT_SECRET;
@@ -216,10 +216,26 @@ const handleTiendaNubeCallback = (req, res) => __awaiter(void 0, void 0, void 0,
       store_id = VALUES(store_id),
       updated_at = CURRENT_TIMESTAMP
     `, [access_token, response.data.refresh_token || null, expiresAt, user_id, user_id]);
+        // Registrar webhook para order/paid y descontar stock automáticamente al vender
+        const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || '').replace(/\/$/, '');
+        if (backendUrl && backendUrl.startsWith('https://')) {
+            const webhookUrl = `${backendUrl}/api/integrations/tiendanube/webhook`;
+            try {
+                yield axios_1.default.post(`https://api.tiendanube.com/v1/${user_id}/webhooks`, { event: 'order/paid', url: webhookUrl }, { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } });
+                console.log('[TN] Webhook order/paid registrado:', webhookUrl);
+            }
+            catch (whErr) {
+                const msg = ((_c = (_b = (_a = whErr.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.url) === null || _c === void 0 ? void 0 : _c[0]) || ((_f = (_e = (_d = whErr.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.event) === null || _f === void 0 ? void 0 : _f[0]) || whErr.message;
+                console.warn('[TN] No se pudo registrar webhook (puede existir ya):', msg);
+            }
+        }
+        else {
+            console.warn('[TN] Configure BACKEND_URL (HTTPS) en .env para activar descuento de stock automático por ventas.');
+        }
         res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=tiendanube`);
     }
     catch (error) {
-        console.error('Error in Tienda Nube callback:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        console.error('Error in Tienda Nube callback:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
         res.redirect(`${FRONTEND_URL}/#settings?status=error&platform=tiendanube`);
     }
 });
@@ -1012,8 +1028,8 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
             console.log('[TN Webhook] Store ID no coincide, ignorando');
             return res.status(200).json({ received: true, ignored: true });
         }
-        // Procesar según el tipo de evento
-        if (event === 'order/created' || event === 'order/paid') {
+        // Procesar solo cuando la orden se paga (descontar stock una sola vez)
+        if (event === 'order/paid') {
             const orderId = req.body.id;
             yield processTiendaNubeOrder(orderId);
         }
@@ -1031,6 +1047,12 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
             return;
+        // Idempotencia: no descontar dos veces la misma orden (p. ej. si TN reenvía el webhook)
+        const alreadyProcessed = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`, [`Orden TN: ${orderId}`]);
+        if (alreadyProcessed) {
+            console.log(`[TN Order] Orden ${orderId} ya procesada, omitiendo`);
+            return;
+        }
         const orderRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${integration.store_id}/orders/${orderId}`, {
             headers: {
                 'Authentication': `bearer ${integration.access_token}`,
@@ -1038,10 +1060,10 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
             }
         });
         const order = orderRes.data;
-        console.log(`[TN Order] Procesando orden ${orderId}, estado: ${order.status}`);
-        // Solo procesar órdenes pagadas o confirmadas
-        if (!['paid', 'open'].includes(order.payment_status)) {
-            console.log(`[TN Order] Orden ${orderId} no está pagada, ignorando`);
+        console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}`);
+        // Solo descontar cuando la venta está pagada
+        if (order.payment_status !== 'paid') {
+            console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
             return;
         }
         const { updateVariantStock, logStockMovement } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -1424,8 +1446,10 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!storeId) {
             return res.status(400).json({ message: 'No se encontró el store_id de Tienda Nube' });
         }
-        const { page = '1', per_page = '20', status, created_at_min, created_at_max } = req.query;
-        let url = `https://api.tiendanube.com/v1/${storeId}/orders?page=${page}&per_page=${per_page}`;
+        const { page = '1', per_page = '20', status, created_at_min, created_at_max, only_paid_pending_shipment } = req.query;
+        const perPageNum = Math.min(100, Math.max(1, parseInt(per_page) || 20));
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        let url = `https://api.tiendanube.com/v1/${storeId}/orders?page=${pageNum}&per_page=${perPageNum}`;
         if (status) {
             url += `&status=${status}`;
         }
@@ -1441,7 +1465,7 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                 'User-Agent': TN_USER_AGENT
             }
         });
-        const orders = ordersRes.data.map((order) => {
+        let orders = ordersRes.data.map((order) => {
             var _a, _b, _c;
             // Extraer nombre del cliente de diferentes fuentes
             let customerName = 'Sin nombre';
@@ -1494,11 +1518,16 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                 updatedAt: order.updated_at
             };
         });
+        if (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') {
+            orders = orders.filter((o) => o.paymentStatus === 'paid' &&
+                o.shippingStatus !== 'shipped' &&
+                o.shippingStatus !== 'delivered');
+        }
         res.json({
             orders,
-            page: parseInt(page),
-            per_page: parseInt(per_page),
-            total: ordersRes.headers['x-total-count'] || orders.length
+            page: pageNum,
+            per_page: perPageNum,
+            total: (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') ? orders.length : (ordersRes.headers['x-total-count'] || orders.length)
         });
     }
     catch (error) {
@@ -1509,51 +1538,32 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getTiendaNubeOrders = getTiendaNubeOrders;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
         }
-        const { offset = '0', limit = '20', status, date_from, date_to } = req.query;
-        let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offset}&limit=${limit}&sort=date_desc`;
-        if (status) {
-            url += `&order.status=${status}`;
-        }
-        if (date_from) {
-            url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
-        }
-        if (date_to) {
-            url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
-        }
-        const ordersRes = yield axios_1.default.get(url, {
-            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        });
-        const orders = (ordersRes.data.results || []).map((order) => {
-            var _a, _b, _c, _d;
-            // Determinar estado del envío
-            let shippingStatus = null;
-            if (order.shipping) {
-                // El status puede venir en diferentes lugares
+        const { offset = '0', limit = '20', status, date_from, date_to, only_pending_shipment_and_cancelled } = req.query;
+        const limitNum = Math.min(Math.max(1, parseInt(limit) || 20), 50);
+        const offsetNum = Math.max(0, parseInt(offset) || 0);
+        const onlyPendingAndCancelled = only_pending_shipment_and_cancelled === '1' || only_pending_shipment_and_cancelled === 'true';
+        const mapOrder = (order) => {
+            var _a, _b, _c, _d, _e, _f;
+            let shippingStatus = (_a = order._shipment_status) !== null && _a !== void 0 ? _a : null;
+            if (!shippingStatus && order.shipping) {
                 shippingStatus = order.shipping.status || order.shipping.substatus || null;
-                // Si no hay status, inferir del estado de la orden
-                if (!shippingStatus) {
-                    if (order.status === 'paid' && order.shipping.id) {
-                        shippingStatus = 'ready_to_ship';
-                    }
+                if (!shippingStatus && order.status === 'paid' && order.shipping.id) {
+                    shippingStatus = 'ready_to_ship';
                 }
             }
-            // Mapear estados de ML a nuestros estados
             const statusMap = {
-                'to_be_agreed': 'pending',
-                'pending': 'pending',
-                'handling': 'handling',
-                'ready_to_ship': 'ready_to_ship',
-                'shipped': 'shipped',
-                'delivered': 'delivered',
-                'not_delivered': 'not_delivered',
-                'cancelled': 'cancelled'
+                'to_be_agreed': 'pending', 'pending': 'pending', 'handling': 'handling',
+                'ready_to_ship': 'ready_to_ship', 'shipped': 'shipped', 'delivered': 'delivered',
+                'not_delivered': 'not_delivered', 'cancelled': 'cancelled'
             };
+            const logisticType = ((_b = order.shipping) === null || _b === void 0 ? void 0 : _b.logistic_type) || null;
+            const isFlex = logisticType === 'self_service';
             return {
                 id: order.id,
                 status: order.status,
@@ -1561,10 +1571,10 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 total: order.total_amount,
                 currency: order.currency_id,
                 buyer: {
-                    id: (_a = order.buyer) === null || _a === void 0 ? void 0 : _a.id,
-                    nickname: (_b = order.buyer) === null || _b === void 0 ? void 0 : _b.nickname,
-                    firstName: (_c = order.buyer) === null || _c === void 0 ? void 0 : _c.first_name,
-                    lastName: (_d = order.buyer) === null || _d === void 0 ? void 0 : _d.last_name
+                    id: (_c = order.buyer) === null || _c === void 0 ? void 0 : _c.id,
+                    nickname: (_d = order.buyer) === null || _d === void 0 ? void 0 : _d.nickname,
+                    firstName: (_e = order.buyer) === null || _e === void 0 ? void 0 : _e.first_name,
+                    lastName: (_f = order.buyer) === null || _f === void 0 ? void 0 : _f.last_name
                 },
                 items: (order.order_items || []).map((item) => {
                     var _a, _b, _c, _d, _e;
@@ -1581,19 +1591,133 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
                     id: order.shipping.id,
                     status: statusMap[shippingStatus] || shippingStatus || 'pending'
                 } : null,
+                isFlex,
                 dateCreated: order.date_created,
                 dateClosed: order.date_closed
             };
-        });
+        };
+        let orders;
+        let total;
+        if (onlyPendingAndCancelled) {
+            // Solo "por enviar": órdenes pagadas cuyo shipment está en handling o ready_to_ship (API de Shipments)
+            const baseParams = `seller=${mlToken.user_id}&limit=50&sort=date_desc`;
+            const dateFrom = date_from ? `&order.date_created.from=${date_from}T00:00:00.000-03:00` : '';
+            const dateTo = date_to ? `&order.date_created.to=${date_to}T23:59:59.999-03:00` : '';
+            const paidRes = yield axios_1.default.get(`https://api.mercadolibre.com/orders/search?${baseParams}&order.status=paid${dateFrom}${dateTo}`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } });
+            const paid = paidRes.data.results || [];
+            const POR_ENVIAR_STATUSES = ['handling', 'ready_to_ship'];
+            const authHeader = { 'Authorization': `Bearer ${mlToken.access_token}`, 'x-format-new': 'true' };
+            const getShipmentId = (order) => __awaiter(void 0, void 0, void 0, function* () {
+                var _a, _b, _c;
+                const ship = order.shipping || order.shipment;
+                if (ship === null || ship === void 0 ? void 0 : ship.id)
+                    return ship.id;
+                try {
+                    const det = yield axios_1.default.get(`https://api.mercadolibre.com/orders/${order.id}`, {
+                        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                    });
+                    const s = ((_a = det.data) === null || _a === void 0 ? void 0 : _a.shipping) || ((_b = det.data) === null || _b === void 0 ? void 0 : _b.shipment);
+                    return (_c = s === null || s === void 0 ? void 0 : s.id) !== null && _c !== void 0 ? _c : null;
+                }
+                catch (_d) {
+                    return null;
+                }
+            });
+            const getShipmentStatus = (shipmentId) => __awaiter(void 0, void 0, void 0, function* () {
+                var _a, _b, _c, _d;
+                try {
+                    const res = yield axios_1.default.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+                        headers: authHeader
+                    });
+                    const data = res.data || {};
+                    const st = ((_b = (_a = data.status) !== null && _a !== void 0 ? _a : data.substatus) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase();
+                    return st || null;
+                }
+                catch (_e) {
+                    try {
+                        const res = yield axios_1.default.get(`https://api.mercadolibre.com/marketplace/shipments/${shipmentId}`, {
+                            headers: authHeader
+                        });
+                        const data = res.data || {};
+                        const st = ((_d = (_c = data.status) !== null && _c !== void 0 ? _c : data.substatus) !== null && _d !== void 0 ? _d : '').toString().trim().toLowerCase();
+                        return st || null;
+                    }
+                    catch (_f) {
+                        return null;
+                    }
+                }
+            });
+            const BATCH = 5;
+            const ordersPorEnviar = [];
+            for (let i = 0; i < paid.length; i += BATCH) {
+                const batch = paid.slice(i, i + BATCH);
+                const shipmentIds = yield Promise.all(batch.map(getShipmentId));
+                const statuses = yield Promise.all(shipmentIds.map((id) => (id ? getShipmentStatus(id) : Promise.resolve(null))));
+                batch.forEach((order, idx) => {
+                    const st = statuses[idx];
+                    if (st && POR_ENVIAR_STATUSES.includes(st)) {
+                        order._shipment_status = st;
+                        ordersPorEnviar.push(order);
+                    }
+                });
+            }
+            ordersPorEnviar.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
+            // Agrupar misma compra: mismo comprador + misma fecha/hora (al minuto) = una sola fila
+            const groupKey = (o) => {
+                var _a, _b;
+                const buyerId = (_b = (_a = o.buyer) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : '';
+                const dateStr = (o.date_created || '').toString();
+                const toMinute = dateStr.slice(0, 16);
+                return `${buyerId}-${toMinute}`;
+            };
+            const groups = new Map();
+            for (const o of ordersPorEnviar) {
+                const key = groupKey(o);
+                if (!groups.has(key))
+                    groups.set(key, []);
+                groups.get(key).push(o);
+            }
+            const groupedOrders = Array.from(groups.values()).map((group) => {
+                const first = group[0];
+                const orderIds = group.map((o) => o.id);
+                const allItems = group.flatMap((o) => o.order_items || []);
+                const merged = Object.assign(Object.assign({}, first), { order_ids: orderIds, order_items: allItems });
+                merged._shipment_status = first._shipment_status;
+                return merged;
+            });
+            total = groupedOrders.length;
+            orders = groupedOrders.slice(offsetNum, offsetNum + limitNum).map((o) => {
+                const mapped = mapOrder(o);
+                if (o.order_ids && o.order_ids.length > 1) {
+                    mapped.orderIds = o.order_ids;
+                }
+                return mapped;
+            });
+        }
+        else {
+            let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
+            if (status)
+                url += `&order.status=${status}`;
+            if (date_from)
+                url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
+            if (date_to)
+                url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
+            const ordersRes = yield axios_1.default.get(url, {
+                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+            });
+            const raw = ordersRes.data.results || [];
+            total = (_b = (_a = ordersRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) !== null && _b !== void 0 ? _b : raw.length;
+            orders = raw.map(mapOrder);
+        }
         res.json({
             orders,
-            offset: parseInt(offset),
-            limit: parseInt(limit),
-            total: ((_a = ordersRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) || orders.length
+            offset: offsetNum,
+            limit: limitNum,
+            total
         });
     }
     catch (error) {
-        console.error('Error fetching ML orders:', ((_b = error.response) === null || _b === void 0 ? void 0 : _b.data) || error.message);
+        console.error('Error fetching ML orders:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo órdenes de Mercado Libre', error: error.message });
     }
 });

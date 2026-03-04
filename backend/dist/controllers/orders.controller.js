@@ -64,6 +64,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 status: order.status,
                 total: order.total,
                 pickedBy: order.picked_by,
+                dispatchedAt: order.dispatched_at,
                 items: items
             };
         })));
@@ -122,7 +123,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.createOrder = createOrder;
 const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, pickedBy } = req.body;
     try {
         // Obtener estado anterior
         const currentOrder = yield (0, db_1.get)("SELECT status FROM orders WHERE id = ?", [id]);
@@ -143,7 +144,16 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 console.error('Errores restaurando stock:', result.errors);
             }
         }
-        yield (0, db_1.execute)("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+        // Documentar quién prepara/despacha y cuándo
+        if (status === 'Preparación' && pickedBy) {
+            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
+        }
+        else if (status === 'Despachado') {
+            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = COALESCE(?, picked_by), dispatched_at = NOW() WHERE id = ?", [status, pickedBy || null, id]);
+        }
+        else {
+            yield (0, db_1.execute)("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+        }
         res.json({ id, status, previousStatus });
     }
     catch (error) {
