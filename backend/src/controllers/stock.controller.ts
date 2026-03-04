@@ -442,16 +442,24 @@ export const importSalesHistory = async (req: Request, res: Response) => {
 
             for (const product of order.products || []) {
               const tnVariantId = product.variant_id;
-              if (!tnVariantId) continue;
+              const qty = product.quantity || 1;
+              const itemSku = (product.sku || product.variant_sku || '').toString().trim();
 
-              // Buscar variante local
-              const variant = await get(
-                `SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`,
-                [tnVariantId]
-              );
+              let variant = await get(`SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
+              if (!variant?.id && itemSku) {
+                variant = await get(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+              }
+              if (!variant?.id && itemSku) {
+                variant = await get(
+                  `SELECT pv.id FROM product_variants pv
+                   JOIN product_colors pc ON pc.id = pv.product_color_id
+                   JOIN products p ON p.id = pc.product_id
+                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`,
+                  [itemSku, `${itemSku}%`]
+                );
+              }
 
               if (variant?.id) {
-                const qty = product.quantity || 1;
                 await execute(
                   `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
                    VALUES (UUID(), ?, 0, 0, ?, 'VENTA_TIENDA_NUBE', ?, ?)`,
@@ -500,15 +508,27 @@ export const importSalesHistory = async (req: Request, res: Response) => {
 
             for (const item of order.order_items || []) {
               const mlVariationId = item.item?.variation_id;
-              if (!mlVariationId) continue;
+              const qty = item.quantity || 1;
+              const itemSku = (item.item?.sku || item.sku || '').toString().trim();
 
-              const variant = await get(
-                `SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`,
-                [mlVariationId]
-              );
+              let variant = null;
+              if (mlVariationId) {
+                variant = await get(`SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+              }
+              if (!variant?.id && itemSku) {
+                variant = await get(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+              }
+              if (!variant?.id && itemSku) {
+                variant = await get(
+                  `SELECT pv.id FROM product_variants pv
+                   JOIN product_colors pc ON pc.id = pv.product_color_id
+                   JOIN products p ON p.id = pc.product_id
+                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`,
+                  [itemSku, `${itemSku}%`]
+                );
+              }
 
               if (variant?.id) {
-                const qty = item.quantity || 1;
                 await execute(
                   `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
                    VALUES (UUID(), ?, 0, 0, ?, 'VENTA_MERCADO_LIBRE', ?, ?)`,
