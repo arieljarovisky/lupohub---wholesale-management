@@ -942,6 +942,11 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
               if (row?.variant_id) {
                 await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [v.id, row.variant_id]);
                 await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [mlItem.id, row.product_id]);
+                // Si el producto solo tiene código (Tango), completar nombre con el título de ML
+                await execute(
+                  `UPDATE products SET name = IF(COALESCE(TRIM(name), '') = '' OR name = sku, ?, name) WHERE id = ?`,
+                  [itemTitle, row.product_id]
+                );
                 linkedVariants++;
                 variantesVinculadas++;
               } else {
@@ -986,6 +991,11 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
             
             if (prod?.id) {
               await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [mlItem.id, prod.id]);
+              // Si el producto solo tiene código (Tango), completar nombre con el título de ML
+              await execute(
+                `UPDATE products SET name = IF(COALESCE(TRIM(name), '') = '' OR name = sku, ?, name) WHERE id = ?`,
+                [itemTitle, prod.id]
+              );
               linkedProducts++;
               logs.push(`  [OK] ${itemTitle} vinculado`);
             } else {

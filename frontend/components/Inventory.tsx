@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -780,6 +780,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   return (
     <div className="space-y-4 relative">
+      {/* Ayuda: unificación código / nombre */}
+      <div className="bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2 flex items-center gap-2 text-slate-400 text-xs">
+        <Info size={16} className="shrink-0 text-blue-400" />
+        <span>
+          <strong className="text-slate-300">Código</strong> es tu artículo (ej. Tango). <strong className="text-slate-300">Nombre</strong> se completa al sincronizar con Tienda Nube o Mercado Libre (título de la publicación). Así unificás todo en un solo listado.
+        </span>
+      </div>
+
       {/* Top Action Bar */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {isAdminOrWarehouse && (
@@ -939,7 +947,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
-          const displayName = groupVariants[0]?.name || skuLabel;
+          const rawName = (groupVariants[0]?.name || '').toString().trim();
+          const hasRealName = rawName.length > 0 && rawName !== skuLabel;
+          const displayName = hasRealName ? rawName : `Artículo ${skuLabel}`;
+          const codigoLabel = `Código: ${skuLabel}`;
           
           const filteredTotalStock = getGroupDisplayStock(groupKey, groupVariants);
           const hasLowStock = getGroupHasLowStock(groupKey, groupVariants);
@@ -959,11 +970,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   </div>
                   <div>
                     <h3 className="font-bold text-white text-lg leading-tight">{displayName}</h3>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                       <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-600" title="Código de artículo (Tango / sistema)">
+                         {codigoLabel}
+                       </span>
                        <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-slate-400 px-2 py-0.5 rounded-lg border border-slate-700">
                          {category}
                        </span>
-                       <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-2 py-0.5 rounded-lg border border-blue-900/30">{skuLabel}</span>
                        <span className="text-[10px] font-black text-green-400 bg-green-900/20 px-2 py-0.5 rounded-lg border border-green-900/30">
                          ${groupVariants[0]?.price?.toLocaleString()}
                        </span>
