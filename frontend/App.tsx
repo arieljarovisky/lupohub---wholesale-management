@@ -478,7 +478,7 @@ const App: React.FC = () => {
              )}
           </header>
 
-          {baseView === 'dashboard' && <Dashboard products={products} orders={orders} role={currentUser.role} />}
+          {baseView === 'dashboard' && <Dashboard products={products} orders={orders} role={currentUser.role} onNavigate={setCurrentView} />}
           {baseView === 'inventory' && (
             <Inventory 
               products={products} 

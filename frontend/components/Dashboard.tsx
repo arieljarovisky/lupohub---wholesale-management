@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar } from 'lucide-react';
+import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList } from 'lucide-react';
 import { Product, Order, OrderStatus, Role } from '../types';
 import { api } from '../services/api';
 
@@ -8,11 +8,13 @@ interface DashboardProps {
   products: Product[];
   orders: Order[];
   role: Role;
+  onNavigate?: (view: string) => void;
 }
 
 type DateRange = '7' | '15' | '30' | '60' | '90';
 
-const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, role }) => {
+const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, role, onNavigate }) => {
+  const isWarehouse = role === Role.WAREHOUSE;
   const [loading, setLoading] = useState(true);
   const [tnOrders, setTnOrders] = useState<any[]>([]);
   const [mlOrders, setMlOrders] = useState<any[]>([]);
@@ -39,26 +41,24 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const dates = getDateRange(parseInt(dateRange));
     
     try {
-      // Cargar todo en paralelo para mayor velocidad
-      const [productsRes, tnRes, mlRes] = await Promise.all([
-        api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
-        api.getTiendaNubeOrders({ 
-          per_page: 50,
-          created_at_min: dates.from,
-          created_at_max: dates.to
-        }).catch(() => ({ orders: [], total: 0 })),
-        api.getMercadoLibreOrders({ 
-          limit: 50,
-          date_from: dates.from,
-          date_to: dates.to
-        }).catch(() => ({ orders: [], total: 0 }))
-      ]);
-
-      setAllProducts(productsRes.items || []);
-      setProductCount(productsRes.total || productsRes.items?.length || 0);
-      setTnOrders(tnRes.orders || []);
-      setMlOrders(mlRes.orders || []);
-
+      if (isWarehouse) {
+        // Depósito: solo productos para alertas de stock
+        const productsRes = await api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 }));
+        setAllProducts(productsRes.items || []);
+        setProductCount(productsRes.total || productsRes.items?.length || 0);
+        setTnOrders([]);
+        setMlOrders([]);
+      } else {
+        const [productsRes, tnRes, mlRes] = await Promise.all([
+          api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
+          api.getTiendaNubeOrders({ per_page: 50, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [], total: 0 })),
+          api.getMercadoLibreOrders({ limit: 50, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
+        ]);
+        setAllProducts(productsRes.items || []);
+        setProductCount(productsRes.total || productsRes.items?.length || 0);
+        setTnOrders(tnRes.orders || []);
+        setMlOrders(mlRes.orders || []);
+      }
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -211,6 +211,109 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       <div className="flex flex-col items-center justify-center h-96">
         <Loader2 className="animate-spin text-blue-500 mb-4" size={48} />
         <p className="text-slate-400">Cargando dashboard...</p>
+      </div>
+    );
+  }
+
+  if (isWarehouse) {
+    const ordersToPick = orders.filter(o => o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.PREPARATION);
+    const productsForStock = allProducts.length > 0 ? allProducts : propProducts;
+    const lowStockList = [...productsForStock]
+      .map(p => ({ name: p.name, sku: p.sku, stock: (p as any).stock_total ?? (p as any).stock ?? 0 }))
+      .filter(p => p.stock < 10)
+      .sort((a, b) => a.stock - b.stock)
+      .slice(0, 15);
+    const outCount = productsForStock.filter(p => ((p as any).stock_total ?? (p as any).stock ?? 0) === 0).length;
+    const lowCount = productsForStock.filter(p => { const s = (p as any).stock_total ?? (p as any).stock ?? 0; return s > 0 && s < 10; }).length;
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-white">Inicio · Depósito</h2>
+            <p className="text-slate-500 text-sm">Pedidos para preparar y stock a reponer</p>
+          </div>
+          <button onClick={loadDashboardData} className="p-2.5 min-h-[44px] min-w-[44px] bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors" aria-label="Actualizar">
+            <RefreshCw size={18} />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          <button onClick={() => onNavigate?.('orders')} className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-5 border border-blue-500/20 text-left hover:border-blue-500/40 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-blue-400 text-xs font-semibold uppercase">Pedidos para sacar</span>
+              <ClipboardList size={20} className="text-blue-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">{ordersToPick.length}</p>
+            <p className="text-slate-500 text-xs mt-2">Confirmados o en preparación</p>
+          </button>
+          <div className="bg-gradient-to-br from-red-500/10 to-red-600/5 rounded-xl p-5 border border-red-500/20">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-red-400 text-xs font-semibold uppercase">Alertas de stock</span>
+              <AlertTriangle size={20} className="text-red-400" />
+            </div>
+            <p className="text-2xl font-bold text-red-400">{outCount + lowCount}</p>
+            <p className="text-slate-500 text-xs mt-2">{outCount} sin stock · {lowCount} bajo</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ClipboardList size={18} className="text-blue-400" />
+                <h3 className="font-bold text-white">Pedidos para preparar</h3>
+              </div>
+              {ordersToPick.length > 0 && (
+                <button onClick={() => onNavigate?.('orders')} className="text-xs font-bold text-blue-400 hover:text-blue-300">Ir a pedidos →</button>
+              )}
+            </div>
+            <div className="p-4">
+              {ordersToPick.length > 0 ? (
+                <ul className="space-y-2">
+                  {ordersToPick.slice(0, 8).map(o => (
+                    <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                      <span className="text-white text-sm">Pedido #{o.id.slice(0, 8)}</span>
+                      <span className="text-slate-500 text-xs">{o.date}</span>
+                    </li>
+                  ))}
+                  {ordersToPick.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {ordersToPick.length - 8} más</li>}
+                </ul>
+              ) : (
+                <p className="text-slate-500 text-center py-8">No hay pedidos pendientes de preparar</p>
+              )}
+            </div>
+          </div>
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle size={18} className="text-red-400" />
+                <h3 className="font-bold text-white">Stock a reponer</h3>
+              </div>
+              {lowStockList.length > 0 && (
+                <button onClick={() => onNavigate?.('inventory')} className="text-xs font-bold text-blue-400 hover:text-blue-300">Ver inventario →</button>
+              )}
+            </div>
+            <div className="p-4">
+              {lowStockList.length > 0 ? (
+                <div className="space-y-3">
+                  {lowStockList.map((p, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${p.stock === 0 ? 'bg-red-500' : 'bg-orange-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm truncate">{p.name}</p>
+                        <p className="text-slate-600 text-xs">{p.sku || '-'}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded text-xs font-bold shrink-0 ${p.stock === 0 ? 'bg-red-500/10 text-red-400' : 'bg-orange-500/10 text-orange-400'}`}>
+                        {p.stock === 0 ? 'SIN STOCK' : `${p.stock} uds`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-500 text-center py-8">Sin alertas de stock</p>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
