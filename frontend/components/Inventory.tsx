@@ -246,20 +246,33 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
-  // 1. Server-side paging (fallback to client if API offline)
+  // 1. Server: cargar todos los productos (en páginas de 100) para que el paginado sea solo de vista
+  const FETCH_PAGE_SIZE = 100;
+  const MAX_PRODUCTS = 2000;
   useEffect(() => {
     if (!serverMode) return;
     (async () => {
       try {
         const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
-        const res = await api.getProductsPaged(currentPage, pageSize, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
-        setServerItems(res.items);
-        setServerTotal(res.total);
+        const first = await api.getProductsPaged(1, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
+        setServerTotal(first.total);
+        if (first.total <= FETCH_PAGE_SIZE) {
+          setServerItems(first.items);
+          return;
+        }
+        const allItems = [...first.items];
+        const totalToLoad = Math.min(first.total, MAX_PRODUCTS);
+        const totalPages = Math.ceil(totalToLoad / FETCH_PAGE_SIZE);
+        for (let p = 2; p <= totalPages; p++) {
+          const next = await api.getProductsPaged(p, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
+          allItems.push(...next.items);
+        }
+        setServerItems(allItems);
       } catch {
         setServerMode(false);
       }
     })();
-  }, [serverMode, currentPage, pageSize, searchTerm, sortKey, sortDir, filterSync]);
+  }, [serverMode, searchTerm, sortKey, sortDir, filterSync]);
 
   // 2. Filter individual products first (incluye padres para poder evaluar variantes)
   const filteredProducts = (serverMode ? serverItems : products).filter(p => {
