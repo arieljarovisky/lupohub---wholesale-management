@@ -1188,37 +1188,35 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             {sortDir === 'asc' ? 'ASC' : 'DESC'}
           </button>
         </div>
-        {displayGroupsInfo.totalPages > 1 && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-              Página {displayGroupsInfo.safePage} de {displayGroupsInfo.totalPages}
-            </span>
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por página</span>
-            <select 
-              value={pageSize}
-              onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
-              className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-            </select>
-            <button 
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={displayGroupsInfo.safePage <= 1}
-              className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
-            >
-              Prev
-            </button>
-            <button 
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              disabled={displayGroupsInfo.safePage >= displayGroupsInfo.totalPages}
-              className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
-            >
-              Next
-            </button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            Página {displayGroupsInfo.safePage} de {displayGroupsInfo.totalPages}
+          </span>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por página</span>
+          <select 
+            value={pageSize}
+            onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
+            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </select>
+          <button 
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={displayGroupsInfo.safePage <= 1}
+            className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+          >
+            Prev
+          </button>
+          <button 
+            onClick={() => setCurrentPage(prev => prev + 1)}
+            disabled={displayGroupsInfo.safePage >= displayGroupsInfo.totalPages}
+            className="px-3 py-2.5 min-h-[44px] bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+          >
+            Next
+          </button>
+        </div>
       </div>
       {Object.keys(groupedProducts).length === 0 && (
         <div className="text-center py-24 bg-slate-900/30 rounded-3xl border-2 border-dashed border-slate-800">
