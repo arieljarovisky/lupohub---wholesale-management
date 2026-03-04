@@ -1,0 +1,9 @@
+# Railway: configurar en el servicio Root Directory = "backend".
+# Así Railpack detecta Node y usa package.json de esta carpeta.
+
+[build]
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm run start"
+
