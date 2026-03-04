@@ -11,6 +11,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getColors = void 0;
 const db_1 = require("../database/db");
+// Patrones que son talles, NO colores
+const SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
+const isValidColor = (name) => {
+    if (!name)
+        return false;
+    const trimmed = name.trim();
+    // Si parece un talle, NO es un color válido
+    if (SIZE_PATTERNS.test(trimmed))
+        return false;
+    return true;
+};
 const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -29,22 +40,24 @@ const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         WHERE table_schema = DATABASE() AND table_name = 'colors' AND column_name = 'hex'
       `);
             const hasHex = Number(((_b = hexColCheck === null || hexColCheck === void 0 ? void 0 : hexColCheck[0]) === null || _b === void 0 ? void 0 : _b.cnt) || 0) > 0;
+            let rows;
             if (hasHex) {
-                const rows = yield (0, db_1.query)(`
+                rows = yield (0, db_1.query)(`
           SELECT id, code, name, hex
           FROM colors
           ORDER BY name ASC
         `);
-                return res.json(rows);
             }
             else {
-                const rows = yield (0, db_1.query)(`
+                rows = yield (0, db_1.query)(`
           SELECT id, code, name, NULL AS hex
           FROM colors
           ORDER BY name ASC
         `);
-                return res.json(rows);
             }
+            // Filtrar solo colores válidos (excluir talles)
+            const validRows = (rows || []).filter((r) => isValidColor(r.name));
+            return res.json(validRows);
         }
         // 3) Fallback: atributos legacy (type='color')
         const attrs = yield (0, db_1.query)(`
@@ -55,10 +68,10 @@ const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     `);
         const mapped = attrs.map((a) => ({
             id: a.id,
-            code: a.name, // Sin código en legacy, usamos el nombre como código
+            code: a.name,
             name: a.name,
             hex: a.value || null
-        }));
+        })).filter((a) => isValidColor(a.name));
         return res.json(mapped);
     }
     catch (error) {

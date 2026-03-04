@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -12,21 +45,36 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAllProducts = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
-const integrations_controller_1 = require("./integrations.controller");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc' } = req.query;
+        const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none } = req.query;
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const perPageNum = Math.min(100, Math.max(1, parseInt(per_page, 10) || 20));
         const offset = (pageNum - 1) * perPageNum;
         const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'name' : 'sku');
         const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
         const search = (q || '').toString().trim();
-        const whereClause = search ? `WHERE p.sku LIKE ? OR p.name LIKE ?` : '';
+        const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
+        const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
+        const filterSyncNone = sync_none === '1' || sync_none === 'true';
+        const conditions = [];
         const params = [];
         if (search) {
+            conditions.push('(p.sku LIKE ? OR p.name LIKE ?)');
             params.push(`%${search}%`, `%${search}%`);
         }
+        if (filterSyncNone) {
+            conditions.push('(p.mercado_libre_id IS NULL OR p.mercado_libre_id = \'\') AND (p.tienda_nube_id IS NULL OR p.tienda_nube_id = \'\')');
+        }
+        else {
+            if (filterSyncMl) {
+                conditions.push('p.mercado_libre_id IS NOT NULL AND p.mercado_libre_id != \'\'');
+            }
+            if (filterSyncTn) {
+                conditions.push('p.tienda_nube_id IS NOT NULL AND p.tienda_nube_id != \'\'');
+            }
+        }
+        const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         const totalRow = yield (0, db_1.get)(`
       SELECT COUNT(*) AS total
       FROM products p
@@ -114,9 +162,15 @@ exports.getProductStockTotalBySku = getProductStockTotalBySku;
 const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { sku } = req.params;
     try {
-        const product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku = ?`, [sku]);
+        // Buscar por SKU exacto o por SKU base (para agrupar variantes)
+        let product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku = ?`, [sku]);
+        // Si no se encuentra exacto, buscar por SKU base (productos cuyo SKU comienza con el parámetro)
+        if (!product) {
+            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`, [`${sku}-%`]);
+        }
         if (!product)
             return res.status(404).json({ message: 'Producto no encontrado' });
+        // Obtener todas las variantes del producto encontrado
         const variantsRows = yield (0, db_1.query)(`SELECT p.sku, c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
               pv.tienda_nube_variant_id, pv.mercado_libre_variant_id
@@ -126,13 +180,13 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.sku=?
-       ORDER BY c.code, s.size_code`, [sku]);
+       WHERE p.id=?
+       ORDER BY c.code, s.size_code`, [product.id]);
         const variants = variantsRows.map((v) => (Object.assign(Object.assign({}, v), { externalIds: {
                 tiendaNubeVariant: v.tienda_nube_variant_id,
                 mercadoLibreVariant: v.mercado_libre_variant_id
             } })));
-        const stock_total = yield (0, exports.getProductStockTotalBySku)(sku);
+        const stock_total = variants.reduce((sum, v) => sum + Number(v.stock || 0), 0);
         res.json(Object.assign(Object.assign({}, product), { externalIds: {
                 tiendaNube: product.tienda_nube_id,
                 mercadoLibre: product.mercado_libre_id
@@ -156,19 +210,11 @@ const patchStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             if (!vId)
                 return res.status(404).json({ message: 'Variante no encontrada' });
         }
-        yield (0, db_1.execute)(`INSERT INTO stocks(variant_id, stock) VALUES (?,?)
-       ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [vId, stock]);
-        let targetSku = sku || null;
-        if (!targetSku) {
-            const row = yield (0, db_1.get)(`SELECT p.sku AS sku
-         FROM products p
-         JOIN product_colors pc ON pc.product_id = p.id
-         JOIN product_variants pv ON pv.product_color_id = pc.id
-         WHERE pv.id = ?`, [vId]);
-            targetSku = (row === null || row === void 0 ? void 0 : row.sku) || null;
-        }
-        if (targetSku) {
-            (0, integrations_controller_1.updateMercadoLibreStock)(targetSku, Number(stock)).catch(() => { });
+        // Usar el nuevo sistema de stock con historial y sincronización
+        const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+        const success = yield updateVariantStock(vId, Number(stock), 'AJUSTE_MANUAL');
+        if (!success) {
+            return res.status(500).json({ message: 'Error actualizando stock' });
         }
         res.json({ variantId: vId, stock });
     }
