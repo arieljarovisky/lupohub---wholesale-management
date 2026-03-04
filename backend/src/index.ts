@@ -11,6 +11,7 @@ import integrationRoutes from './routes/integrations.routes';
 import stockRoutes from './routes/stock.routes';
 import despachosRoutes from './routes/despachos.routes';
 import usersRoutes from './routes/users.routes';
+import customersRoutes from './routes/customers.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
@@ -43,6 +44,7 @@ app.use('/api/integrations', integrationRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/despachos', despachosRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/customers', customersRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {

@@ -52,7 +52,7 @@ const App: React.FC = () => {
   // Users from API when admin is logged in; empty otherwise
   const [users, setUsers] = useState<User[]>([]);
   const [attributes, setAttributes] = useState<Attribute[]>(MOCK_ATTRIBUTES);
-  const [customers, setCustomers] = useState<Customer[]>(MOCK_CUSTOMERS);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -110,14 +110,16 @@ const App: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes] = await Promise.all([
+      const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
         api.getProducts(),
         api.getOrders(),
         api.getColors(),
-        api.getSizes()
+        api.getSizes(),
+        api.getCustomers()
       ]);
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
+      setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
       const colorAttrs = fetchedColors.map((c, idx) => ({ 
         id: c.code ? `color-${c.code}` : `color-idx-${idx}-${Date.now()}`, 
         type: 'color', 
@@ -297,8 +299,14 @@ const App: React.FC = () => {
     setAttributes(prev => prev.filter(a => a.id !== id));
   };
 
-  const handleCreateCustomer = (newCustomer: Customer) => {
-    setCustomers(prev => [...prev, newCustomer]);
+  const handleCreateCustomer = async (newCustomer: Customer) => {
+    try {
+      const created = await api.createCustomer(newCustomer);
+      setCustomers(prev => [...prev, created]);
+    } catch (error) {
+      console.error(error);
+      alert('Error al crear el cliente. Revisá que el email esté completo y que la conexión con el servidor esté activa.');
+    }
   };
 
   const handleStartPicking = async (order: Order) => {

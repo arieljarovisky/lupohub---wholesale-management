@@ -1,4 +1,4 @@
-import { Product, Order, OrderStatus, User } from '../types';
+import { Product, Order, OrderStatus, User, Customer } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request } from './httpClient';
 
@@ -201,6 +201,45 @@ export const api = {
     return handleRequest(async () => {
       await request<void>(`/orders/${id}/status`, 'PATCH', { status, pickedBy });
     }, undefined, 'updateOrderStatus');
+  },
+
+  // --- CUSTOMERS ---
+  getCustomers: async (): Promise<Customer[]> => {
+    return handleRequest(async () => {
+      const rows = await request<any[]>('/customers', 'GET');
+      return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+        id: r.id,
+        sellerId: r.sellerId ?? r.seller_id ?? '',
+        name: r.name ?? '',
+        businessName: r.businessName ?? r.business_name ?? '',
+        email: r.email ?? '',
+        address: r.address ?? '',
+        city: r.city ?? ''
+      })) as Customer[];
+    }, [], 'getCustomers');
+  },
+
+  createCustomer: async (customer: Customer): Promise<Customer> => {
+    return handleRequest(async () => {
+      const created = await request<any>('/customers', 'POST', {
+        id: customer.id,
+        sellerId: customer.sellerId,
+        name: customer.name,
+        businessName: customer.businessName,
+        email: customer.email,
+        address: customer.address,
+        city: customer.city
+      });
+      return {
+        id: created.id,
+        sellerId: created.sellerId ?? created.seller_id ?? '',
+        name: created.name ?? '',
+        businessName: created.businessName ?? created.business_name ?? '',
+        email: created.email ?? '',
+        address: created.address ?? '',
+        city: created.city ?? ''
+      } as Customer;
+    }, customer, 'createCustomer');
   },
 
   // Ajuste manual de stock por variante (Admin o Depósito)
