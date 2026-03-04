@@ -507,6 +507,7 @@ const App: React.FC = () => {
               role={currentUser.role} 
               onCreateProducts={handleCreateProducts}
               onUpdateStock={handleUpdateStock}
+              onImportComplete={loadData}
             />
           )}
           {baseView === 'orders' && (

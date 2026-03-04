@@ -134,6 +134,21 @@ export const api = {
       return await request<Product>('/products', 'POST', product);
     }, product, 'createProduct');
   },
+
+  /** Importar artículos desde Excel de Tango (columna Código = 7+3+3, opcional Descripción). */
+  importTangoArticles: async (
+    rows: Record<string, unknown>[],
+    onlyComplete = true
+  ): Promise<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] }> => {
+    const res = await request<any>('/products/import-tango', 'POST', { rows, onlyComplete });
+    return {
+      productsCreated: res.productsCreated ?? 0,
+      variantsCreated: res.variantsCreated ?? 0,
+      variantsUpdated: res.variantsUpdated ?? 0,
+      totalProcessed: res.totalProcessed ?? 0,
+      errors: Array.isArray(res.errors) ? res.errors : [],
+    };
+  },
   
   updateProduct: async (product: Product): Promise<Product> => {
     const payload: any = {

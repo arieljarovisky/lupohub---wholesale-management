@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -31,9 +31,10 @@ interface InventoryProps {
   role: Role;
   onCreateProducts?: (products: Product[]) => void;
   onUpdateStock?: (productId: string, newStock: number) => void;
+  onImportComplete?: () => void;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock }) => {
+const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -66,6 +67,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [despachoCantidad, setDespachoCantidad] = useState('');
   const [despachoCosto, setDespachoCosto] = useState('');
   const [savingDespacho, setSavingDespacho] = useState(false);
+
+  // Import Tango State
+  const [importingTango, setImportingTango] = useState(false);
+  const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
+  const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
+  const tangoFileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter States
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -292,7 +299,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setServerMode(false);
       }
     })();
-  }, [serverMode, searchTerm, sortKey, sortDir, filterSync]);
+  }, [serverMode, searchTerm, sortKey, sortDir, filterSync, serverListRefreshKey]);
 
   // 2. Filter individual products first (incluye padres para poder evaluar variantes)
   const filteredProducts = (serverMode ? serverItems : products).filter(p => {
@@ -459,6 +466,43 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos');
     const filename = `productos_${new Date().toISOString().slice(0,10)}.xlsx`;
     XLSX.writeFile(workbook, filename);
+  };
+
+  const handleImportTangoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingTango(true);
+    setTangoImportResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = ev.target?.result;
+        if (!data) throw new Error('No se pudo leer el archivo');
+        const wb = XLSX.read(data, { type: 'binary' });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(firstSheet);
+        if (rows.length === 0) {
+          setTangoImportResult(null);
+          alert('El archivo no tiene filas. Debe tener columna "Código" (7+3+3) y opcional "Descripción".');
+          setImportingTango(false);
+          return;
+        }
+        api.importTangoArticles(rows, true).then((res) => {
+          setTangoImportResult(res);
+          setServerListRefreshKey((k) => k + 1);
+          onImportComplete?.();
+        }).catch((err) => {
+          alert(err?.message || 'Error al importar. Revisá que el Excel tenga columna Código.');
+        }).finally(() => {
+          setImportingTango(false);
+          if (tangoFileInputRef.current) tangoFileInputRef.current.value = '';
+        });
+      } catch (err: any) {
+        setImportingTango(false);
+        alert(err?.message || 'Error leyendo el Excel.');
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const handleSyncStock = async () => {
@@ -788,6 +832,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </span>
       </div>
 
+      {/* Resultado importación Tango */}
+      {tangoImportResult && (
+        <div className="bg-emerald-900/40 border border-emerald-700 rounded-xl px-4 py-3 flex items-start justify-between gap-2">
+          <div className="text-sm text-emerald-200">
+            <p className="font-semibold">Importación Tango finalizada</p>
+            <p className="mt-1">
+              {tangoImportResult.productsCreated} productos nuevos, {tangoImportResult.variantsCreated} variantes creadas{tangoImportResult.variantsUpdated ? `, ${tangoImportResult.variantsUpdated} actualizadas` : ''}. Procesadas: {tangoImportResult.totalProcessed} filas.
+            </p>
+            {tangoImportResult.errors.length > 0 && (
+              <p className="mt-1 text-amber-300 text-xs">Errores: {tangoImportResult.errors.slice(0, 3).join('; ')}{tangoImportResult.errors.length > 3 ? ` (+${tangoImportResult.errors.length - 3} más)` : ''}</p>
+            )}
+          </div>
+          <button type="button" onClick={() => setTangoImportResult(null)} className="text-slate-400 hover:text-white p-1">
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
       {/* Top Action Bar */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {isAdminOrWarehouse && (
@@ -801,6 +863,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           </button>
         )}
         
+        <input
+          ref={tangoFileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportTangoFile}
+        />
+        <button
+          type="button"
+          onClick={() => tangoFileInputRef.current?.click()}
+          disabled={importingTango}
+          className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-amber-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50"
+        >
+          {importingTango ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
+          <span className="text-sm font-semibold">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
+        </button>
         <button 
           onClick={exportProductsToExcel}
           className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-green-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm"

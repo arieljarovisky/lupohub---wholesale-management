@@ -298,3 +298,143 @@ export const deleteAllProducts = async (req: any, res: any) => {
     res.status(500).json({ message: 'Error eliminando todos los datos' });
   }
 };
+
+// --- Importación desde Tango (Excel): código = 7 art + 3 talle + 3 color ---
+function normalizeHeader(h: string): string {
+  return (h || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function findColumn(headers: string[], name: string): number {
+  for (let i = 0; i < headers.length; i++) {
+    if (normalizeHeader(headers[i]) === name || normalizeHeader(headers[i]).includes(name)) return i;
+  }
+  return -1;
+}
+
+function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; color: string; codigo13: string } {
+  const raw = (codigo != null ? String(codigo).trim() : '');
+  const s = raw.replace(/\D/g, '');
+  return {
+    articulo: s.slice(0, 7),
+    talle: s.slice(7, 10),
+    color: s.slice(10, 13),
+    codigo13: s.slice(0, 13),
+  };
+}
+
+export const importTangoArticles = async (req: Request, res: Response) => {
+  try {
+    const { rows: rawRows, onlyComplete = true } = req.body as {
+      rows: Record<string, unknown>[];
+      onlyComplete?: boolean;
+    };
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      return res.status(400).json({ message: 'Se requiere un array "rows" con las filas del Excel (con columna Código y opcional Descripción).' });
+    }
+    const headers = Object.keys(rawRows[0] || {});
+    const codigoCol = findColumn(headers, 'codigo');
+    if (codigoCol < 0) {
+      return res.status(400).json({ message: 'No se encontró la columna "Código" en las filas enviadas.' });
+    }
+    const descCol = findColumn(headers, 'descripcion');
+    const codigoKey = headers[codigoCol];
+    const descKey = descCol >= 0 ? headers[descCol] : null;
+
+    const rows: { articulo: string; talle: string; color: string; codigo13: string; descripcion: string }[] = [];
+    for (const row of rawRows) {
+      const codigo = row[codigoKey];
+      const parsed = parseCodigoTango(codigo);
+      if (parsed.codigo13.length < 13 && onlyComplete) continue;
+      const descripcion = (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
+      rows.push({
+        articulo: parsed.articulo,
+        talle: parsed.talle,
+        color: parsed.color,
+        codigo13: parsed.codigo13,
+        descripcion,
+      });
+    }
+
+    let productsCreated = 0;
+    let variantsCreated = 0;
+    let variantsUpdated = 0;
+    const errors: string[] = [];
+    const productNamesByArticulo: Record<string, string> = {};
+
+    for (const r of rows) {
+      try {
+        if (r.codigo13.length < 13) continue;
+        if (!r.articulo) continue;
+
+        if (!productNamesByArticulo[r.articulo] && r.descripcion) {
+          productNamesByArticulo[r.articulo] = r.descripcion;
+        }
+
+        let productId: string | null = (await get(`SELECT id FROM products WHERE sku = ?`, [r.articulo]))?.id || null;
+        if (!productId) {
+          productId = uuidv4();
+          const name = productNamesByArticulo[r.articulo] || r.articulo;
+          await execute(
+            `INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`,
+            [productId, r.articulo, name, 'General', 0, null]
+          );
+          productsCreated++;
+        }
+
+        let sizeId = (await get(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))?.id;
+        if (!sizeId) {
+          sizeId = uuidv4();
+          await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, r.talle]);
+        }
+
+        let colorId = (await get(`SELECT id FROM colors WHERE code = ?`, [r.color]))?.id;
+        if (!colorId) {
+          colorId = uuidv4();
+          await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, r.color, r.color, '#000000']);
+        }
+
+        let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+        if (!productColorId) {
+          productColorId = uuidv4();
+          await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+        }
+
+        const existingVariant = await get(
+          `SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`,
+          [productColorId, sizeId]
+        );
+        if (!existingVariant) {
+          const variantId = uuidv4();
+          await execute(
+            `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
+            [variantId, productColorId, sizeId, r.codigo13]
+          );
+          await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, 0) ON DUPLICATE KEY UPDATE stock = stock`, [variantId]);
+          variantsCreated++;
+        } else {
+          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, existingVariant.id]);
+          variantsUpdated++;
+        }
+      } catch (err: any) {
+        errors.push(`Fila ${r.codigo13}: ${err?.message || 'Error'}`);
+      }
+    }
+
+    res.json({
+      message: 'Importación Tango finalizada',
+      productsCreated,
+      variantsCreated,
+      variantsUpdated,
+      totalProcessed: rows.filter((r) => r.codigo13.length >= 13).length,
+      errors: errors.slice(0, 50),
+    });
+  } catch (error: any) {
+    console.error('Import Tango:', error);
+    res.status(500).json({ message: 'Error importando artículos Tango', error: error?.message });
+  }
+};
