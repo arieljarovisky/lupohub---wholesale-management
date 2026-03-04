@@ -8,13 +8,24 @@ export const getOrders = async (req: any, res: any) => {
     // 1. Get Orders
     const ordersRow = await query("SELECT * FROM orders ORDER BY date DESC");
     
-    // 2. Get Items for each order (N+1 query simplified for demo, in prod use JOIN or specialized fetch)
+    // 2. Get Items for each order with productId (variant -> product_color -> product)
     const ordersFull = await Promise.all(ordersRow.map(async (order) => {
       const items = await query(`
-        SELECT i.variant_id as variantId, i.quantity, i.picked, i.price_at_moment as priceAtMoment
+        SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+               pc.product_id AS productId
         FROM order_items i
+        JOIN product_variants pv ON pv.id = i.variant_id
+        JOIN product_colors pc ON pc.id = pv.product_color_id
         WHERE i.order_id = ?
       `, [order.id]);
+      
+      const itemsMapped = (items as any[]).map((row: any) => ({
+        variantId: row.variantId,
+        productId: row.productId,
+        quantity: row.quantity,
+        picked: row.picked ?? 0,
+        priceAtMoment: Number(row.priceAtMoment)
+      }));
       
       return {
         id: order.id,
@@ -22,10 +33,10 @@ export const getOrders = async (req: any, res: any) => {
         sellerId: order.seller_id,
         date: order.date,
         status: order.status,
-        total: order.total,
-        pickedBy: order.picked_by,
-        dispatchedAt: order.dispatched_at,
-        items: items
+        total: Number(order.total),
+        pickedBy: order.picked_by ?? undefined,
+        dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
+        items: itemsMapped
       };
     }));
 
@@ -81,11 +92,44 @@ export const createOrder = async (req: any, res: any) => {
       }
       await execute(
         `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment]
+        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0]
       );
     }
-    
-    res.status(201).json({ ...newOrder, id: orderId });
+
+    if (newOrder.status === 'Confirmado') {
+      const { deductStockForOrder } = await import('./stock.controller');
+      const result = await deductStockForOrder(orderId);
+      if (!result.success) console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
+    }
+
+    const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [orderId]);
+    if (!created) return res.status(201).json({ ...newOrder, id: orderId });
+    const items = await query(`
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      FROM order_items i
+      JOIN product_variants pv ON pv.id = i.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      WHERE i.order_id = ?
+    `, [orderId]);
+    const itemsMapped = (items as any[]).map((row: any) => ({
+      variantId: row.variantId,
+      productId: row.productId,
+      quantity: row.quantity,
+      picked: row.picked ?? 0,
+      priceAtMoment: Number(row.priceAtMoment)
+    }));
+    const orderResponse = {
+      id: created.id,
+      customerId: created.customer_id,
+      sellerId: created.seller_id,
+      date: created.date,
+      status: created.status,
+      total: Number(created.total),
+      pickedBy: created.picked_by ?? undefined,
+      dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
+      items: itemsMapped
+    };
+    res.status(201).json(orderResponse);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error creating order" });
@@ -184,7 +228,33 @@ export const updateOrder = async (req: any, res: any) => {
         [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment]
       );
     }
-    res.json({ ...updated, id });
+    const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
+    if (!created) return res.json({ ...updated, id });
+    const itemsRows = await query(`
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      FROM order_items i
+      JOIN product_variants pv ON pv.id = i.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      WHERE i.order_id = ?
+    `, [id]);
+    const itemsMapped = (itemsRows as any[]).map((row: any) => ({
+      variantId: row.variantId,
+      productId: row.productId,
+      quantity: row.quantity,
+      picked: row.picked ?? 0,
+      priceAtMoment: Number(row.priceAtMoment)
+    }));
+    res.json({
+      id: created.id,
+      customerId: created.customer_id,
+      sellerId: created.seller_id,
+      date: created.date,
+      status: created.status,
+      total: Number(created.total),
+      pickedBy: created.picked_by ?? undefined,
+      dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
+      items: itemsMapped
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error actualizando pedido" });
@@ -195,6 +265,12 @@ export const deleteOrder = async (req: any, res: any) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ message: "ID inválido" });
   try {
+    const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
+    if (currentOrder?.status === 'Confirmado') {
+      const { restoreStockForOrder } = await import('./stock.controller');
+      const result = await restoreStockForOrder(id);
+      if (!result.success) console.error('Errores restaurando stock al eliminar pedido:', result.errors);
+    }
     await execute("DELETE FROM orders WHERE id = ?", [id]);
     res.json({ id });
   } catch (error) {

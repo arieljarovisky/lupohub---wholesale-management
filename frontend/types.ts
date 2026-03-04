@@ -8,7 +8,8 @@ export enum OrderStatus {
   DRAFT = 'Borrador',
   CONFIRMED = 'Confirmado',
   PREPARATION = 'Preparación',
-  DISPATCHED = 'Despachado'
+  DISPATCHED = 'Despachado',
+  CANCELLED = 'Cancelado'
 }
 
 export interface Attribute {
@@ -67,11 +68,12 @@ export interface Customer {
 }
 
 export interface OrderItem {
-  productId: string;
+  productId?: string;   // id del producto (para mostrar en picking)
+  variantId?: string;   // id de la variante (guardado en BD)
   quantity: number;
-  picked?: number; // Quantity prepared by warehouse
+  picked?: number;      // Quantity prepared by warehouse
   priceAtMoment: number;
-  isBackorder?: boolean; // Flag for items without immediate stock
+  isBackorder?: boolean;
 }
 
 export interface Order {

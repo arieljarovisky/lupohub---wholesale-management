@@ -38,7 +38,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       setSelectedCustomerId(initialOrder.customerId);
       setOrderDate(initialOrder.date);
       const mappedRows = initialOrder.items.map(item => {
-        const p = products.find(prod => prod.sku === (item as any).sku) || products[0];
+        const p = products.find(prod => prod.id === item.productId) || products.find(prod => prod.sku === (item as any).sku);
         return {
           id: `row-${Math.random()}`,
           variantId: (item as any).variantId,
@@ -46,7 +46,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           description: p ? `${p.name}` : 'Variante',
           price: item.priceAtMoment,
           quantity: item.quantity,
-          isBackorder: !!item.isBackorder
+          isBackorder: !!(item as any).isBackorder
         };
       });
       setRows(mappedRows);
@@ -105,13 +105,14 @@ const addItem = async (product: Product) => {
       customerId: selectedCustomerId,
       sellerId: initialOrder?.sellerId || sellerId,
       items: rows.map(r => ({
-        variantId: r.variantId as any,
+        variantId: r.variantId,
+        productId: products.find(p => p.sku === r.sku)?.id,
         quantity: r.quantity,
         priceAtMoment: r.price,
         isBackorder: r.isBackorder
       })),
       total,
-      status: initialOrder?.status || OrderStatus.CONFIRMED,
+      status: initialOrder?.status ?? OrderStatus.CONFIRMED,
       date: orderDate
     });
   };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
 
 interface OrdersProps {
@@ -31,13 +31,19 @@ const Orders: React.FC<OrdersProps> = ({
       case OrderStatus.CONFIRMED: return 'bg-blue-900/30 text-blue-300 border border-blue-800';
       case OrderStatus.PREPARATION: return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800';
       case OrderStatus.DISPATCHED: return 'bg-green-900/30 text-green-300 border border-green-800';
+      case OrderStatus.CANCELLED: return 'bg-red-900/30 text-red-300 border border-red-800';
+      default: return 'bg-slate-700/50 text-slate-400 border border-slate-600';
     }
   };
 
-  const filteredOrders = orders.filter(o => 
+  const filteredOrders = orders.filter(o =>
     (filterStatus === 'ALL' || o.status === filterStatus) &&
     (filterCustomer === 'ALL' || o.customerId === filterCustomer)
   );
+
+  const canCancelOrder = (order: Order) =>
+    (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PREPARATION) &&
+    (role === Role.ADMIN || role === Role.SELLER);
 
   return (
     <div className="space-y-6">
@@ -122,6 +128,15 @@ const Orders: React.FC<OrdersProps> = ({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {canCancelOrder(order) && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (window.confirm('¿Cancelar este pedido? Se restaurará el stock.')) onUpdateStatus(order.id, OrderStatus.CANCELLED); }}
+                      className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
+                      title="Cancelar pedido"
+                    >
+                      <XCircle size={16} />
+                    </button>
+                  )}
                   {role === Role.ADMIN && (
                     <button
                       onClick={(e) => { e.stopPropagation(); if (window.confirm('¿Eliminar pedido?')) onDeleteOrder?.(order.id); }}
@@ -140,7 +155,7 @@ const Orders: React.FC<OrdersProps> = ({
                   {totalItemsCount} unidades • {order.date}
                 </div>
                 <div className="flex items-center gap-4">
-                   {role === Role.WAREHOUSE && order.status !== OrderStatus.DISPATCHED && (
+                   {role === Role.WAREHOUSE && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
                      <button 
                         onClick={(e) => { e.stopPropagation(); onStartPicking?.(order); }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-500 transition"

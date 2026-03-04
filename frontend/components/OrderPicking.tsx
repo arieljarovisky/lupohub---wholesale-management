@@ -26,11 +26,12 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
     setItems(order.items.map(i => ({ ...i, picked: i.picked || 0 })));
   }, [order]);
 
-  const toggleItemComplete = (productId: string) => {
+  const itemKey = (item: OrderItem) => item.productId || item.variantId || '';
+
+  const toggleItemComplete = (key: string) => {
     if (isReadOnly) return;
     setItems(prev => prev.map(item => {
-      if (item.productId === productId) {
-        // Toggle between 0 and full quantity
+      if (itemKey(item) === key) {
         const newPicked = item.picked === item.quantity ? 0 : item.quantity;
         return { ...item, picked: newPicked };
       }
@@ -38,11 +39,11 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
     }));
   };
 
-  const updatePickedQuantity = (productId: string, qty: number) => {
+  const updatePickedQuantity = (key: string, qty: number) => {
     if (isReadOnly) return;
     setItems(prev => prev.map(item => {
-      if (item.productId === productId) {
-        return { ...item, picked: Math.min(Math.max(0, qty), item.quantity) }; // Clamp between 0 and max
+      if (itemKey(item) === key) {
+        return { ...item, picked: Math.min(Math.max(0, qty), item.quantity) };
       }
       return item;
     }));
@@ -117,12 +118,13 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
       <div className="p-3 md:p-6 space-y-3 pb-24 md:pb-6 overflow-y-auto">
         {items.map((item) => {
           const product = products.find(p => p.id === item.productId);
+          const key = itemKey(item);
           const isFullyPicked = item.picked === item.quantity;
           const isPartial = item.picked > 0 && item.picked < item.quantity;
           
           return (
             <div 
-              key={item.productId} 
+              key={key} 
               className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
                 isFullyPicked 
                 ? 'bg-slate-900/50 border-green-900/30 opacity-60' 
@@ -132,7 +134,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
               <div className="flex flex-col md:flex-row">
                 
                 {/* Product Info Section */}
-                <div className="p-4 flex gap-4 items-start flex-1 cursor-pointer" onClick={() => !isReadOnly && toggleItemComplete(item.productId)}>
+                <div className="p-4 flex gap-4 items-start flex-1 cursor-pointer" onClick={() => !isReadOnly && toggleItemComplete(key)}>
                    {/* Big Checkbox */}
                    <div className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center border-2 transition-all ${
                       isFullyPicked 
@@ -148,15 +150,19 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
                    <div className="min-w-0">
                       <div className="flex flex-wrap gap-2 mb-1">
                         <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                           {product?.sku}
+                           {product?.sku ?? 'Variante'}
                         </span>
                       </div>
                       <h3 className={`font-bold text-white text-base leading-snug ${isFullyPicked ? 'line-through text-slate-500' : ''}`}>
-                         {product?.name}
+                         {product?.name ?? `Ítem (${item.quantity} un.)`}
                       </h3>
                       <div className="flex items-center gap-2 mt-1 text-xs font-medium text-slate-400 uppercase">
-                         <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product?.size}</span>
-                         <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product?.color}</span>
+                         {product && (
+                           <>
+                             <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product.size}</span>
+                             <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product.color}</span>
+                           </>
+                         )}
                       </div>
                    </div>
                 </div>
@@ -174,7 +180,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
                    <div className="flex items-center gap-3 bg-slate-900 rounded-xl p-1 border border-slate-700">
                       <button 
                         disabled={isReadOnly}
-                        onClick={() => updatePickedQuantity(item.productId, (item.picked || 0) - 1)}
+                        onClick={() => updatePickedQuantity(key, (item.picked || 0) - 1)}
                         className="w-10 h-10 flex items-center justify-center bg-slate-800 rounded-lg text-slate-400 active:bg-slate-700 active:text-white disabled:opacity-30"
                       >
                         -
@@ -183,14 +189,14 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
                         type="number"
                         disabled={isReadOnly}
                         value={item.picked}
-                        onChange={(e) => updatePickedQuantity(item.productId, parseInt(e.target.value) || 0)}
+                        onChange={(e) => updatePickedQuantity(key, parseInt(e.target.value) || 0)}
                         className={`w-12 bg-transparent text-center font-black text-lg outline-none ${
                           isFullyPicked ? 'text-green-500' : isPartial ? 'text-blue-400' : 'text-slate-500'
                         }`}
                       />
                       <button 
                         disabled={isReadOnly}
-                        onClick={() => updatePickedQuantity(item.productId, (item.picked || 0) + 1)}
+                        onClick={() => updatePickedQuantity(key, (item.picked || 0) + 1)}
                         className="w-10 h-10 flex items-center justify-center bg-blue-600 rounded-lg text-white shadow-lg shadow-blue-900/20 active:bg-blue-500 active:scale-95 disabled:opacity-30 disabled:bg-slate-800"
                       >
                         +
