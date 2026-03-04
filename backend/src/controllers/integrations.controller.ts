@@ -1705,8 +1705,14 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       const filtered = merged.filter((o: any) => {
         if (o.status === 'cancelled') return true;
         if (o.status !== 'paid') return false;
-        const sh = o.shipping?.status || o.shipping?.substatus;
-        return ['ready_to_ship', 'pending', 'handling'].includes(sh) || !sh;
+        // Usar shipping o shipment (la API puede devolver cualquiera)
+        const ship = o.shipping || o.shipment;
+        const sh = (ship?.status || ship?.substatus || '').toString().toLowerCase();
+        // Excluir explícitamente enviados y entregados
+        if (['shipped', 'delivered', 'not_delivered'].includes(sh)) return false;
+        // Incluir solo si está claramente por despachar (no incluir si no hay status y no estamos seguros)
+        const pendingStatuses = ['ready_to_ship', 'pending', 'handling', 'to_be_agreed'];
+        return pendingStatuses.includes(sh);
       });
       total = filtered.length;
       orders = filtered.slice(offsetNum, offsetNum + limitNum).map(mapOrder);
