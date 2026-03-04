@@ -222,7 +222,7 @@ const MercadoLibreOrders: React.FC = () => {
                   : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              Por despachar + canceladas
+              Solo por enviar
             </button>
             <button
               type="button"
@@ -237,7 +237,7 @@ const MercadoLibreOrders: React.FC = () => {
             </button>
           </div>
           {!showAllSales && (
-            <p className="text-xs text-slate-500 self-center sm:self-auto">Solo órdenes por enviar y canceladas</p>
+            <p className="text-xs text-slate-500 self-center sm:self-auto">Solo órdenes con envío en preparación o listas para despachar</p>
           )}
         </div>
 

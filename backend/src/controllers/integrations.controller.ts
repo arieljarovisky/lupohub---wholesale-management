@@ -1637,8 +1637,8 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
     const onlyPendingAndCancelled = only_pending_shipment_and_cancelled === '1' || only_pending_shipment_and_cancelled === 'true';
 
     const mapOrder = (order: any) => {
-      let shippingStatus = null;
-      if (order.shipping) {
+      let shippingStatus = order._shipment_status ?? null;
+      if (!shippingStatus && order.shipping) {
         shippingStatus = order.shipping.status || order.shipping.substatus || null;
         if (!shippingStatus && order.status === 'paid' && order.shipping.id) {
           shippingStatus = 'ready_to_ship';
@@ -1685,37 +1685,64 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
     let total: number;
 
     if (onlyPendingAndCancelled) {
-      // Solo por despachar + canceladas: traer pagadas y canceladas, filtrar pagadas por envío
+      // Solo "por enviar": órdenes pagadas cuyo shipment está en handling o ready_to_ship (API de Shipments)
       const baseParams = `seller=${mlToken.user_id}&limit=50&sort=date_desc`;
       const dateFrom = date_from ? `&order.date_created.from=${date_from}T00:00:00.000-03:00` : '';
       const dateTo = date_to ? `&order.date_created.to=${date_to}T23:59:59.999-03:00` : '';
-      const [paidRes, cancelledRes] = await Promise.all([
-        axios.get(`https://api.mercadolibre.com/orders/search?${baseParams}&order.status=paid${dateFrom}${dateTo}`, {
-          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        }),
-        axios.get(`https://api.mercadolibre.com/orders/search?${baseParams}&order.status=cancelled${dateFrom}${dateTo}`, {
-          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        })
-      ]);
-      const paid = paidRes.data.results || [];
-      const cancelled = cancelledRes.data.results || [];
-      const merged = [...paid, ...cancelled].sort(
-        (a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime()
+      const paidRes = await axios.get(
+        `https://api.mercadolibre.com/orders/search?${baseParams}&order.status=paid${dateFrom}${dateTo}`,
+        { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }
       );
-      const filtered = merged.filter((o: any) => {
-        if (o.status === 'cancelled') return true;
-        if (o.status !== 'paid') return false;
-        // Usar shipping o shipment (la API puede devolver cualquiera; a veces no viene en el listado)
-        const ship = o.shipping || o.shipment;
-        const sh = (ship?.status || ship?.substatus || '').toString().toLowerCase();
-        // Excluir solo cuando estamos seguros de que ya se envió o entregó
-        if (['shipped', 'delivered', 'not_delivered'].includes(sh)) return false;
-        // Incluir: por despachar (status conocido) o cuando no hay status (API a veces no lo trae)
-        const pendingStatuses = ['ready_to_ship', 'pending', 'handling', 'to_be_agreed'];
-        return pendingStatuses.includes(sh) || !sh;
-      });
-      total = filtered.length;
-      orders = filtered.slice(offsetNum, offsetNum + limitNum).map(mapOrder);
+      const paid = paidRes.data.results || [];
+
+      const POR_ENVIAR_STATUSES = ['handling', 'ready_to_ship'];
+      const authHeader = { 'Authorization': `Bearer ${mlToken.access_token}`, 'x-format-new': 'true' };
+
+      const getShipmentId = async (order: any): Promise<number | null> => {
+        const ship = order.shipping || order.shipment;
+        if (ship?.id) return ship.id;
+        try {
+          const det = await axios.get(`https://api.mercadolibre.com/orders/${order.id}`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          const s = det.data?.shipping || det.data?.shipment;
+          return s?.id ?? null;
+        } catch {
+          return null;
+        }
+      };
+
+      const getShipmentStatus = async (shipmentId: number): Promise<string | null> => {
+        try {
+          const res = await axios.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+            headers: authHeader
+          });
+          return (res.data?.status || res.data?.substatus || '').toString().toLowerCase() || null;
+        } catch {
+          return null;
+        }
+      };
+
+      const BATCH = 5;
+      const ordersPorEnviar: any[] = [];
+      for (let i = 0; i < paid.length; i += BATCH) {
+        const batch = paid.slice(i, i + BATCH);
+        const shipmentIds = await Promise.all(batch.map(getShipmentId));
+        const statuses = await Promise.all(
+          shipmentIds.map((id) => (id ? getShipmentStatus(id) : Promise.resolve(null)))
+        );
+        batch.forEach((order, idx) => {
+          const st = statuses[idx];
+          if (st && POR_ENVIAR_STATUSES.includes(st)) {
+            order._shipment_status = st;
+            ordersPorEnviar.push(order);
+          }
+        });
+      }
+
+      ordersPorEnviar.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
+      total = ordersPorEnviar.length;
+      orders = ordersPorEnviar.slice(offsetNum, offsetNum + limitNum).map(mapOrder);
     } else {
       let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
       if (status) url += `&order.status=${status}`;
