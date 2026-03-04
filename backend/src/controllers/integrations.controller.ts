@@ -1418,14 +1418,10 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   }
 };
 
-// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
+// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
 export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
-    const mlToken = await getValidMLToken();
-    if (!mlToken) {
-      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
-    }
-
+    const { updateMercadoLibreStockByVariant } = await import('./stock.controller');
     const variants = await query(`
       SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku
       FROM product_variants pv
@@ -1440,22 +1436,17 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     const logs: string[] = [];
 
     for (const v of variants) {
-      try {
-        await axios.put(
-          `https://api.mercadolibre.com/items/${v.mercado_libre_id}/variations/${v.mercado_libre_variant_id}`,
-          { available_quantity: v.stock || 0 },
-          {
-            headers: {
-              'Authorization': `Bearer ${mlToken.access_token}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
+      const ok = await updateMercadoLibreStockByVariant(
+        v.mercado_libre_id,
+        v.mercado_libre_variant_id,
+        v.stock || 0
+      );
+      if (ok) {
         updated++;
         logs.push(`[OK] ${v.sku}: ${v.stock || 0} unidades`);
-      } catch (e: any) {
+      } else {
         errors++;
-        logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.message || e.message}`);
+        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
       }
     }
 

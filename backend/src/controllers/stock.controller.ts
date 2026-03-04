@@ -220,40 +220,94 @@ export const updateTiendaNubeStock = async (
   }
 };
 
-// Actualizar stock en Mercado Libre por variante
+// Actualizar stock en Mercado Libre por variante.
+// Prueba primero PUT a la subrecurso; si ML devuelve error, usa GET item + PUT item con array variations (formato que exige la API en muchos casos).
 export const updateMercadoLibreStockByVariant = async (
   itemId: string,
   variationId: string,
   stock: number
 ): Promise<boolean> => {
+  const integration = await get(
+    `SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`
+  );
+
+  if (!integration?.access_token) {
+    console.log('[ML Stock] No hay integración configurada');
+    return false;
+  }
+
+  const headers = {
+    'Authorization': `Bearer ${integration.access_token}`,
+    'Content-Type': 'application/json'
+  };
+
+  // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
   try {
-    const integration = await get(
-      `SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`
-    );
-
-    if (!integration?.access_token) {
-      console.log('[ML Stock] No hay integración configurada');
-      return false;
-    }
-
-    const response = await axios.put(
+    await axios.put(
       `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
       { available_quantity: stock },
-      {
-        headers: {
-          'Authorization': `Bearer ${integration.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      }
+      { headers }
     );
-
     console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
     return true;
-  } catch (error: any) {
-    console.error('[ML Stock] Error:', error.response?.data || error.message);
+  } catch (subError: any) {
+    const status = subError.response?.status;
+    const data = subError.response?.data;
+    // Si es 400/404/405, probar método completo (GET + PUT con todas las variaciones)
+    if (status === 400 || status === 404 || status === 405 || (status >= 400 && status < 500)) {
+      try {
+        return await updateMercadoLibreStockByItemUpdate(itemId, variationId, stock, integration.access_token);
+      } catch (fullError: any) {
+        console.error('[ML Stock] Error método completo:', fullError.response?.data || fullError.message);
+        return false;
+      }
+    }
+    console.error('[ML Stock] Error:', data || subError.message);
     return false;
   }
 };
+
+// Fallback: obtener ítem de ML, actualizar solo la variación indicada y enviar PUT con todas las variaciones (requerido por la API).
+async function updateMercadoLibreStockByItemUpdate(
+  itemId: string,
+  variationId: string,
+  newStock: number,
+  accessToken: string
+): Promise<boolean> {
+  const headers = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  };
+
+  const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+  const item = getRes.data;
+  const variations: any[] = item.variations || [];
+
+  if (variations.length === 0) {
+    // Ítem sin variaciones: ML usa available_quantity a nivel ítem
+    await axios.put(
+      `https://api.mercadolibre.com/items/${itemId}`,
+      { available_quantity: newStock },
+      { headers }
+    );
+    console.log(`[ML Stock] Actualizado item ${itemId} (sin variaciones) a ${newStock} unidades`);
+    return true;
+  }
+
+  const variationsPayload = variations.map((v: any) => {
+    const isTarget = String(v.id) === String(variationId);
+    const qty = isTarget ? newStock : (v.available_quantity ?? 0);
+    return { id: v.id, available_quantity: Math.max(0, qty) };
+  });
+
+  await axios.put(
+    `https://api.mercadolibre.com/items/${itemId}`,
+    { variations: variationsPayload },
+    { headers }
+  );
+  console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${newStock} unidades (vía PUT item)`);
+  return true;
+}
 
 // Endpoint: Obtener historial de movimientos de stock
 export const getStockMovements = async (req: Request, res: Response) => {

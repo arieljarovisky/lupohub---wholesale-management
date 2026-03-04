@@ -789,7 +789,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">
-                      La app es la fuente de verdad. El botón anterior envía tu stock local a ML.{' '}
+                      La app es la fuente de verdad. <strong>Sincronizar stock a ML</strong> envía tu stock local a Mercado Libre (cada cambio en la app ya se envía a ML). Si modificaste stock o hubo ventas en ML y querés traer esos cambios a la app, usá{' '}
                       <button
                         type="button"
                         onClick={handleImportStockFromMercadoLibre}
@@ -797,8 +797,7 @@ const Settings: React.FC<SettingsProps> = ({
                         className="text-yellow-400 hover:text-yellow-300 underline disabled:opacity-50"
                       >
                         Importar desde ML
-                      </button>
-                      {' '}(traer lo publicado en ML a la app, uso ocasional).
+                      </button>.
                     </p>
 
                     {/* Mensaje Automático */}
