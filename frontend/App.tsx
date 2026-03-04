@@ -237,9 +237,10 @@ const App: React.FC = () => {
     setOrders(prev => prev.filter(o => o.id !== orderId));
     try {
       await api.deleteOrder(orderId);
-    } catch (error) {
+    } catch (error: any) {
       setOrders(previous);
-      alert("Error eliminando pedido");
+      const msg = error?.response?.data?.message || error?.message || "Error eliminando pedido";
+      alert(msg);
     }
   };
 

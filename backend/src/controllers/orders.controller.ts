@@ -266,10 +266,14 @@ export const deleteOrder = async (req: any, res: any) => {
   if (!id) return res.status(400).json({ message: "ID inválido" });
   try {
     const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
-    if (currentOrder?.status === 'Confirmado') {
+    const status = currentOrder?.status;
+    if (status === 'Confirmado' || status === 'Preparación') {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
-      if (!result.success) console.error('Errores restaurando stock al eliminar pedido:', result.errors);
+      if (!result.success) {
+        console.error('Errores restaurando stock al eliminar pedido:', result.errors);
+        return res.status(500).json({ message: 'Error restaurando stock: ' + (result.errors?.join(', ') || 'desconocido') });
+      }
     }
     await execute("DELETE FROM orders WHERE id = ?", [id]);
     res.json({ id });

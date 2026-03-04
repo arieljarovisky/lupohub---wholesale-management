@@ -71,28 +71,33 @@ const StockHistory: React.FC = () => {
   const [filterType, setFilterType] = useState<string>('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [limit, setLimit] = useState(100);
+  const [limit, setLimit] = useState(50);
 
-  const fetchMovements = async () => {
+  const fetchMovements = React.useCallback(async (abort?: { current: boolean }) => {
     setLoading(true);
     try {
-      const params: any = { limit };
+      const params: any = { limit: Math.min(200, Math.max(10, limit)) };
       if (filterType) params.type = filterType;
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo + 'T23:59:59';
-      
+
       const data = await api.getStockMovements(params);
-      setMovements(data);
+      if (abort?.current) return;
+      setMovements(Array.isArray(data) ? data : []);
     } catch (error) {
+      if (abort?.current) return;
       console.error('Error fetching stock movements:', error);
+      setMovements([]);
     } finally {
-      setLoading(false);
+      if (!abort?.current) setLoading(false);
     }
-  };
+  }, [filterType, dateFrom, dateTo, limit]);
 
   useEffect(() => {
-    fetchMovements();
-  }, [filterType, dateFrom, dateTo, limit]);
+    const abort = { current: false };
+    fetchMovements(abort);
+    return () => { abort.current = true; };
+  }, [filterType, dateFrom, dateTo, limit, fetchMovements]);
 
   const handleCreateSnapshot = async () => {
     if (!confirm('¿Crear un snapshot del stock actual? Esto registrará el stock de todas las variantes como punto de partida.')) return;

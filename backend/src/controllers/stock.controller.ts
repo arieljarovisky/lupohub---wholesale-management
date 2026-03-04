@@ -283,7 +283,8 @@ export const getStockMovements = async (req: Request, res: Response) => {
       params.push(to);
     }
 
-    params.push(parseInt(limit as string) || 50);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10) || 50));
+    params.push(limitNum);
 
     const movements = await query(
       `SELECT sm.*, pv.sku, p.name as product_name
