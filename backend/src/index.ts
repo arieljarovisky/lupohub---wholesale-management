@@ -14,6 +14,7 @@ import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
+import { testConnection } from './database/db';
 
 dotenv.config();
 
@@ -43,10 +44,33 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'LupoHub Backend', db: 'MySQL' });
 });
 
-// Initialize database tables
-addStockMovementsTable().catch(console.error);
-fixIntegrationsTable().catch(console.error);
-addDespachosTable().catch(console.error);
+// Initialize database tables (con reintentos por si MySQL tarda en Railway)
+async function initDatabase() {
+  const maxAttempts = 5;
+  const delayMs = 3000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[DB] Intento ${attempt}/${maxAttempts} de conectar a MySQL...`);
+      await testConnection();
+      console.log('[DB] Conexión OK, creando/verificando tablas...');
+      await addStockMovementsTable();
+      await fixIntegrationsTable();
+      await addDespachosTable();
+      console.log('[DB] Tablas inicializadas correctamente');
+      return;
+    } catch (err: any) {
+      console.error(`[DB] Intento ${attempt} fallido:`, err?.code || err?.message);
+      if (attempt < maxAttempts) {
+        console.log(`[DB] Reintento en ${delayMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        console.error('[DB] No se pudo conectar después de', maxAttempts, 'intentos. Revisá que MYSQL_URL esté definida (Variable Reference al servicio MySQL) y que ambos servicios estén en el mismo proyecto.');
+      }
+    }
+  }
+}
+
+initDatabase().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
