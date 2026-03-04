@@ -79,6 +79,10 @@ const App: React.FC = () => {
         dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
         inventory: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER],
         orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+        tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
+        mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+        stock_history: [Role.ADMIN, Role.WAREHOUSE],
+        despachos: [Role.ADMIN],
         customers: [Role.ADMIN, Role.SELLER],
         visits: [Role.ADMIN, Role.SELLER],
         settings: [Role.ADMIN]
@@ -422,8 +426,8 @@ const App: React.FC = () => {
     ]},
     { title: 'Pedidos y canales', items: [
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
-      { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN] },
-      { id: 'mercadolibre_orders', label: 'Ventas ML', icon: Zap, roles: [Role.ADMIN] },
+      { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_stock', label: 'Stock ML', icon: Package, roles: [Role.ADMIN] },
     ]},
     { title: 'CRM y sistema', items: [
@@ -459,8 +463,11 @@ const App: React.FC = () => {
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
                  {baseView === 'orders' && 'Pedidos Mayoristas'}
-                 {baseView === 'tiendanube_orders' && 'Ventas Tienda Nube'}
-                 {baseView === 'mercadolibre_orders' && 'Ventas Mercado Libre'}
+                 {baseView === 'tiendanube_orders' && 'Tienda Nube'}
+                 {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
+                 {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
+                 {baseView === 'stock_history' && 'Historial de Stock'}
+                 {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}

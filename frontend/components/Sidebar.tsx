@@ -29,8 +29,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, 
     {
       title: 'Canales de Venta',
       items: [
-        { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN], color: 'cyan' },
-        { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN], color: 'yellow' },
+        { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
+        { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
         { id: 'mercadolibre_stock', label: 'Stock ML', icon: Package, roles: [Role.ADMIN], color: 'yellow' },
       ]
     },
