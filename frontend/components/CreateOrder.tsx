@@ -53,12 +53,23 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     }
   }, [initialOrder, products]);
 
-  const filteredSearchProducts = products.filter(p => 
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
-  ).slice(0, 10);
+  const searchTrimmed = searchTerm.trim().toLowerCase();
+  const searchWords = searchTrimmed ? searchTrimmed.split(/\s+/).filter(Boolean) : [];
 
-const addItem = async (product: Product) => {
+  const filteredSearchProducts = React.useMemo(() => {
+    if (searchWords.length === 0) {
+      return products.slice(0, 30);
+    }
+    return products.filter(p => {
+      const sku = (p.sku || '').toLowerCase();
+      const name = (p.name || '').toLowerCase();
+      const category = (p.category || '').toLowerCase();
+      const allText = `${sku} ${name} ${category}`;
+      return searchWords.every(word => allText.includes(word));
+    }).slice(0, 50);
+  }, [products, searchTrimmed]);
+
+  const addItem = async (product: Product) => {
     if (isReadOnly) return;
     const existing = rows.find(r => r.sku === product.sku);
     const isBackorder = product.stock <= 0;
@@ -69,7 +80,7 @@ const addItem = async (product: Product) => {
       const variants = await api.getVariantsBySku(product.sku);
       if (variants.length <= 1) {
         const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', stock: product.stock };
-        setRows([...rows, {
+        setRows(prev => [...prev, {
           id: Date.now().toString(),
           variantId: v.variantId || undefined,
           sku: product.sku,
@@ -82,7 +93,6 @@ const addItem = async (product: Product) => {
         setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, variants });
       }
     }
-    setIsSearching(false);
     setSearchTerm('');
   };
 
@@ -215,50 +225,74 @@ const addItem = async (product: Product) => {
 
       {isSearching && (
         <div className="fixed inset-0 bg-slate-950 z-[100] p-4 flex flex-col animate-fade-in">
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={() => setIsSearching(false)} className="p-2 text-slate-400"><ArrowLeft size={24}/></button>
+          <div className="flex items-center gap-3 mb-3">
+            <button onClick={() => setIsSearching(false)} className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Cerrar">
+              <ArrowLeft size={22}/>
+            </button>
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18}/>
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20}/>
               <input 
                 autoFocus
                 type="text" 
-                placeholder="SKU o nombre de modelo..." 
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl py-4 pl-10 pr-4 outline-none text-white focus:ring-2 focus:ring-blue-500 shadow-xl"
+                placeholder="Buscar por SKU, nombre o categoría (ej: 3223, medias, lupo)..." 
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 outline-none text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-xl text-base"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
+              {searchTerm.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-1"
+                  aria-label="Borrar"
+                >
+                  <XCircle size={18}/>
+                </button>
+              )}
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto space-y-3 pb-20">
+          <p className="text-xs text-slate-500 mb-3 px-1">
+            {searchTrimmed ? `${filteredSearchProducts.length} resultado(s). Tocá un producto para agregar; podés seguir buscando sin cerrar.` : 'Mostrando primeros 30 productos. Escribí para filtrar.'}
+          </p>
+          <div className="flex-1 overflow-y-auto space-y-2 pb-4 min-h-0">
             {filteredSearchProducts.map(p => (
               <button 
                 key={p.id} 
                 onClick={() => addItem(p)}
-                className={`w-full text-left p-4 rounded-2xl border transition-all flex justify-between items-center active:scale-[0.98] ${p.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-900 border-slate-800'}`}
+                className={`w-full text-left p-3.5 rounded-xl border transition-all flex justify-between items-center gap-3 active:scale-[0.99] hover:border-slate-600 ${p.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-900 border-slate-800'}`}
               >
-                <div className="flex-1 min-w-0 pr-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="text-[10px] text-blue-500 font-bold font-mono uppercase">{p.sku}</div>
-                    {p.stock <= 0 && <span className="text-[8px] bg-red-900 text-red-200 px-1.5 py-0.5 rounded uppercase font-black">Pendiente</span>}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <span className="text-xs font-mono font-bold text-blue-400">{p.sku}</span>
+                    {p.category && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">{p.category}</span>}
+                    {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold">Pendiente</span>}
                   </div>
-                  <div className="font-bold text-white text-sm truncate">{p.name}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{p.size} • {p.color}</div>
+                  <div className="font-bold text-white text-sm leading-tight truncate">{p.name}</div>
+                  {(p.size || p.color) && <div className="text-xs text-slate-500 mt-0.5">{[p.size, p.color].filter(Boolean).join(' • ')}</div>}
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-sm font-black text-green-500 mb-1">${p.price.toLocaleString()}</div>
-                  <div className={`flex items-center justify-end gap-1.5 text-[10px] font-black uppercase tracking-tighter ${p.stock <= 0 ? 'text-red-400' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-600'}`}>
-                    {p.stock <= 0 ? (
-                      <><XCircle size={10} /> Agotado</>
-                    ) : (
-                      <><CheckCircle2 size={10} /> En Stock</>
-                    )}
-                  </div>
+                <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
+                  <span className="text-sm font-black text-green-400">${p.price.toLocaleString()}</span>
+                  <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
+                    {p.stock <= 0 ? 'Sin stock' : `${p.stock} un.`}
+                  </span>
                 </div>
               </button>
             ))}
             {filteredSearchProducts.length === 0 && (
-              <div className="text-center py-10 text-slate-700 text-sm font-bold uppercase tracking-widest">No hay resultados</div>
+              <div className="text-center py-12 text-slate-500">
+                <Package className="mx-auto mb-2 opacity-50" size={32}/>
+                <p className="font-semibold">No hay resultados</p>
+                <p className="text-sm mt-1">Probá con otras palabras o otro SKU</p>
+              </div>
             )}
+          </div>
+          <div className="pt-3 border-t border-slate-800 flex gap-2">
+            <button
+              onClick={() => setIsSearching(false)}
+              className="flex-1 py-3 rounded-xl bg-slate-800 text-white font-bold border border-slate-700 hover:bg-slate-700 transition"
+            >
+              Listo ({rows.length} en el pedido)
+            </button>
           </div>
         </div>
       )}

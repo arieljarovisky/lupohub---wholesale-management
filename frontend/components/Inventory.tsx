@@ -5,6 +5,26 @@ import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
 import * as XLSX from 'xlsx';
 
+const CONCURRENT_VARIANT_REQUESTS = 4;
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let index = 0;
+  async function run(): Promise<void> {
+    while (index < items.length) {
+      const i = index++;
+      try {
+        await fn(items[i]);
+      } catch {
+        // ignore per-item errors
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => run()));
+}
+
 interface InventoryProps {
   products: Product[];
   attributes?: Attribute[];
@@ -355,13 +375,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const selectedColorItem = filterColor !== 'ALL' ? availableColors.find(c => (c as any).name === filterColor || (c as any).code === filterColor) : null;
   const selectedColorLabel = selectedColorItem ? `${(selectedColorItem as any).name || ''}` : colorQuery;
 
-  // Prefetch variants for color filtering at group level
+  // Prefetch variants for color filtering at group level (concurrency limit to avoid ERR_INSUFFICIENT_RESOURCES)
   useEffect(() => {
     if (filterColor === 'ALL') {
       setLoadingVariantsByGroup({});
       return;
     }
-    if (filterColor === 'ALL') return;
     const baseSkus: string[] = Array.from(new Set<string>(products.map(product => {
       const sku = (product.sku || 'SIN-CODIGO').toString();
       const parts = sku.split('-');
@@ -369,11 +388,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (parts.length === 2) return parts.join('-');
       return sku;
     })));
-    const missing: string[] = baseSkus.filter(k => !loadedVariants[k]);
+    const missing: string[] = baseSkus.filter(k => !loadedVariants[k]).slice(0, 25);
     if (missing.length === 0) return;
-    Promise.all(missing.map(async (groupName) => {
+    let cancelled = false;
+    runWithConcurrency(missing, CONCURRENT_VARIANT_REQUESTS, async (groupName) => {
+      if (cancelled) return;
       try {
         const variants = await api.getVariantsBySku(groupName);
+        if (cancelled) return;
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
@@ -396,10 +418,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       } catch {
         // ignore
       }
-    })).catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [filterColor, products]);
   
-  // Prefetch variants for visible groups on initial load (no color filter)
+  // Prefetch variants for visible groups on initial load (no color filter, concurrency limit)
   useEffect(() => {
     if (filterColor !== 'ALL') return;
     const baseSkus: string[] = Array.from(new Set<string>(filteredProducts.map(product => {
@@ -410,12 +433,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return sku;
     })));
     const missing: string[] = baseSkus.filter(k => !loadedVariants[k]);
-    const limit = missing.slice(0, 50);
+    const limit = missing.slice(0, 20);
     if (limit.length === 0) return;
     setLoadingVariantsByGroup(prev => ({ ...prev, ...Object.fromEntries(limit.map(k => [k, true])) }));
-    Promise.all(limit.map(async (groupName) => {
+    let cancelled = false;
+    runWithConcurrency(limit, CONCURRENT_VARIANT_REQUESTS, async (groupName) => {
+      if (cancelled) return;
       try {
         const variants = await api.getVariantsBySku(groupName);
+        if (cancelled) return;
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
@@ -438,11 +464,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       } catch {
         // ignore
       } finally {
-        setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: false }));
+        if (!cancelled) setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: false }));
       }
-    })).catch(() => {
-      setLoadingVariantsByGroup(prev => ({ ...prev, ...Object.fromEntries(limit.map(k => [k, false])) }));
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setLoadingVariantsByGroup(prev => ({ ...prev, ...Object.fromEntries(limit.map(k => [k, false])) }));
     });
+    return () => { cancelled = true; };
   }, [filteredProducts, filterColor]);
 
   const exportProductsToExcel = () => {

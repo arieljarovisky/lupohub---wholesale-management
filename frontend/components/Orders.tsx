@@ -45,6 +45,8 @@ const Orders: React.FC<OrdersProps> = ({
     (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PREPARATION) &&
     (role === Role.ADMIN || role === Role.SELLER);
 
+  const canEditOrder = role === Role.ADMIN || role === Role.SELLER;
+
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -100,8 +102,8 @@ const Orders: React.FC<OrdersProps> = ({
           return (
             <div 
               key={order.id} 
-              onClick={() => onEditOrder?.(order)}
-              className="bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 hover:border-blue-500 transition-all cursor-pointer group shadow-sm active:bg-slate-750"
+              onClick={() => canEditOrder && onEditOrder?.(order)}
+              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'}`}
             >
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
@@ -146,7 +148,7 @@ const Orders: React.FC<OrdersProps> = ({
                       <Trash2 size={16} />
                     </button>
                   )}
-                  <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
+                  {canEditOrder && <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />}
                 </div>
               </div>
 
