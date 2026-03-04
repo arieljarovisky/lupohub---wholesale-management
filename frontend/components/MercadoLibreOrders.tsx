@@ -4,6 +4,7 @@ import { api } from '../services/api';
 
 interface MercadoLibreOrder {
   id: number;
+  orderIds?: number[];
   status: string;
   statusDetail: string;
   total: number;
@@ -411,10 +412,11 @@ const MercadoLibreOrders: React.FC = () => {
             const shipping = order.shipping ? (shippingStatusConfig[order.shipping.status] || shippingStatusConfig.pending) : null;
             const dateInfo = formatDate(order.dateCreated);
             const isExpanded = expandedOrder === order.id;
+            const isGrouped = order.orderIds && order.orderIds.length > 1;
 
             return (
               <div 
-                key={order.id} 
+                key={order.orderIds ? order.orderIds.join('-') : order.id} 
                 className={`bg-slate-800/40 rounded-2xl border transition-all duration-200 ${
                   isExpanded ? 'border-yellow-500/50 shadow-lg shadow-yellow-900/10' : 'border-slate-700/30 hover:border-slate-600/50'
                 }`}
@@ -434,7 +436,13 @@ const MercadoLibreOrders: React.FC = () => {
                       <div className="w-px h-10 bg-slate-700/50" />
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-white font-black text-lg">#{order.id}</span>
+                          {isGrouped ? (
+                            <span className="text-white font-black text-lg">
+                              {order.orderIds!.length} órdenes · #{order.orderIds![0]}
+                            </span>
+                          ) : (
+                            <span className="text-white font-black text-lg">#{order.id}</span>
+                          )}
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${status.bg} ${status.color}`}>
                             {status.label.toUpperCase()}
                           </span>
@@ -457,7 +465,7 @@ const MercadoLibreOrders: React.FC = () => {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">{order.items.length} producto{order.items.length !== 1 ? 's' : ''}</p>
-                        <p className="text-xs text-slate-500">#{order.id}</p>
+                        <p className="text-xs text-slate-500">{isGrouped ? `Compra con ${order.orderIds!.length} órdenes ML` : `#${order.id}`}</p>
                       </div>
                       <ChevronDown 
                         size={20} 
@@ -504,6 +512,11 @@ const MercadoLibreOrders: React.FC = () => {
                         </div>
                         <p className="text-white text-sm">{dateInfo.full}</p>
                         <p className="text-slate-400 text-sm">a las {dateInfo.time} hs</p>
+                        {order.orderIds && order.orderIds.length > 1 && (
+                          <p className="text-slate-400 text-xs mt-2">
+                            Órdenes ML: {order.orderIds.map(id => `#${id}`).join(', ')}
+                          </p>
+                        )}
                         {order.dateClosed && (
                           <p className="text-slate-500 text-xs mt-2">
                             Cerrada: {formatDate(order.dateClosed).full}
@@ -543,17 +556,31 @@ const MercadoLibreOrders: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* External Link */}
-                    <div className="mt-4 flex justify-end">
-                      <a
-                        href={`https://www.mercadolibre.com.ar/ventas/${order.id}/detalle`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-yellow-400 hover:text-yellow-300 text-sm font-bold flex items-center gap-2 transition-colors"
-                      >
-                        Ver en Mercado Libre
-                        <ExternalLink size={14} />
-                      </a>
+                    {/* External Link(s) */}
+                    <div className="mt-4 flex justify-end flex-wrap gap-2">
+                      {order.orderIds && order.orderIds.length > 1 ? (
+                        order.orderIds.slice(0, 3).map((oid) => (
+                          <a
+                            key={oid}
+                            href={`https://www.mercadolibre.com.ar/ventas/${oid}/detalle`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-yellow-400 hover:text-yellow-300 text-sm font-bold flex items-center gap-1 transition-colors"
+                          >
+                            #{oid} <ExternalLink size={12} />
+                          </a>
+                        ))
+                      ) : (
+                        <a
+                          href={`https://www.mercadolibre.com.ar/ventas/${order.id}/detalle`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-yellow-400 hover:text-yellow-300 text-sm font-bold flex items-center gap-2 transition-colors"
+                        >
+                          Ver en Mercado Libre
+                          <ExternalLink size={14} />
+                        </a>
+                      )}
                     </div>
                   </div>
                 )}

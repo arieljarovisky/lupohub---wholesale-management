@@ -1717,9 +1717,20 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
           const res = await axios.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
             headers: authHeader
           });
-          return (res.data?.status || res.data?.substatus || '').toString().toLowerCase() || null;
+          const data = res.data || {};
+          const st = (data.status ?? data.substatus ?? '').toString().trim().toLowerCase();
+          return st || null;
         } catch {
-          return null;
+          try {
+            const res = await axios.get(`https://api.mercadolibre.com/marketplace/shipments/${shipmentId}`, {
+              headers: authHeader
+            });
+            const data = res.data || {};
+            const st = (data.status ?? data.substatus ?? '').toString().trim().toLowerCase();
+            return st || null;
+          } catch {
+            return null;
+          }
         }
       };
 
@@ -1741,8 +1752,38 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       }
 
       ordersPorEnviar.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
-      total = ordersPorEnviar.length;
-      orders = ordersPorEnviar.slice(offsetNum, offsetNum + limitNum).map(mapOrder);
+
+      // Agrupar misma compra: mismo comprador + misma fecha/hora (al minuto) = una sola fila
+      const groupKey = (o: any) => {
+        const buyerId = o.buyer?.id ?? '';
+        const dateStr = (o.date_created || '').toString();
+        const toMinute = dateStr.slice(0, 16);
+        return `${buyerId}-${toMinute}`;
+      };
+      const groups = new Map<string, any[]>();
+      for (const o of ordersPorEnviar) {
+        const key = groupKey(o);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(o);
+      }
+
+      const groupedOrders = Array.from(groups.values()).map((group) => {
+        const first = group[0];
+        const orderIds = group.map((o: any) => o.id);
+        const allItems = group.flatMap((o: any) => o.order_items || []);
+        const merged = { ...first, order_ids: orderIds, order_items: allItems };
+        merged._shipment_status = first._shipment_status;
+        return merged;
+      });
+
+      total = groupedOrders.length;
+      orders = groupedOrders.slice(offsetNum, offsetNum + limitNum).map((o: any) => {
+        const mapped = mapOrder(o);
+        if (o.order_ids && o.order_ids.length > 1) {
+          (mapped as any).orderIds = o.order_ids;
+        }
+        return mapped;
+      });
     } else {
       let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
       if (status) url += `&order.status=${status}`;
