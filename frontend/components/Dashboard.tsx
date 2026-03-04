@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList } from 'lucide-react';
+import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList, Clock } from 'lucide-react';
 import { Product, Order, OrderStatus, Role } from '../types';
 import { api } from '../services/api';
 
@@ -42,12 +42,17 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     
     try {
       if (isWarehouse) {
-        // Depósito: solo productos para alertas de stock
-        const productsRes = await api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 }));
+        // Depósito: productos + órdenes TN y ML pendientes de despacho (sin montos sensibles)
+        const dates = getDateRange(15);
+        const [productsRes, tnRes, mlRes] = await Promise.all([
+          api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
+          api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [], total: 0 })),
+          api.getMercadoLibreOrders({ limit: 100, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [], total: 0 }))
+        ]);
         setAllProducts(productsRes.items || []);
         setProductCount(productsRes.total || productsRes.items?.length || 0);
-        setTnOrders([]);
-        setMlOrders([]);
+        setTnOrders(tnRes.orders || []);
+        setMlOrders(mlRes.orders || []);
       } else {
         const [productsRes, tnRes, mlRes] = await Promise.all([
           api.getProductsPaged(1, 1000).catch(() => ({ items: [], total: 0 })),
@@ -226,6 +231,21 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const outCount = productsForStock.filter(p => ((p as any).stock_total ?? (p as any).stock ?? 0) === 0).length;
     const lowCount = productsForStock.filter(p => { const s = (p as any).stock_total ?? (p as any).stock ?? 0; return s > 0 && s < 10; }).length;
 
+    // Pedidos TN por despachar: pagados y no enviados
+    const tnToShip = tnOrders.filter((o: any) =>
+      o.paymentStatus === 'paid' && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered'
+    );
+    // Pedidos ML por despachar: pagados y listos/preparando/pendientes de envío
+    const mlToShip = mlOrders.filter((o: any) =>
+      o.status === 'paid' && o.shipping?.status && ['ready_to_ship', 'pending', 'handling'].includes(o.shipping.status)
+    );
+
+    const formatOrderDate = (dateStr: string) => {
+      if (!dateStr) return '-';
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+    };
+
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -310,6 +330,72 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                 </div>
               ) : (
                 <p className="text-slate-500 text-center py-8">Sin alertas de stock</p>
+              )}
+            </div>
+          </div>
+        </div>
+        {/* Pedidos Tienda Nube y Mercado Libre por despachar */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Cloud size={18} className="text-cyan-400" />
+                <h3 className="font-bold text-white">Tienda Nube · Por despachar</h3>
+              </div>
+              {tnToShip.length > 0 && (
+                <span className="text-xs font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded">{tnToShip.length}</span>
+              )}
+            </div>
+            <div className="p-4">
+              {tnToShip.length > 0 ? (
+                <ul className="space-y-2">
+                  {tnToShip.slice(0, 8).map((o: any) => (
+                    <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                      <span className="text-white text-sm">#{o.number ?? o.id}</span>
+                      <span className="text-slate-500 text-xs">{formatOrderDate(o.createdAt)}</span>
+                    </li>
+                  ))}
+                  {tnToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {tnToShip.length - 8} más</li>}
+                </ul>
+              ) : (
+                <p className="text-slate-500 text-center py-8">No hay pedidos TN pendientes de despacho</p>
+              )}
+            </div>
+          </div>
+          <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+            <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap size={18} className="text-yellow-400" />
+                <h3 className="font-bold text-white">Mercado Libre · Por despachar</h3>
+              </div>
+              {mlToShip.length > 0 && (
+                <span className="text-xs font-bold text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded">{mlToShip.length}</span>
+              )}
+            </div>
+            <div className="p-4">
+              {mlToShip.length > 0 ? (
+                <>
+                  <p className="text-slate-400 text-xs mb-3 flex items-center gap-1">
+                    <Clock size={12} />
+                    <strong className="text-amber-400">Flex:</strong> se pueden despachar hasta las 16:00
+                  </p>
+                  <ul className="space-y-2">
+                    {mlToShip.slice(0, 8).map((o: any) => (
+                      <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
+                        <span className="text-white text-sm flex items-center gap-2">
+                          #{o.id}
+                          {o.isFlex && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">Flex</span>
+                          )}
+                        </span>
+                        <span className="text-slate-500 text-xs">{formatOrderDate(o.dateCreated)}</span>
+                      </li>
+                    ))}
+                    {mlToShip.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {mlToShip.length - 8} más</li>}
+                  </ul>
+                </>
+              ) : (
+                <p className="text-slate-500 text-center py-8">No hay pedidos ML pendientes de despacho</p>
               )}
             </div>
           </div>

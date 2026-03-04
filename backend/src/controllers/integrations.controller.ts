@@ -194,6 +194,25 @@ export const handleTiendaNubeCallback = async (req: Request, res: Response) => {
       updated_at = CURRENT_TIMESTAMP
     `, [access_token, response.data.refresh_token || null, expiresAt, user_id, user_id]);
 
+    // Registrar webhook para order/paid y descontar stock automáticamente al vender
+    const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || '').replace(/\/$/, '');
+    if (backendUrl && backendUrl.startsWith('https://')) {
+      const webhookUrl = `${backendUrl}/api/integrations/tiendanube/webhook`;
+      try {
+        await axios.post(
+          `https://api.tiendanube.com/v1/${user_id}/webhooks`,
+          { event: 'order/paid', url: webhookUrl },
+          { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
+        );
+        console.log('[TN] Webhook order/paid registrado:', webhookUrl);
+      } catch (whErr: any) {
+        const msg = whErr.response?.data?.url?.[0] || whErr.response?.data?.event?.[0] || whErr.message;
+        console.warn('[TN] No se pudo registrar webhook (puede existir ya):', msg);
+      }
+    } else {
+      console.warn('[TN] Configure BACKEND_URL (HTTPS) en .env para activar descuento de stock automático por ventas.');
+    }
+
     res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=tiendanube`);
   } catch (error: any) {
     console.error('Error in Tienda Nube callback:', error.response?.data || error.message);
@@ -1020,8 +1039,8 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
       return res.status(200).json({ received: true, ignored: true });
     }
 
-    // Procesar según el tipo de evento
-    if (event === 'order/created' || event === 'order/paid') {
+    // Procesar solo cuando la orden se paga (descontar stock una sola vez)
+    if (event === 'order/paid') {
       const orderId = req.body.id;
       await processTiendaNubeOrder(orderId);
     }
@@ -1039,6 +1058,16 @@ const processTiendaNubeOrder = async (orderId: string) => {
     const integration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
     if (!integration?.access_token) return;
 
+    // Idempotencia: no descontar dos veces la misma orden (p. ej. si TN reenvía el webhook)
+    const alreadyProcessed = await get(
+      `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`,
+      [`Orden TN: ${orderId}`]
+    );
+    if (alreadyProcessed) {
+      console.log(`[TN Order] Orden ${orderId} ya procesada, omitiendo`);
+      return;
+    }
+
     const orderRes = await axios.get(
       `https://api.tiendanube.com/v1/${integration.store_id}/orders/${orderId}`,
       {
@@ -1050,11 +1079,11 @@ const processTiendaNubeOrder = async (orderId: string) => {
     );
 
     const order = orderRes.data;
-    console.log(`[TN Order] Procesando orden ${orderId}, estado: ${order.status}`);
+    console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}`);
 
-    // Solo procesar órdenes pagadas o confirmadas
-    if (!['paid', 'open'].includes(order.payment_status)) {
-      console.log(`[TN Order] Orden ${orderId} no está pagada, ignorando`);
+    // Solo descontar cuando la venta está pagada
+    if (order.payment_status !== 'paid') {
+      console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
       return;
     }
 
@@ -1636,6 +1665,10 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
         'cancelled': 'cancelled'
       };
 
+      // Mercado Envíos Flex: logistic_type "self_service" → se pueden despachar hasta las 16:00
+      const logisticType = order.shipping?.logistic_type || null;
+      const isFlex = logisticType === 'self_service';
+
       return {
         id: order.id,
         status: order.status,
@@ -1660,6 +1693,7 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
           id: order.shipping.id,
           status: statusMap[shippingStatus] || shippingStatus || 'pending'
         } : null,
+        isFlex,
         dateCreated: order.date_created,
         dateClosed: order.date_closed
       };
