@@ -314,6 +314,7 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
         logs.push(msg);
     };
 
+    const perPage = 200; // API Tienda Nube permite hasta 200 por página
     while (hasMore) {
       try {
         const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
@@ -323,7 +324,7 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
           },
           params: {
             page,
-            per_page: 50 // Max allowed usually
+            per_page: perPage
           }
         });
 
@@ -331,6 +332,10 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
         if (products.length === 0) {
           hasMore = false;
           break;
+        }
+        log(`[Sync] Página ${page}: ${products.length} productos`);
+        if (products.length < perPage) {
+          hasMore = false;
         }
 
         // Process each product
@@ -535,8 +540,8 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
         }
 
         page++;
-        // Safety break
-        if (page > 50) hasMore = false; 
+        // Safety break (hasta 200 páginas = 40.000 productos)
+        if (page > 200) hasMore = false; 
       } catch (error: any) {
         // If 404, likely means page out of range or end of list
         if (error.response?.status === 404) {

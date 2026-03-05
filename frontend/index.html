@@ -4,58 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5, user-scalable=yes" />
     <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="LupoHub" />
     <title>LupoHub Manager</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            colors: {
-              slate: {
-                850: '#1e293b', // Custom dark shade
-                900: '#0f172a',
-                950: '#020617',
-              }
-            }
-          }
-        }
-      }
-    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      /* Safe area for notched devices */
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #020617; /* Slate 950 */
-        color: #e2e8f0; /* Slate 200 */
-        padding-bottom: env(safe-area-inset-bottom, 0);
-        padding-left: env(safe-area-inset-left, 0);
-        padding-right: env(safe-area-inset-right, 0);
-      }
-      /* Custom Scrollbar Dark */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #0f172a;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #334155;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #475569;
-      }
-      @media (max-width: 640px) {
-        .touch-manipulation { touch-action: manipulation; }
-      }
-    </style>
   <script type="importmap">
 {
   "imports": {
