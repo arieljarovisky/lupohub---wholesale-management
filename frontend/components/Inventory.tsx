@@ -71,6 +71,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
@@ -442,31 +443,31 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return () => { cancelled = true; };
   }, [filterColor]);
 
-  const exportProductsToExcel = () => {
-    const rows: any[] = [];
-    Object.entries(groupedProducts).forEach(([groupKey, groupVariants]) => {
-      const variants = loadedVariants[groupKey] || groupVariants;
-      variants.forEach(p => {
-        const parts = (p.sku || '').toString().split('-');
-        const parsedSize = p.size || (parts.length >= 3 ? parts[parts.length - 2] : '');
-        const parsedColor = p.color || (parts.length >= 3 ? parts[parts.length - 1] : '');
-        rows.push({
-          SKU: p.sku,
-          Nombre: p.name,
-          Categoría: p.category,
-          Talle: parsedSize,
-          Color: parsedColor,
-          Stock: ((p as any).stock_total ?? (p as any).stock ?? 0),
-          Precio: (p as any).base_price ?? (p as any).price ?? 0,
-          Descripción: (p as any).description || '',
-        });
-      });
-    });
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Productos');
-    const filename = `productos_${new Date().toISOString().slice(0,10)}.xlsx`;
-    XLSX.writeFile(workbook, filename);
+  const exportProductsToExcel = async () => {
+    setExportingExcel(true);
+    try {
+      const rows = await api.exportInventory();
+      const excelRows = rows.map((r: any) => ({
+        'Código artículo': r.product_sku,
+        'Nombre producto': r.product_name,
+        'Categoría': r.category || '',
+        'SKU variante': r.variant_sku || '',
+        'Talle': r.talle_display ? `${r.size_code} - ${r.talle_display}` : r.size_code,
+        'Color': r.color_code && r.color_name && r.color_code !== r.color_name ? `${r.color_code} - ${r.color_name}` : (r.color_name || r.color_code || ''),
+        'Stock': Number(r.stock ?? 0),
+        'Precio': Number(r.base_price ?? 0),
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
+      const filename = `inventario_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, filename);
+    } catch (e) {
+      console.error(e);
+      alert('Error al exportar. Revisá que el backend esté conectado.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const handleImportTangoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -882,10 +883,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </button>
         <button 
           onClick={exportProductsToExcel}
-          className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-green-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm"
+          disabled={exportingExcel}
+          className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-green-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50"
         >
-          <Download size={16} />
-          <span className="text-sm font-semibold">Exportar Excel</span>
+          {exportingExcel ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
+          <span className="text-sm font-semibold">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
         </button>
 
         {isAdminOrWarehouse && (

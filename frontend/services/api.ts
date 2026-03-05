@@ -94,6 +94,24 @@ export const api = {
     }, { items: MOCK_PRODUCTS.slice(0, perPage), page, per_page: perPage, total: MOCK_PRODUCTS.length }, 'getProductsPaged');
   },
 
+  /** Inventario completo para exportar Excel: todas las variantes con stock. */
+  exportInventory: async (): Promise<Array<{
+    product_sku: string;
+    product_name: string;
+    category: string;
+    base_price: number;
+    variant_sku: string;
+    size_code: string;
+    size_name: string;
+    color_code: string;
+    color_name: string;
+    stock: number;
+    talle_display?: string;
+  }>> => {
+    const res = await request<{ rows: any[] }>('/products/export-inventory', 'GET');
+    return res?.rows ?? [];
+  },
+
   getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
     return handleRequest(async () => {
       const res = await request<any>(`/products/${sku}`, 'GET');

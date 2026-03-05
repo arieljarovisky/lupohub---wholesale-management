@@ -440,3 +440,37 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error importando artículos Tango', error: error?.message });
   }
 };
+
+/** Exportar inventario completo: productos + variantes + stock (para Excel en frontend). */
+export const exportInventory = async (req: Request, res: Response) => {
+  try {
+    const rows = await query(`
+      SELECT
+        p.sku AS product_sku,
+        p.name AS product_name,
+        p.category,
+        p.base_price,
+        pv.sku AS variant_sku,
+        s.size_code,
+        s.name AS size_name,
+        c.code AS color_code,
+        c.name AS color_name,
+        COALESCE(st.stock, 0) AS stock
+      FROM products p
+      JOIN product_colors pc ON pc.product_id = p.id
+      JOIN colors c ON c.id = pc.color_id
+      JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN stocks st ON st.variant_id = pv.id
+      ORDER BY p.sku, s.size_code, c.code
+    `);
+    const withTalleLabel = (rows || []).map((r: any) => ({
+      ...r,
+      talle_display: nombreTalleDesdeCodigo(r.size_code) || r.size_name || r.size_code,
+    }));
+    res.json({ rows: withTalleLabel });
+  } catch (error: any) {
+    console.error('Export inventory:', error);
+    res.status(500).json({ message: 'Error exportando inventario', error: error?.message });
+  }
+};
