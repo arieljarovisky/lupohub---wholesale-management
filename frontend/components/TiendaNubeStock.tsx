@@ -34,7 +34,7 @@ const TiendaNubeStock: React.FC = () => {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('title');
-  const limit = 20;
+  const limit = 200;
 
   const fetchStock = async () => {
     setLoading(true);
@@ -225,6 +225,20 @@ const TiendaNubeStock: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {/* Rango y paginación */}
+      {!loading && !searchTerm.trim() && total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-400">
+          <span>
+            Mostrando {offset + 1}–{Math.min(offset + items.length, total)} de {total} productos
+          </span>
+          {totalPages > 1 && (
+            <span className="text-cyan-400 font-medium">
+              Página {currentPage} de {totalPages}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Items List */}
       {loading ? (

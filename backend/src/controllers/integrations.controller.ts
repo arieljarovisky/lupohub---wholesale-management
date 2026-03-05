@@ -1585,7 +1585,7 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
 
     const { offset = '0', limit = '50' } = req.query;
     const page = Math.floor(Number(offset) / Number(limit)) + 1;
-    const perPage = Math.min(100, Math.max(1, parseInt(limit as string) || 50));
+    const perPage = Math.min(200, Math.max(1, parseInt(limit as string) || 50)); // API TN permite hasta 200 por página
 
     const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
       headers: {
@@ -1642,7 +1642,8 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
       });
     }
 
-    const total = response.headers['x-total'] ? parseInt(response.headers['x-total'] as string, 10) : items.length;
+    const totalHeader = response.headers['x-total-count'] || response.headers['x-total'];
+    const total = totalHeader ? parseInt(String(totalHeader), 10) : items.length;
     res.json({
       items,
       total: typeof total === 'number' && !isNaN(total) ? total : items.length,
