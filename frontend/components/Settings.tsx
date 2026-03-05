@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
@@ -646,7 +646,25 @@ const Settings: React.FC<SettingsProps> = ({
       )}
 
       {activeTab === 'integrations' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
+          {/* Guía: nuevos artículos (Tango) → ML y TN */}
+          <div className="bg-slate-800/80 rounded-2xl border border-slate-600 p-5">
+            <p className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
+              <Package size={14} /> Cómo sincronizar y unificar tus nuevos artículos (Tango) con Mercado Libre y Tienda Nube
+            </p>
+            <ol className="text-sm text-slate-300 space-y-2 list-decimal list-inside">
+              <li><strong className="text-slate-200">Importá desde Tango</strong> (Inventario → Importar Tango) para tener productos y variantes con código 7+3+3 en LupoHub.</li>
+              <li><strong className="text-slate-200">Mismo SKU en las plataformas.</strong> En Mercado Libre y Tienda Nube, cada variante debe tener el <strong>SKU del vendedor</strong> igual al código de 13 dígitos de LupoHub (ej. <code className="bg-slate-700 px-1 rounded">0066348130197</code>). Así la app puede vincularlas.</li>
+              <li><strong className="text-slate-200">Vincular productos:</strong> en Tienda Nube usá <strong>Importar productos</strong>; en Mercado Libre usá <strong>Vincular productos</strong>. La vinculación se hace por SKU: si coinciden, se asocian solas.</li>
+              <li><strong className="text-slate-200">Cargar stock en LupoHub</strong> (Inventario: + / − por variante). Cada cambio de stock en la app se envía a ML/TN si la variante está vinculada.</li>
+              <li><strong className="text-slate-200">Sincronizar stock en bloque:</strong> en esta pestaña usá <strong>Sincronizar stock</strong> (TN) y <strong>Sincronizar stock a ML</strong> para enviar todo el stock local a cada plataforma de una vez.</li>
+            </ol>
+            <p className="text-xs text-slate-500 mt-3">
+              Si una variante no se vincula, revisá que el SKU en ML/TN sea exactamente el mismo que en LupoHub (código de 13 dígitos sin espacios).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Tienda Nube */}
           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
              <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
@@ -914,6 +932,7 @@ const Settings: React.FC<SettingsProps> = ({
                </div>
              </div>
            </div>
+          </div>
         </div>
       )}
 
@@ -941,14 +960,17 @@ const Settings: React.FC<SettingsProps> = ({
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
              {(activeTab === 'sizes' ? sizes : colors).map(attr => {
-               const displayName = attr.name || (attr as any).code || 'Sin nombre';
                const code = (attr as any).code;
+               const name = attr.name || 'Sin nombre';
+               const displayLabel = attr.type === 'color' && code
+                 ? (code !== name ? `${code} - ${name}` : name)
+                 : (attr.type === 'size' && code ? (code !== name ? `${code} - ${name}` : name) : name);
                return (
                  <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-slate-600 transition-colors">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       {attr.type === 'color' && <div className="w-5 h-5 rounded-full border border-white/10 shadow-sm shrink-0" style={{background: attr.value || '#000'}} />}
-                      <span className="text-sm font-black text-slate-200 tracking-tight truncate" title={displayName}>
-                        {displayName}
+                      <span className="text-sm font-black text-slate-200 tracking-tight truncate" title={displayLabel}>
+                        {displayLabel}
                       </span>
                     </div>
                     <button onClick={() => onDeleteAttribute(attr.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1 shrink-0"><Trash2 size={16}/></button>
