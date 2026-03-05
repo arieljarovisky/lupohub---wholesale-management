@@ -11,6 +11,7 @@ export const TALLE_CODIGO_A_NOMBRE: Record<string, string> = {
   '180': 'XG',
   '200': 'XXG',
   '240': 'XXG',
+  '250': 'XXXG',
 };
 
 export function nombreTalleDesdeCodigo(codigo: string): string {

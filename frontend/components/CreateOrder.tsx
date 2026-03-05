@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Trash2, Plus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, OrderItem, Role } from '../types';
 import { api } from '../services/api';
-import { nombreTalleDesdeCodigo } from '../utils/tallesTango';
+import { labelTalle } from '../utils/tallesTango';
 
 interface CreateOrderProps {
   products: Product[];
@@ -85,7 +85,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           id: Date.now().toString(),
           variantId: v.variantId || undefined,
           sku: product.sku,
-          description: `${product.name}${v.sizeCode ? ' (' + (nombreTalleDesdeCodigo(v.sizeCode) || v.sizeCode) + ')' : ''}${v.colorName ? ' - ' + v.colorName : ''}`,
+          description: `${product.name}${v.sizeCode ? ' (' + labelTalle(v.sizeCode) + ')' : ''}${v.colorName ? ' - ' + v.colorName : ''}`,
           price: product.price,
           quantity: 1,
           isBackorder: (v.stock ?? 0) <= 0
@@ -316,7 +316,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                     id: Date.now().toString(),
                     variantId: v.variantId,
                     sku: variantSelect.sku,
-                    description: `${variantSelect.productName} (${nombreTalleDesdeCodigo(v.sizeCode) || v.sizeCode}) - ${v.colorName}`,
+                    description: `${variantSelect.productName} (${labelTalle(v.sizeCode)}) - ${v.colorName}`,
                     price: variantSelect.price,
                     quantity: 1,
                     isBackorder: v.stock <= 0
@@ -326,7 +326,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                 className={`w-full text-left p-4 rounded-2xl border transition-all flex justify-between items-center active:scale-[0.98] ${v.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-900 border-slate-800'}`}
               >
                 <div>
-                  <div className="text-white font-bold">{nombreTalleDesdeCodigo(v.sizeCode) || v.sizeCode} • {v.colorName}</div>
+                  <div className="text-white font-bold">{labelTalle(v.sizeCode)} • {v.colorName}</div>
                   <div className="text-xs text-slate-500">{variantSelect.sku}</div>
                 </div>
                 <div className="text-right shrink-0">

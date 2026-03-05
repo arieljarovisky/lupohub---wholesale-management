@@ -22,6 +22,7 @@ Los 3 dígitos del talle se muestran como el talle real en la app:
 | 180 | XG |
 | 200 | XXG |
 | 240 | XXG |
+| 250 | XXXG |
 
 **Ejemplo:** código `0012501  130197` (con espacios) o `0012501130197`:  
 - Se extraen solo dígitos → `0012501130197`  
