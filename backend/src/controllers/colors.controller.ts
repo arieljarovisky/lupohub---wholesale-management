@@ -1,17 +1,6 @@
 import { Request, Response } from 'express';
 import { query } from '../database/db';
 
-// Patrones que son talles, NO colores
-const SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
-
-const isValidColor = (name: string): boolean => {
-  if (!name) return false;
-  const trimmed = name.trim();
-  // Si parece un talle, NO es un color válido
-  if (SIZE_PATTERNS.test(trimmed)) return false;
-  return true;
-};
-
 export const getColors = async (req: Request, res: Response) => {
   try {
     // 1) Detectar si existe la tabla "colors"
@@ -36,19 +25,17 @@ export const getColors = async (req: Request, res: Response) => {
         rows = await query(`
           SELECT id, code, name, hex
           FROM colors
-          ORDER BY name ASC
+          ORDER BY COALESCE(NULLIF(TRIM(name), ''), code) ASC
         `);
       } else {
         rows = await query(`
           SELECT id, code, name, NULL AS hex
           FROM colors
-          ORDER BY name ASC
+          ORDER BY COALESCE(NULLIF(TRIM(name), ''), code) ASC
         `);
       }
-      
-      // Filtrar solo colores válidos (excluir talles)
-      const validRows = (rows || []).filter((r: any) => isValidColor(r.name));
-      return res.json(validRows);
+      // Devolver todos los colores (incl. códigos numéricos de Tango). No filtrar por isValidColor.
+      return res.json(rows || []);
     }
 
     // 3) Fallback: atributos legacy (type='color')
@@ -63,7 +50,7 @@ export const getColors = async (req: Request, res: Response) => {
       code: a.name,
       name: a.name,
       hex: a.value || null
-    })).filter((a: any) => isValidColor(a.name));
+    }));
     return res.json(mapped);
   } catch (error) {
     console.error(error);

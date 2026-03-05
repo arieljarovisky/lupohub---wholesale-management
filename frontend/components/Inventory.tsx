@@ -3,6 +3,7 @@ import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, Chec
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
+import { nombreTalleDesdeCodigo } from '../utils/tallesTango';
 import * as XLSX from 'xlsx';
 
 const CONCURRENT_VARIANT_REQUESTS = 4;
@@ -1147,6 +1148,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       const parts = (product.sku || '').toString().split('-');
                       const sizeLabel = product.size || (parts.length >= 3 ? parts[parts.length - 2] : '');
                       const colorLabel = product.color || (parts.length >= 3 ? parts[parts.length - 1] : '');
+                      const talleDisplay = nombreTalleDesdeCodigo(sizeLabel) || sizeLabel;
 
                       return (
                         <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1163,7 +1165,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                              </div>
                              <div className="flex items-center gap-3">
                                 <span className="text-sm text-white font-medium">
-                                   <span className="text-slate-500 font-normal text-xs uppercase mr-1">Talle:</span>{sizeLabel}
+                                   <span className="text-slate-500 font-normal text-xs uppercase mr-1">Talle:</span>{talleDisplay}
                                 </span>
                                 <span className="w-px h-3 bg-slate-700"></span>
                                 <span className="text-sm text-white font-medium flex items-center gap-1">

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { query, execute } from '../database/db';
+import { nombreTalleDesdeCodigo } from '../talles-tango';
 
 // Talles válidos conocidos
 const VALID_SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
@@ -19,15 +20,17 @@ export const getSizes = async (req: Request, res: Response) => {
     const hasSizesTable = Number(tblCheck?.[0]?.cnt || 0) > 0;
 
     if (hasSizesTable) {
-      // Consulta directa - la tabla sizes tiene size_code y name
+      // Consulta directa - la tabla sizes tiene size_code y name. Mostrar nombre real (P, M, G...) para códigos Tango.
       const rows = await query(`
-        SELECT id, size_code AS code, COALESCE(NULLIF(name, ''), size_code) AS name
+        SELECT id, size_code AS code, name
         FROM sizes
         ORDER BY size_code ASC
       `);
-      
-      // Filtrar solo talles válidos
-      const validRows = (rows || []).filter((r: any) => isValidSize(r.code));
+      const validRows = (rows || []).filter((r: any) => isValidSize(r.code)).map((r: any) => ({
+        id: r.id,
+        code: r.code,
+        name: nombreTalleDesdeCodigo(r.code) || r.name || r.code,
+      }));
       return res.json(validRows);
     }
 

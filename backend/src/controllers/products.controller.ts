@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { nombreTalleDesdeCodigo } from '../talles-tango';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -389,7 +390,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
         let sizeId = (await get(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))?.id;
         if (!sizeId) {
           sizeId = uuidv4();
-          await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, r.talle]);
+          const talleNombre = nombreTalleDesdeCodigo(r.talle);
+          await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, talleNombre]);
         }
 
         let colorId = (await get(`SELECT id FROM colors WHERE code = ?`, [r.color]))?.id;

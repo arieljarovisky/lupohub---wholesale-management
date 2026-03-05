@@ -8,6 +8,21 @@ Exportación desde Tango: el archivo de artículos tiene una columna **Código**
 | Talle  | 8–10     | 3 dígitos | Código de talle     |
 | Color  | 11–13    | 3 dígitos | Código de color     |
 
+## Mapeo código de talle → nombre real
+
+Los 3 dígitos del talle se muestran como el talle real en la app:
+
+| Código | Talle |
+|--------|--------|
+| 130 | P |
+| 140 | M |
+| 150 | G |
+| 160 | GG |
+| 170 | U |
+| 180 | XG |
+| 200 | XXG |
+| 240 | XXG |
+
 **Ejemplo:** código `0012501  130197` (con espacios) o `0012501130197`:  
 - Se extraen solo dígitos → `0012501130197`  
 - Artículo: `0012501`  
