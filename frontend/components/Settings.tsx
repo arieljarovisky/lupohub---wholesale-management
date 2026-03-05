@@ -658,6 +658,7 @@ const Settings: React.FC<SettingsProps> = ({
               <li><strong className="text-slate-200">Vincular productos:</strong> en Tienda Nube usá <strong>Importar productos</strong>; en Mercado Libre usá <strong>Vincular productos</strong>. La vinculación se hace por SKU: si coinciden, se asocian solas.</li>
               <li><strong className="text-slate-200">Cargar stock en LupoHub</strong> (Inventario: + / − por variante). Cada cambio de stock en la app se envía a ML/TN si la variante está vinculada.</li>
               <li><strong className="text-slate-200">Sincronizar stock en bloque:</strong> en esta pestaña usá <strong>Sincronizar stock</strong> (TN) y <strong>Sincronizar stock a ML</strong> para enviar todo el stock local a cada plataforma de una vez.</li>
+              <li><strong className="text-slate-200">Publicaciones en pack (x2, x3):</strong> si en ML o TN vendés el mismo artículo en pack de 2 o 3 unidades, en Inventario abrí <strong>Vincular producto</strong> y configurá <strong>Packs</strong> (Mercado Libre / Tienda Nube). El stock que se envía será: stock local ÷ pack (ej. 100 unidades con pack 2 → 50 en la publicación).</li>
             </ol>
             <p className="text-xs text-slate-500 mt-3">
               Si una variante no se vincula, revisá que el SKU en ML/TN sea exactamente el mismo que en LupoHub (código de 13 dígitos sin espacios).

@@ -148,12 +148,20 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
   }
 };
 
-// Sincronizar stock a plataformas externas (TN y ML)
+// Aplicar pack size: stock en app es por unidad; en ML/TN puede ser por pack (ej. pack x2 → enviar stock/2).
+function stockForPlatform(localStock: number, packSize: number | null | undefined): number {
+  const n = Math.max(0, Number(packSize) || 1);
+  return n <= 0 ? localStock : Math.floor(localStock / n);
+}
+
+// Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
     const variant = await get(
       `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, 
-              p.tienda_nube_id, p.mercado_libre_id, pv.sku
+              p.tienda_nube_id, p.mercado_libre_id, pv.sku,
+              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
@@ -163,12 +171,15 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
 
     if (!variant) return;
 
+    const stockTN = stockForPlatform(newStock, variant.tn_pack);
+    const stockML = stockForPlatform(newStock, variant.ml_pack);
+
     // Sincronizar con Tienda Nube
     if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
       await updateTiendaNubeStock(
         variant.tienda_nube_id,
         variant.tienda_nube_variant_id,
-        newStock
+        stockTN
       );
     }
 
@@ -177,11 +188,10 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       await updateMercadoLibreStockByVariant(
         variant.mercado_libre_id,
         variant.mercado_libre_variant_id,
-        newStock
+        stockML
       );
     } else if (variant.sku) {
-      // Fallback por SKU cuando no tenemos mapeo de IDs de ML
-      await updateMercadoLibreStock(variant.sku, newStock);
+      await updateMercadoLibreStock(variant.sku, stockML);
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);

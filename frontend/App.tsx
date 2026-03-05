@@ -10,7 +10,6 @@ import Customers from './components/Customers';
 import OrderPicking from './components/OrderPicking';
 import TiendaNubeOrders from './components/TiendaNubeOrders';
 import MercadoLibreOrders from './components/MercadoLibreOrders';
-import MercadoLibreStock from './components/MercadoLibreStock';
 import StockHistory from './components/StockHistory';
 import Despachos from './components/Despachos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap } from 'lucide-react';
@@ -442,7 +441,6 @@ const App: React.FC = () => {
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
-      { id: 'mercadolibre_stock', label: 'Stock ML', icon: Package, roles: [Role.ADMIN] },
     ]},
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
@@ -561,7 +559,6 @@ const App: React.FC = () => {
           )}
           {baseView === 'tiendanube_orders' && <TiendaNubeOrders />}
           {baseView === 'mercadolibre_orders' && <MercadoLibreOrders />}
-          {baseView === 'mercadolibre_stock' && <MercadoLibreStock />}
           {baseView === 'stock_history' && <StockHistory />}
           {baseView === 'despachos' && <Despachos />}
         </div>

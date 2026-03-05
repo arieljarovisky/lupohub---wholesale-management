@@ -140,14 +140,20 @@ export const getProductBySku = async (req: any, res: any) => {
   try {
     // Buscar por SKU exacto o por SKU base (para agrupar variantes)
     let product = await get(
-      `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku = ?`,
+      `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+              COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+       FROM products p WHERE p.sku = ?`,
       [sku]
     );
     
-    // Si no se encuentra exacto, buscar por SKU base (productos cuyo SKU comienza con el parámetro)
+    // Si no se encuentra exacto, buscar por SKU base
     if (!product) {
       product = await get(
-        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`,
+        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+         FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`,
         [`${sku}-%`]
       );
     }
@@ -204,7 +210,7 @@ export const patchStock = async (req: any, res: any) => {
       if (!vId) return res.status(404).json({ message: 'Variante no encontrada' });
     }
     
-    // Usar el nuevo sistema de stock con historial y sincronización
+    // Usar el nuevo sistema de stock con historial y sincronizaci?n
     const { updateVariantStock } = await import('./stock.controller');
     const success = await updateVariantStock(vId, Number(stock), 'AJUSTE_MANUAL');
     
@@ -221,19 +227,28 @@ export const patchStock = async (req: any, res: any) => {
 
 export const updateProduct = async (req: any, res: any) => {
   const { id } = req.params;
-  const { name, category, base_price, description } = req.body as { name?: string; category?: string; base_price?: number; description?: string };
-  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize } = req.body as {
+    name?: string; category?: string; base_price?: number; description?: string;
+    mercadoLibrePackSize?: number; tiendaNubePackSize?: number;
+  };
+  if (!id) return res.status(400).json({ message: 'ID inv?lido' });
   try {
+    const mlPack = mercadoLibrePackSize != null ? Math.max(1, Math.floor(Number(mercadoLibrePackSize))) : null;
+    const tnPack = tiendaNubePackSize != null ? Math.max(1, Math.floor(Number(tiendaNubePackSize))) : null;
     await execute(
       `UPDATE products SET 
          name = COALESCE(?, name),
          category = COALESCE(?, category),
          base_price = COALESCE(?, base_price),
-         description = COALESCE(?, description)
+         description = COALESCE(?, description),
+         mercado_libre_pack_size = COALESCE(?, mercado_libre_pack_size),
+         tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size)
        WHERE id = ?`,
-      [name ?? null, category ?? null, base_price ?? null, description ?? null, id]
+      [name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, id]
     );
-    const updated = await get(`SELECT id, sku, name, category, base_price, description FROM products WHERE id = ?`, [id]);
+    const updated = await get(`SELECT id, sku, name, category, base_price, description,
+      COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+      COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size FROM products WHERE id = ?`, [id]);
     if (!updated) return res.status(404).json({ message: 'Producto no encontrado' });
     res.json(updated);
   } catch (error) {
@@ -245,7 +260,7 @@ export const updateProduct = async (req: any, res: any) => {
 export const updateProductExternalIds = async (req: any, res: any) => {
   const { id } = req.params;
   const { tiendaNubeId, mercadoLibreId } = req.body;
-  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  if (!id) return res.status(400).json({ message: 'ID inv?lido' });
 
   try {
     await execute(
@@ -265,7 +280,7 @@ export const updateProductExternalIds = async (req: any, res: any) => {
 export const updateVariantExternalIds = async (req: any, res: any) => {
   const { variantId } = req.params;
   const { tiendaNubeVariantId, mercadoLibreVariantId } = req.body;
-  if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
+  if (!variantId) return res.status(400).json({ message: 'ID de variante inv?lido' });
 
   try {
     await execute(
@@ -300,7 +315,7 @@ export const deleteAllProducts = async (req: any, res: any) => {
   }
 };
 
-// --- Importación desde Tango (Excel): código = 7 art + 3 talle + 3 color ---
+// --- Importaci?n desde Tango (Excel): c?digo = 7 art + 3 talle + 3 color ---
 function normalizeHeader(h: string): string {
   return (h || '')
     .toString()
@@ -335,12 +350,12 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       onlyComplete?: boolean;
     };
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
-      return res.status(400).json({ message: 'Se requiere un array "rows" con las filas del Excel (con columna Código y opcional Descripción).' });
+      return res.status(400).json({ message: 'Se requiere un array "rows" con las filas del Excel (con columna C?digo y opcional Descripci?n).' });
     }
     const headers = Object.keys(rawRows[0] || {});
     const codigoCol = findColumn(headers, 'codigo');
     if (codigoCol < 0) {
-      return res.status(400).json({ message: 'No se encontró la columna "Código" en las filas enviadas.' });
+      return res.status(400).json({ message: 'No se encontr? la columna "C?digo" en las filas enviadas.' });
     }
     const descCol = findColumn(headers, 'descripcion');
     const codigoKey = headers[codigoCol];
@@ -428,7 +443,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     }
 
     res.json({
-      message: 'Importación Tango finalizada',
+      message: 'Importaci?n Tango finalizada',
       productsCreated,
       variantsCreated,
       variantsUpdated,
@@ -437,7 +452,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Import Tango:', error);
-    res.status(500).json({ message: 'Error importando artículos Tango', error: error?.message });
+    res.status(500).json({ message: 'Error importando art?culos Tango', error: error?.message });
   }
 };
 

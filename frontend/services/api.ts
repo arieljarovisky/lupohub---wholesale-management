@@ -112,6 +112,15 @@ export const api = {
     return res?.rows ?? [];
   },
 
+  getProductBySku: async (sku: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; externalIds?: any; variants?: any[] } | null> => {
+    try {
+      const res = await request<any>(`/products/${encodeURIComponent(sku)}`, 'GET');
+      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1 } : null;
+    } catch {
+      return null;
+    }
+  },
+
   getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
     return handleRequest(async () => {
       const res = await request<any>(`/products/${sku}`, 'GET');
@@ -168,13 +177,15 @@ export const api = {
     };
   },
   
-  updateProduct: async (product: Product): Promise<Product> => {
+  updateProduct: async (product: Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number }): Promise<Product> => {
     const payload: any = {
       name: product.name,
       category: product.category,
       base_price: product.price,
       description: product.description
     };
+    if (product.mercadoLibrePackSize != null) payload.mercadoLibrePackSize = product.mercadoLibrePackSize;
+    if (product.tiendaNubePackSize != null) payload.tiendaNubePackSize = product.tiendaNubePackSize;
     return handleRequest(async () => {
       return await request<Product>(`/products/${product.id}`, 'PUT', payload);
     }, product, 'updateProduct');
@@ -374,6 +385,17 @@ export const api = {
       const queryString = queryParams.toString();
       return await request<{ orders: any[]; total: number }>(`/integrations/mercadolibre/orders${queryString ? '?' + queryString : ''}`, 'GET');
     }, { orders: [], total: 0 }, 'getMercadoLibreOrders');
+  },
+
+  // Stock de Tienda Nube (publicaciones con stock)
+  getTiendaNubeStock: async (params?: { offset?: number; limit?: number }): Promise<{ items: any[]; total: number }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.offset !== undefined) queryParams.append('offset', params.offset.toString());
+      if (params?.limit) queryParams.append('limit', params.limit.toString());
+      const queryString = queryParams.toString();
+      return await request<{ items: any[]; total: number }>(`/integrations/tiendanube/stock${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { items: [], total: 0 }, 'getTiendaNubeStock');
   },
 
   // Stock de Mercado Libre

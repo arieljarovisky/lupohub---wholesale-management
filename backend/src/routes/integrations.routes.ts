@@ -17,6 +17,7 @@ import {
   syncAllStockToMercadoLibre,
   importStockFromMercadoLibre,
   getTiendaNubeOrders,
+  getTiendaNubeStock,
   getMercadoLibreOrders,
   getMercadoLibreStock,
   getMLAutoMessageConfig,
@@ -45,6 +46,7 @@ router.post('/mercadolibre/webhook', handleMercadoLibreWebhook);
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.get('/tiendanube/orders', getTiendaNubeOrders);
+router.get('/tiendanube/stock', getTiendaNubeStock);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', syncAllStockToTiendaNube);
 router.post('/tiendanube/normalize-sizes', normalizeSizesInTiendaNube);

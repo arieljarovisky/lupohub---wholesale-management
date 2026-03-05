@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
 import * as XLSX from 'xlsx';
+import MercadoLibreStock from './MercadoLibreStock';
+import TiendaNubeStock from './TiendaNubeStock';
 
 const CONCURRENT_VARIANT_REQUESTS = 4;
 async function runWithConcurrency<T>(
@@ -59,6 +61,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkTnId, setLinkTnId] = useState('');
   const [linkTnVariantId, setLinkTnVariantId] = useState('');
   const [linkMlId, setLinkMlId] = useState('');
+  const [linkProduct, setLinkProduct] = useState<{ id: string; name?: string; sku?: string; price?: number; category?: string; description?: string } | null>(null);
+  const [linkPackMl, setLinkPackMl] = useState(1);
+  const [linkPackTn, setLinkPackTn] = useState(1);
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -72,6 +77,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>('mine');
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
@@ -658,6 +664,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkTnId(product.externalIds?.tiendaNube || '');
     setLinkTnVariantId(product.externalIds?.tiendaNubeVariant || '');
     setLinkMlId(product.externalIds?.mercadoLibre || '');
+    setLinkPackMl(1);
+    setLinkPackTn(1);
+    setLinkProduct(null);
+    const parts = (product.sku || '').toString().split('-');
+    const groupKey = parts.length >= 3 ? parts.slice(0, -2).join('-') : product.sku || '';
+    if (groupKey) {
+      api.getProductBySku(groupKey).then((p) => {
+        if (p) {
+          setLinkProduct({ id: p.id, name: p.name, sku: p.sku, price: p.base_price, category: p.category, description: (p as any).description });
+          setLinkPackMl(p.mercado_libre_pack_size ?? 1);
+          setLinkPackTn(p.tienda_nube_pack_size ?? 1);
+        }
+      });
+    }
   };
 
   const handleSaveLink = async () => {
@@ -702,12 +722,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         await api.updateProductExternalIds(parentProduct.id, {
           tiendaNubeId: linkTnId
         });
-        // Also update ML ID on parent if ML uses Item ID as parent
         if (linkMlId) {
              await api.updateProductExternalIds(parentProduct.id, {
                 mercadoLibreId: linkMlId
              });
         }
+      }
+      if (linkProduct) {
+        await api.updateProduct({
+          ...linkProduct,
+          id: linkProduct.id,
+          name: linkProduct.name ?? '',
+          sku: linkProduct.sku ?? '',
+          price: linkProduct.price ?? 0,
+          mercadoLibrePackSize: linkPackMl,
+          tiendaNubePackSize: linkPackTn
+        } as Product & { mercadoLibrePackSize: number; tiendaNubePackSize: number });
       }
 
       // Update local state to reflect changes immediately
@@ -826,6 +856,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   return (
     <div className="space-y-4 relative">
+      {/* Toggle: Mi inventario vs Vista Mercado Libre vs Vista Tienda Nube */}
+      <div className="flex rounded-xl bg-slate-800/80 border border-slate-700 p-1">
+        <button
+          type="button"
+          onClick={() => setInventorySubView('mine')}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'mine' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+        >
+          <Package size={18} />
+          Mi inventario
+        </button>
+        <button
+          type="button"
+          onClick={() => setInventorySubView('ml')}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'ml' ? 'bg-yellow-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+        >
+          <Zap size={18} />
+          Vista Mercado Libre
+        </button>
+        <button
+          type="button"
+          onClick={() => setInventorySubView('tn')}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'tn' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
+        >
+          <Cloud size={18} />
+          Vista Tienda Nube
+        </button>
+      </div>
+
+      {inventorySubView === 'ml' ? (
+        <MercadoLibreStock />
+      ) : inventorySubView === 'tn' ? (
+        <TiendaNubeStock />
+      ) : (
+        <>
       {/* Ayuda: unificación código / nombre */}
       <div className="bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2 flex items-center gap-2 text-slate-400 text-xs">
         <Info size={16} className="shrink-0 text-blue-400" />
@@ -1558,6 +1622,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm"
                        />
                     </div>
+                    <div className="border-t border-slate-700 pt-4 space-y-3">
+                       <p className="text-[10px] font-black text-slate-500 uppercase">Packs (unidades por publicación)</p>
+                       <p className="text-xs text-slate-500">Si en ML o TN vendés en pack de 2 o 3, indicá cuántas unidades tiene cada publicación. El stock que se sincroniza será: stock local ÷ este número.</p>
+                       <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                             <label className="text-[10px] text-slate-500">Mercado Libre</label>
+                             <input type="number" min={1} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm" />
+                          </div>
+                          <div className="space-y-1">
+                             <label className="text-[10px] text-slate-500">Tienda Nube</label>
+                             <input type="number" min={1} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm" />
+                          </div>
+                       </div>
+                    </div>
                  </div>
               </div>
               <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
@@ -1665,6 +1743,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               </div>
            </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

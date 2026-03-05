@@ -1382,7 +1382,8 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
     }
 
     const variants = await query(`
-      SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku
+      SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+             COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
       FROM product_variants pv
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
@@ -1396,9 +1397,11 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
 
     for (const v of variants) {
       try {
+        const pack = Math.max(1, Number((v as any).tn_pack) || 1);
+        const stockToSend = Math.floor(Number(v.stock || 0) / pack);
         await axios.put(
           `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-          { stock: v.stock || 0 },
+          { stock: stockToSend },
           {
             headers: {
               'Authentication': `bearer ${integration.access_token}`,
@@ -1408,7 +1411,7 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
           }
         );
         updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} unidades`);
+        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
       } catch (e: any) {
         errors++;
         logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
@@ -1433,7 +1436,8 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
   try {
     const { updateMercadoLibreStockByVariant } = await import('./stock.controller');
     const variants = await query(`
-      SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku
+      SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku,
+             COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
       FROM product_variants pv
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
@@ -1446,14 +1450,16 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     const logs: string[] = [];
 
     for (const v of variants) {
+      const pack = Math.max(1, Number((v as any).ml_pack) || 1);
+      const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       const ok = await updateMercadoLibreStockByVariant(
         v.mercado_libre_id,
         v.mercado_libre_variant_id,
-        v.stock || 0
+        stockToSend
       );
       if (ok) {
         updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} unidades`);
+        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
       } else {
         errors++;
         logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
@@ -1560,6 +1566,90 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
 // ==================== ÓRDENES EXTERNAS ====================
 
 // Obtener órdenes de Tienda Nube
+// Obtener stock/publicaciones de Tienda Nube (igual que getMercadoLibreStock pero para TN)
+export const getTiendaNubeStock = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+    }
+
+    const { offset = '0', limit = '50' } = req.query;
+    const page = Math.floor(Number(offset) / Number(limit)) + 1;
+    const perPage = Math.min(100, Math.max(1, parseInt(limit as string) || 50));
+
+    const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
+      headers: {
+        'Authentication': `bearer ${integration.access_token}`,
+        'User-Agent': TN_USER_AGENT
+      },
+      params: { page, per_page: perPage }
+    });
+
+    const products = response.data || [];
+    const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
+    const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
+
+    const items: any[] = [];
+    for (const p of products) {
+      const title = p.name?.es || p.name?.pt || p.name?.en || p.name || '';
+      const attrs = p.attributes || [];
+      let sizeIdx = -1;
+      let colorIdx = -1;
+      attrs.forEach((a: any, i: number) => {
+        const n = (a?.es ?? a?.en ?? a?.pt ?? '').toString();
+        if (isSizeAttr(n)) sizeIdx = i;
+        if (isColorAttr(n)) colorIdx = i;
+      });
+      let totalStock = 0;
+      const variations = (p.variants || []).map((v: any) => {
+        const stock = Number(v.stock) || 0;
+        totalStock += stock;
+        const values = v.values || [];
+        const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? (values[sizeIdx]?.es ?? values[sizeIdx]?.pt ?? values[sizeIdx]?.en ?? values[sizeIdx]) : '';
+        const colorVal = colorIdx >= 0 && colorIdx < values.length ? (values[colorIdx]?.es ?? values[colorIdx]?.pt ?? values[colorIdx]?.en ?? values[colorIdx]) : '';
+        const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
+        return {
+          variationId: v.id,
+          sku: v.sku || '',
+          size: String(toStr(sizeVal)),
+          color: String(toStr(colorVal)),
+          stock,
+          sold: 0
+        };
+      });
+      const img = (p.images && p.images[0]) ? (p.images[0].src || p.images[0].url) : '';
+      items.push({
+        id: String(p.id),
+        title,
+        status: 'active',
+        price: p.variants?.[0]?.price ?? 0,
+        totalStock,
+        soldTotal: 0,
+        thumbnail: img,
+        permalink: p.url || `https://tiendanube.com`,
+        hasVariations: variations.length > 1,
+        variations
+      });
+    }
+
+    const total = response.headers['x-total'] ? parseInt(response.headers['x-total'] as string, 10) : items.length;
+    res.json({
+      items,
+      total: typeof total === 'number' && !isNaN(total) ? total : items.length,
+      offset: parseInt(offset as string),
+      limit: perPage
+    });
+  } catch (error: any) {
+    console.error('Error fetching TN stock:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo stock de Tienda Nube', error: error.message });
+  }
+};
+
 export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
