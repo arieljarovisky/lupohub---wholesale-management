@@ -254,15 +254,22 @@ export const updateMercadoLibreStock = async (sku: string, newStock: number) => 
     if (searchRes.data.results && searchRes.data.results.length > 0) {
         const itemId = searchRes.data.results[0];
         // Fetch item details to find variation
-        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
             headers: { Authorization: `Bearer ${access_token}` }
         });
         
         const variations = itemRes.data.variations;
         let variationId = null;
         
+        const matchVariationBySku = (v: any) => {
+          const vSku = (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+          if (vSku === sku) return true;
+          const attr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+          const attrVal = attr ? (attr.value_name ?? attr.value ?? '').toString().trim() : '';
+          return attrVal === sku;
+        };
         if (variations && variations.length > 0) {
-            const targetVar = variations.find((v: any) => v.seller_custom_field === sku);
+            const targetVar = variations.find((v: any) => matchVariationBySku(v));
             if (targetVar) variationId = targetVar.id;
         }
         
@@ -304,17 +311,16 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
     // Pagination loop
     let page = 1;
     let hasMore = true;
-    let importedCount = 0;
-    let updatedCount = 0;
-    
-    // Log array to return to frontend
+    let productCount = 0;
+    let variantCount = 0;
     const logs: string[] = [];
     const log = (msg: string) => {
-        console.log(msg);
-        logs.push(msg);
+      console.log(msg);
+      logs.push(msg);
     };
 
-    const perPage = 200; // API Tienda Nube permite hasta 200 por página
+    // Los productos de TN/ML no se guardan en la BD; solo se consulta la API para reportar.
+    const perPage = 200;
     while (hasMore) {
       try {
         const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
@@ -322,10 +328,7 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
             'Authentication': `bearer ${access_token}`,
             'User-Agent': TN_USER_AGENT
           },
-          params: {
-            page,
-            per_page: perPage
-          }
+          params: { page, per_page: perPage }
         });
 
         const products = response.data;
@@ -333,187 +336,14 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
           hasMore = false;
           break;
         }
-        log(`[Sync] Página ${page}: ${products.length} productos`);
-        if (products.length < perPage) {
-          hasMore = false;
-        }
+        log(`[TN] Página ${page}: ${products.length} productos`);
+        if (products.length < perPage) hasMore = false;
 
-        // Process each product
         for (const tnProduct of products) {
-          try {
-            log(`[Sync] Processing Product: ${tnProduct.name.es || tnProduct.name} (ID: ${tnProduct.id})`);
-            
-            const sku = tnProduct.variants?.[0]?.sku || `TN-${tnProduct.id}`;
-            
-            let existingProduct = await get(`SELECT * FROM products WHERE tienda_nube_id = ?`, [tnProduct.id]);
-            if (!existingProduct && sku) {
-                 existingProduct = await get(`SELECT * FROM products WHERE sku = ?`, [sku]);
-            }
-            let productId = existingProduct?.id;
-            if (existingProduct) {
-              await execute(`
-                UPDATE products SET 
-                name = ?, 
-                tienda_nube_id = ?,
-                description = COALESCE(?, description)
-                WHERE id = ?
-              `, [tnProduct.name.es || tnProduct.name.pt || tnProduct.name, tnProduct.id, tnProduct.description?.es || '', productId]);
-              updatedCount++;
-            } else {
-              productId = uuidv4();
-              await execute(`
-                INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-              `, [
-                productId, 
-                sku, 
-                tnProduct.name.es || tnProduct.name.pt || tnProduct.name, 
-                'General',
-                Number(tnProduct.variants?.[0]?.price || 0),
-                tnProduct.description?.es || '',
-                tnProduct.id
-              ]);
-              importedCount++;
-            }
-  
-            // Atributos del producto en Tienda Nube: cada índice corresponde a variant.values[i]
-            // e.g. attributes: [{ es: "Color" }, { es: "Talle" }] -> values[0]=color, values[1]=talle
-            const productAttributes = tnProduct.attributes || [];
-            const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
-            const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
-            // Detectar si un valor parece ser un talle típico
-            const looksLikeSize = (val: string) => {
-              const v = val.trim().toUpperCase();
-              // Talles comunes: U, P, M, G, GG, XG, XXG, XXXG, S, L, XL, XXL, números
-              return /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|\d+)$/i.test(v);
-            };
-
-            const processedVariantIds: string[] = [];
-            for (const variant of tnProduct.variants) {
-              try {
-                const values = variant.values || [];
-                log(`  [Variant] ID: ${variant.id}, SKU: ${variant.sku}, Stock: ${variant.stock}, Values: ${JSON.stringify(values)}`);
-                
-                let sizeName = 'U';
-                let colorName = 'Único';
-                if (values.length > 0) {
-                  const sizeParts: string[] = [];
-                  const colorParts: string[] = [];
-                  for (let i = 0; i < values.length; i++) {
-                    const attr = productAttributes[i];
-                    const attrName = (attr && (attr.es || attr.en || attr.pt || (typeof attr === 'string' ? attr : '')))?.toString().trim() || '';
-                    const val = (values[i]?.es ?? values[i]?.pt ?? values[i]?.en ?? values[i])?.toString().trim() || '';
-                    if (!val) continue;
-                    if (isSizeAttr(attrName)) {
-                      sizeParts.push(val);
-                    } else if (isColorAttr(attrName)) {
-                      colorParts.push(val);
-                    } else {
-                      // Sin nombre de atributo reconocido: detectar por el valor
-                      if (looksLikeSize(val)) {
-                        sizeParts.push(val);
-                      } else {
-                        colorParts.push(val);
-                      }
-                    }
-                  }
-                  if (sizeParts.length > 0) sizeName = sizeParts.join(' ');
-                  if (colorParts.length > 0) colorName = colorParts.join(' ');
-                  // Si no se detectó nada, usar el primer valor como color y 'U' como talle
-                  if (sizeName === 'U' && colorName === 'Único' && values.length > 0) {
-                    const firstVal = values[0]?.es || values[0]?.pt || values[0];
-                    if (firstVal) {
-                      if (looksLikeSize(firstVal)) {
-                        sizeName = firstVal;
-                      } else {
-                        colorName = firstVal;
-                      }
-                    }
-                  }
-                }
-  
-                // Usar solo colores y talles que ya existen (no crear nuevos)
-                const colorRow = await get(
-                  `SELECT id FROM colors WHERE name = ? OR UPPER(TRIM(code)) = UPPER(TRIM(?)) OR UPPER(TRIM(name)) = UPPER(TRIM(?)) LIMIT 1`,
-                  [colorName, colorName, colorName]
-                );
-                const colorId = colorRow?.id || null;
-                if (!colorId) {
-                  log(`  [Omitido] Variante ${variant.id}: color "${colorName}" no existe en Configuración. Agregá el color primero.`);
-                  continue;
-                }
-
-                const safeSizeCode = sizeName.substring(0, 100).trim();
-                const normalizedSize = normalizeSizeToStandard(safeSizeCode);
-                const sizeRow = await get(
-                  `SELECT id FROM sizes WHERE size_code = ? OR UPPER(TRIM(size_code)) = UPPER(?) OR UPPER(TRIM(size_code)) = UPPER(?) LIMIT 1`,
-                  [safeSizeCode, normalizedSize, safeSizeCode]
-                );
-                const sizeId = sizeRow?.id || null;
-                if (!sizeId) {
-                  log(`  [Omitido] Variante ${variant.id}: talle "${sizeName}" no existe en Configuración. Agregá el talle primero.`);
-                  continue;
-                }
-  
-                let productColorRow = await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]);
-                let productColorId = productColorRow?.id;
-                if (!productColorId) {
-                  productColorId = uuidv4();
-                  await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-                }
-  
-                let variantRow = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-                let localVariantId = variantRow?.id;
-                if (!localVariantId) {
-                  localVariantId = uuidv4();
-                  await execute(`
-                    INSERT INTO product_variants (id, product_color_id, size_id, tienda_nube_variant_id, sku) 
-                    VALUES (?, ?, ?, ?, ?)
-                  `, [localVariantId, productColorId, sizeId, variant.id, variant.sku || null]);
-                } else {
-                  await execute(`UPDATE product_variants SET tienda_nube_variant_id = ?, sku = ? WHERE id = ?`, [variant.id, variant.sku || null, localVariantId]);
-                }
-                processedVariantIds.push(localVariantId);
-  
-                const stock = variant.stock !== null && variant.stock !== undefined ? Number(variant.stock) : 0;
-                await execute(`
-                  INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-                  ON DUPLICATE KEY UPDATE stock = VALUES(stock)
-                `, [localVariantId, stock]);
-  
-                if (variant.sku) {
-                  updateMercadoLibreStock(variant.sku, stock).catch(e => console.error(e));
-                }
-              } catch (variantErr: any) {
-                log(`[ERROR] Variant ${variant.id}: ${variantErr?.response?.data?.message || variantErr?.message || 'Error desconocido'}`);
-              }
-            }
-            if (processedVariantIds.length > 0 && productId) {
-              try {
-                await execute(`
-                  DELETE st FROM stocks st
-                  JOIN product_variants pv ON st.variant_id = pv.id
-                  JOIN product_colors pc ON pv.product_color_id = pc.id
-                  WHERE pc.product_id = ? AND pv.id NOT IN (${processedVariantIds.map(() => '?').join(',')})
-                `, [productId, ...processedVariantIds]);
-                await execute(`
-                  DELETE pv FROM product_variants pv
-                  JOIN product_colors pc ON pv.product_color_id = pc.id
-                  WHERE pc.product_id = ? AND pv.id NOT IN (${processedVariantIds.map(() => '?').join(',')})
-                `, [productId, ...processedVariantIds]);
-                await execute(`
-                  DELETE pc FROM product_colors pc
-                  LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
-                  WHERE pc.product_id = ? AND pv.id IS NULL
-                `, [productId]);
-                log(`  [Cleanup] Eliminadas variantes locales no presentes en Tienda Nube para producto ${tnProduct.id}`);
-              } catch (cleanupErr: any) {
-                log(`[ERROR] Cleanup producto ${tnProduct.id}: ${cleanupErr?.message || 'Error desconocido'}`);
-              }
-            }
-          } catch (prodErr: any) {
-            log(`[ERROR] Product ${tnProduct?.id}: ${prodErr?.response?.data?.message || prodErr?.message || 'Error desconocido'}`);
-          }
+          productCount++;
+          const variants = tnProduct.variants || [];
+          variantCount += variants.length;
+          log(`  ${tnProduct.name?.es || tnProduct.name} (ID: ${tnProduct.id}): ${variants.length} variantes`);
         }
 
         page++;
@@ -529,7 +359,16 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
       }
     }
 
-    res.json({ message: 'Sincronización completada', imported: importedCount, updated: updatedCount, logs });
+    log('');
+    log('Los productos de Tienda Nube no se guardan en la base de datos. Usá la vista "Vista Tienda Nube" en Inventario para ver el stock.');
+    res.json({
+      message: 'Consulta completada. Los productos de Tienda Nube no se guardan en la BD.',
+      imported: 0,
+      updated: 0,
+      productCount,
+      variantCount,
+      logs
+    });
 
   } catch (error: any) {
     console.error('Error syncing products:', error.response?.data || error.message);
@@ -739,7 +578,7 @@ export const debugMercadoLibreItem = async (req: Request, res: Response) => {
     }
     
     // Obtener detalles del item
-    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
       headers: { Authorization: `Bearer ${access_token}` }
     });
     
@@ -833,7 +672,7 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
       
       try {
         // Usar multiget para obtener varios items a la vez
-        const multigetRes = await axios.get(`https://api.mercadolibre.com/items?ids=${batch.join(',')}`, {
+        const multigetRes = await axios.get(`https://api.mercadolibre.com/items?ids=${batch.join(',')}&include_attributes=all`, {
           headers: { Authorization: `Bearer ${access_token}` }
         });
         
@@ -868,11 +707,10 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
             }
             
             for (const v of variations) {
-              // Buscar SKU en múltiples campos posibles de ML
-              const mlSku = v.seller_custom_field 
-                || v.seller_sku 
-                || (v.attributes?.find((a: any) => a.id === 'SELLER_SKU')?.value_name)
-                || '';
+              // SKU en ML: atributo SELLER_SKU en variación (/items con include_attributes=all)
+              const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+              const mlSku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '')
+                || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
               
               // Extraer color y talle de attribute_combinations
               const attrCombs = v.attribute_combinations || [];
@@ -922,13 +760,7 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
               }
               
               if (row?.variant_id) {
-                await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [v.id, row.variant_id]);
-                await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [mlItem.id, row.product_id]);
-                // Si el producto solo tiene código (Tango), completar nombre con el título de ML
-                await execute(
-                  `UPDATE products SET name = IF(COALESCE(TRIM(name), '') = '' OR name = sku, ?, name) WHERE id = ?`,
-                  [itemTitle, row.product_id]
-                );
+                // No se guardan vínculos en la BD; solo se cuenta para el reporte
                 linkedVariants++;
                 variantesVinculadas++;
               } else {
@@ -972,14 +804,9 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
             }
             
             if (prod?.id) {
-              await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [mlItem.id, prod.id]);
-              // Si el producto solo tiene código (Tango), completar nombre con el título de ML
-              await execute(
-                `UPDATE products SET name = IF(COALESCE(TRIM(name), '') = '' OR name = sku, ?, name) WHERE id = ?`,
-                [itemTitle, prod.id]
-              );
+              // No se guardan vínculos en la BD; solo se cuenta para el reporte
               linkedProducts++;
-              logs.push(`  [OK] ${itemTitle} vinculado`);
+              logs.push(`  [OK] ${itemTitle} (no se guarda en BD)`);
             } else {
               notFound++;
               logs.push(`  [X] ${itemTitle} - no encontrado`);
@@ -993,17 +820,14 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
     
     logs.push(`\n========== RESUMEN ==========`);
     logs.push(`Publicaciones ML procesadas: ${items.length}`);
-    logs.push(`Variantes vinculadas: ${linkedVariants}`);
-    logs.push(`Productos vinculados (sin variantes): ${linkedProducts}`);
+    logs.push(`Coincidencias encontradas (variantes): ${linkedVariants}`);
+    logs.push(`Coincidencias encontradas (productos sin variantes): ${linkedProducts}`);
     logs.push(`No encontrados/Sin SKU: ${notFound}`);
     logs.push(``);
-    logs.push(`NOTA: Si "No encontrados" es alto, verifica que:`);
-    logs.push(`1. Las variantes en ML tengan el campo "SKU del vendedor" configurado`);
-    logs.push(`2. Los SKUs en ML coincidan EXACTAMENTE con los de Tienda Nube`);
-    logs.push(`3. Hayas importado primero los productos desde Tienda Nube`);
+    logs.push(`Los datos de Mercado Libre no se guardan en la base de datos. Usá la vista "Vista Mercado Libre" en Inventario para ver el stock.`);
     
     res.json({ 
-      message: 'Sincronización ML completada', 
+      message: 'Consulta completada. Los productos de Mercado Libre no se guardan en la BD.', 
       linkedVariants, 
       linkedProducts,
       notFound,
@@ -1387,7 +1211,7 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
   for (let i = 0; i < mlIds.length; i += batchSize) {
     const batch = mlIds.slice(i, i + batchSize);
     const itemPromises = batch.map((id: string) =>
-      axios.get(`https://api.mercadolibre.com/items/${id}`, {
+      axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
         headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
       }).then(r => r.data).catch(() => null)
     );
@@ -1560,7 +1384,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
       for (let i = 0; i < itemIds.length; i += batchSize) {
         const batch = itemIds.slice(i, i + batchSize);
         const itemPromises = batch.map((itemId: string) =>
-          axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+          axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
             headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
           }).then(r => r.data).catch(() => null)
         );
@@ -1685,7 +1509,7 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
       for (let i = 0; i < itemIds.length; i += batchSize) {
         const batch = itemIds.slice(i, i + batchSize);
         const itemPromises = batch.map((itemId: string) =>
-          axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+          axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
             headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
           }).then(r => r.data).catch(() => null)
         );
@@ -2223,7 +2047,7 @@ export const getMercadoLibreStockTotals = async (req: Request, res: Response) =>
       for (let i = 0; i < itemIds.length; i += batchSize) {
         const batch = itemIds.slice(i, i + batchSize);
         const results = await Promise.all(batch.map((id: string) =>
-          axios.get(`https://api.mercadolibre.com/items/${id}`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }).then(r => r.data).catch(() => null)
+          axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }).then(r => r.data).catch(() => null)
         ));
         for (const item of results) {
           if (!item) continue;
@@ -2282,7 +2106,7 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       
       const itemPromises = batch.map(async (itemId: string) => {
         try {
-          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
             headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
           });
           return itemRes.data;
@@ -2302,12 +2126,10 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
           let totalStock = 0;
           const variations = item.variations.map((v: any) => {
             totalStock += v.available_quantity || 0;
-            // SKU: prioridad seller_sku (oficial en ML), seller_custom_field, o atributo SELLER_SKU
-            let sku = (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
-            if (!sku && Array.isArray(v.attributes)) {
-              const skuAttr = v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-              if (skuAttr) sku = (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim();
-            }
+            // SKU: en ML se gestiona como atributo SELLER_SKU en details de la variación (/items con include_attributes=all)
+            const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+            const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+            const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
             // Extraer color y talle de attribute_combinations (IDs pueden variar por categoría/país)
             let color = '';
             let size = '';

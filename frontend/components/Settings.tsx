@@ -79,7 +79,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [loadingSync, setLoadingSync] = useState(false);
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const [syncCompleted, setSyncCompleted] = useState(false);
-  const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0 });
+  const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0, productCount: 0, variantCount: 0 });
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
   const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
@@ -127,14 +127,17 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlAutoMessageSaved, setMlAutoMessageSaved] = useState(false);
 
   useEffect(() => {
-    // Check for status params
+    // Al volver de OAuth: solo marcar "guardado" y actualizar estado. NO ejecutar importación/sync de productos.
     const hash = window.location.hash;
     if (hash.includes('status=success')) {
        setSaved(true);
-       setTimeout(() => setSaved(false), 3000);
+       setTimeout(() => setSaved(false), 4000);
+       // Limpiar la URL para no dejar status=success en el hash (evita confusión y que se repita el mensaje)
+       const cleanHash = hash.replace(/\?status=success(&platform=[^&]*)?/i, '').replace(/\?$/, '') || 'settings';
+       setTimeout(() => { window.location.replace('#' + cleanHash); }, 100);
     }
-    
-    // Fetch integration status
+
+    // Fetch integration status (solo ver si está conectado; no dispara carga de productos)
     const fetchStatus = async () => {
       setLoadingIntegrations(true);
       try {
@@ -325,7 +328,12 @@ const Settings: React.FC<SettingsProps> = ({
       if (res.logs) {
         setSyncLogs(res.logs);
       }
-      setSyncStats({ imported: res.imported, updated: res.updated });
+      setSyncStats({
+        imported: res.imported ?? 0,
+        updated: res.updated ?? 0,
+        productCount: (res as any).productCount ?? 0,
+        variantCount: (res as any).variantCount ?? 0
+      });
       setSyncCompleted(true);
     } catch (e: any) {
       setSyncLogs(prev => [...prev, `ERROR: ${e.message || 'Error desconocido'}`]);
@@ -756,7 +764,7 @@ const Settings: React.FC<SettingsProps> = ({
              </div>
              <div className="p-6 space-y-5">
                 <p className="text-slate-400 text-sm">
-                  Vincula tu tienda de Tienda Nube para sincronizar automáticamente productos y stock.
+                  Conectar solo guarda la cuenta. Los productos no se cargan solos: para traerlos a LupoHub usá <strong>Importar productos</strong> cuando quieras.
                 </p>
                 {integrations.tiendanube && (
                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
@@ -771,7 +779,7 @@ const Settings: React.FC<SettingsProps> = ({
                           className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
                         >
                           <RefreshCw size={14} />
-                          IMPORTAR PRODUCTOS
+                          CONSULTAR PRODUCTOS
                         </button>
                         <button 
                           onClick={handleSyncStockToTiendaNube}
@@ -831,7 +839,7 @@ const Settings: React.FC<SettingsProps> = ({
              </div>
              <div className="p-6 space-y-5">
                 <p className="text-slate-400 text-sm">
-                  Conecta tu cuenta de Mercado Libre para mantener el stock y precios actualizados en tiempo real.
+                  Conectar solo guarda la cuenta. Para vincular tus publicaciones de ML con LupoHub usá <strong>Vincular productos</strong> cuando quieras.
                 </p>
                  {integrations.mercadolibre && (
                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
@@ -1063,11 +1071,11 @@ const Settings: React.FC<SettingsProps> = ({
       <Modal 
         isOpen={showSyncModal} 
         onClose={() => { if (!loadingSync) setShowSyncModal(false); }} 
-        title={syncCompleted ? "¡Sincronización Exitosa!" : "Sincronizar Tienda Nube"}
+        title={syncCompleted ? "Consulta completada" : "Consultar Tienda Nube"}
         footer={
            !loadingSync && !syncCompleted ? (
              <button onClick={handleSyncTiendaNube} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
-               Comenzar Importación
+               Consultar productos
              </button>
            ) : syncCompleted ? (
               <button onClick={() => setShowSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
@@ -1080,14 +1088,8 @@ const Settings: React.FC<SettingsProps> = ({
           {!syncCompleted ? (
              <>
                 <p className="text-slate-300 text-sm">
-                   Esta acción descargará todos los productos y variantes de Tienda Nube y actualizará la base de datos local.
+                   Consulta los productos y variantes de Tienda Nube. No se guarda nada en la base de datos; usá la vista &quot;Vista Tienda Nube&quot; en Inventario para ver el stock.
                 </p>
-                <div className="bg-yellow-900/20 p-3 rounded-lg border border-yellow-800/30 flex items-start gap-2">
-                  <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={16} />
-                  <p className="text-xs text-yellow-200/80">
-                     Si ya existen productos, se actualizarán sus precios y stock. Asegúrate de haber eliminado datos antiguos si quieres una importación limpia.
-                  </p>
-                </div>
              </>
           ) : (
              <div className="bg-green-900/20 p-4 rounded-xl border border-green-800/30 flex flex-col items-center text-center gap-2">
@@ -1097,12 +1099,12 @@ const Settings: React.FC<SettingsProps> = ({
                 <h4 className="text-white font-bold text-lg">Proceso Completado</h4>
                 <div className="flex gap-4 mt-2">
                    <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/50 min-w-[80px]">
-                      <p className="text-[10px] text-slate-400 uppercase font-black">Importados</p>
-                      <p className="text-xl font-black text-white">{syncStats.imported}</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-black">Productos</p>
+                      <p className="text-xl font-black text-white">{syncStats.productCount || syncStats.imported}</p>
                    </div>
                    <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-700/50 min-w-[80px]">
-                      <p className="text-[10px] text-slate-400 uppercase font-black">Actualizados</p>
-                      <p className="text-xl font-black text-white">{syncStats.updated}</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-black">Variantes</p>
+                      <p className="text-xl font-black text-white">{syncStats.variantCount || syncStats.updated}</p>
                    </div>
                 </div>
              </div>
