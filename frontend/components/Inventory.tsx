@@ -882,6 +882,33 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  const handleBulkLoadBothAndMatch = async () => {
+    const mlId = bulkLinkMlId.trim();
+    const tnId = bulkLinkTnId.trim();
+    if (!mlId || !tnId) {
+      showToast('info', 'Ingresá ambos IDs (ML y TN) para cargar y emparejar todo.');
+      return;
+    }
+    setBulkLinkLoading(true);
+    try {
+      const [mlRes, tnRes] = await Promise.all([
+        api.getMercadoLibreItemVariations(mlId),
+        api.getTiendaNubeProductVariants(tnId)
+      ]);
+      const mlList = mlRes.variations || [];
+      const tnList = tnRes.variants || [];
+      setBulkLinkMlVariations(mlList);
+      setBulkLinkTnVariants(tnList);
+      runBulkAutoMatch(bulkLinkVariants, mlList, tnList);
+      showToast('success', `Se cargaron ${mlList.length} variaciones de ML y ${tnList.length} de TN. Se emparejaron por SKU y talle/color. Revisá la tabla y guardá.`);
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', e?.message || 'Error al cargar ML o TN.');
+    } finally {
+      setBulkLinkLoading(false);
+    }
+  };
+
   const handleBulkLinkSave = async () => {
     if (!bulkLinkGroupKey || !bulkLinkProductId) return;
     setBulkLinkSaving(true);
@@ -2234,6 +2261,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         </button>
                       </div>
                     </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleBulkLoadBothAndMatch}
+                      disabled={!bulkLinkMlId.trim() || !bulkLinkTnId.trim() || bulkLinkLoading || bulkLinkVariants.length === 0}
+                      className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                    >
+                      <Link size={16} />
+                      Cargar y emparejar todo
+                    </button>
+                    <span className="text-xs text-slate-500">Con ambos IDs cargados se emparejan automáticamente por SKU y talle/color.</span>
                   </div>
                   {(bulkLinkMlVariations.length > 0 || bulkLinkTnVariants.length > 0) && (
                     <button type="button" onClick={() => runBulkAutoMatch(bulkLinkVariants, bulkLinkMlVariations, bulkLinkTnVariants)} className="text-sm text-indigo-400 hover:text-indigo-300">
