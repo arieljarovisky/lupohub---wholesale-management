@@ -2268,18 +2268,20 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
     if (!storeId) {
       return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
     }
-    const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, {
-      headers: {
-        'Authentication': `bearer ${integration.access_token}`,
-        'User-Agent': TN_USER_AGENT
-      },
-      validateStatus: () => true
-    });
-    if (response.status !== 200) {
-      const errMsg = (response.data && (response.data.description || response.data.message)) || response.statusText;
-      return res.status(response.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
+    const headers = {
+      'Authentication': `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT
+    };
+
+    const [productRes, variantsRes] = await Promise.all([
+      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true }),
+      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, { headers, validateStatus: () => true })
+    ]);
+    if (productRes.status !== 200) {
+      const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
+      return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
     }
-    const p = response.data;
+    const p = productRes.data;
     const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
     const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
     const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
@@ -2290,7 +2292,14 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       if (isSizeAttr(n)) sizeIdx = i;
       if (isColorAttr(n)) colorIdx = i;
     });
-    const variantsList = Array.isArray(p?.variants) ? p.variants : [];
+
+    let variantsList: any[] = [];
+    if (variantsRes.status === 200 && Array.isArray(variantsRes.data)) {
+      variantsList = variantsRes.data;
+    } else if (Array.isArray(p?.variants)) {
+      variantsList = p.variants;
+    }
+
     const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
     const variants = variantsList.map((v: any) => {
       const values = Array.isArray(v?.values) ? v.values : [];

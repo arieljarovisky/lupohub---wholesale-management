@@ -890,23 +890,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return;
     }
     setBulkLinkLoading(true);
-    try {
-      const [mlRes, tnRes] = await Promise.all([
-        api.getMercadoLibreItemVariations(mlId),
-        api.getTiendaNubeProductVariants(tnId)
-      ]);
-      const mlList = mlRes.variations || [];
-      const tnList = tnRes.variants || [];
+    const [mlSettled, tnSettled] = await Promise.allSettled([
+      api.getMercadoLibreItemVariations(mlId),
+      api.getTiendaNubeProductVariants(tnId)
+    ]);
+    let mlList: { variationId: number | string; sku: string; color: string; size: string; stock: number }[] = [];
+    let tnList: { variantId: number | string; sku: string; color: string; size: string; stock: number }[] = [];
+    const errors: string[] = [];
+
+    if (mlSettled.status === 'fulfilled') {
+      mlList = mlSettled.value?.variations || [];
       setBulkLinkMlVariations(mlList);
-      setBulkLinkTnVariants(tnList);
-      runBulkAutoMatch(bulkLinkVariants, mlList, tnList);
-      showToast('success', `Se cargaron ${mlList.length} variaciones de ML y ${tnList.length} de TN. Se emparejaron por SKU y talle/color. Revisá la tabla y guardá.`);
-    } catch (e: any) {
-      console.error(e);
-      showToast('error', e?.message || 'Error al cargar ML o TN.');
-    } finally {
-      setBulkLinkLoading(false);
+      if (mlList.length === 0) errors.push('ML no devolvió variaciones (revisá el ID de la publicación).');
+    } else {
+      const msg = (mlSettled.reason?.message || mlSettled.reason)?.toString() || 'Error desconocido';
+      errors.push(`Mercado Libre: ${msg}`);
     }
+    if (tnSettled.status === 'fulfilled') {
+      tnList = tnSettled.value?.variants || [];
+      setBulkLinkTnVariants(tnList);
+      if (tnList.length === 0) errors.push('Tienda Nube no devolvió variantes (revisá el ID del producto).');
+    } else {
+      const msg = (tnSettled.reason?.message || tnSettled.reason)?.toString() || 'Error desconocido';
+      errors.push(`Tienda Nube: ${msg}`);
+    }
+
+    runBulkAutoMatch(bulkLinkVariants, mlList, tnList);
+
+    if (errors.length > 0) {
+      showToast('error', errors.join(' '));
+    } else {
+      showToast('success', `Se cargaron ${mlList.length} variaciones de ML y ${tnList.length} de TN. Se emparejaron por SKU y talle/color. Revisá la tabla y guardá.`);
+    }
+    setBulkLinkLoading(false);
   };
 
   const handleBulkLinkSave = async () => {
