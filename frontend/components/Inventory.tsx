@@ -775,6 +775,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+  const bulkLinkSkuMatch = (skuA: string, skuB: string) => {
+    const a = norm(skuA);
+    const b = norm(skuB);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const aBase = a.replace(/\s+ac\.?$/i, '').replace(/\s*—.*$/, '').trim();
+    const bBase = b.replace(/\s+ac\.?$/i, '').replace(/\s*—.*$/, '').trim();
+    return aBase === bBase || a.startsWith(bBase) || b.startsWith(aBase);
+  };
   const runBulkAutoMatch = (
     localVariants: Array<{ variantId: string; sku: string; size: string; color: string }>,
     mlList: { variationId: number | string; sku: string; size: string; color: string }[],
@@ -2251,7 +2260,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                               <td className="p-3">
                                 <select
                                   value={bulkLinkAssignments[v.variantId]?.ml ?? ''}
-                                  onChange={(e) => setBulkLinkAssignments(prev => ({ ...prev, [v.variantId]: { ml: e.target.value, tn: prev[v.variantId]?.tn ?? '' } }))}
+                                  onChange={(e) => {
+                                    const mlVal = e.target.value;
+                                    const mlOpt = bulkLinkMlVariations.find(m => String(m.variationId) === mlVal);
+                                    const tnMatch = mlOpt && bulkLinkTnVariants.find(t => bulkLinkSkuMatch(mlOpt.sku, t.sku));
+                                    setBulkLinkAssignments(prev => ({
+                                      ...prev,
+                                      [v.variantId]: {
+                                        ml: mlVal,
+                                        tn: tnMatch ? String(tnMatch.variantId) : (prev[v.variantId]?.tn ?? '')
+                                      }
+                                    }));
+                                  }}
                                   className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
                                 >
                                   <option value="">—</option>
@@ -2265,7 +2285,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                               <td className="p-3">
                                 <select
                                   value={bulkLinkAssignments[v.variantId]?.tn ?? ''}
-                                  onChange={(e) => setBulkLinkAssignments(prev => ({ ...prev, [v.variantId]: { ml: prev[v.variantId]?.ml ?? '', tn: e.target.value } }))}
+                                  onChange={(e) => {
+                                    const tnVal = e.target.value;
+                                    const tnOpt = bulkLinkTnVariants.find(t => String(t.variantId) === tnVal);
+                                    const mlMatch = tnOpt && bulkLinkMlVariations.find(m => bulkLinkSkuMatch(tnOpt.sku, m.sku));
+                                    setBulkLinkAssignments(prev => ({
+                                      ...prev,
+                                      [v.variantId]: {
+                                        ml: mlMatch ? String(mlMatch.variationId) : (prev[v.variantId]?.ml ?? ''),
+                                        tn: tnVal
+                                      }
+                                    }));
+                                  }}
                                   className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
                                 >
                                   <option value="">—</option>
