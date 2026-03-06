@@ -4,7 +4,6 @@ import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
-import { syncStockToExternalPlatforms } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -94,12 +93,15 @@ export const createProduct = async (req: any, res: any) => {
   const id = uuidv4();
 
   try {
+    const category = newProduct.category ?? null;
+    const basePrice = (newProduct as any).base_price != null ? Number((newProduct as any).base_price) : (newProduct.price != null ? Number(newProduct.price) : 0);
+    const description = newProduct.description ?? null;
     await execute(
       `INSERT INTO products (id, sku, name, category, base_price, description) 
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, newProduct.sku, newProduct.name, newProduct.category, newProduct.base_price, newProduct.description]
+      [id, newProduct.sku, newProduct.name, category, basePrice, description]
     );
-    res.status(201).json({ id, sku: newProduct.sku, name: newProduct.name, category: newProduct.category, base_price: newProduct.base_price, description: newProduct.description });
+    res.status(201).json({ id, sku: newProduct.sku, name: newProduct.name, category: category ?? undefined, base_price: basePrice, description: description ?? undefined });
   } catch (error: any) {
     console.error(error);
     // MySQL error code for Duplicate Entry is 1062 or code 'ER_DUP_ENTRY'
@@ -420,19 +422,44 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       );
     }
 
-    // Sincronizar stock a ML y TN de las variantes reci?n vinculadas (aplica pack size)
+    // Traer stock de Mercado Libre al inventario local (ML = fuente de verdad)
     let synced = 0;
-    for (const link of links) {
-      const hasMl = link.mercadoLibreVariantId != null && String(link.mercadoLibreVariantId) !== '';
-      const hasTn = link.tiendaNubeVariantId != null && String(link.tiendaNubeVariantId) !== '';
-      if (!link.variantId || (!hasMl && !hasTn)) continue;
-      try {
-        const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
-        const stock = Number(stockRow?.stock ?? 0);
-        await syncStockToExternalPlatforms(link.variantId, stock);
-        synced++;
-      } catch (syncErr: any) {
-        console.warn('[bulkLinkVariants] Sync stock para variante', link.variantId, ':', syncErr?.message);
+    const mlItemId = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
+    if (mlItemId) {
+      const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+      if (integration?.access_token) {
+        try {
+          const itemRes = await axios.get(
+            `https://api.mercadolibre.com/items/${mlItemId}?include_attributes=all`,
+            { headers: { Authorization: `Bearer ${integration.access_token}` } }
+          );
+          const item = itemRes.data;
+          const variations = item?.variations || [];
+          const hasVariations = variations.length > 0;
+
+          for (const link of links) {
+            const hasMl = link.mercadoLibreVariantId != null && String(link.mercadoLibreVariantId) !== '';
+            if (!link.variantId || !hasMl) continue;
+            try {
+              let qty = 0;
+              if (hasVariations) {
+                const v = variations.find((x: any) => String(x.id) === String(link.mercadoLibreVariantId));
+                qty = v ? (v.available_quantity ?? 0) : 0;
+              } else {
+                qty = item.available_quantity ?? 0;
+              }
+              await execute(
+                `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
+                [link.variantId, qty]
+              );
+              synced++;
+            } catch (err: any) {
+              console.warn('[bulkLinkVariants] Error actualizando stock local desde ML para variante', link.variantId, ':', err?.message);
+            }
+          }
+        } catch (mlErr: any) {
+          console.warn('[bulkLinkVariants] Error trayendo ?tem de ML:', mlErr?.response?.data || mlErr?.message);
+        }
       }
     }
 

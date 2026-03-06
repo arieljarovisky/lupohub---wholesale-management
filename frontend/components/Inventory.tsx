@@ -883,7 +883,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setBulkLinkGroupKey(null);
       if (updated > 0) {
         const msg = synced > 0
-          ? `Se guardaron ${updated} vinculación(es) y se sincronizó el stock de ${synced} variante(s) a Mercado Libre y Tienda Nube.`
+          ? `Se guardaron ${updated} vinculación(es) y se trajo el stock de Mercado Libre a tu inventario (${synced} variante(s) actualizadas).`
           : `Se guardaron ${updated} vinculación(es).`;
         alert(msg);
       }
