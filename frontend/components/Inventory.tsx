@@ -735,23 +735,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
   const runBulkAutoMatch = (
-    localVariants: Array<{ variantId: string; size: string; color: string }>,
-    mlList: { variationId: number | string; size: string; color: string }[],
-    tnList: { variantId: number | string; size: string; color: string }[]
+    localVariants: Array<{ variantId: string; sku: string; size: string; color: string }>,
+    mlList: { variationId: number | string; sku: string; size: string; color: string }[],
+    tnList: { variantId: number | string; sku: string; size: string; color: string }[]
   ) => {
     setBulkLinkAssignments(prev => {
       const next = { ...prev };
       localVariants.forEach(local => {
+        const skuN = norm(local.sku);
         const sizeN = norm(local.size);
         const colorN = norm(local.color);
         if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
+        // ML: primero por SKU (ML y TN usan el mismo SKU), luego por talle+color
         if (!next[local.variantId].ml && mlList.length > 0) {
-          const match = mlList.find(m => norm(m.size) === sizeN && norm(m.color) === colorN);
+          let match = skuN ? mlList.find(m => norm(m.sku) === skuN) : null;
+          if (!match) match = mlList.find(m => norm(m.size) === sizeN && norm(m.color) === colorN);
           if (match) next[local.variantId].ml = String(match.variationId);
           else if (mlList.length === 1) next[local.variantId].ml = String(mlList[0].variationId);
         }
+        // TN: mismo criterio (mismo SKU que ML)
         if (!next[local.variantId].tn && tnList.length > 0) {
-          const match = tnList.find(t => norm(t.size) === sizeN && norm(t.color) === colorN);
+          let match = skuN ? tnList.find(t => norm(t.sku) === skuN) : null;
+          if (!match) match = tnList.find(t => norm(t.size) === sizeN && norm(t.color) === colorN);
           if (match) next[local.variantId].tn = String(match.variantId);
           else if (tnList.length === 1) next[local.variantId].tn = String(tnList[0].variantId);
         }
@@ -2097,7 +2102,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-4">
               <p className="text-sm text-slate-400">
-                Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN; se intentará emparejar por <strong>talle y color</strong> (aunque el SKU sea distinto).
+                Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
               </p>
               {bulkLinkLoading && bulkLinkVariants.length === 0 ? (
                 <div className="text-slate-400 py-8 text-center">Cargando variantes del grupo...</div>
@@ -2137,7 +2142,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   </div>
                   {(bulkLinkMlVariations.length > 0 || bulkLinkTnVariants.length > 0) && (
                     <button type="button" onClick={() => runBulkAutoMatch(bulkLinkVariants, bulkLinkMlVariations, bulkLinkTnVariants)} className="text-sm text-indigo-400 hover:text-indigo-300">
-                      Volver a emparejar por talle/color
+                      Volver a emparejar (SKU, luego talle/color)
                     </button>
                   )}
                   {bulkLinkVariants.length > 0 && (
