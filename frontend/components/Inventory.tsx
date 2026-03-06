@@ -1637,6 +1637,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </p>
                  </div>
 
+                 {/* Cómo obtener los IDs */}
+                 <div className="rounded-xl bg-slate-800/50 border border-slate-600/50 p-3">
+                    <p className="text-[11px] text-slate-400 mb-1 font-semibold">¿Dónde obtengo los IDs?</p>
+                    <p className="text-[10px] text-slate-500">
+                       En Inventario cambiá a <strong>Vista Mercado Libre</strong> o <strong>Vista Tienda Nube</strong>. Ahí ves cada publicación con su <strong>ID publicación</strong> / <strong>ID producto</strong>. Tocá la fila para expandir y ver la tabla con <strong>ID variación</strong> / <strong>ID variante</strong> por talle/color. Usá el ícono de copiar para llevarlos acá.
+                    </p>
+                 </div>
+
                  {/* Tienda Nube */}
                  <div className="space-y-3 rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
                     <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">

@@ -703,14 +703,17 @@ const Settings: React.FC<SettingsProps> = ({
               <Smartphone size={18} /> Instalar LupoHub en tablet o móvil
             </p>
             <p className="text-xs text-slate-300 mb-2">
-              En la computadora suele aparecer el botón para instalar. En la <strong>tablet</strong> o el <strong>celular</strong> hacé lo siguiente:
+              En la compu suele aparecer el botón para instalar. En <strong>tablet Android</strong> Chrome a veces no lo muestra; hay que usar el menú:
             </p>
             <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
-              <li>Abrí LupoHub en <strong>Chrome</strong> (misma URL que en la compu).</li>
-              <li>Tocá el <strong>menú del navegador</strong> (los tres puntos ⋮ arriba a la derecha).</li>
+              <li>Abrí <strong>Chrome</strong> en la tablet y entrá a la <strong>misma URL</strong> de LupoHub (HTTPS).</li>
+              <li>Tocá los <strong>tres puntos ⋮</strong> (arriba a la derecha) para abrir el menú.</li>
               <li>Elegí <strong>“Agregar a la pantalla de inicio”</strong> o <strong>“Instalar aplicación”</strong>.</li>
               <li>Confirmá. El ícono de LupoHub quedará en la pantalla de inicio y se abrirá como app, sin la barra de Chrome.</li>
             </ol>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Si no ves “Instalar aplicación”, probá menú ⋮ → “Añadir a pantalla de inicio”. En tablets la opción suele estar solo en el menú.
+            </p>
           </div>
 
           {/* Guía: stock depósito → Tienda Nube y Mercado Libre */}

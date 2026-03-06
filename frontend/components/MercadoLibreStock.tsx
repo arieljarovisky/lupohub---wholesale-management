@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check } from 'lucide-react';
 import { api } from '../services/api';
 
 interface MLStockItem {
@@ -41,6 +41,13 @@ const MercadoLibreStock: React.FC = () => {
     lowStockCount: number;
     noStockCount: number;
   } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopiedId(label);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   const fetchTotals = async () => {
     try {
@@ -319,8 +326,17 @@ const MercadoLibreStock: React.FC = () => {
                     <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
                       <div className="min-w-0 flex-1">
                         <p className="text-white font-bold truncate">{item.title}</p>
-                        <p className="text-slate-500 text-xs mt-1">
-                          ID: {item.id} · ${item.price?.toLocaleString('es-AR')}
+                        <p className="text-slate-500 text-xs mt-1 flex items-center gap-2 flex-wrap">
+                          <span>ID publicación: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-amber-300/90">{item.id}</code></span>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(item.id, `ml-item-${item.id}`)}
+                            className="inline-flex items-center gap-1 text-slate-500 hover:text-amber-400 transition-colors"
+                            title="Copiar ID publicación"
+                          >
+                            {copiedId === `ml-item-${item.id}` ? <Check size={12} /> : <Copy size={12} />}
+                          </button>
+                          <span className="text-slate-600">· ${item.price?.toLocaleString('es-AR')}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-4 sm:gap-6">
@@ -351,6 +367,7 @@ const MercadoLibreStock: React.FC = () => {
                           <table className="w-full min-w-[400px]">
                             <thead>
                               <tr className="border-b border-slate-700/30">
+                                <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">ID variación</th>
                                 <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
                                 <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Color</th>
                                 <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Talle</th>
@@ -361,6 +378,17 @@ const MercadoLibreStock: React.FC = () => {
                             <tbody>
                               {item.variations.map((v, i) => (
                                 <tr key={i} className="border-b border-slate-700/20 last:border-0">
+                                  <td className="p-3 text-amber-300/90 text-xs font-mono flex items-center gap-1">
+                                    {v.variationId}
+                                    <button
+                                      type="button"
+                                      onClick={() => copyToClipboard(String(v.variationId), `ml-var-${v.variationId}`)}
+                                      className="text-slate-500 hover:text-amber-400 transition-colors"
+                                      title="Copiar ID variación"
+                                    >
+                                      {copiedId === `ml-var-${v.variationId}` ? <Check size={12} /> : <Copy size={12} />}
+                                    </button>
+                                  </td>
                                   <td className="p-3 text-slate-400 text-xs font-mono">{v.sku || '-'}</td>
                                   <td className="p-3 text-white text-sm">{v.color || '-'}</td>
                                   <td className="p-3 text-white text-sm">{v.size || '-'}</td>

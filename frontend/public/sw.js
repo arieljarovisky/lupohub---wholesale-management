@@ -1,6 +1,17 @@
-/* Service worker mínimo para que la PWA sea instalable en tablet/móvil */
-const CACHE = 'lupohub-v1';
-self.addEventListener('install', () => self.skipWaiting());
+/* Service worker para PWA instalable (iPhone y Android tablet/móvil) */
+const CACHE = 'lupohub-v2';
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE).then((cache) => {
+      return cache.addAll(['/', '/manifest.webmanifest', '/icons/icon.svg']);
+    }).catch(() => {})
+  );
+});
 self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
+  e.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    }).then(() => self.clients.claim())
+  );
 });
