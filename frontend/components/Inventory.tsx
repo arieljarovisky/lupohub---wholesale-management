@@ -1320,8 +1320,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    >
                      <option value="ALL">Todos</option>
                      {availableColors.map(c => {
-                       const code = (c as any).code;
-                        const label = code ? `${code} ${c.name || ''}` : (c.name || '');
+                       const code = (c as any).code != null ? String((c as any).code).trim() : '';
+                        const label = code ? `${code} - ${c.name || ''}` : (c.name || '');
                         const val = code || c.name;
                         return <option key={c.id} value={val}>{label}</option>;
                      })}
@@ -1804,6 +1804,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                        <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Palette size={16} className="text-pink-400"/> Selección de Colores</h4>
                        <div className="flex flex-wrap gap-2">
                           {availableColors.map(color => {
+                             const code = (color as any).code != null ? String((color as any).code).trim() : '';
+                             const label = code ? `${code} - ${color.name || ''}` : (color.name || '');
                              const isSelected = selectedColors.includes(color.name);
                              return (
                                <button 
@@ -1816,7 +1818,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                  }`}
                                >
                                  <div className="w-3 h-3 rounded-full border border-white/20" style={{background: color.value}}></div>
-                                 {color.name}
+                                 {label}
                                </button>
                              );
                           })}

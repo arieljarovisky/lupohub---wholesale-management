@@ -1048,11 +1048,9 @@ const Settings: React.FC<SettingsProps> = ({
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
              {(activeTab === 'sizes' ? sizes : colors).map(attr => {
-               const code = (attr as any).code;
+               const code = (attr as any).code != null ? String((attr as any).code).trim() : '';
                const name = attr.name || 'Sin nombre';
-               const displayLabel = attr.type === 'color' && code
-                 ? (code !== name ? `${code} - ${name}` : name)
-                 : (attr.type === 'size' && code ? (code !== name ? `${code} - ${name}` : name) : name);
+               const displayLabel = code ? `${code} - ${name}` : name;
                return (
                  <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-slate-600 transition-colors">
                     <div className="flex items-center gap-3 min-w-0 flex-1">

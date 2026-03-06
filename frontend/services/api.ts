@@ -155,7 +155,11 @@ export const api = {
   getColors: async (): Promise<Array<{ code: string; name: string; hex?: string }>> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/colors', 'GET');
-      return rows.map(r => ({ code: r.code, name: r.name, hex: r.hex }));
+      return rows.map(r => ({
+        code: r.code != null ? String(r.code).trim() : '',
+        name: r.name != null ? String(r.name).trim() : '',
+        hex: r.hex
+      }));
     }, [], 'getColors');
   },
 
