@@ -2006,6 +2006,57 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
   }
 };
 
+// Totales de stock Mercado Libre (todas las publicaciones, para las cards)
+export const getMercadoLibreStockTotals = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const limit = 50;
+    let offset = 0;
+    let totalProducts = 0;
+    let totalStock = 0;
+    let lowStockCount = 0;
+    let noStockCount = 0;
+    while (true) {
+      const itemsRes = await axios.get(
+        `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
+        { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }
+      );
+      const itemIds: string[] = itemsRes.data.results || [];
+      if (itemIds.length === 0) break;
+      const batchSize = 10;
+      for (let i = 0; i < itemIds.length; i += batchSize) {
+        const batch = itemIds.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map((id: string) =>
+          axios.get(`https://api.mercadolibre.com/items/${id}`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }).then(r => r.data).catch(() => null)
+        ));
+        for (const item of results) {
+          if (!item) continue;
+          let productStock = 0;
+          if (item.variations?.length) {
+            productStock = (item.variations as any[]).reduce((s, v) => s + (v.available_quantity || 0), 0);
+          } else {
+            productStock = item.available_quantity || 0;
+          }
+          totalProducts += 1;
+          totalStock += productStock;
+          if (productStock === 0) noStockCount += 1;
+          else if (productStock < 5) lowStockCount += 1;
+        }
+      }
+      if (itemIds.length < limit) break;
+      offset += limit;
+      if (offset >= 10000) break;
+    }
+    res.json({ totalProducts, totalStock, lowStockCount, noStockCount });
+  } catch (error: any) {
+    console.error('Error fetching ML stock totals:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo totales de Mercado Libre', error: error.message });
+  }
+};
+
 // Obtener stock de Mercado Libre
 export const getMercadoLibreStock = async (req: Request, res: Response) => {
   try {

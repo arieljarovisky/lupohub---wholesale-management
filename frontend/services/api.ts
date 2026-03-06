@@ -416,6 +416,12 @@ export const api = {
     }, { items: [], total: 0 }, 'getMercadoLibreStock');
   },
 
+  getMercadoLibreStockTotals: async (): Promise<{ totalProducts: number; totalStock: number; lowStockCount: number; noStockCount: number }> => {
+    return handleRequest(async () => {
+      return await request<{ totalProducts: number; totalStock: number; lowStockCount: number; noStockCount: number }>('/integrations/mercadolibre/stock/totals', 'GET');
+    }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getMercadoLibreStockTotals');
+  },
+
   // Configuración de mensaje automático de ML
   getMLAutoMessageConfig: async (): Promise<{ enabled: boolean; messageTemplate: string }> => {
     return handleRequest(async () => {
