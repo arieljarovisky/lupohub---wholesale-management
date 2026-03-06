@@ -2325,18 +2325,25 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
           let totalStock = 0;
           const variations = item.variations.map((v: any) => {
             totalStock += v.available_quantity || 0;
-            
-            // Extraer color y talle de los atributos
+            // SKU: prioridad seller_sku (oficial en ML), seller_custom_field, o atributo SELLER_SKU
+            let sku = (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+            if (!sku && Array.isArray(v.attributes)) {
+              const skuAttr = v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+              if (skuAttr) sku = (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim();
+            }
+            // Extraer color y talle de attribute_combinations (IDs pueden variar por categoría/país)
             let color = '';
             let size = '';
             (v.attribute_combinations || []).forEach((attr: any) => {
-              if (attr.id === 'COLOR') color = attr.value_name;
-              if (attr.id === 'SIZE') size = attr.value_name;
+              const id = (attr.id || '').toString().toUpperCase();
+              const name = (attr.value_name || attr.name || '').toString().trim();
+              if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+              if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
             });
 
             return {
               variationId: v.id,
-              sku: v.seller_custom_field || '',
+              sku,
               color,
               size,
               stock: v.available_quantity || 0,
