@@ -84,27 +84,28 @@ export const getProducts = async (req: Request, res: Response) => {
 };
 
 export const createProduct = async (req: any, res: any) => {
-  const newProduct: Product = req.body;
-  
-  if (!newProduct.sku || !newProduct.name) {
+  const body = req.body || {};
+  const sku = body.sku != null ? String(body.sku).trim() : '';
+  const name = body.name != null ? String(body.name).trim() : '';
+
+  if (!sku || !name) {
     return res.status(400).json({ message: "SKU y Nombre son requeridos" });
   }
 
   const id = uuidv4();
+  const category = body.category != null ? String(body.category) : null;
+  const basePrice = body.base_price != null ? Number(body.base_price) : (body.price != null ? Number(body.price) : 0);
+  const description = body.description != null ? String(body.description) : null;
 
   try {
-    const category = newProduct.category ?? null;
-    const basePrice = (newProduct as any).base_price != null ? Number((newProduct as any).base_price) : ((newProduct as any).price != null ? Number((newProduct as any).price) : 0);
-    const description = newProduct.description ?? null;
     await execute(
       `INSERT INTO products (id, sku, name, category, base_price, description) 
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, newProduct.sku, newProduct.name, category, basePrice, description]
+      [id, sku, name, category, basePrice, description]
     );
-    res.status(201).json({ id, sku: newProduct.sku, name: newProduct.name, category: category ?? undefined, base_price: basePrice, description: description ?? undefined });
+    res.status(201).json({ id, sku, name, category: category ?? undefined, base_price: basePrice, description: description ?? undefined });
   } catch (error: any) {
     console.error(error);
-    // MySQL error code for Duplicate Entry is 1062 or code 'ER_DUP_ENTRY'
     if (error.code === 'ER_DUP_ENTRY' || error.message.includes('Duplicate entry')) {
       return res.status(409).json({ message: "El SKU ya existe" });
     }
