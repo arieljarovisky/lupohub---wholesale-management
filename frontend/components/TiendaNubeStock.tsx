@@ -326,12 +326,10 @@ const TiendaNubeStock: React.FC = () => {
                           <p className={`text-xl sm:text-2xl font-black ${stockColor}`}>{item.totalStock}</p>
                           <p className="text-slate-500 text-xs">disponibles</p>
                         </div>
-                        {item.soldTotal > 0 && (
-                          <div className="text-right">
-                            <p className="text-lg font-bold text-slate-400">{item.soldTotal}</p>
-                            <p className="text-slate-600 text-xs">vendidos</p>
-                          </div>
-                        )}
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-slate-400">{item.soldTotal ?? 0}</p>
+                          <p className="text-slate-600 text-xs">vendidos</p>
+                        </div>
                       </div>
                     </div>
                     <ChevronDown

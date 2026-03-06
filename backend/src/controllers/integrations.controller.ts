@@ -1570,6 +1570,34 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
 
 // ==================== ÓRDENES EXTERNAS ====================
 
+/** Agrega cantidad vendida por variant_id desde órdenes pagadas de Tienda Nube */
+async function getTiendaNubeVariantSoldMap(accessToken: string, storeId: string): Promise<Map<number, number>> {
+  const soldByVariant = new Map<number, number>();
+  let page = 1;
+  const perPage = 50;
+  while (true) {
+    const res = await axios.get(`https://api.tiendanube.com/v1/${storeId}/orders`, {
+      headers: { 'Authentication': `bearer ${accessToken}`, 'User-Agent': TN_USER_AGENT },
+      params: { page, per_page: perPage }
+    });
+    const orders = res.data || [];
+    if (orders.length === 0) break;
+    for (const order of orders) {
+      if (order.payment_status !== 'paid') continue;
+      for (const line of order.products || []) {
+        const vid = line.variant_id;
+        if (vid == null) continue;
+        const qty = Number(line.quantity) || 0;
+        soldByVariant.set(vid, (soldByVariant.get(vid) || 0) + qty);
+      }
+    }
+    if (orders.length < perPage) break;
+    page++;
+    if (page > 500) break;
+  }
+  return soldByVariant;
+}
+
 // Obtener órdenes de Tienda Nube
 // Obtener stock/publicaciones de Tienda Nube (igual que getMercadoLibreStock pero para TN)
 export const getTiendaNubeStock = async (req: Request, res: Response) => {
@@ -1587,15 +1615,18 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
     const page = Math.floor(Number(offset) / Number(limit)) + 1;
     const perPage = Math.min(200, Math.max(1, parseInt(limit as string) || 50)); // API TN permite hasta 200 por página
 
-    const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
-      headers: {
-        'Authentication': `bearer ${integration.access_token}`,
-        'User-Agent': TN_USER_AGENT
-      },
-      params: { page, per_page: perPage }
-    });
+    const [productsRes, soldMap] = await Promise.all([
+      axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
+        headers: {
+          'Authentication': `bearer ${integration.access_token}`,
+          'User-Agent': TN_USER_AGENT
+        },
+        params: { page, per_page: perPage }
+      }),
+      getTiendaNubeVariantSoldMap(integration.access_token, storeId)
+    ]);
 
-    const products = response.data || [];
+    const products = productsRes.data || [];
     const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
     const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
 
@@ -1611,9 +1642,12 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
         if (isColorAttr(n)) colorIdx = i;
       });
       let totalStock = 0;
+      let soldTotal = 0;
       const variations = (p.variants || []).map((v: any) => {
         const stock = Number(v.stock) || 0;
         totalStock += stock;
+        const sold = soldMap.get(v.id) || 0;
+        soldTotal += sold;
         const values = v.values || [];
         const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? (values[sizeIdx]?.es ?? values[sizeIdx]?.pt ?? values[sizeIdx]?.en ?? values[sizeIdx]) : '';
         const colorVal = colorIdx >= 0 && colorIdx < values.length ? (values[colorIdx]?.es ?? values[colorIdx]?.pt ?? values[colorIdx]?.en ?? values[colorIdx]) : '';
@@ -1624,7 +1658,7 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
           size: String(toStr(sizeVal)),
           color: String(toStr(colorVal)),
           stock,
-          sold: 0
+          sold
         };
       });
       const img = (p.images && p.images[0]) ? (p.images[0].src || p.images[0].url) : '';
@@ -1634,7 +1668,7 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
         status: 'active',
         price: p.variants?.[0]?.price ?? 0,
         totalStock,
-        soldTotal: 0,
+        soldTotal,
         thumbnail: img,
         permalink: p.url || `https://tiendanube.com`,
         hasVariations: variations.length > 1,
@@ -1642,7 +1676,7 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
       });
     }
 
-    const totalHeader = response.headers['x-total-count'] || response.headers['x-total'];
+    const totalHeader = productsRes.headers['x-total-count'] || productsRes.headers['x-total'];
     const total = totalHeader ? parseInt(String(totalHeader), 10) : items.length;
     res.json({
       items,
