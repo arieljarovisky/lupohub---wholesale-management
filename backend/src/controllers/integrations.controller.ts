@@ -432,50 +432,27 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
                   }
                 }
   
-                let colorId = null;
-                let colorRow = await get(`SELECT id FROM colors WHERE name = ?`, [colorName]);
-                if (!colorRow) {
-                  colorId = `c-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  let code = colorName.substring(0, 50).toUpperCase();
-                  try {
-                    await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
-                  } catch (e: any) {
-                    if (e.code === 'ER_DUP_ENTRY') {
-                      code = code.substring(0, 45) + Math.floor(Math.random() * 1000);
-                      try {
-                        await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, colorName, code, '#000000']);
-                      } catch (e2: any) {
-                        console.error(`Failed to insert color ${colorName}`, e2);
-                      }
-                    } else if (e.code === 'ER_BAD_FIELD_ERROR') {
-                      await execute(`INSERT INTO colors (id, name, code) VALUES (?, ?, ?)`, [colorId, colorName, code]);
-                    } else {
-                      throw e;
-                    }
-                  }
-                } else {
-                  colorId = colorRow.id;
+                // Usar solo colores y talles que ya existen (no crear nuevos)
+                const colorRow = await get(
+                  `SELECT id FROM colors WHERE name = ? OR UPPER(TRIM(code)) = UPPER(TRIM(?)) OR UPPER(TRIM(name)) = UPPER(TRIM(?)) LIMIT 1`,
+                  [colorName, colorName, colorName]
+                );
+                const colorId = colorRow?.id || null;
+                if (!colorId) {
+                  log(`  [Omitido] Variante ${variant.id}: color "${colorName}" no existe en Configuración. Agregá el color primero.`);
+                  continue;
                 }
-  
-                let sizeId = null;
-                const safeSizeCode = sizeName.substring(0, 100); 
-                let sizeRow = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
-                if (!sizeRow) {
-                  sizeId = `s-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  try {
-                    await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, safeSizeCode, sizeName]);
-                  } catch (e: any) {
-                    if (e.code === 'ER_BAD_FIELD_ERROR') {
-                      await execute(`INSERT INTO sizes (id, size_code) VALUES (?, ?)`, [sizeId, safeSizeCode]);
-                    } else if (e.code === 'ER_DUP_ENTRY') {
-                      const existing = await get(`SELECT id FROM sizes WHERE size_code = ?`, [safeSizeCode]);
-                      sizeId = existing?.id;
-                    } else {
-                      throw e;
-                    }
-                  }
-                } else {
-                  sizeId = sizeRow.id;
+
+                const safeSizeCode = sizeName.substring(0, 100).trim();
+                const normalizedSize = normalizeSizeToStandard(safeSizeCode);
+                const sizeRow = await get(
+                  `SELECT id FROM sizes WHERE size_code = ? OR UPPER(TRIM(size_code)) = UPPER(?) OR UPPER(TRIM(size_code)) = UPPER(?) LIMIT 1`,
+                  [safeSizeCode, normalizedSize, safeSizeCode]
+                );
+                const sizeId = sizeRow?.id || null;
+                if (!sizeId) {
+                  log(`  [Omitido] Variante ${variant.id}: talle "${sizeName}" no existe en Configuración. Agregá el talle primero.`);
+                  continue;
                 }
   
                 let productColorRow = await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]);
