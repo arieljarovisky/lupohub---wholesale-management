@@ -34,6 +34,10 @@ export interface ExternalIds {
 export interface Product {
   id: string;
   sku: string;
+  /** SKU del artículo padre (desde backend); usado para agrupar variantes */
+  base_sku?: string;
+  /** ID del producto padre en products (desde backend) */
+  product_id?: string;
   name: string;
   category: string;
   size: string;

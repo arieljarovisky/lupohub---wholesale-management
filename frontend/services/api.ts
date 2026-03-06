@@ -54,6 +54,8 @@ export const api = {
         return {
           id: r.id,
           sku: r.sku,
+          base_sku: r.base_sku,
+          product_id: r.product_id,
           name: r.name,
           category: r.category,
           size,
@@ -78,6 +80,8 @@ export const api = {
       return {
         id: r.id,
         sku: r.sku,
+        base_sku: r.base_sku,
+        product_id: r.product_id,
         name: r.name,
         category: r.category,
         size,
@@ -113,6 +117,8 @@ export const api = {
         return {
           id: r.id,
           sku: r.sku,
+          base_sku: r.base_sku,
+          product_id: r.product_id,
           name: r.name,
           category: r.category,
           size,
