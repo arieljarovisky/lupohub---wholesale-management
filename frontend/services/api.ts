@@ -47,18 +47,23 @@ export const api = {
     return handleRequest(async () => {
       const res = await request<any>('/products?per_page=5000', 'GET');
       const rows = Array.isArray(res) ? res : res.items;
-      return rows.map((r: any) => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category,
-        size: '',
-        color: '',
-        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
-        price: Number((r as any).base_price ?? (r as any).price ?? 0),
-        description: '',
-        externalIds: r.externalIds
-      })) as Product[];
+      return rows.map((r: any) => {
+        const parts = (r.sku || '').toString().split('-');
+        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          category: r.category,
+          size,
+          color,
+          stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+          price: Number((r as any).base_price ?? (r as any).price ?? 0),
+          description: r.description ?? '',
+          externalIds: r.externalIds
+        };
+      }) as Product[];
     }, MOCK_PRODUCTS, 'getProducts');
   },
 
@@ -78,18 +83,23 @@ export const api = {
         ...(syncNone ? { sync_none: '1' } : {})
       });
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
-      const items = (res.items || []).map((r: any) => ({
-        id: r.id,
-        sku: r.sku,
-        name: r.name,
-        category: r.category,
-        size: '',
-        color: '',
-        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
-        price: Number((r as any).base_price ?? (r as any).price ?? 0),
-        description: '',
-        externalIds: r.externalIds
-      })) as Product[];
+      const items = (res.items || []).map((r: any) => {
+        const parts = (r.sku || '').toString().split('-');
+        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        return {
+          id: r.id,
+          sku: r.sku,
+          name: r.name,
+          category: r.category,
+          size,
+          color,
+          stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+          price: Number((r as any).base_price ?? (r as any).price ?? 0),
+          description: r.description ?? '',
+          externalIds: r.externalIds
+        };
+      }) as Product[];
       return { items, page: res.page, per_page: res.per_page, total: res.total };
     }, { items: MOCK_PRODUCTS.slice(0, perPage), page, per_page: perPage, total: MOCK_PRODUCTS.length }, 'getProductsPaged');
   },
