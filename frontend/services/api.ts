@@ -398,6 +398,12 @@ export const api = {
     }, { items: [], total: 0 }, 'getTiendaNubeStock');
   },
 
+  getTiendaNubeStockTotals: async (): Promise<{ totalProducts: number; totalStock: number; lowStockCount: number; noStockCount: number }> => {
+    return handleRequest(async () => {
+      return await request<{ totalProducts: number; totalStock: number; lowStockCount: number; noStockCount: number }>('/integrations/tiendanube/stock/totals', 'GET');
+    }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getTiendaNubeStockTotals');
+  },
+
   // Stock de Mercado Libre
   getMercadoLibreStock: async (params?: { offset?: number; limit?: number; status?: string }): Promise<{ items: any[]; total: number }> => {
     return handleRequest(async () => {

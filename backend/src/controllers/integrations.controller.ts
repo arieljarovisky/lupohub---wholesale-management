@@ -1656,6 +1656,63 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
   }
 };
 
+// Totales de stock Tienda Nube (todos los productos, para las cards)
+export const getTiendaNubeStockTotals = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+    }
+    const perPage = 200;
+    let page = 1;
+    let hasMore = true;
+    let totalProducts = 0;
+    let totalStock = 0;
+    let lowStockCount = 0;
+    let noStockCount = 0;
+    while (hasMore) {
+      const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
+        headers: {
+          'Authentication': `bearer ${integration.access_token}`,
+          'User-Agent': TN_USER_AGENT
+        },
+        params: { page, per_page: perPage }
+      });
+      const products = response.data || [];
+      if (products.length === 0) {
+        hasMore = false;
+        break;
+      }
+      for (const p of products) {
+        let productStock = 0;
+        for (const v of p.variants || []) {
+          productStock += Number(v.stock) || 0;
+        }
+        totalProducts += 1;
+        totalStock += productStock;
+        if (productStock === 0) noStockCount += 1;
+        else if (productStock < 5) lowStockCount += 1;
+      }
+      if (products.length < perPage) hasMore = false;
+      else page++;
+      if (page > 200) hasMore = false;
+    }
+    res.json({
+      totalProducts,
+      totalStock,
+      lowStockCount,
+      noStockCount
+    });
+  } catch (error: any) {
+    console.error('Error fetching TN stock totals:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo totales de Tienda Nube', error: error.message });
+  }
+};
+
 export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);

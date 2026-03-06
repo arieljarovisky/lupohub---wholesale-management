@@ -35,6 +35,21 @@ const TiendaNubeStock: React.FC = () => {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('title');
   const limit = 200;
+  const [globalTotals, setGlobalTotals] = useState<{
+    totalProducts: number;
+    totalStock: number;
+    lowStockCount: number;
+    noStockCount: number;
+  } | null>(null);
+
+  const fetchTotals = async () => {
+    try {
+      const res = await api.getTiendaNubeStockTotals();
+      setGlobalTotals(res);
+    } catch (e) {
+      console.error('Error fetching TN totals:', e);
+    }
+  };
 
   const fetchStock = async () => {
     setLoading(true);
@@ -49,6 +64,24 @@ const TiendaNubeStock: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const handleRefresh = () => {
+    fetchTotals();
+    if (offset === 0) {
+      setLoading(true);
+      api.getTiendaNubeStock({ offset: 0, limit }).then((res) => {
+        const sortedItems = (res.items || []).sort((a: TNStockItem, b: TNStockItem) => a.title.localeCompare(b.title));
+        setItems(sortedItems);
+        setTotal(res.total || 0);
+      }).catch(console.error).finally(() => setLoading(false));
+    } else {
+      setOffset(0);
+    }
+  };
+
+  useEffect(() => {
+    fetchTotals();
+  }, []);
 
   useEffect(() => {
     fetchStock();
@@ -118,10 +151,10 @@ const TiendaNubeStock: React.FC = () => {
   const totalPages = searchTerm ? 1 : Math.max(1, Math.ceil(total / limit));
 
   const stats = {
-    totalItems: total,
-    totalStock: items.reduce((sum, i) => sum + i.totalStock, 0),
-    lowStock: items.filter(i => i.totalStock > 0 && i.totalStock < 5).length,
-    noStock: items.filter(i => i.totalStock === 0).length
+    totalItems: globalTotals?.totalProducts ?? total,
+    totalStock: globalTotals?.totalStock ?? items.reduce((sum, i) => sum + i.totalStock, 0),
+    lowStock: globalTotals?.lowStockCount ?? items.filter(i => i.totalStock > 0 && i.totalStock < 5).length,
+    noStock: globalTotals?.noStockCount ?? items.filter(i => i.totalStock === 0).length
   };
 
   return (
@@ -138,7 +171,7 @@ const TiendaNubeStock: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={fetchStock}
+          onClick={handleRefresh}
           disabled={loading}
           className="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-cyan-900/30 transition-all"
         >
@@ -365,50 +398,55 @@ const TiendaNubeStock: React.FC = () => {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-1 sm:gap-2 pt-2">
-          <div className="flex items-center gap-1 rounded-2xl bg-slate-800/60 border border-slate-700/50 shadow-lg shadow-black/20 p-1.5">
+        <div className="flex flex-col items-center gap-3 pt-4 pb-2">
+          <p className="text-slate-500 text-sm">
+            Página <span className="text-cyan-400 font-semibold">{currentPage}</span> de <span className="font-semibold text-white">{totalPages}</span>
+          </p>
+          <nav className="flex items-center gap-1 rounded-2xl bg-slate-800 border border-slate-600/60 shadow-xl shadow-black/30 px-2 py-2" aria-label="Paginación">
             <button
               onClick={() => setOffset(0)}
               disabled={offset === 0}
-              className="p-2.5 rounded-xl text-white/90 hover:bg-cyan-500/20 hover:text-cyan-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              className="p-3 rounded-xl text-slate-400 hover:bg-cyan-500/20 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-all duration-200"
               title="Primera página"
+              aria-label="Primera página"
             >
-              <ChevronLeft size={18} className="text-white" />
-              <ChevronLeft size={18} className="text-white -ml-3" />
+              <ChevronLeft size={20} className="inline-block" strokeWidth={2.5} />
+              <ChevronLeft size={20} className="inline-block -ml-3" strokeWidth={2.5} />
             </button>
             <button
               onClick={() => setOffset(o => Math.max(0, o - limit))}
               disabled={offset === 0}
-              className="p-2.5 rounded-xl text-white/90 hover:bg-cyan-500/20 hover:text-cyan-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              className="p-3 rounded-xl text-slate-400 hover:bg-cyan-500/20 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-all duration-200"
               title="Anterior"
+              aria-label="Anterior"
             >
-              <ChevronLeft size={18} className="text-white" />
+              <ChevronLeft size={20} strokeWidth={2.5} />
             </button>
-
-            <span className="min-w-[4rem] text-center px-4 py-2 text-sm font-bold text-white bg-slate-700/50 rounded-xl border border-slate-600/50">
-              <span className="text-cyan-400">{currentPage}</span>
-              <span className="text-slate-500 mx-1">/</span>
-              <span>{totalPages}</span>
+            <span className="min-w-[5rem] text-center px-5 py-2.5 text-sm font-bold text-white bg-slate-700/80 rounded-xl border border-cyan-500/30 mx-1">
+              <span className="text-cyan-300">{currentPage}</span>
+              <span className="text-slate-500 mx-1.5">/</span>
+              <span className="text-slate-300">{totalPages}</span>
             </span>
-
             <button
               onClick={() => setOffset(o => o + limit)}
               disabled={currentPage >= totalPages}
-              className="p-2.5 rounded-xl text-white/90 hover:bg-cyan-500/20 hover:text-cyan-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              className="p-3 rounded-xl text-slate-400 hover:bg-cyan-500/20 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-all duration-200"
               title="Siguiente"
+              aria-label="Siguiente"
             >
-              <ChevronRight size={18} className="text-white" />
+              <ChevronRight size={20} strokeWidth={2.5} />
             </button>
             <button
               onClick={() => setOffset((totalPages - 1) * limit)}
               disabled={currentPage >= totalPages}
-              className="p-2.5 rounded-xl text-white/90 hover:bg-cyan-500/20 hover:text-cyan-400 disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/90 transition-all duration-200"
+              className="p-3 rounded-xl text-slate-400 hover:bg-cyan-500/20 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400 transition-all duration-200"
               title="Última página"
+              aria-label="Última página"
             >
-              <ChevronRight size={18} className="text-white" />
-              <ChevronRight size={18} className="text-white -ml-3" />
+              <ChevronRight size={20} className="inline-block" strokeWidth={2.5} />
+              <ChevronRight size={20} className="inline-block -ml-3" strokeWidth={2.5} />
             </button>
-          </div>
+          </nav>
         </div>
       )}
     </div>
