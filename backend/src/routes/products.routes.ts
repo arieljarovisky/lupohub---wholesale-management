@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, deleteAllProducts, importTangoArticles, exportInventory } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, bulkLinkVariants, deleteAllProducts, importTangoArticles, exportInventory } from '../controllers/products.controller';
 
 const router = Router();
 
@@ -13,5 +13,6 @@ router.patch('/stock', patchStock);
 router.put('/:id', updateProduct);
 router.put('/:id/external-ids', updateProductExternalIds);
 router.put('/variants/:variantId/external-ids', updateVariantExternalIds);
+router.post('/variants/bulk-link', bulkLinkVariants);
 
 export default router;

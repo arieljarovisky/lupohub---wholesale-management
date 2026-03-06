@@ -355,6 +355,78 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   }
 };
 
+/** Vinculaci?n en lote: actualiza IDs externos de varias variantes y opcionalmente el producto padre. No trae stock de ML. */
+export const bulkLinkVariants = async (req: Request, res: Response) => {
+  const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = req.body as {
+    productId?: string;
+    mercadoLibreItemId?: string;
+    tiendaNubeProductId?: string;
+    links: Array<{
+      variantId: string;
+      mercadoLibreVariantId?: string | number;
+      tiendaNubeVariantId?: string | number;
+      externalSku?: string;
+    }>;
+  };
+  if (!links || !Array.isArray(links) || links.length === 0) {
+    return res.status(400).json({ message: 'Se requiere un array "links" con al menos un elemento' });
+  }
+
+  try {
+    let resolvedProductId = productId;
+    if ((mercadoLibreItemId || tiendaNubeProductId) && !resolvedProductId && links.length > 0) {
+      const row = await get(
+        `SELECT p.id AS product_id FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         WHERE pv.id = ? LIMIT 1`,
+        [links[0].variantId]
+      );
+      resolvedProductId = row?.product_id ?? undefined;
+    }
+    if (resolvedProductId) {
+      if (tiendaNubeProductId != null && tiendaNubeProductId !== '') {
+        await execute(
+          `UPDATE products SET tienda_nube_id = ? WHERE id = ?`,
+          [String(tiendaNubeProductId), resolvedProductId]
+        );
+      }
+      if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
+        await execute(
+          `UPDATE products SET mercado_libre_id = ? WHERE id = ?`,
+          [String(mercadoLibreItemId), resolvedProductId]
+        );
+      }
+    }
+    for (const link of links) {
+      const { variantId, mercadoLibreVariantId, tiendaNubeVariantId, externalSku } = link;
+      if (!variantId) continue;
+      await execute(
+        `UPDATE product_variants SET
+           tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
+           mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
+           external_sku = COALESCE(?, external_sku)
+         WHERE id = ?`,
+        [
+          tiendaNubeVariantId != null && tiendaNubeVariantId !== '' ? String(tiendaNubeVariantId) : null,
+          mercadoLibreVariantId != null && mercadoLibreVariantId !== '' ? String(mercadoLibreVariantId) : null,
+          externalSku !== undefined && externalSku !== null ? String(externalSku) : null,
+          variantId
+        ]
+      );
+    }
+    res.json({
+      updated: links.length,
+      productId: resolvedProductId,
+      mercadoLibreItemId: mercadoLibreItemId ?? undefined,
+      tiendaNubeProductId: tiendaNubeProductId ?? undefined
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error en vinculaci?n en lote' });
+  }
+};
+
 export const deleteAllProducts = async (req: any, res: any) => {
   try {
     await execute('SET FOREIGN_KEY_CHECKS = 0');

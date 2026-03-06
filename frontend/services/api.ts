@@ -215,6 +215,15 @@ export const api = {
     }, {}, 'updateVariantExternalIds');
   },
 
+  bulkLinkVariants: async (payload: {
+    productId?: string;
+    mercadoLibreItemId?: string;
+    tiendaNubeProductId?: string;
+    links: Array<{ variantId: string; mercadoLibreVariantId?: string | number; tiendaNubeVariantId?: string | number; externalSku?: string }>;
+  }): Promise<{ updated: number; productId?: string }> => {
+    return request<{ updated: number; productId?: string }>('/products/variants/bulk-link', 'POST', payload);
+  },
+
   // --- ORDERS ---
   getOrders: async (): Promise<Order[]> => {
     return handleRequest(async () => {
