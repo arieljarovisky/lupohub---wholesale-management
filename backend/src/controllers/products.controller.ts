@@ -638,7 +638,7 @@ export const deleteVariant = async (req: any, res: any) => {
 
 /** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
 export const deleteProduct = async (req: any, res: any) => {
-  const { productId } = req.params;
+  const productId = req.params.id;
   if (!productId) return res.status(400).json({ message: 'Falta productId' });
   try {
     const inOrder = await get(
