@@ -34,7 +34,7 @@ const TiendaNubeStock: React.FC = () => {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('title');
-  const limit = 200;
+  const limit = 20;
   const [globalTotals, setGlobalTotals] = useState<{
     totalProducts: number;
     totalStock: number;
