@@ -1179,8 +1179,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
     const baseKey = newBaseSku.trim();
     setExpandedGroups(prev => (prev.includes(baseKey) ? prev : [...prev, baseKey]));
-    onCreateProducts(newProducts);
     setIsCreating(false);
+    Promise.resolve(onCreateProducts(newProducts)).then(() => {
+      setServerListRefreshKey(k => k + 1);
+    }).catch(() => {});
   };
 
   return (
