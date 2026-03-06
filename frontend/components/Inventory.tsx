@@ -751,8 +751,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         mercadoLibreItemId: linkMlId || undefined,
         externalSku: linkExternalSku.trim() || undefined
       });
-      if (typeof (linkRes as any).stockFromML === 'number') {
-        setLinkSaveStockFromML((linkRes as any).stockFromML);
+      const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
+      if (newStockFromML !== undefined) {
+        setLinkSaveStockFromML(newStockFromML);
       }
 
       // 2. Update Product (Parent) External IDs if provided
@@ -806,13 +807,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         } as Product & { mercadoLibrePackSize: number; tiendaNubePackSize: number });
       }
 
-      // Update local state to reflect changes immediately
+      // Actualizar estado local de una: vínculos y stock (si vino de ML)
       setLoadedVariants(prev => {
         const group = prev[groupKey] || [];
         return {
           ...prev,
           [groupKey]: group.map(p => p.id === linkingVariant.id ? {
             ...p,
+            ...(newStockFromML !== undefined && { stock: newStockFromML, stock_total: newStockFromML } as any),
             externalIds: {
               ...p.externalIds,
               tiendaNube: linkTnId,
@@ -827,6 +829,29 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           } : p)
         };
       });
+
+      // Refrescar variantes del grupo desde el servidor para que el stock (y todo) quede al día
+      api.getVariantsBySku(groupKey).then(variants => {
+        const mapped: Product[] = variants.map((v) => ({
+          id: v.variantId,
+          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+          name: groupedProducts[groupKey]?.[0]?.name || '',
+          category: groupedProducts[groupKey]?.[0]?.category || 'General',
+          price: groupedProducts[groupKey]?.[0]?.price || 0,
+          description: '',
+          size: v.sizeCode,
+          color: v.colorName,
+          colorCode: v.colorCode,
+          stock: v.stock,
+          integrations: {
+            local: true,
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre
+          },
+          externalIds: v.externalIds
+        }));
+        setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
+      }).catch(() => {});
 
       setLinkingVariant(null);
     } catch (error) {
