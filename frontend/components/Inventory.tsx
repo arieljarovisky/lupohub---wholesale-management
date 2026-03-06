@@ -787,32 +787,33 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const runBulkAutoMatch = (
     localVariants: Array<{ variantId: string; sku: string; size: string; color: string }>,
     mlList: { variationId: number | string; sku: string; size: string; color: string }[],
-    tnList: { variantId: number | string; sku: string; size: string; color: string }[]
+    tnList: { variantId: number | string; sku: string; size: string; color: string }[],
+    currentAssignments?: Record<string, { ml?: string; tn?: string }>
   ) => {
-    setBulkLinkAssignments(prev => {
-      const next = { ...prev };
-      localVariants.forEach(local => {
-        const skuN = norm(local.sku);
-        const sizeN = norm(local.size);
-        const colorN = norm(local.color);
-        if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
-        // ML: primero por SKU (ML y TN usan el mismo SKU), luego por talle+color
-        if (!next[local.variantId].ml && mlList.length > 0) {
-          let match = skuN ? mlList.find(m => norm(m.sku) === skuN) : null;
-          if (!match) match = mlList.find(m => norm(m.size) === sizeN && norm(m.color) === colorN);
-          if (match) next[local.variantId].ml = String(match.variationId);
-          else if (mlList.length === 1) next[local.variantId].ml = String(mlList[0].variationId);
-        }
-        // TN: mismo criterio (mismo SKU que ML)
-        if (!next[local.variantId].tn && tnList.length > 0) {
-          let match = skuN ? tnList.find(t => norm(t.sku) === skuN) : null;
-          if (!match) match = tnList.find(t => norm(t.size) === sizeN && norm(t.color) === colorN);
-          if (match) next[local.variantId].tn = String(match.variantId);
-          else if (tnList.length === 1) next[local.variantId].tn = String(tnList[0].variantId);
-        }
-      });
-      return next;
+    const prev = currentAssignments !== undefined ? currentAssignments : bulkLinkAssignments;
+    const next = { ...prev };
+    localVariants.forEach(local => {
+      const skuN = norm(local.sku);
+      const sizeN = norm(local.size);
+      const colorN = norm(local.color);
+      if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
+      // ML: primero por SKU (ML y TN usan el mismo SKU), luego por talle+color
+      if (!next[local.variantId].ml && mlList.length > 0) {
+        let match = skuN ? mlList.find(m => norm(m.sku) === skuN) : null;
+        if (!match) match = mlList.find(m => norm(m.size) === sizeN && norm(m.color) === colorN);
+        if (match) next[local.variantId].ml = String(match.variationId);
+        else if (mlList.length === 1) next[local.variantId].ml = String(mlList[0].variationId);
+      }
+      // TN: mismo criterio (mismo SKU que ML)
+      if (!next[local.variantId].tn && tnList.length > 0) {
+        let match = skuN ? tnList.find(t => norm(t.sku) === skuN) : null;
+        if (!match) match = tnList.find(t => norm(t.size) === sizeN && norm(t.color) === colorN);
+        if (match) next[local.variantId].tn = String(match.variantId);
+        else if (tnList.length === 1) next[local.variantId].tn = String(tnList[0].variantId);
+      }
     });
+    setBulkLinkAssignments(next);
+    return next;
   };
 
   React.useEffect(() => {
@@ -920,7 +921,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (errors.length > 0) {
       showToast('error', errors.join(' '));
     } else {
-      showToast('success', `Se cargaron ${mlList.length} variaciones de ML y ${tnList.length} de TN. Se emparejaron por SKU y talle/color. Revisá la tabla y guardá.`);
+      const nextAssignments = runBulkAutoMatch(bulkLinkVariants, mlList, tnList);
+      const linkedCount = Object.values(nextAssignments).filter(a => (a.ml?.trim() || a.tn?.trim())).length;
+      if (linkedCount === 0) {
+        showToast('info', 'Se cargaron las listas pero no se emparejó ninguna variante por SKU ni por talle/color. Revisá que coincidan o asigná manualmente en la tabla.');
+      } else {
+        showToast('success', `Se cargaron ${mlList.length} variaciones de ML y ${tnList.length} de TN. Se emparejaron ${linkedCount} variantes. Revisá la tabla y guardá.`);
+      }
     }
     setBulkLinkLoading(false);
   };
