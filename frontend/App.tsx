@@ -317,13 +317,20 @@ const App: React.FC = () => {
         setProducts(prev => [...prev, ...created]);
       }
       if (duplicates > 0 && created.length === 0) {
-        showToast('info', `${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.\n\nLa variante ya está en tu inventario: buscá el grupo por SKU o expandí la fila para verla.`);
+        showToast('info', `${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.\n\nRefrescando la lista para que veas las variantes que ya están en tu inventario.`);
       } else if (duplicates > 0) {
         showToast('success', `${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
       } else if (created.length > 0) {
         showToast('success', `${created.length} variante(s) creadas exitosamente.`);
       } else {
         showToast('error', 'No se pudo crear ninguna variante. Revisá la consola o la conexión.');
+      }
+      // Refrescar siempre desde el servidor para que se vean variantes nuevas o las que ya existían (duplicados)
+      try {
+        const refreshed = await api.getProducts();
+        setProducts(refreshed);
+      } catch (_) {
+        // Si falla el refresh, la lista local ya tiene las creadas
       }
     } catch (error) {
       console.error(error);
