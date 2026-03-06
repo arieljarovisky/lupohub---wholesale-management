@@ -242,6 +242,27 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  // Sincronizar los 3: ML (fuente de verdad) → LupoHub → Tienda Nube
+  const handleSyncAllFromMercadoLibre = async () => {
+    setShowStockSyncModal(true);
+    setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(true);
+    setStockSyncResult(null);
+    try {
+      const res = await api.syncAllStockFromMercadoLibre();
+      setStockSyncResult({
+        platform: 'ML → LupoHub → TN',
+        updated: res.importedFromML + res.sentToTN,
+        errors: res.errorsFromML + res.errorsToTN,
+        logs: res.logs || []
+      });
+    } catch (e: any) {
+      setStockSyncResult({ platform: 'ML → LupoHub → TN', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+    } finally {
+      setMlStockSyncLoading(false);
+    }
+  };
+
   // Opcional: importar stock desde ML a la app (alinear una vez con lo publicado en ML)
   const handleImportStockFromMercadoLibre = async () => {
     setShowStockSyncModal(true);
@@ -655,7 +676,8 @@ const Settings: React.FC<SettingsProps> = ({
             <ol className="text-sm text-slate-300 space-y-2 list-decimal list-inside">
               <li><strong className="text-slate-200">Importá desde Tango</strong> (Inventario → Importar Tango) para tener productos y variantes con código 7+3+3 en LupoHub.</li>
               <li><strong className="text-slate-200">Mismo SKU en las plataformas.</strong> En Mercado Libre y Tienda Nube, cada variante debe tener el <strong>SKU del vendedor</strong> igual al código de 13 dígitos de LupoHub (ej. <code className="bg-slate-700 px-1 rounded">0066348130197</code>). Así la app puede vincularlas.</li>
-              <li><strong className="text-slate-200">Vincular productos:</strong> en Tienda Nube usá <strong>Importar productos</strong>; en Mercado Libre usá <strong>Vincular productos</strong>. La vinculación se hace por SKU: si coinciden, se asocian solas.</li>
+              <li><strong className="text-slate-200">SKU interno vs externo:</strong> tu inventario (LupoHub/Tango) puede usar un código distinto al de Mercado Libre y Tienda Nube. En Inventario → <strong>Vincular producto</strong> podés indicar el <strong>SKU en ML/TN</strong> (el mismo para ambas plataformas). Así se sincroniza el stock y se identifican los pedidos correctamente.</li>
+                <li><strong className="text-slate-200">Vincular productos:</strong> en Tienda Nube usá <strong>Importar productos</strong>; en Mercado Libre usá <strong>Vincular productos</strong>. Si los SKU coinciden se asocian solas; si no, configurá el SKU externo en Vincular producto.</li>
               <li><strong className="text-slate-200">Cargar stock en LupoHub</strong> (Inventario: + / − por variante). Cada cambio de stock en la app se envía a ML/TN si la variante está vinculada.</li>
               <li><strong className="text-slate-200">Sincronizar stock en bloque:</strong> en esta pestaña usá <strong>Sincronizar stock</strong> (TN) y <strong>Sincronizar stock a ML</strong> para enviar todo el stock local a cada plataforma de una vez.</li>
               <li><strong className="text-slate-200">Publicaciones en pack (x2, x3):</strong> si en ML o TN vendés el mismo artículo en pack de 2 o 3 unidades, en Inventario abrí <strong>Vincular producto</strong> y configurá <strong>Packs</strong> (Mercado Libre / Tienda Nube). El stock que se envía será: stock local ÷ pack (ej. 100 unidades con pack 2 → 50 en la publicación).</li>
@@ -783,6 +805,15 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button 
+                          onClick={handleSyncAllFromMercadoLibre}
+                          disabled={mlStockSyncLoading}
+                          className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Mercado Libre = fuente de verdad: trae el stock de ML a LupoHub y lo envía a Tienda Nube"
+                        >
+                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          SINCRONIZAR LOS 3 (ML = REAL)
+                        </button>
+                        <button 
                           onClick={handleTestMercadoLibre}
                           disabled={mlTestLoading}
                           className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
@@ -792,7 +823,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </button>
                         <button 
                           onClick={handleSyncMercadoLibre}
-                          className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
+                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2"
                         >
                           <RefreshCw size={14} />
                           VINCULAR PRODUCTOS
@@ -803,12 +834,12 @@ const Settings: React.FC<SettingsProps> = ({
                           className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          SINCRONIZAR STOCK A ML
+                          LOCAL → ML
                         </button>
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">
-                      La app es la fuente de verdad. <strong>Sincronizar stock a ML</strong> envía tu stock local a Mercado Libre (cada cambio en la app ya se envía a ML). Si modificaste stock o hubo ventas en ML y querés traer esos cambios a la app, usá{' '}
+                      <strong>ML = real:</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> para traer el stock de Mercado Libre a LupoHub y enviarlo a Tienda Nube. Para enviar solo tu stock local a ML, usá <strong>LOCAL → ML</strong>. Para solo traer ML a la app sin tocar TN, usá{' '}
                       <button
                         type="button"
                         onClick={handleImportStockFromMercadoLibre}

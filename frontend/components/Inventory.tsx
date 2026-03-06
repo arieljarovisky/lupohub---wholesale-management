@@ -64,6 +64,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkProduct, setLinkProduct] = useState<{ id: string; name?: string; sku?: string; price?: number; category?: string; description?: string } | null>(null);
   const [linkPackMl, setLinkPackMl] = useState(1);
   const [linkPackTn, setLinkPackTn] = useState(1);
+  const [linkExternalSku, setLinkExternalSku] = useState('');
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -666,6 +667,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkMlId(product.externalIds?.mercadoLibre || '');
     setLinkPackMl(1);
     setLinkPackTn(1);
+    setLinkExternalSku('');
     setLinkProduct(null);
     const parts = (product.sku || '').toString().split('-');
     const groupKey = parts.length >= 3 ? parts.slice(0, -2).join('-') : product.sku || '';
@@ -675,6 +677,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setLinkProduct({ id: p.id, name: p.name, sku: p.sku, price: p.base_price, category: p.category, description: (p as any).description });
           setLinkPackMl(p.mercado_libre_pack_size ?? 1);
           setLinkPackTn(p.tienda_nube_pack_size ?? 1);
+          const variant = (p as any).variants?.find((v: any) => v.variant_id === product.id);
+          setLinkExternalSku(variant?.external_sku ?? '');
+        } else {
+          setLinkExternalSku('');
         }
       });
     }
@@ -686,7 +692,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // 1. Update Variant External IDs
       await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
-        mercadoLibreVariantId: linkMlId || undefined // ML item ID is often used as variant ID for simple items or mapped
+        mercadoLibreVariantId: linkMlId || undefined,
+        externalSku: linkExternalSku.trim() || undefined
       });
 
       // 2. Update Product (Parent) External IDs if provided
@@ -1586,11 +1593,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               </div>
               <div className="p-6 space-y-6">
                  <div className="bg-blue-900/10 border border-blue-900/30 p-4 rounded-xl mb-4">
-                    <p className="text-xs text-blue-300 font-medium mb-1">Vinculando variante:</p>
+                    <p className="text-xs text-blue-300 font-medium mb-1">SKU interno (LupoHub / Tango)</p>
                     <p className="text-sm text-white font-mono">{linkingVariant.sku}</p>
                  </div>
 
                  <div className="space-y-4">
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Tag size={12} className="text-amber-400"/> SKU en Mercado Libre y Tienda Nube</label>
+                       <input 
+                         type="text" 
+                         value={linkExternalSku}
+                         onChange={(e) => setLinkExternalSku(e.target.value)}
+                         placeholder="Mismo SKU que en ML y TN (para sincronizar)"
+                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-amber-500 outline-none font-mono text-sm"
+                       />
+                       <p className="text-[10px] text-slate-600 ml-1">Si ML y TN usan otro código que tu inventario, ingresalo acá. Se usa para sincronizar stock y para identificar pedidos.</p>
+                    </div>
                     <div className="space-y-1">
                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Cloud size={12} className="text-blue-400"/> Tienda Nube (Producto ID)</label>
                        <input 
@@ -1622,17 +1640,41 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm"
                        />
                     </div>
-                    <div className="border-t border-slate-700 pt-4 space-y-3">
-                       <p className="text-[10px] font-black text-slate-500 uppercase">Packs (unidades por publicación)</p>
-                       <p className="text-xs text-slate-500">Si en ML o TN vendés en pack de 2 o 3, indicá cuántas unidades tiene cada publicación. El stock que se sincroniza será: stock local ÷ este número.</p>
-                       <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                             <label className="text-[10px] text-slate-500">Mercado Libre</label>
-                             <input type="number" min={1} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm" />
+                    <div className="border-t border-slate-700 pt-4 space-y-4">
+                       <p className="text-[10px] font-black text-slate-500 uppercase">Elegir pack (unidades por publicación)</p>
+                       <p className="text-xs text-slate-500">Indicá cuántas unidades tiene cada publicación en ML y TN. El stock que se sincroniza será: stock local ÷ este número (ej. 100 un. con pack x2 → 50 en la publicación).</p>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                             <label className="text-[10px] text-slate-500 font-bold">Mercado Libre</label>
+                             <div className="flex flex-wrap gap-2 mb-2">
+                                {[1, 2, 3, 6, 12].map((n) => (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => setLinkPackMl(n)}
+                                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${linkPackMl === n ? 'bg-yellow-600 text-white ring-2 ring-yellow-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                  >
+                                    x{n}
+                                  </button>
+                                ))}
+                             </div>
+                             <input type="number" min={1} max={999} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm" placeholder="Otro" />
                           </div>
-                          <div className="space-y-1">
-                             <label className="text-[10px] text-slate-500">Tienda Nube</label>
-                             <input type="number" min={1} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm" />
+                          <div className="space-y-2">
+                             <label className="text-[10px] text-slate-500 font-bold">Tienda Nube</label>
+                             <div className="flex flex-wrap gap-2 mb-2">
+                                {[1, 2, 3, 6, 12].map((n) => (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => setLinkPackTn(n)}
+                                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${linkPackTn === n ? 'bg-cyan-600 text-white ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                  >
+                                    x{n}
+                                  </button>
+                                ))}
+                             </div>
+                             <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-cyan-500 outline-none font-mono text-sm" placeholder="Otro" />
                           </div>
                        </div>
                     </div>

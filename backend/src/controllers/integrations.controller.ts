@@ -1124,8 +1124,8 @@ const processTiendaNubeOrder = async (orderId: string) => {
           `SELECT pv.id, s.stock as current_stock
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.sku = ?`,
-          [itemSku]
+           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
+          [itemSku, itemSku]
         );
       }
       if (!variant?.id && itemSku) {
@@ -1134,8 +1134,8 @@ const processTiendaNubeOrder = async (orderId: string) => {
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
            JOIN products p ON p.id = (SELECT product_id FROM product_colors WHERE id = pv.product_color_id)
-           WHERE p.sku = ? OR pv.sku LIKE ?`,
-          [itemSku, `${itemSku}%`]
+           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
+          [itemSku, `${itemSku}%`, itemSku]
         );
       }
 
@@ -1232,8 +1232,8 @@ const processMercadoLibreOrder = async (orderId: string) => {
           `SELECT pv.id, s.stock as current_stock
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.sku = ?`,
-          [itemSku]
+           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
+          [itemSku, itemSku]
         );
       }
       if (!variant?.id && itemSku) {
@@ -1243,8 +1243,8 @@ const processMercadoLibreOrder = async (orderId: string) => {
            LEFT JOIN stocks s ON s.variant_id = pv.id
            JOIN product_colors pc ON pc.id = pv.product_color_id
            JOIN products p ON p.id = pc.product_id
-           WHERE p.sku = ? OR pv.sku LIKE ?`,
-          [itemSku, `${itemSku}%`]
+           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
+          [itemSku, `${itemSku}%`, itemSku]
         );
       }
 
@@ -1481,6 +1481,134 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('Error syncing stock to ML:', error);
     res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+  }
+};
+
+/** Sincronizar los 3 stocks con Mercado Libre como fuente de verdad: ML → LupoHub → Tienda Nube */
+export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    const hasTN = !!(tnIntegration?.access_token && tnIntegration?.store_id);
+
+    const { updateVariantStock } = await import('./stock.controller');
+    const logs: string[] = [];
+    let updated = 0;
+    let errors = 0;
+    const limit = 50;
+    let offset = 0;
+
+    logs.push('[1/2] Importando stock desde Mercado Libre (fuente de verdad)...');
+    while (true) {
+      const itemsRes = await axios.get(
+        `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
+        { headers: { 'Authorization': `Bearer ${mlToken.access_token}` } }
+      );
+      const itemIds: string[] = itemsRes.data.results || [];
+      if (itemIds.length === 0) break;
+
+      const batchSize = 10;
+      for (let i = 0; i < itemIds.length; i += batchSize) {
+        const batch = itemIds.slice(i, i + batchSize);
+        const itemPromises = batch.map((itemId: string) =>
+          axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          }).then(r => r.data).catch(() => null)
+        );
+        const items = await Promise.all(itemPromises);
+
+        for (const item of items) {
+          if (!item) continue;
+          if (item.variations && item.variations.length > 0) {
+            for (const v of item.variations) {
+              const mlQty = v.available_quantity ?? 0;
+              const row = await get(
+                `SELECT pv.id as variant_id FROM product_variants pv
+                 JOIN product_colors pc ON pc.id = pv.product_color_id
+                 JOIN products p ON p.id = pc.product_id
+                 WHERE p.mercado_libre_id = ? AND pv.mercado_libre_variant_id = ?`,
+                [item.id, v.id]
+              );
+              if (row?.variant_id) {
+                const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
+                if (ok) { updated++; logs.push(`[OK] ${v.seller_custom_field || v.id}: ${mlQty}`); }
+                else { errors++; logs.push(`[ERROR] ${v.seller_custom_field || v.id}`); }
+              }
+            }
+          } else {
+            const mlQty = item.available_quantity ?? 0;
+            const variantRow = await get(
+              `SELECT pv.id as variant_id FROM product_variants pv
+               JOIN product_colors pc ON pc.id = pv.product_color_id
+               JOIN products p ON p.id = pc.product_id
+               WHERE p.mercado_libre_id = ? LIMIT 1`,
+              [item.id]
+            );
+            if (variantRow?.variant_id) {
+              const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
+              if (ok) { updated++; logs.push(`[OK] ${item.id}: ${mlQty}`); }
+              else { errors++; logs.push(`[ERROR] ${item.id}`); }
+            }
+          }
+        }
+      }
+      if (itemIds.length < limit) break;
+      offset += limit;
+    }
+
+    let tnUpdated = 0;
+    let tnErrors = 0;
+    if (hasTN) {
+      logs.push('[2/2] Enviando stock a Tienda Nube...');
+      const variants = await query(`
+        SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+               COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+        FROM product_variants pv
+        JOIN product_colors pc ON pc.id = pv.product_color_id
+        JOIN products p ON p.id = pc.product_id
+        LEFT JOIN stocks s ON s.variant_id = pv.id
+        WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
+      `);
+      for (const v of variants) {
+        try {
+          const pack = Math.max(1, Number((v as any).tn_pack) || 1);
+          const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+          await axios.put(
+            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
+            { stock: stockToSend },
+            {
+              headers: {
+                'Authentication': `bearer ${tnIntegration.access_token}`,
+                'Content-Type': 'application/json',
+                'User-Agent': TN_USER_AGENT
+              }
+            }
+          );
+          tnUpdated++;
+          logs.push(`[TN] ${v.sku}: ${stockToSend}`);
+        } catch (e: any) {
+          tnErrors++;
+          logs.push(`[TN ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
+        }
+      }
+    } else {
+      logs.push('[2/2] Tienda Nube no conectada, se omitió el envío.');
+    }
+
+    res.json({
+      message: 'Stock sincronizado: Mercado Libre → LupoHub → Tienda Nube',
+      importedFromML: updated,
+      errorsFromML: errors,
+      sentToTN: tnUpdated,
+      errorsToTN: tnErrors,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error sync from ML:', error);
+    res.status(500).json({ message: 'Error sincronizando desde Mercado Libre', error: error.message });
   }
 };
 

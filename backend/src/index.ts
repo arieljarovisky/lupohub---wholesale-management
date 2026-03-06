@@ -18,6 +18,7 @@ import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
 import { addPackSizeToProducts } from './database/add_pack_size_products';
+import { addExternalSkuToVariants } from './database/add_external_sku';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -68,6 +69,7 @@ async function initDatabase() {
       await fixIntegrationsTable();
       await addDespachosTable();
       await addPackSizeToProducts();
+      await addExternalSkuToVariants();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

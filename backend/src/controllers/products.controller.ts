@@ -162,7 +162,8 @@ export const getProductBySku = async (req: any, res: any) => {
     
     // Obtener todas las variantes del producto encontrado
     const variantsRows = await query(
-      `SELECT p.sku, c.code AS color_code, c.name AS color_name,
+      `SELECT p.sku, pv.sku AS variant_sku, pv.external_sku,
+              c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
               pv.tienda_nube_variant_id, pv.mercado_libre_variant_id
        FROM products p
@@ -279,18 +280,19 @@ export const updateProductExternalIds = async (req: any, res: any) => {
 
 export const updateVariantExternalIds = async (req: any, res: any) => {
   const { variantId } = req.params;
-  const { tiendaNubeVariantId, mercadoLibreVariantId } = req.body;
+  const { tiendaNubeVariantId, mercadoLibreVariantId, externalSku } = req.body;
   if (!variantId) return res.status(400).json({ message: 'ID de variante inv?lido' });
 
   try {
     await execute(
       `UPDATE product_variants SET 
          tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
-         mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id)
+         mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
+         external_sku = COALESCE(?, external_sku)
        WHERE id = ?`,
-      [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, variantId]
+      [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, externalSku !== undefined ? externalSku : null, variantId]
     );
-    res.json({ variantId, tiendaNubeVariantId, mercadoLibreVariantId });
+    res.json({ variantId, tiendaNubeVariantId, mercadoLibreVariantId, externalSku: externalSku ?? undefined });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando IDs externos de variante' });

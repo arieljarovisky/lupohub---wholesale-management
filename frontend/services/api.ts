@@ -209,7 +209,7 @@ export const api = {
     }, undefined, 'updateProductExternalIds');
   },
 
-  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string }): Promise<void> => {
+  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string; externalSku?: string }): Promise<void> => {
     return handleRequest(async () => {
       await request<void>(`/products/variants/${variantId}/external-ids`, 'PUT', ids);
     }, undefined, 'updateVariantExternalIds');
@@ -349,6 +349,27 @@ export const api = {
     return handleRequest(async () => {
       return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 180000);
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
+  },
+
+  /** ML = fuente de verdad: importa stock desde ML a LupoHub y luego envía a Tienda Nube */
+  syncAllStockFromMercadoLibre: async (): Promise<{
+    message: string;
+    importedFromML: number;
+    errorsFromML: number;
+    sentToTN: number;
+    errorsToTN: number;
+    logs: string[];
+  }> => {
+    return handleRequest(async () => {
+      return await request<{
+        message: string;
+        importedFromML: number;
+        errorsFromML: number;
+        sentToTN: number;
+        errorsToTN: number;
+        logs: string[];
+      }>('/integrations/mercadolibre/sync-from-ml', 'POST', undefined, undefined, 180000);
+    }, { message: 'Offline', importedFromML: 0, errorsFromML: 0, sentToTN: 0, errorsToTN: 0, logs: [] }, 'syncAllStockFromMercadoLibre');
   },
 
   importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
