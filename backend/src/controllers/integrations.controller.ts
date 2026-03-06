@@ -2192,6 +2192,126 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
   }
 };
 
+// Obtener variaciones de un ítem de Mercado Libre por ID (para vincular por ID padre)
+export const getMercadoLibreItemVariations = async (req: Request, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    if (!itemId) {
+      return res.status(400).json({ message: 'Falta itemId' });
+    }
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
+    }
+    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
+      headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+    });
+    const item = itemRes.data;
+    if (!item || item.error) {
+      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+    }
+    if (item.variations && item.variations.length > 0) {
+      const variations = item.variations.map((v: any) => {
+        const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+        const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+        const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+        let color = '';
+        let size = '';
+        (v.attribute_combinations || []).forEach((attr: any) => {
+          const id = (attr.id || '').toString().toUpperCase();
+          const name = (attr.value_name || attr.name || '').toString().trim();
+          if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+          if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
+        });
+        return {
+          variationId: v.id,
+          sku,
+          color,
+          size,
+          stock: v.available_quantity || 0
+        };
+      });
+      return res.json({ variations, singleProduct: false, itemId: item.id });
+    }
+    // Sin variaciones: producto único
+    return res.json({
+      variations: [{
+        variationId: item.id,
+        sku: (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim(),
+        color: '',
+        size: '',
+        stock: item.available_quantity || 0
+      }],
+      singleProduct: true,
+      itemId: item.id
+    });
+  } catch (error: any) {
+    const status = error.response?.status;
+    const detail = error.response?.data?.message || error.message;
+    console.error('Error fetching ML item variations:', detail);
+    res.status(status === 404 ? 404 : 500).json({ message: 'Error obteniendo variaciones de Mercado Libre', detail });
+  }
+};
+
+// Obtener variantes de un producto de Tienda Nube por ID (para vincular por ID padre)
+export const getTiendaNubeProductVariants = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+    if (!productId) {
+      return res.status(400).json({ message: 'Falta productId' });
+    }
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+    }
+    const response = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, {
+      headers: {
+        'Authentication': `bearer ${integration.access_token}`,
+        'User-Agent': TN_USER_AGENT
+      },
+      validateStatus: () => true
+    });
+    if (response.status !== 200) {
+      const errMsg = (response.data && (response.data.description || response.data.message)) || response.statusText;
+      return res.status(response.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
+    }
+    const p = response.data;
+    const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
+    const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
+    const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
+    let sizeIdx = -1;
+    let colorIdx = -1;
+    attrs.forEach((a: any, i: number) => {
+      const n = (a?.es ?? a?.en ?? a?.pt ?? '').toString();
+      if (isSizeAttr(n)) sizeIdx = i;
+      if (isColorAttr(n)) colorIdx = i;
+    });
+    const variantsList = Array.isArray(p?.variants) ? p.variants : [];
+    const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
+    const variants = variantsList.map((v: any) => {
+      const values = Array.isArray(v?.values) ? v.values : [];
+      const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? values[sizeIdx] : '';
+      const colorVal = colorIdx >= 0 && colorIdx < values.length ? values[colorIdx] : '';
+      return {
+        variantId: v?.id,
+        sku: v?.sku || '',
+        size: String(toStr(sizeVal)),
+        color: String(toStr(colorVal)),
+        stock: Number(v?.stock) || 0
+      };
+    });
+    return res.json({ variants, productId: p.id });
+  } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
+    console.error('Error fetching TN product variants:', detail);
+    res.status(500).json({ message: 'Error obteniendo variantes de Tienda Nube', detail });
+  }
+};
+
 // Obtener configuración de mensaje automático de ML
 export const getMLAutoMessageConfig = async (req: Request, res: Response) => {
   try {

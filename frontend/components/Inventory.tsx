@@ -67,6 +67,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkPackMl, setLinkPackMl] = useState(1);
   const [linkPackTn, setLinkPackTn] = useState(1);
   const [linkExternalSku, setLinkExternalSku] = useState('');
+  const [linkMlVariations, setLinkMlVariations] = useState<{ variationId: number | string; sku: string; color: string; size: string; stock: number }[] | null>(null);
+  const [linkTnVariants, setLinkTnVariants] = useState<{ variantId: number | string; sku: string; color: string; size: string; stock: number }[] | null>(null);
+  const [loadingMlVariations, setLoadingMlVariations] = useState(false);
+  const [loadingTnVariants, setLoadingTnVariants] = useState(false);
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -662,6 +666,50 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  const handleLoadMlVariations = async () => {
+    const id = linkMlId.trim();
+    if (!id) return;
+    setLoadingMlVariations(true);
+    setLinkMlVariations(null);
+    try {
+      const res = await api.getMercadoLibreItemVariations(id);
+      setLinkMlVariations(res.variations || []);
+      const skuToMatch = (linkExternalSku || linkingVariant?.sku || '').toString().trim();
+      const match = (res.variations || []).find(
+        (v) => v.sku && skuToMatch && v.sku.trim() === skuToMatch
+      );
+      if (match) setLinkMlVariantId(String(match.variationId));
+      else if (res.variations?.length === 1) setLinkMlVariantId(String(res.variations[0].variationId));
+    } catch (e) {
+      console.error(e);
+      alert('No se pudieron cargar las variaciones. Revisá que el ID de publicación sea correcto.');
+    } finally {
+      setLoadingMlVariations(false);
+    }
+  };
+
+  const handleLoadTnVariants = async () => {
+    const id = linkTnId.trim();
+    if (!id) return;
+    setLoadingTnVariants(true);
+    setLinkTnVariants(null);
+    try {
+      const res = await api.getTiendaNubeProductVariants(id);
+      setLinkTnVariants(res.variants || []);
+      const skuToMatch = (linkExternalSku || linkingVariant?.sku || '').toString().trim();
+      const match = (res.variants || []).find(
+        (v) => v.sku && skuToMatch && v.sku.trim() === skuToMatch
+      );
+      if (match) setLinkTnVariantId(String(match.variantId));
+      else if (res.variants?.length === 1) setLinkTnVariantId(String(res.variants[0].variantId));
+    } catch (e) {
+      console.error(e);
+      alert('No se pudieron cargar las variantes. Revisá que el ID de producto sea correcto.');
+    } finally {
+      setLoadingTnVariants(false);
+    }
+  };
+
   const handleOpenLinkModal = (product: Product) => {
     setLinkingVariant(product);
     setLinkTnId(product.externalIds?.tiendaNube || '');
@@ -670,9 +718,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkPackMl(1);
     setLinkPackTn(1);
     setLinkExternalSku((product.sku ?? '').toString());
-    setLinkMlVariantId('');
+    setLinkMlVariantId((product.externalIds as any)?.mercadoLibreVariant?.toString() ?? '');
     setLinkSaveStockFromML(null);
     setLinkProduct(null);
+    setLinkMlVariations(null);
+    setLinkTnVariants(null);
     const parts = (product.sku || '').toString().split('-');
     const groupKey = parts.length >= 3 ? parts.slice(0, -2).join('-') : product.sku || '';
     if (groupKey) {
@@ -1641,7 +1691,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  <div className="rounded-xl bg-slate-800/50 border border-slate-600/50 p-3">
                     <p className="text-[11px] text-slate-400 mb-1 font-semibold">¿Dónde obtengo los IDs?</p>
                     <p className="text-[10px] text-slate-500">
-                       En Inventario cambiá a <strong>Vista Mercado Libre</strong> o <strong>Vista Tienda Nube</strong>. Ahí ves cada publicación con su <strong>ID publicación</strong> / <strong>ID producto</strong>. Tocá la fila para expandir y ver la tabla con <strong>ID variación</strong> / <strong>ID variante</strong> por talle/color. Usá el ícono de copiar para llevarlos acá.
+                       Podés poner solo el <strong>ID del padre</strong> (publicación ML o producto TN) y tocar <strong>&quot;Cargar variantes&quot;</strong>: se listan las variantes y, si el SKU coincide con el de esta fila, se elige sola. También podés copiar IDs desde <strong>Vista Mercado Libre</strong> / <strong>Vista Tienda Nube</strong> (expandir la fila y usar el ícono copiar).
                     </p>
                  </div>
 
@@ -1654,26 +1704,53 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID del producto</label>
-                          <input 
-                            type="text" 
-                            value={linkTnId}
-                            onChange={(e) => setLinkTnId(e.target.value)}
-                            placeholder="ID padre (grupo)"
-                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
-                          />
+                          <div className="flex gap-2">
+                             <input 
+                               type="text" 
+                               value={linkTnId}
+                               onChange={(e) => { setLinkTnId(e.target.value); setLinkTnVariants(null); }}
+                               placeholder="ID padre (grupo)"
+                               className="flex-1 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
+                             />
+                             <button
+                               type="button"
+                               onClick={handleLoadTnVariants}
+                               disabled={!linkTnId.trim() || loadingTnVariants}
+                               className="px-3 py-2.5 rounded-lg bg-cyan-600/80 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                             >
+                               {loadingTnVariants ? '...' : 'Cargar variantes'}
+                             </button>
+                          </div>
                        </div>
+                       {linkTnVariants && linkTnVariants.length > 0 && (
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1">Elegir variante (por SKU/talle/color)</label>
+                             <select
+                               value={linkTnVariantId}
+                               onChange={(e) => setLinkTnVariantId(e.target.value)}
+                               className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white focus:border-cyan-500/70 outline-none font-mono text-sm"
+                             >
+                               <option value="">Seleccionar...</option>
+                               {linkTnVariants.map((v) => (
+                                 <option key={String(v.variantId)} value={String(v.variantId)}>
+                                   {v.sku || '(sin SKU)'} — {[v.color, v.size].filter(Boolean).join(' ') || '—'}
+                                 </option>
+                               ))}
+                             </select>
+                          </div>
+                       )}
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID de la variante</label>
                           <input 
                             type="text" 
                             value={linkTnVariantId}
                             onChange={(e) => setLinkTnVariantId(e.target.value)}
-                            placeholder="ID variante"
+                            placeholder="Se llena al cargar variantes o manual"
                             className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
                           />
                        </div>
                     </div>
-                    <p className="text-[10px] text-slate-500">Aplica al grupo {linkingVariant.sku.split('-').slice(0,-2).join('-') || 'base'}.</p>
+                    <p className="text-[10px] text-slate-500">Poné el ID del producto y tocá &quot;Cargar variantes&quot; para que se reconozcan por SKU.</p>
                  </div>
 
                  {/* Mercado Libre */}
@@ -1686,21 +1763,48 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID publicación (ítem) ML</label>
-                          <input 
-                            type="text" 
-                            value={linkMlId}
-                            onChange={(e) => setLinkMlId(e.target.value)}
-                            placeholder="Ej: MLA123..."
-                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
-                          />
+                          <div className="flex gap-2">
+                             <input 
+                               type="text" 
+                               value={linkMlId}
+                               onChange={(e) => { setLinkMlId(e.target.value); setLinkMlVariations(null); }}
+                               placeholder="Ej: MLA123..."
+                               className="flex-1 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
+                             />
+                             <button
+                               type="button"
+                               onClick={handleLoadMlVariations}
+                               disabled={!linkMlId.trim() || loadingMlVariations}
+                               className="px-3 py-2.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                             >
+                               {loadingMlVariations ? '...' : 'Cargar variantes'}
+                             </button>
+                          </div>
                        </div>
+                       {linkMlVariations && linkMlVariations.length > 0 && (
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1">Elegir variación (por SKU/talle/color)</label>
+                             <select
+                               value={linkMlVariantId}
+                               onChange={(e) => setLinkMlVariantId(e.target.value)}
+                               className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white focus:border-amber-500/70 outline-none font-mono text-sm"
+                             >
+                               <option value="">Seleccionar...</option>
+                               {linkMlVariations.map((v) => (
+                                 <option key={v.variationId} value={String(v.variationId)}>
+                                   {v.sku || '(sin SKU)'} — {[v.color, v.size].filter(Boolean).join(' ') || '—'}
+                                 </option>
+                               ))}
+                             </select>
+                          </div>
+                       )}
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID variación ML (si tiene talles/colores)</label>
                           <input 
                             type="text" 
                             value={linkMlVariantId}
                             onChange={(e) => setLinkMlVariantId(e.target.value)}
-                            placeholder="Ej: 12345678901"
+                            placeholder="Se llena al cargar variantes o manual"
                             className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
                           />
                        </div>
