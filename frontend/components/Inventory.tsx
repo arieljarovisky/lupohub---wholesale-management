@@ -4,6 +4,7 @@ import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
+import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
@@ -38,6 +39,7 @@ interface InventoryProps {
 }
 
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
+  const { showToast } = useNotification();
   const [searchTerm, setSearchTerm] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -278,7 +280,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const handleAssignDespacho = async () => {
     if (!selectedDespachoId || !selectedProductForDespacho) {
-      alert('Seleccioná un despacho');
+      showToast('info', 'Seleccioná un despacho');
       return;
     }
 
@@ -293,9 +295,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
       
       setShowDespachoModal(false);
-      alert('Producto asignado al despacho correctamente');
+      showToast('success', 'Producto asignado al despacho correctamente');
     } catch (error: any) {
-      alert('Error: ' + (error.message || 'No se pudo asignar'));
+      showToast('error', error.message || 'No se pudo asignar');
     } finally {
       setSavingDespacho(false);
     }
@@ -490,7 +492,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       XLSX.writeFile(workbook, filename);
     } catch (e) {
       console.error(e);
-      alert('Error al exportar. Revisá que el backend esté conectado.');
+      showToast('error', 'Error al exportar. Revisá que el backend esté conectado.');
     } finally {
       setExportingExcel(false);
     }
@@ -511,7 +513,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(firstSheet);
         if (rows.length === 0) {
           setTangoImportResult(null);
-          alert('El archivo no tiene filas. Debe tener columna "Código" (7+3+3) y opcional "Descripción".');
+          showToast('info', 'El archivo no tiene filas. Debe tener columna "Código" (7+3+3) y opcional "Descripción".');
           setImportingTango(false);
           return;
         }
@@ -520,14 +522,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setServerListRefreshKey((k) => k + 1);
           onImportComplete?.();
         }).catch((err) => {
-          alert(err?.message || 'Error al importar. Revisá que el Excel tenga columna Código.');
+          showToast('error', err?.message || 'Error al importar. Revisá que el Excel tenga columna Código.');
         }).finally(() => {
           setImportingTango(false);
           if (tangoFileInputRef.current) tangoFileInputRef.current.value = '';
         });
       } catch (err: any) {
         setImportingTango(false);
-        alert(err?.message || 'Error leyendo el Excel.');
+        showToast('error', err?.message || 'Error leyendo el Excel.');
       }
     };
     reader.readAsBinaryString(file);
@@ -695,7 +697,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       else if (res.variations?.length === 1) setLinkMlVariantId(String(res.variations[0].variationId));
     } catch (e) {
       console.error(e);
-      alert('No se pudieron cargar las variaciones. Revisá que el ID de publicación sea correcto.');
+      showToast('error', 'No se pudieron cargar las variaciones. Revisá que el ID de publicación sea correcto.');
     } finally {
       setLoadingMlVariations(false);
     }
@@ -717,7 +719,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       else if (res.variants?.length === 1) setLinkTnVariantId(String(res.variants[0].variantId));
     } catch (e) {
       console.error(e);
-      alert('No se pudieron cargar las variantes. Revisá que el ID de producto sea correcto.');
+      showToast('error', 'No se pudieron cargar las variantes. Revisá que el ID de producto sea correcto.');
     } finally {
       setLoadingTnVariants(false);
     }
@@ -809,7 +811,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       runBulkAutoMatch(bulkLinkVariants, mlList, bulkLinkTnVariants);
     } catch (e) {
       console.error(e);
-      alert('No se pudieron cargar las variaciones de ML.');
+      showToast('error', 'No se pudieron cargar las variaciones de ML.');
     } finally {
       setBulkLinkLoading(false);
     }
@@ -826,7 +828,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       runBulkAutoMatch(bulkLinkVariants, bulkLinkMlVariations, tnList);
     } catch (e) {
       console.error(e);
-      alert('No se pudieron cargar las variantes de TN.');
+      showToast('error', 'No se pudieron cargar las variantes de TN.');
     } finally {
       setBulkLinkLoading(false);
     }
@@ -846,7 +848,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         };
       }).filter(l => l.mercadoLibreVariantId || l.tiendaNubeVariantId);
       if (links.length === 0) {
-        alert('Asigná al menos una variación ML o variante TN en la tabla.');
+        showToast('info', 'Asigná al menos una variación ML o variante TN en la tabla.');
         setBulkLinkSaving(false);
         return;
       }
@@ -1042,7 +1044,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setLinkingVariant(null);
     } catch (error) {
       console.error(error);
-      alert("Error guardando vinculación");
+      showToast('error', 'Error guardando vinculación');
     }
   };
 
