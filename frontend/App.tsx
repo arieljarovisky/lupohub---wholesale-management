@@ -17,8 +17,10 @@ import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
+import { useNotification } from './context/NotificationContext';
 
 const App: React.FC = () => {
+  const { showToast } = useNotification();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -145,7 +147,7 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error("Error loading data form API", error);
-      alert("Error conectando con el servidor. Verifica que el backend esté corriendo.");
+      showToast('error', 'Error conectando con el servidor. Verifica que el backend esté corriendo.');
     } finally {
       setIsLoading(false);
     }
@@ -187,7 +189,7 @@ const App: React.FC = () => {
       await api.updateVariantStock(productId, newStock);
     } catch (error) {
       setProducts(previousProducts);
-      alert("Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).");
+      showToast('error', 'Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).');
     }
   };
 
@@ -204,7 +206,7 @@ const App: React.FC = () => {
        await api.updateOrderStatus(orderId, status, pickedBy);
      } catch (error) {
        setOrders(previousOrders);
-       alert("Error actualizando estado del pedido");
+       showToast('error', 'Error actualizando estado del pedido');
      }
   };
 
@@ -222,7 +224,7 @@ const App: React.FC = () => {
       setCurrentView('orders');
     } catch (error) {
       console.error(error);
-      alert(editingOrder ? "Error actualizando el pedido" : "Error creando el pedido");
+      showToast('error', editingOrder ? 'Error actualizando el pedido' : 'Error creando el pedido');
     }
   };
 
@@ -238,8 +240,8 @@ const App: React.FC = () => {
       await api.deleteOrder(orderId);
     } catch (error: any) {
       setOrders(previous);
-      const msg = error?.response?.data?.message || error?.message || "Error eliminando pedido";
-      alert(msg);
+      const msg = error?.response?.data?.message || error?.message || 'Error eliminando pedido';
+      showToast('error', msg);
     }
   };
 
@@ -256,7 +258,7 @@ const App: React.FC = () => {
       const fetchedUsers = await api.getUsers();
       setUsers(fetchedUsers);
     } catch (err: any) {
-      alert(err?.message || 'Error al crear usuario');
+      showToast('error', err?.message || 'Error al crear usuario');
     }
   };
 
@@ -266,7 +268,7 @@ const App: React.FC = () => {
       await api.deleteUser(userId);
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err: any) {
-      alert(err?.message || 'Error al eliminar usuario');
+      showToast('error', err?.message || 'Error al eliminar usuario');
     }
   };
 
@@ -278,7 +280,7 @@ const App: React.FC = () => {
     if (!newProducts.length) return;
     try {
       setIsLoading(true);
-      const settled = await Promise.allSettled(newProducts.map(p => api.createProduct(p)));
+      const settled = await Promise.allSettled(newProducts.map(p => api.createProductStrict(p)));
       const created: Product[] = [];
       let duplicates = 0;
       for (let i = 0; i < settled.length; i++) {
@@ -298,17 +300,17 @@ const App: React.FC = () => {
         setProducts(prev => [...prev, ...created]);
       }
       if (duplicates > 0 && created.length === 0) {
-        alert(`${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.`);
+        showToast('info', `${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.`);
       } else if (duplicates > 0) {
-        alert(`${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
+        showToast('success', `${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
       } else if (created.length > 0) {
-        alert(`${created.length} variante(s) creadas exitosamente.`);
+        showToast('success', `${created.length} variante(s) creadas exitosamente.`);
       } else {
-        alert("No se pudo crear ninguna variante. Revisá la consola o la conexión.");
+        showToast('error', 'No se pudo crear ninguna variante. Revisá la consola o la conexión.');
       }
     } catch (error) {
       console.error(error);
-      alert("Error guardando productos en base de datos");
+      showToast('error', 'Error guardando productos en base de datos');
     } finally {
       setIsLoading(false);
     }
@@ -328,7 +330,7 @@ const App: React.FC = () => {
       setCustomers(prev => [...prev, created]);
     } catch (error) {
       console.error(error);
-      alert('Error al crear el cliente. Revisá que el email esté completo y que la conexión con el servidor esté activa.');
+      showToast('error', 'Error al crear el cliente. Revisá que el email esté completo y que la conexión con el servidor esté activa.');
     }
   };
 
@@ -339,7 +341,7 @@ const App: React.FC = () => {
         setOrders(prev => prev.map(o => o.id === order.id ? { ...o, pickedBy: currentUser.id } : o));
         setActivePickingOrder({ ...order, pickedBy: currentUser.id });
       } catch {
-        alert('Error al registrar preparación del pedido');
+        showToast('error', 'Error al registrar preparación del pedido');
         return;
       }
     } else {

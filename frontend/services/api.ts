@@ -162,6 +162,11 @@ export const api = {
     }, product, 'createProduct');
   },
 
+  /** Crea producto sin fallback: lanza en 409 (SKU duplicado). Usar en lote para distinguir creados vs duplicados. */
+  createProductStrict: async (product: Product): Promise<Product> => {
+    return request<Product>('/products', 'POST', product);
+  },
+
   /** Importar artículos desde Excel de Tango (columna Código = 7+3+3, opcional Descripción). */
   importTangoArticles: async (
     rows: Record<string, unknown>[],

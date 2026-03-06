@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import { NotificationProvider } from './context/NotificationContext';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -17,6 +18,8 @@ if ('serviceWorker' in navigator && typeof window !== 'undefined') {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <NotificationProvider>
+      <App />
+    </NotificationProvider>
   </React.StrictMode>
 );
