@@ -105,10 +105,36 @@ export const createProduct = async (req: any, res: any) => {
   const initialStock = body.stock != null ? Math.max(0, parseInt(String(body.stock), 10) || 0) : (body.stock_total != null ? Math.max(0, parseInt(String(body.stock_total), 10) || 0) : 0);
 
   const parts = sku.split('-');
-  const isVariantSku = parts.length >= 3;
-  const baseSku = isVariantSku ? parts.slice(0, -2).join('-') : sku;
-  const sizeCode = isVariantSku ? parts[parts.length - 2] : null;
-  const colorCode = isVariantSku ? parts[parts.length - 1] : null;
+  const isVariantSkuWithDashes = parts.length >= 3;
+  let baseSku = sku;
+  let sizeCode: string | null = null;
+  let colorCode: string | null = null;
+
+  if (body.base_sku != null && String(body.base_sku).trim() !== '') {
+    baseSku = String(body.base_sku).trim();
+    const sz = body.sizeCode ?? body.size;
+    const cl = body.colorCode ?? body.color;
+    if (sz != null && cl != null) {
+      sizeCode = String(sz).trim();
+      colorCode = String(cl).trim();
+    }
+  }
+  if (sizeCode == null || colorCode == null) {
+    if (isVariantSkuWithDashes) {
+      baseSku = parts.slice(0, -2).join('-');
+      sizeCode = parts[parts.length - 2];
+      colorCode = parts[parts.length - 1];
+    } else if (sku.length >= 13 && !sku.includes('-')) {
+      const parsed = parseCodigoTango(sku);
+      if (parsed.codigo13.length >= 13) {
+        baseSku = parsed.articulo;
+        sizeCode = parsed.talle;
+        colorCode = parsed.color;
+      }
+    }
+  }
+
+  const isVariantSku = (sizeCode != null && colorCode != null && (baseSku !== sku || (body.base_sku != null && String(body.base_sku).trim() !== '')));
 
   if (isVariantSku) {
     // Crear como variante: producto padre + product_colors + product_variants + stocks (igual que import Tango)
