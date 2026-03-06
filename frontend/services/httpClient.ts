@@ -26,15 +26,38 @@ axios.interceptors.response.use(
     console.log('[api:ok]', res.status, res.config.url);
     return res;
   },
-  (err) => {
+  async (err) => {
     const status = err?.response?.status;
     const url = err?.config?.url;
     console.log('[api:error]', status, url, err?.message);
+    const config = err?.config;
+    const isRefreshRequest = typeof url === 'string' && url.includes('/auth/refresh');
+    const alreadyRetried = (config as any)?._retried === true;
+    if (status === 401 && !isRefreshRequest && !alreadyRetried && authToken) {
+      try {
+        const refreshUrl = `${baseUrl}/auth/refresh`;
+        const refreshRes = await axios.post(refreshUrl, {}, {
+          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+          timeout: 10000
+        });
+        const newToken = refreshRes?.data?.token;
+        if (newToken) {
+          authToken = newToken;
+          localStorage.setItem('lupo_api_token', newToken);
+          (config as any)._retried = true;
+          config.headers = config.headers || {};
+          config.headers['Authorization'] = `Bearer ${newToken}`;
+          return axios(config);
+        }
+      } catch (_) {
+        /* refresh falló */
+      }
+    }
     if (status === 401) {
       try {
         localStorage.removeItem('lupo_api_token');
         authToken = null;
-        console.warn('Token inválido. Se limpió el token y se requiere re-login.');
+        console.warn('Token inválido o no se pudo renovar. Se requiere volver a iniciar sesión.');
       } catch {}
     }
     return Promise.reject(err);
