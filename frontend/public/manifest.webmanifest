@@ -3,10 +3,11 @@
   "short_name": "LupoHub",
   "description": "Gestión mayorista, inventario y pedidos",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "any",
   "background_color": "#020617",
   "theme_color": "#0f172a",
-  "scope": "/",
   "lang": "es"
 }
