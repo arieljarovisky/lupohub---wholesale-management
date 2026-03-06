@@ -4,6 +4,7 @@ import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { syncStockToExternalPlatforms } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -418,8 +419,26 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
         ]
       );
     }
+
+    // Sincronizar stock a ML y TN de las variantes reci?n vinculadas (aplica pack size)
+    let synced = 0;
+    for (const link of links) {
+      const hasMl = link.mercadoLibreVariantId != null && String(link.mercadoLibreVariantId) !== '';
+      const hasTn = link.tiendaNubeVariantId != null && String(link.tiendaNubeVariantId) !== '';
+      if (!link.variantId || (!hasMl && !hasTn)) continue;
+      try {
+        const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
+        const stock = Number(stockRow?.stock ?? 0);
+        await syncStockToExternalPlatforms(link.variantId, stock);
+        synced++;
+      } catch (syncErr: any) {
+        console.warn('[bulkLinkVariants] Sync stock para variante', link.variantId, ':', syncErr?.message);
+      }
+    }
+
     res.json({
       updated: links.length,
+      synced,
       productId: resolvedProductId,
       mercadoLibreItemId: mercadoLibreItemId ?? undefined,
       tiendaNubeProductId: tiendaNubeProductId ?? undefined

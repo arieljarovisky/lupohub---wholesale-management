@@ -857,6 +857,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         links
       });
       const updated = (res as any)?.updated ?? links.length;
+      const synced = (res as any)?.synced ?? 0;
       await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
@@ -880,7 +881,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
       setShowBulkLinkModal(false);
       setBulkLinkGroupKey(null);
-      if (updated > 0) alert(`Se guardaron ${updated} vinculación(es).`);
+      if (updated > 0) {
+        const msg = synced > 0
+          ? `Se guardaron ${updated} vinculación(es) y se sincronizó el stock de ${synced} variante(s) a Mercado Libre y Tienda Nube.`
+          : `Se guardaron ${updated} vinculación(es).`;
+        alert(msg);
+      }
     } catch (e: any) {
       console.error('Bulk link error:', e);
       const msg = e?.message || (typeof e === 'string' ? e : 'Error al guardar vinculaciones.');
