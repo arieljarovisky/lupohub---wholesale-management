@@ -499,7 +499,7 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="flex h-screen w-full bg-slate-950 text-slate-200 flex-col md:flex-row overflow-hidden">
+    <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
       <div className="hidden md:block shrink-0">
         <Sidebar 
           currentView={baseView} 
@@ -509,7 +509,7 @@ const App: React.FC = () => {
         />
       </div>
       
-      <main className={`flex-1 h-full overflow-y-auto p-4 md:p-8 md:ml-64 relative min-h-0`}>
+      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto p-4 md:p-8 md:ml-64 relative scroll-area-ios">
         {isLoading && (
           <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
@@ -643,13 +643,13 @@ const App: React.FC = () => {
         <>
           <div className="md:hidden fixed inset-0 bg-black/60 z-[60] backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} aria-hidden />
           <div className="md:hidden fixed inset-0 z-[70] flex flex-col bg-slate-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 shrink-0">
               <h2 className="text-lg font-bold text-white">Menú</h2>
               <button onClick={() => setMobileMenuOpen(false)} className="p-3 -mr-2 text-slate-400 hover:text-white rounded-xl touch-manipulation" aria-label="Cerrar">
                 <span className="text-2xl leading-none">×</span>
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-6 touch-scroll scroll-area-ios">
               {allMobileNavSections.map(section => {
                 const items = section.items.filter(i => i.roles.includes(currentUser.role));
                 if (items.length === 0) return null;

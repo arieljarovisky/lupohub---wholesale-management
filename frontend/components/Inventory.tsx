@@ -1840,7 +1840,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               </div>
 
               {/* Modal Body */}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-8 min-h-0">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-8 min-h-0 touch-scroll">
                  {/* 1. Base Information */}
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-1">
@@ -2005,7 +2005,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <X size={20} />
                  </button>
               </div>
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-6 min-h-0">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-6 min-h-0 touch-scroll">
                  {/* SKU unificado: inventario, ML y TN */}
                  <div className="rounded-xl bg-indigo-900/20 border border-indigo-700/50 p-4 space-y-3">
                     <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
@@ -2245,7 +2245,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <X size={20} />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto overflow-x-auto flex-1 space-y-4 min-h-0">
+            <div className="p-4 overflow-y-auto overflow-x-auto flex-1 space-y-4 min-h-0 touch-scroll">
               <p className="text-sm text-slate-400">
                 Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
               </p>

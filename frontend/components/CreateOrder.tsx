@@ -157,7 +157,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+      <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0 touch-scroll">
         <div className="flex justify-between items-center mb-2 px-1">
            <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Detalle del Pedido ({rows.length})</h3>
            {!isReadOnly && (
@@ -255,7 +255,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           <p className="text-xs text-slate-500 mb-3 px-1">
             {searchTrimmed ? `${filteredSearchProducts.length} resultado(s). Tocá un producto para agregar; podés seguir buscando sin cerrar.` : 'Mostrando primeros 30 productos. Escribí para filtrar.'}
           </p>
-          <div className="flex-1 overflow-y-auto space-y-2 pb-4 min-h-0">
+          <div className="flex-1 overflow-y-auto space-y-2 pb-4 min-h-0 touch-scroll">
             {filteredSearchProducts.map(p => (
               <button 
                 key={p.id} 
@@ -307,7 +307,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
               <div className="font-bold text-white">{variantSelect.productName} • {variantSelect.sku}</div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto space-y-2">
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-0 touch-scroll">
             {variantSelect.variants.map(v => (
               <button
                 key={v.variantId}

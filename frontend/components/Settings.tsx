@@ -17,7 +17,7 @@ const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; 
             <X size={20} />
           </button>
         </div>
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0 touch-scroll">
           {children}
         </div>
         {footer && (
