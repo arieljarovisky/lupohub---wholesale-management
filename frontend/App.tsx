@@ -275,14 +275,37 @@ const App: React.FC = () => {
   };
 
   const handleCreateProducts = async (newProducts: Product[]) => {
-    // This receives an array (batch), but our simple API does one by one or needs a batch endpoint.
-    // We will loop for now.
+    if (!newProducts.length) return;
     try {
       setIsLoading(true);
-      const createdPromises = newProducts.map(p => api.createProduct(p));
-      const results = await Promise.all(createdPromises);
-      setProducts(prev => [...prev, ...results]);
-      alert(`${results.length} productos creados exitosamente.`);
+      const settled = await Promise.allSettled(newProducts.map(p => api.createProduct(p)));
+      const created: Product[] = [];
+      let duplicates = 0;
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        if (r.status === 'fulfilled') {
+          created.push(r.value as Product);
+        } else {
+          const msg = (r.reason?.message || '').toLowerCase();
+          if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409')) {
+            duplicates++;
+          } else {
+            console.error('Error creando producto:', newProducts[i]?.sku, r.reason);
+          }
+        }
+      }
+      if (created.length > 0) {
+        setProducts(prev => [...prev, ...created]);
+      }
+      if (duplicates > 0 && created.length === 0) {
+        alert(`${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.`);
+      } else if (duplicates > 0) {
+        alert(`${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
+      } else if (created.length > 0) {
+        alert(`${created.length} variante(s) creadas exitosamente.`);
+      } else {
+        alert("No se pudo crear ninguna variante. Revisá la consola o la conexión.");
+      }
     } catch (error) {
       console.error(error);
       alert("Error guardando productos en base de datos");

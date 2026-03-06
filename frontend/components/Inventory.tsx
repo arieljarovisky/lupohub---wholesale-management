@@ -1103,14 +1103,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (!newProductName || !newBaseSku || !newPrice || selectedSizes.length === 0 || selectedColors.length === 0) return;
     if (!onCreateProducts) return;
 
+    const baseSku = newBaseSku.trim();
     const newProducts: Product[] = [];
     let index = 0;
 
-    selectedSizes.forEach(size => {
-      selectedColors.forEach(color => {
+    selectedSizes.forEach(sizeName => {
+      selectedColors.forEach(colorName => {
         index++;
-        const skuSuffix = `${size.toUpperCase().substring(0, 2)}-${color.toUpperCase().substring(0, 2)}`;
-        const finalSku = `${newBaseSku}-${skuSuffix}`;
+        const sizeAttr = availableSizes.find((s: any) => (s.name || '').toString() === sizeName);
+        const colorAttr = availableColors.find((c: any) => (c.name || '').toString() === colorName);
+        const sizeCode = (sizeAttr && (sizeAttr as any).code != null) ? String((sizeAttr as any).code).trim() : sizeName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
+        const colorCode = (colorAttr && (colorAttr as any).code != null) ? String((colorAttr as any).code).trim() : colorName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
+        const finalSku = `${baseSku}-${sizeCode}-${colorCode}`;
         
         newProducts.push({
           id: `p-${Date.now()}-${index}`,
@@ -1119,8 +1123,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           category: newCategory || 'General',
           price: parseFloat(newPrice) || 0,
           description: newDescription,
-          size: size,
-          color: color,
+          size: sizeName,
+          color: colorName,
           stock: parseInt(initialStock) || 0,
           integrations: { local: true, mercadoLibre: false, tiendaNube: false }
         });
@@ -1723,7 +1727,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                          disabled={isVariantMode}
                          className={`w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-mono focus:border-blue-500 outline-none uppercase ${isVariantMode ? 'opacity-50 cursor-not-allowed' : ''}`}
                        />
-                       {!isVariantMode && <p className="text-[10px] text-slate-600 ml-1">Se agregarán sufijos automáticamente (ej: -M-BK)</p>}
+                       <p className="text-[10px] text-slate-500 ml-1">El SKU de cada variante se genera automáticamente: base + código talle + código color (ej: 0055402-250-099)</p>
                     </div>
                     <div className="space-y-1">
                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Box size={12}/> Nombre del Modelo</label>
