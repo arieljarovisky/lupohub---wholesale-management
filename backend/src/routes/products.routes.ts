@@ -3,6 +3,10 @@ import { getProducts, createProduct, getProductBySku, patchStock, updateProduct,
 
 const router = Router();
 
+// Rutas específicas primero (evitar que /:sku o /:id capturen)
+router.post('/variants/bulk-link', bulkLinkVariants);
+router.put('/variants/:variantId/external-ids', updateVariantExternalIds);
+
 router.delete('/all', deleteAllProducts);
 router.post('/import-tango', importTangoArticles);
 router.get('/export-inventory', exportInventory);
@@ -12,7 +16,5 @@ router.post('/', createProduct);
 router.patch('/stock', patchStock);
 router.put('/:id', updateProduct);
 router.put('/:id/external-ids', updateProductExternalIds);
-router.put('/variants/:variantId/external-ids', updateVariantExternalIds);
-router.post('/variants/bulk-link', bulkLinkVariants);
 
 export default router;

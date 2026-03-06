@@ -357,7 +357,8 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
 
 /** Vinculaci?n en lote: actualiza IDs externos de varias variantes y opcionalmente el producto padre. No trae stock de ML. */
 export const bulkLinkVariants = async (req: Request, res: Response) => {
-  const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = req.body as {
+  const body = req.body || {};
+  const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = body as {
     productId?: string;
     mercadoLibreItemId?: string;
     tiendaNubeProductId?: string;
@@ -369,10 +370,12 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
     }>;
   };
   if (!links || !Array.isArray(links) || links.length === 0) {
+    console.warn('[bulkLinkVariants] Body recibido sin links v?lidos:', { hasBody: !!req.body, keys: body ? Object.keys(body) : [], linksLength: links?.length });
     return res.status(400).json({ message: 'Se requiere un array "links" con al menos un elemento' });
   }
 
   try {
+    console.log('[bulkLinkVariants] Actualizando', links.length, 'variantes, productId:', productId, 'ML:', mercadoLibreItemId, 'TN:', tiendaNubeProductId);
     let resolvedProductId = productId;
     if ((mercadoLibreItemId || tiendaNubeProductId) && !resolvedProductId && links.length > 0) {
       const row = await get(

@@ -836,23 +836,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (!bulkLinkGroupKey || !bulkLinkProductId) return;
     setBulkLinkSaving(true);
     try {
-      const links = bulkLinkVariants.map(v => ({
-        variantId: v.variantId,
-        mercadoLibreVariantId: bulkLinkAssignments[v.variantId]?.ml || undefined,
-        tiendaNubeVariantId: bulkLinkAssignments[v.variantId]?.tn || undefined
-      })).filter(l => l.mercadoLibreVariantId || l.tiendaNubeVariantId);
+      const links = bulkLinkVariants.map(v => {
+        const ml = bulkLinkAssignments[v.variantId]?.ml?.trim() || '';
+        const tn = bulkLinkAssignments[v.variantId]?.tn?.trim() || '';
+        return {
+          variantId: String(v.variantId),
+          mercadoLibreVariantId: ml || undefined,
+          tiendaNubeVariantId: tn || undefined
+        };
+      }).filter(l => l.mercadoLibreVariantId || l.tiendaNubeVariantId);
       if (links.length === 0) {
-        alert('Asigná al menos una variación ML o variante TN.');
+        alert('Asigná al menos una variación ML o variante TN en la tabla.');
         setBulkLinkSaving(false);
         return;
       }
-      await api.bulkLinkVariants({
+      const res = await api.bulkLinkVariants({
         productId: bulkLinkProductId,
         mercadoLibreItemId: bulkLinkMlId.trim() || undefined,
         tiendaNubeProductId: bulkLinkTnId.trim() || undefined,
         links
       });
-      api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
+      const updated = (res as any)?.updated ?? links.length;
+      await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${bulkLinkGroupKey}-${v.sizeCode}-${v.colorCode}`,
@@ -872,12 +877,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [bulkLinkGroupKey]: mapped }));
-      }).catch(() => {});
+      });
       setShowBulkLinkModal(false);
       setBulkLinkGroupKey(null);
-    } catch (e) {
-      console.error(e);
-      alert('Error al guardar vinculaciones.');
+      if (updated > 0) alert(`Se guardaron ${updated} vinculación(es).`);
+    } catch (e: any) {
+      console.error('Bulk link error:', e);
+      const msg = e?.message || (typeof e === 'string' ? e : 'Error al guardar vinculaciones.');
+      alert(msg);
     } finally {
       setBulkLinkSaving(false);
     }
