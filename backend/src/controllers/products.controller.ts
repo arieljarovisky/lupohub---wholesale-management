@@ -626,7 +626,8 @@ export const deleteVariant = async (req: any, res: any) => {
     }
     await execute('DELETE FROM stocks WHERE variant_id = ?', [variantId]);
     const result = await execute('DELETE FROM product_variants WHERE id = ?', [variantId]);
-    if ((result as any).affectedRows === 0) {
+    const affected = result && (result as any).affectedRows;
+    if (affected === 0) {
       return res.status(404).json({ message: 'Variante no encontrada' });
     }
     res.json({ message: 'Variante eliminada' });
@@ -654,7 +655,8 @@ export const deleteProduct = async (req: any, res: any) => {
       });
     }
     const result = await execute('DELETE FROM products WHERE id = ?', [productId]);
-    if ((result as any).affectedRows === 0) {
+    const affected = result && (result as any).affectedRows;
+    if (affected === 0) {
       return res.status(404).json({ message: 'Producto no encontrado' });
     }
     res.json({ message: 'Producto y variantes eliminados' });

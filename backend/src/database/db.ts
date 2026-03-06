@@ -50,9 +50,11 @@ export const query = async (sql: string, params: any[] = []): Promise<any[]> => 
 };
 
 // Wrapper para ejecuciones que modifican datos (INSERT, UPDATE, DELETE)
-export const execute = async (sql: string, params: any[] = []): Promise<void> => {
+// Retorna el ResultSetHeader (affectedRows, insertId, etc.) para poder comprobar filas afectadas
+export const execute = async (sql: string, params: any[] = []): Promise<any> => {
   try {
-    await pool.execute(sql, params);
+    const [rows] = await pool.execute(sql, params);
+    return rows;
   } catch (error) {
     console.error(`Error executing command: ${sql}`, error);
     throw error;
