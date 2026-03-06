@@ -94,7 +94,7 @@ export const createProduct = async (req: any, res: any) => {
 
   try {
     const category = newProduct.category ?? null;
-    const basePrice = (newProduct as any).base_price != null ? Number((newProduct as any).base_price) : (newProduct.price != null ? Number(newProduct.price) : 0);
+    const basePrice = (newProduct as any).base_price != null ? Number((newProduct as any).base_price) : ((newProduct as any).price != null ? Number((newProduct as any).price) : 0);
     const description = newProduct.description ?? null;
     await execute(
       `INSERT INTO products (id, sku, name, category, base_price, description) 
