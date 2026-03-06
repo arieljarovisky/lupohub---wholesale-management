@@ -396,8 +396,8 @@ const TiendaNubeStock: React.FC = () => {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {/* Pagination: siempre visible cuando hay productos (aunque sea 1 página) */}
+      {total > 0 && (
         <div className="flex flex-col items-center gap-3 pt-4 pb-2">
           <p className="text-slate-500 text-sm">
             Página <span className="text-cyan-400 font-semibold">{currentPage}</span> de <span className="font-semibold text-white">{totalPages}</span>
