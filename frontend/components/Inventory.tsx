@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2 } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -39,7 +39,7 @@ interface InventoryProps {
 }
 
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
   const [searchTerm, setSearchTerm] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -738,6 +738,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setBulkLinkMlVariations([]);
     setBulkLinkTnVariants([]);
     setBulkLinkAssignments({});
+  };
+
+  const handleDeleteVariant = (variantId: string, skuLabel: string) => {
+    showConfirm({
+      title: 'Eliminar variante',
+      message: `¿Eliminar la variante ${skuLabel}? Se borrará también su stock. No se puede deshacer.`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteVariant(variantId);
+          showToast('success', 'Variante eliminada');
+          onImportComplete?.();
+        } catch (e: any) {
+          showToast('error', e?.message || 'Error al eliminar la variante');
+        }
+      },
+    });
+  };
+
+  const handleDeleteProduct = (productId: string, groupKey: string, groupName: string) => {
+    showConfirm({
+      title: 'Eliminar artículo completo',
+      message: `¿Eliminar el artículo "${groupName}" (${groupKey}) y todas sus variantes? No se puede deshacer.`,
+      confirmLabel: 'Eliminar todo',
+      onConfirm: async () => {
+        try {
+          await api.deleteProduct(productId);
+          showToast('success', 'Artículo y variantes eliminados');
+          onImportComplete?.();
+        } catch (e: any) {
+          showToast('error', e?.message || 'Error al eliminar el artículo');
+        }
+      },
+    });
   };
 
   const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
@@ -1446,6 +1480,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                        <PlusCircle size={20} />
                      </button>
                    )}
+                   {/* Delete product (all variants) */}
+                   {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
+                     <button
+                       onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
+                       className="p-2 bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors"
+                       title="Eliminar artículo y todas sus variantes"
+                     >
+                       <Trash2 size={20} />
+                     </button>
+                   )}
 
                    <div className={`p-1.5 rounded-full transition-transform duration-300 ${isExpanded ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-700 text-slate-400'}`}>
                       <ChevronDown size={20} />
@@ -1605,6 +1649,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors"
                                       >
                                        <Edit2 size={16} />
+                                      </button>
+                                      <button 
+                                       onClick={() => handleDeleteVariant(product.id, product.sku || '')}
+                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
+                                       title="Eliminar variante"
+                                      >
+                                       <Trash2 size={16} />
                                       </button>
                                     </div>
                                   )}

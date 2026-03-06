@@ -245,6 +245,16 @@ export const api = {
     }, undefined, 'deleteAllProducts');
   },
 
+  /** Elimina una variante (y su stock). Falla si la variante está en pedidos. */
+  deleteVariant: async (variantId: string): Promise<void> => {
+    await request<void>(`/products/variants/${encodeURIComponent(variantId)}`, 'DELETE');
+  },
+
+  /** Elimina un producto (artículo) y todas sus variantes. Falla si alguna variante está en pedidos. */
+  deleteProduct: async (productId: string): Promise<void> => {
+    await request<void>(`/products/${encodeURIComponent(productId)}`, 'DELETE');
+  },
+
   patchStock: async (args: { variantId?: string; sku?: string; colorCode?: string; sizeCode?: string; stock: number }): Promise<{ variantId: string; stock: number }> => {
     return handleRequest(async () => {
       return await request<{ variantId: string; stock: number }>(`/products/stock`, 'PATCH', args);

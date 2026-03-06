@@ -610,6 +610,60 @@ export const deleteAllProducts = async (req: any, res: any) => {
   }
 };
 
+/** Eliminar una variante (y su stock). No se puede si está en pedidos. */
+export const deleteVariant = async (req: any, res: any) => {
+  const { variantId } = req.params;
+  if (!variantId) return res.status(400).json({ message: 'Falta variantId' });
+  try {
+    const inOrder = await get(
+      `SELECT 1 FROM order_items WHERE variant_id = ? LIMIT 1`,
+      [variantId]
+    );
+    if (inOrder) {
+      return res.status(400).json({
+        message: 'No se puede eliminar la variante porque está en uno o más pedidos.',
+      });
+    }
+    await execute('DELETE FROM stocks WHERE variant_id = ?', [variantId]);
+    const result = await execute('DELETE FROM product_variants WHERE id = ?', [variantId]);
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ message: 'Variante no encontrada' });
+    }
+    res.json({ message: 'Variante eliminada' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error eliminando variante' });
+  }
+};
+
+/** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
+export const deleteProduct = async (req: any, res: any) => {
+  const { productId } = req.params;
+  if (!productId) return res.status(400).json({ message: 'Falta productId' });
+  try {
+    const inOrder = await get(
+      `SELECT 1 FROM order_items oi
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       WHERE pc.product_id = ? LIMIT 1`,
+      [productId]
+    );
+    if (inOrder) {
+      return res.status(400).json({
+        message: 'No se puede eliminar el artículo porque alguna variante está en pedidos.',
+      });
+    }
+    const result = await execute('DELETE FROM products WHERE id = ?', [productId]);
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ message: 'Producto no encontrado' });
+    }
+    res.json({ message: 'Producto y variantes eliminados' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error eliminando producto' });
+  }
+};
+
 // --- Importaci?n desde Tango (Excel): c?digo = 7 art + 3 talle + 3 color ---
 function normalizeHeader(h: string): string {
   return (h || '')
