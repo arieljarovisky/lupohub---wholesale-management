@@ -1307,7 +1307,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       )}
 
       {/* Top Action Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
         {isAdminOrWarehouse && (
           <button 
             onClick={handleSyncStock}
@@ -1817,30 +1817,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* CREATE PRODUCT MODAL */}
       {isCreating && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-           <div className="bg-slate-900 rounded-3xl border border-slate-800 w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl animate-fade-in-up">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+           <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-800 w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col shadow-2xl animate-fade-in-up flex-1 sm:flex-initial">
               {/* Modal Header */}
-              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
-                 <div className="flex items-center gap-3">
-                    <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-900/20">
+              <div className="p-4 sm:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl shrink-0">
+                 <div className="flex items-center gap-3 min-w-0">
+                    <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-indigo-900/20 shrink-0">
                        <Layers size={24} />
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-white">
-                        {isVariantMode ? 'Agregar Variantes' : 'Alta Masiva de Productos'}
-                      </h3>
-                      <p className="text-xs text-slate-400">
-                        {isVariantMode ? `Sumando talles/colores a ${newProductName}` : 'Generador de matriz de variantes (SKUs)'}
-                      </p>
+                    <div className="min-w-0">
+                       <h3 className="text-lg sm:text-xl font-bold text-white truncate">
+                         {isVariantMode ? 'Agregar Variantes' : 'Alta Masiva de Productos'}
+                       </h3>
+                       <p className="text-xs text-slate-400 truncate">
+                         {isVariantMode ? `Sumando talles/colores a ${newProductName}` : 'Generador de matriz de variantes (SKUs)'}
+                       </p>
                     </div>
                  </div>
-                 <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition">
+                 <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2.5 min-w-[44px] min-h-[44px] rounded-full hover:bg-slate-700 transition touch-manipulation shrink-0" aria-label="Cerrar">
                     <X size={24} />
                  </button>
               </div>
 
               {/* Modal Body */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-8 min-h-0">
                  {/* 1. Base Information */}
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-1">
@@ -1994,18 +1994,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* LINK EXTERNAL IDS MODAL */}
       {linkingVariant && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-           <div className="bg-slate-900 rounded-2xl border border-slate-700/80 w-full max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[90vh] overflow-hidden">
-              <div className="shrink-0 p-5 border-b border-slate-700/80 flex justify-between items-center">
-                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <span className="p-1.5 rounded-lg bg-indigo-500/20"><Link size={18} className="text-indigo-400" /></span>
-                    Vincular producto
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+           <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] sm:max-h-[90vh] overflow-hidden flex-1 sm:flex-initial">
+              <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700/80 flex justify-between items-center">
+                 <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2 min-w-0">
+                    <span className="p-1.5 rounded-lg bg-indigo-500/20 shrink-0"><Link size={18} className="text-indigo-400" /></span>
+                    <span className="truncate">Vincular producto</span>
                  </h3>
-                 <button onClick={() => setLinkingVariant(null)} className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 transition" aria-label="Cerrar">
+                 <button onClick={() => setLinkingVariant(null)} className="p-2.5 min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 transition touch-manipulation shrink-0" aria-label="Cerrar">
                     <X size={20} />
                  </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-6 min-h-0">
                  {/* SKU unificado: inventario, ML y TN */}
                  <div className="rounded-xl bg-indigo-900/20 border border-indigo-700/50 p-4 space-y-3">
                     <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
@@ -2213,16 +2213,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </div>
                  </div>
               </div>
-              <div className="shrink-0 p-5 border-t border-slate-700/80 flex justify-end gap-3 bg-slate-900/80">
+              <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-end gap-3 bg-slate-900/80">
                  <button 
                    onClick={() => setLinkingVariant(null)}
-                   className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm"
+                   className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm touch-manipulation min-h-[44px]"
                  >
                    Cancelar
                  </button>
                  <button 
                    onClick={handleSaveLink}
-                   className="px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98] transition flex items-center gap-2 text-sm"
+                   className="px-5 py-3 sm:py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98] transition flex items-center justify-center gap-2 text-sm touch-manipulation min-h-[44px]"
                  >
                    <CheckCircle2 size={16} />
                    Guardar vínculos
@@ -2234,18 +2234,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Modal Vincular grupo en lote */}
       {showBulkLinkModal && bulkLinkGroupKey && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowBulkLinkModal(false)}>
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-slate-700 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Link size={20} className="text-indigo-400" />
-                Vincular grupo con ML y TN
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowBulkLinkModal(false)}>
+          <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700 shadow-2xl w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col flex-1 sm:flex-initial" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 min-w-0">
+                <Link size={20} className="text-indigo-400 shrink-0" />
+                <span className="truncate">Vincular grupo con ML y TN</span>
               </h3>
-              <button type="button" onClick={() => setShowBulkLinkModal(false)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 transition">
+              <button type="button" onClick={() => setShowBulkLinkModal(false)} className="text-slate-400 hover:text-white p-2.5 min-w-[44px] min-h-[44px] rounded-lg hover:bg-slate-700 transition touch-manipulation" aria-label="Cerrar">
                 <X size={20} />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+            <div className="p-4 overflow-y-auto overflow-x-auto flex-1 space-y-4 min-h-0">
               <p className="text-sm text-slate-400">
                 Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
               </p>
@@ -2285,12 +2285,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
                     <button
                       type="button"
                       onClick={handleBulkLoadBothAndMatch}
                       disabled={!bulkLinkMlId.trim() || !bulkLinkTnId.trim() || bulkLinkLoading || bulkLinkVariants.length === 0}
-                      className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                      className="px-4 py-3 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 min-h-[44px] touch-manipulation"
                     >
                       <Link size={16} />
                       Cargar y emparejar todo
@@ -2303,8 +2303,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </button>
                   )}
                   {bulkLinkVariants.length > 0 && (
-                    <div className="rounded-xl border border-slate-700 overflow-x-auto">
-                      <table className="w-full min-w-[600px] text-sm">
+                    <div className="rounded-xl border border-slate-700 overflow-x-auto touch-scroll scrollbar-hide -mx-1 sm:mx-0">
+                      <table className="w-full min-w-[520px] text-sm">
                         <thead>
                           <tr className="border-b border-slate-700 bg-slate-800/80">
                             <th className="text-left text-slate-400 font-semibold p-3">Mi variante (talle / color)</th>
@@ -2378,11 +2378,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </>
               )}
             </div>
-            <div className="p-4 border-t border-slate-700 flex justify-end gap-3 bg-slate-800/30">
-              <button type="button" onClick={() => setShowBulkLinkModal(false)} className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 text-sm">
+            <div className="p-4 border-t border-slate-700 flex flex-col-reverse sm:flex-row justify-end gap-3 bg-slate-800/30 shrink-0">
+              <button type="button" onClick={() => setShowBulkLinkModal(false)} className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700 hover:bg-slate-600 text-sm touch-manipulation min-h-[44px]">
                 Cancelar
               </button>
-              <button type="button" onClick={handleBulkLinkSave} disabled={bulkLinkSaving || !bulkLinkProductId || bulkLinkVariants.length === 0} className="px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm flex items-center gap-2">
+              <button type="button" onClick={handleBulkLinkSave} disabled={bulkLinkSaving || !bulkLinkProductId || bulkLinkVariants.length === 0} className="px-5 py-3 sm:py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2 touch-manipulation min-h-[44px]">
                 {bulkLinkSaving ? 'Guardando...' : 'Guardar vinculaciones'}
               </button>
             </div>

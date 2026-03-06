@@ -467,10 +467,10 @@ const Settings: React.FC<SettingsProps> = ({
          <p className="text-slate-400 text-sm">Administración central de LUPO Hub Argentina.</p>
       </div>
 
-      <div className="flex space-x-2 border-b border-slate-700 overflow-x-auto scrollbar-hide">
+      <div className="flex space-x-2 border-b border-slate-700 overflow-x-auto touch-scroll scrollbar-hide pb-px -mx-1 px-1 sm:mx-0 sm:px-0">
         <button
           onClick={() => setActiveTab('users')}
-          className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap ${
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'users' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
           }`}
         >
@@ -478,7 +478,7 @@ const Settings: React.FC<SettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('sellers')}
-          className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap ${
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'sellers' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
           }`}
         >
@@ -486,7 +486,7 @@ const Settings: React.FC<SettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('integrations')}
-          className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap ${
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'integrations' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
           }`}
         >
@@ -494,7 +494,7 @@ const Settings: React.FC<SettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('sizes')}
-          className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap ${
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'sizes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
           }`}
         >
@@ -502,7 +502,7 @@ const Settings: React.FC<SettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('colors')}
-          className={`pb-3 px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap ${
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'colors' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
           }`}
         >

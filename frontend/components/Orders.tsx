@@ -65,12 +65,12 @@ const Orders: React.FC<OrdersProps> = ({
       </div>
 
       <div className="space-y-4">
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        <div className="flex gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0 touch-manipulation">
           {['ALL', ...Object.values(OrderStatus)].map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status as OrderStatus | 'ALL')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${
+              className={`px-4 sm:px-5 py-3 sm:py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border min-h-[44px] ${
                 filterStatus === status 
                 ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/30' 
                 : 'bg-slate-800 text-slate-400 border-slate-700 active:bg-slate-700'
@@ -105,7 +105,7 @@ const Orders: React.FC<OrdersProps> = ({
             <div 
               key={order.id} 
               onClick={() => canEditOrder && onEditOrder?.(order)}
-              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'}`}
+              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation`}
             >
               <div className="flex justify-between items-start">
                 <div className="space-y-1">

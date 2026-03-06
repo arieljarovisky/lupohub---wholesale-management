@@ -517,7 +517,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden">
+        <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden px-1 sm:px-0">
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">

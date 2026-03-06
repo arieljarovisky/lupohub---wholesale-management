@@ -41,3 +41,28 @@ body {
     touch-action: manipulation;
   }
 }
+
+/* Scroll horizontal suave en móvil (iOS) — usar junto a overflow-x-auto */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Ocultar scrollbar manteniendo scroll (Chrome, Safari, Edge) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Modales en móvil: usar altura segura */
+@supports (height: 100dvh) {
+  @media (max-width: 640px) {
+    .modal-mobile-full {
+      min-height: 100dvh;
+      max-height: 100dvh;
+      border-radius: 0;
+    }
+  }
+}

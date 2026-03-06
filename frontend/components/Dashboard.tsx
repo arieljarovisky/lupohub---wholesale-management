@@ -692,11 +692,11 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                   <YAxis 
                     dataKey="name" 
                     type="category" 
-                    width={100} 
+                    width={72}
                     axisLine={false} 
                     tickLine={false} 
                     tick={{ fill: '#94a3b8', fontSize: 10 }}
-                    tickFormatter={(v) => v.length > 15 ? v.substring(0, 15) + '...' : v}
+                    tickFormatter={(v) => (v && v.length > 12 ? v.substring(0, 12) + '…' : v) || ''}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}
