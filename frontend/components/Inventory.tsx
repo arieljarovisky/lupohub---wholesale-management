@@ -3,7 +3,7 @@ import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Mi
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
-import { labelTalle } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
@@ -1112,10 +1112,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     selectedSizes.forEach(sizeName => {
       selectedColors.forEach(colorName => {
         index++;
-        const sizeAttr = availableSizes.find((s: any) => (s.name || '').toString() === sizeName);
-        const colorAttr = availableColors.find((c: any) => (c.name || '').toString() === colorName);
-        const sizeCode = (sizeAttr && (sizeAttr as any).code != null) ? String((sizeAttr as any).code).trim() : sizeName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
-        const colorCode = (colorAttr && (colorAttr as any).code != null) ? String((colorAttr as any).code).trim() : colorName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
+        const sizeAttr = availableSizes.find((s: any) => (s.name || '').toString() === sizeName || ((s as any).code || '').toString() === sizeName);
+        const colorAttr = availableColors.find((c: any) => (c.name || '').toString() === colorName || ((c as any).code || '').toString() === colorName);
+        const rawSizeCode = (sizeAttr && (sizeAttr as any).code != null) ? String((sizeAttr as any).code).trim() : sizeName;
+        const rawColorCode = (colorAttr && (colorAttr as any).code != null) ? String((colorAttr as any).code).trim() : colorName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
+        const sizeCode = codigoTalleParaSku(rawSizeCode) || rawSizeCode.replace(/\s+/g, '');
+        const colorCode = /^\d+$/.test(rawColorCode) ? rawColorCode : rawColorCode;
         const finalSku = `${baseSku}-${sizeCode}-${colorCode}`;
         
         newProducts.push({
