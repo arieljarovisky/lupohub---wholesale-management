@@ -584,8 +584,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const getGroupRawVariants = (groupKey: string, groupVariants: Product[]) => {
     const lv = loadedVariants[groupKey];
-    // Si la lista del servidor tiene más variantes (ej. recién creadas), usarla para que se agrupen
-    if (groupVariants.length > 0 && (lv?.length ?? 0) < groupVariants.length) return groupVariants;
     return (lv && lv.length > 0) ? lv : groupVariants;
   };
   const getGroupFilteredVariants = (groupKey: string, groupVariants: Product[]) => {
