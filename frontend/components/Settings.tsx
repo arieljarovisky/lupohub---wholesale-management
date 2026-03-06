@@ -713,22 +713,19 @@ const Settings: React.FC<SettingsProps> = ({
             </ol>
           </div>
 
-          {/* Guía: nuevos artículos (Tango) → ML y TN */}
+          {/* Guía: stock depósito → Tienda Nube y Mercado Libre */}
           <div className="bg-slate-800/80 rounded-2xl border border-slate-600 p-5">
             <p className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
-              <Package size={14} /> Cómo sincronizar y unificar tus nuevos artículos (Tango) con Mercado Libre y Tienda Nube
+              <Package size={14} /> Cómo sincronizar el stock de tu depósito con Tienda Nube y Mercado Libre
             </p>
             <ol className="text-sm text-slate-300 space-y-2 list-decimal list-inside">
-              <li><strong className="text-slate-200">Importá desde Tango</strong> (Inventario → Importar Tango) para tener productos y variantes con código 7+3+3 en LupoHub.</li>
-              <li><strong className="text-slate-200">Mismo SKU en las plataformas.</strong> En Mercado Libre y Tienda Nube, cada variante debe tener el <strong>SKU del vendedor</strong> igual al código de 13 dígitos de LupoHub (ej. <code className="bg-slate-700 px-1 rounded">0066348130197</code>). Así la app puede vincularlas.</li>
-              <li><strong className="text-slate-200">SKU interno vs externo:</strong> tu inventario (LupoHub/Tango) puede usar un código distinto al de Mercado Libre y Tienda Nube. En Inventario → <strong>Vincular producto</strong> podés indicar el <strong>SKU en ML/TN</strong> (el mismo para ambas plataformas). Así se sincroniza el stock y se identifican los pedidos correctamente.</li>
-                <li><strong className="text-slate-200">Vincular productos:</strong> en Tienda Nube usá <strong>Importar productos</strong>; en Mercado Libre usá <strong>Vincular productos</strong>. Si los SKU coinciden se asocian solas; si no, configurá el SKU externo en Vincular producto.</li>
-              <li><strong className="text-slate-200">Cargar stock en LupoHub</strong> (Inventario: + / − por variante). Cada cambio de stock en la app se envía a ML/TN si la variante está vinculada.</li>
-              <li><strong className="text-slate-200">Sincronizar stock en bloque:</strong> en esta pestaña usá <strong>Sincronizar stock</strong> (TN) y <strong>Sincronizar stock a ML</strong> para enviar todo el stock local a cada plataforma de una vez.</li>
-              <li><strong className="text-slate-200">Publicaciones en pack (x2, x3):</strong> si en ML o TN vendés el mismo artículo en pack de 2 o 3 unidades, en Inventario abrí <strong>Vincular producto</strong> y configurá <strong>Packs</strong> (Mercado Libre / Tienda Nube). El stock que se envía será: stock local ÷ pack (ej. 100 unidades con pack 2 → 50 en la publicación).</li>
+              <li><strong className="text-slate-200">Tené tus productos en LupoHub.</strong> Importalos desde Tango (Inventario → Importar Tango) o cargalos a mano. El stock que cargues acá es el de tu depósito (fuente de verdad).</li>
+              <li><strong className="text-slate-200">Vinculá cada variante con TN y ML.</strong> En <strong>Inventario → Mi inventario</strong>, en cada fila de producto tocá el ícono de <strong>cadena (Vincular)</strong>. Ahí cargá el <strong>ID de producto e ID de variante de Tienda Nube</strong> y el <strong>ID de publicación/variación de Mercado Libre</strong> que correspondan a esa variante. Sin este vínculo la app no sabe a qué listing enviar el stock.</li>
+              <li><strong className="text-slate-200">Opcional: SKU externo y packs.</strong> Si en ML/TN usás otro SKU, indicalo en el mismo modal. Si vendés por pack (x2, x3), configurá el pack; el stock que se envía será: stock del depósito ÷ pack.</li>
+              <li><strong className="text-slate-200">Enviar stock a las plataformas.</strong> En esta pestaña (Integraciones) usá <strong>Sincronizar stock a Tienda Nube</strong> y <strong>Sincronizar stock a Mercado Libre</strong>. Se envía el stock actual de tu depósito (LupoHub) a cada variante que tengas vinculada.</li>
             </ol>
             <p className="text-xs text-slate-500 mt-3">
-              Si una variante no se vincula, revisá que el SKU en ML/TN sea exactamente el mismo que en LupoHub (código de 13 dígitos sin espacios).
+              Los productos de TN y ML no se guardan en la base de datos; solo se usa el vínculo que vos cargás para enviar stock desde LupoHub hacia cada plataforma.
             </p>
           </div>
 

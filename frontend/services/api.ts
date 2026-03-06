@@ -209,10 +209,10 @@ export const api = {
     }, undefined, 'updateProductExternalIds');
   },
 
-  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string; externalSku?: string }): Promise<void> => {
+  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string }): Promise<{ stockFromML?: number }> => {
     return handleRequest(async () => {
-      await request<void>(`/products/variants/${variantId}/external-ids`, 'PUT', ids);
-    }, undefined, 'updateVariantExternalIds');
+      return await request<{ stockFromML?: number }>(`/products/variants/${variantId}/external-ids`, 'PUT', ids);
+    }, {}, 'updateVariantExternalIds');
   },
 
   // --- ORDERS ---

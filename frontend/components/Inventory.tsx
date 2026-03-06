@@ -61,6 +61,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkTnId, setLinkTnId] = useState('');
   const [linkTnVariantId, setLinkTnVariantId] = useState('');
   const [linkMlId, setLinkMlId] = useState('');
+  const [linkMlVariantId, setLinkMlVariantId] = useState('');
+  const [linkSaveStockFromML, setLinkSaveStockFromML] = useState<number | null>(null);
   const [linkProduct, setLinkProduct] = useState<{ id: string; name?: string; sku?: string; price?: number; category?: string; description?: string } | null>(null);
   const [linkPackMl, setLinkPackMl] = useState(1);
   const [linkPackTn, setLinkPackTn] = useState(1);
@@ -668,6 +670,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkPackMl(1);
     setLinkPackTn(1);
     setLinkExternalSku('');
+    setLinkMlVariantId('');
+    setLinkSaveStockFromML(null);
     setLinkProduct(null);
     const parts = (product.sku || '').toString().split('-');
     const groupKey = parts.length >= 3 ? parts.slice(0, -2).join('-') : product.sku || '';
@@ -689,12 +693,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const handleSaveLink = async () => {
     if (!linkingVariant) return;
     try {
-      // 1. Update Variant External IDs
-      await api.updateVariantExternalIds(linkingVariant.id, {
+      setLinkSaveStockFromML(null);
+      // 1. Update Variant External IDs (si hay Item ML, el backend trae el stock de ML y lo guarda en inventario)
+      const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
-        mercadoLibreVariantId: linkMlId || undefined,
+        mercadoLibreVariantId: linkMlVariantId || linkMlId || undefined,
+        mercadoLibreItemId: linkMlId || undefined,
         externalSku: linkExternalSku.trim() || undefined
       });
+      if (typeof (linkRes as any).stockFromML === 'number') {
+        setLinkSaveStockFromML((linkRes as any).stockFromML);
+      }
 
       // 2. Update Product (Parent) External IDs if provided
       // We don't have the parent ID easily here, but the backend getProductBySku returns it.
@@ -1654,16 +1663,34 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                        <Zap size={12} className="text-amber-400/80" />
                        Mercado Libre
                     </p>
-                    <div>
-                       <label className="text-[11px] text-slate-500 block mb-1">Item ID</label>
-                       <input 
-                         type="text" 
-                         value={linkMlId}
-                         onChange={(e) => setLinkMlId(e.target.value)}
-                         placeholder="Ej: MLA123..."
-                         className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
-                       />
+                    <p className="text-[10px] text-slate-500">Al guardar con Item ID, se trae el stock actual de ML a tu inventario.</p>
+                    <div className="grid grid-cols-1 gap-3">
+                       <div>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID publicación (ítem) ML</label>
+                          <input 
+                            type="text" 
+                            value={linkMlId}
+                            onChange={(e) => setLinkMlId(e.target.value)}
+                            placeholder="Ej: MLA123..."
+                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
+                          />
+                       </div>
+                       <div>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID variación ML (si tiene talles/colores)</label>
+                          <input 
+                            type="text" 
+                            value={linkMlVariantId}
+                            onChange={(e) => setLinkMlVariantId(e.target.value)}
+                            placeholder="Ej: 12345678901"
+                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
+                          />
+                       </div>
                     </div>
+                    {linkSaveStockFromML !== null && (
+                      <p className="text-xs text-green-400 font-medium flex items-center gap-1.5">
+                        <CheckCircle2 size={14} /> Stock traído de Mercado Libre: {linkSaveStockFromML} unidades guardadas en tu inventario.
+                      </p>
+                    )}
                  </div>
 
                  {/* Packs */}

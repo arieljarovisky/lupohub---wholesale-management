@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import axios from 'axios';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -280,7 +281,7 @@ export const updateProductExternalIds = async (req: any, res: any) => {
 
 export const updateVariantExternalIds = async (req: any, res: any) => {
   const { variantId } = req.params;
-  const { tiendaNubeVariantId, mercadoLibreVariantId, externalSku } = req.body;
+  const { tiendaNubeVariantId, mercadoLibreVariantId, mercadoLibreItemId, externalSku } = req.body;
   if (!variantId) return res.status(400).json({ message: 'ID de variante inv?lido' });
 
   try {
@@ -292,7 +293,62 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
        WHERE id = ?`,
       [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, externalSku !== undefined ? externalSku : null, variantId]
     );
-    res.json({ variantId, tiendaNubeVariantId, mercadoLibreVariantId, externalSku: externalSku ?? undefined });
+
+    let stockFromML: number | null = null;
+    const mlItemId = mercadoLibreItemId ?? null;
+    const mlVariantId = mercadoLibreVariantId ?? null;
+
+    if (mlItemId) {
+      const productRow = await get(
+        `SELECT p.id AS product_id FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         WHERE pv.id = ? LIMIT 1`,
+        [variantId]
+      );
+      if (productRow?.product_id) {
+        await execute(
+          `UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`,
+          [mlItemId, productRow.product_id]
+        );
+      }
+
+      const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+      if (integration?.access_token) {
+        try {
+          const itemRes = await axios.get(
+            `https://api.mercadolibre.com/items/${mlItemId}?include_attributes=all`,
+            { headers: { Authorization: `Bearer ${integration.access_token}` } }
+          );
+          const item = itemRes.data;
+          const variations = item?.variations || [];
+          let qty = 0;
+          if (variations.length > 0) {
+            const v = mlVariantId
+              ? variations.find((x: any) => String(x.id) === String(mlVariantId))
+              : variations[0];
+            qty = v ? (v.available_quantity ?? 0) : 0;
+          } else {
+            qty = item.available_quantity ?? 0;
+          }
+          await execute(
+            `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
+            [variantId, qty]
+          );
+          stockFromML = qty;
+        } catch (mlErr: any) {
+          console.error('[updateVariantExternalIds] Error trayendo stock de ML:', mlErr?.response?.data || mlErr?.message);
+        }
+      }
+    }
+
+    res.json({
+      variantId,
+      tiendaNubeVariantId,
+      mercadoLibreVariantId,
+      externalSku: externalSku ?? undefined,
+      stockFromML: stockFromML ?? undefined
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando IDs externos de variante' });
