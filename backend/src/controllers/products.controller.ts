@@ -11,18 +11,18 @@ export const getProducts = async (req: Request, res: Response) => {
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
-    const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'name' : 'sku');
+    const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'p.name' : 'pv.sku');
     const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
     const search = (q || '').toString().trim();
     const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
     const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
     const filterSyncNone = sync_none === '1' || sync_none === 'true';
 
-    const conditions: string[] = [];
+    const conditions: string[] = ['1=1'];
     const params: any[] = [];
     if (search) {
-      conditions.push('(p.sku LIKE ? OR p.name LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`);
+      conditions.push('(pv.sku LIKE ? OR p.sku LIKE ? OR p.name LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (filterSyncNone) {
       conditions.push('(p.mercado_libre_id IS NULL OR p.mercado_libre_id = \'\') AND (p.tienda_nube_id IS NULL OR p.tienda_nube_id = \'\')');
@@ -40,6 +40,8 @@ export const getProducts = async (req: Request, res: Response) => {
       `
       SELECT COUNT(*) AS total
       FROM products p
+      JOIN product_colors pc ON pc.product_id = p.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id
       ${whereClause}
       `,
       params
@@ -48,22 +50,21 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const rows = await query(
       `
-      SELECT p.id, p.sku, p.name, p.category, p.base_price,
+      SELECT pv.id, pv.sku, p.name, p.category, p.base_price,
              p.tienda_nube_id, p.mercado_libre_id,
-             COALESCE(SUM(st.stock), 0) AS stock_total
+             COALESCE(st.stock, 0) AS stock_total
       FROM products p
-      LEFT JOIN product_colors pc ON pc.product_id = p.id
-      LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_colors pc ON pc.product_id = p.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks st ON st.variant_id = pv.id
       ${whereClause}
-      GROUP BY p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id
       ORDER BY ${sortCol} ${sortDir}
       LIMIT ? OFFSET ?
       `,
       [...params, perPageNum, offset]
     );
-    
-    const mapped = rows.map((r: any) => ({
+
+    const mapped = (rows || []).map((r: any) => ({
       id: r.id,
       sku: r.sku,
       name: r.name,
@@ -75,7 +76,7 @@ export const getProducts = async (req: Request, res: Response) => {
         mercadoLibre: r.mercado_libre_id
       }
     }));
-    
+
     res.json({ items: mapped, page: pageNum, per_page: perPageNum, total });
   } catch (error) {
     console.error(error);
@@ -95,11 +96,92 @@ export const createProduct = async (req: any, res: any) => {
     return res.status(400).json({ message: "SKU y Nombre son requeridos" });
   }
 
-  const id = uuidv4();
   const category = body.category != null ? String(body.category) : null;
   const basePrice = body.base_price != null ? Number(body.base_price) : (body.price != null ? Number(body.price) : 0);
   const description = body.description != null ? String(body.description) : null;
+  const initialStock = body.stock != null ? Math.max(0, parseInt(String(body.stock), 10) || 0) : (body.stock_total != null ? Math.max(0, parseInt(String(body.stock_total), 10) || 0) : 0);
 
+  const parts = sku.split('-');
+  const isVariantSku = parts.length >= 3;
+  const baseSku = isVariantSku ? parts.slice(0, -2).join('-') : sku;
+  const sizeCode = isVariantSku ? parts[parts.length - 2] : null;
+  const colorCode = isVariantSku ? parts[parts.length - 1] : null;
+
+  if (isVariantSku) {
+    // Crear como variante: producto padre + product_colors + product_variants + stocks (igual que import Tango)
+    try {
+      let productId: string | null = (await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]))?.id || null;
+      if (!productId) {
+        productId = uuidv4();
+        await execute(
+          `INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`,
+          [productId, baseSku, name, category ?? 'General', basePrice, description]
+        );
+      }
+
+      let sizeId = (await get(`SELECT id FROM sizes WHERE size_code = ?`, [sizeCode]))?.id;
+      if (!sizeId) {
+        return res.status(400).json({
+          message: `No existe el talle con código "${sizeCode}". Creálo en Configuración > Talles.`,
+        });
+      }
+
+      let colorId = (await get(`SELECT id FROM colors WHERE code = ?`, [colorCode]))?.id;
+      if (!colorId) {
+        colorId = (await get(`SELECT id FROM colors WHERE name = ?`, [colorCode]))?.id;
+      }
+      if (!colorId) {
+        return res.status(400).json({
+          message: `No existe el color con código "${colorCode}". Creálo en Configuración > Colores.`,
+        });
+      }
+
+      let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+      if (!productColorId) {
+        productColorId = uuidv4();
+        await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+      }
+
+      const existingVariant = await get(
+        `SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`,
+        [productColorId, sizeId]
+      );
+      if (existingVariant) {
+        return res.status(409).json({ message: "La variante ya existe para este artículo, talle y color." });
+      }
+
+      const variantId = uuidv4();
+      await execute(
+        `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
+        [variantId, productColorId, sizeId, sku]
+      );
+      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, initialStock]);
+
+      const productRow = await get(`SELECT name, category, base_price, tienda_nube_id, mercado_libre_id FROM products WHERE id = ?`, [productId]);
+      console.log('[createProduct] Variante creada:', sku, 'variantId=', variantId);
+      return res.status(201).json({
+        id: variantId,
+        sku,
+        name: productRow?.name ?? name,
+        category: productRow?.category ?? category ?? 'General',
+        base_price: Number(productRow?.base_price ?? basePrice),
+        description: productRow?.description ?? description ?? undefined,
+        externalIds: {
+          tiendaNube: productRow?.tienda_nube_id ?? undefined,
+          mercadoLibre: productRow?.mercado_libre_id ?? undefined,
+        },
+      });
+    } catch (error: any) {
+      console.error('[createProduct] Error variante:', error?.code, error?.message);
+      if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
+        return res.status(409).json({ message: "La variante ya existe." });
+      }
+      return res.status(500).json({ message: "Error creando variante", detail: error?.message });
+    }
+  }
+
+  // SKU simple: un solo producto en tabla products (sin variantes)
+  const id = uuidv4();
   try {
     await execute(
       `INSERT INTO products (id, sku, name, category, base_price, description) 
