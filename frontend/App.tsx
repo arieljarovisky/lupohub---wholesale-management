@@ -325,12 +325,12 @@ const App: React.FC = () => {
       } else {
         showToast('error', 'No se pudo crear ninguna variante. Revisá la consola o la conexión.');
       }
-      // Refrescar siempre desde el servidor para que se vean variantes nuevas o las que ya existían (duplicados)
+      // Refrescar desde el servidor para que se vean variantes nuevas (sin usar fallback para no pisar con mock)
       try {
-        const refreshed = await api.getProducts();
+        const refreshed = await api.getProductsStrict();
         setProducts(refreshed);
       } catch (_) {
-        // Si falla el refresh, la lista local ya tiene las creadas
+        // Si falla el refresh, mantener lista actual (incl. las que acabamos de agregar)
       }
     } catch (error) {
       console.error(error);

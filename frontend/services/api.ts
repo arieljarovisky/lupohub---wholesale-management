@@ -67,6 +67,29 @@ export const api = {
     }, MOCK_PRODUCTS, 'getProducts');
   },
 
+  /** Igual que getProducts pero sin fallback: lanza si falla. Usar al refrescar después de crear para no pisar con MOCK. */
+  getProductsStrict: async (): Promise<Product[]> => {
+    const res = await request<any>('/products?per_page=5000', 'GET');
+    const rows = Array.isArray(res) ? res : (res && res.items) || [];
+    return rows.map((r: any) => {
+      const parts = (r.sku || '').toString().split('-');
+      const size = parts.length >= 2 ? parts[parts.length - 2] : '';
+      const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+      return {
+        id: r.id,
+        sku: r.sku,
+        name: r.name,
+        category: r.category,
+        size,
+        color,
+        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+        price: Number((r as any).base_price ?? (r as any).price ?? 0),
+        description: r.description ?? '',
+        externalIds: r.externalIds
+      };
+    }) as Product[];
+  },
+
   getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
     return handleRequest(async () => {
       const syncMl = syncFilter === 'ML' || syncFilter === 'BOTH';

@@ -88,7 +88,10 @@ export const createProduct = async (req: any, res: any) => {
   const sku = body.sku != null ? String(body.sku).trim() : '';
   const name = body.name != null ? String(body.name).trim() : '';
 
+  console.log('[createProduct] body.sku=', body.sku, 'body.name=', body.name, '-> parsed sku=', sku, 'name=', name);
+
   if (!sku || !name) {
+    console.log('[createProduct] Rechazado: SKU o nombre vacío');
     return res.status(400).json({ message: "SKU y Nombre son requeridos" });
   }
 
@@ -103,13 +106,14 @@ export const createProduct = async (req: any, res: any) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [id, sku, name, category, basePrice, description]
     );
+    console.log('[createProduct] INSERT OK:', sku);
     res.status(201).json({ id, sku, name, category: category ?? undefined, base_price: basePrice, description: description ?? undefined });
   } catch (error: any) {
-    console.error(error);
-    if (error.code === 'ER_DUP_ENTRY' || error.message.includes('Duplicate entry')) {
+    console.error('[createProduct] Error INSERT:', error?.code, error?.message);
+    if (error.code === 'ER_DUP_ENTRY' || (error.message && error.message.includes('Duplicate entry'))) {
       return res.status(409).json({ message: "El SKU ya existe" });
     }
-    res.status(500).json({ message: "Error creating product" });
+    res.status(500).json({ message: "Error creating product", detail: error?.message });
   }
 };
 
