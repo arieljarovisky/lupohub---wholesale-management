@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
+import { useNotification } from '../context/NotificationContext';
 
 interface OrdersProps {
   orders: Order[];
@@ -22,6 +23,7 @@ const Orders: React.FC<OrdersProps> = ({
   currentUserId, onUpdateStatus, onCreateOrder, 
   onNavigate, onStartPicking, onEditOrder, onDeleteOrder 
 }) => {
+  const { showConfirm } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
 
@@ -132,7 +134,7 @@ const Orders: React.FC<OrdersProps> = ({
                 <div className="flex items-center gap-2">
                   {canCancelOrder(order) && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); if (window.confirm('¿Cancelar este pedido? Se restaurará el stock.')) onUpdateStatus(order.id, OrderStatus.CANCELLED); }}
+                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Cancelar pedido', message: '¿Cancelar este pedido? Se restaurará el stock.', confirmLabel: 'Cancelar pedido', onConfirm: () => onUpdateStatus(order.id, OrderStatus.CANCELLED) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
                       title="Cancelar pedido"
                     >
@@ -141,7 +143,7 @@ const Orders: React.FC<OrdersProps> = ({
                   )}
                   {role === Role.ADMIN && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); if (window.confirm('¿Eliminar pedido?')) onDeleteOrder?.(order.id); }}
+                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
                       title="Eliminar pedido"
                     >

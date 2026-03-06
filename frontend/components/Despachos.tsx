@@ -5,6 +5,7 @@ import {
   CheckCircle, Clock, Truck, Building, Globe, AlertTriangle
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 
 interface Despacho {
   id: string;
@@ -33,6 +34,7 @@ const estadoConfig: Record<string, { label: string; color: string; bgColor: stri
 const paisesComunes = ['Brasil', 'China', 'Estados Unidos', 'Italia', 'España', 'Alemania', 'Colombia', 'Perú', 'Chile', 'Otro'];
 
 const Despachos: React.FC = () => {
+  const { showToast, showConfirm } = useNotification();
   const [despachos, setDespachos] = useState<Despacho[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -140,7 +142,7 @@ const Despachos: React.FC = () => {
 
   const handleSave = async () => {
     if (!form.numero_despacho || !form.fecha_despacho) {
-      alert('Número de despacho y fecha son requeridos');
+      showToast('info', 'Número de despacho y fecha son requeridos');
       return;
     }
 
@@ -162,21 +164,21 @@ const Despachos: React.FC = () => {
       resetForm();
       fetchDespachos();
     } catch (error: any) {
-      alert('Error: ' + (error.message || 'No se pudo guardar'));
+      showToast('error', error.message || 'No se pudo guardar');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('¿Eliminar este despacho? Esta acción no se puede deshacer.')) return;
-    
-    try {
-      await api.deleteDespacho(id);
-      fetchDespachos();
-    } catch (error) {
-      alert('Error eliminando despacho');
-    }
+  const handleDelete = (id: string) => {
+    showConfirm({
+      title: 'Eliminar despacho',
+      message: '¿Eliminar este despacho? Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      onConfirm: () => {
+        api.deleteDespacho(id).then(() => fetchDespachos()).catch(() => showToast('error', 'Error eliminando despacho'));
+      },
+    });
   };
 
   const handleViewDetail = async (despacho: Despacho) => {
@@ -185,7 +187,7 @@ const Despachos: React.FC = () => {
       setSelectedDespacho(detail);
       setShowDetailModal(true);
     } catch (error) {
-      alert('Error cargando detalles');
+      showToast('error', 'Error cargando detalles');
     }
   };
 
@@ -208,7 +210,7 @@ const Despachos: React.FC = () => {
 
   const handleAddProductToDespacho = async () => {
     if (!selectedProductId || !selectedDespacho) {
-      alert('Seleccioná un producto');
+      showToast('info', 'Seleccioná un producto');
       return;
     }
 
@@ -229,23 +231,28 @@ const Despachos: React.FC = () => {
       setShowAddProductModal(false);
       fetchDespachos();
     } catch (error: any) {
-      alert('Error: ' + (error.message || 'No se pudo agregar'));
+      showToast('error', error.message || 'No se pudo agregar');
     } finally {
       setSavingProduct(false);
     }
   };
 
-  const handleRemoveItem = async (itemId: string) => {
-    if (!selectedDespacho || !confirm('¿Quitar este producto del despacho?')) return;
-    
-    try {
-      await api.removeDespachoItem(selectedDespacho.id, itemId);
-      const detail = await api.getDespachoById(selectedDespacho.id);
-      setSelectedDespacho(detail);
-      fetchDespachos();
-    } catch (error) {
-      alert('Error quitando producto');
-    }
+  const handleRemoveItem = (itemId: string) => {
+    if (!selectedDespacho) return;
+    showConfirm({
+      title: 'Quitar producto',
+      message: '¿Quitar este producto del despacho?',
+      confirmLabel: 'Quitar',
+      onConfirm: () => {
+        api.removeDespachoItem(selectedDespacho.id, itemId)
+          .then(async () => {
+            const detail = await api.getDespachoById(selectedDespacho.id);
+            setSelectedDespacho(detail);
+            fetchDespachos();
+          })
+          .catch(() => showToast('error', 'Error quitando producto'));
+      },
+    });
   };
 
   const filteredProductos = productosSinDespacho.filter(p => {

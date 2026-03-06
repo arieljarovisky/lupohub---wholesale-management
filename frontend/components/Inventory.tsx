@@ -887,12 +887,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         const msg = synced > 0
           ? `Se guardaron ${updated} vinculación(es) y se trajo el stock de Mercado Libre a tu inventario (${synced} variante(s) actualizadas).`
           : `Se guardaron ${updated} vinculación(es).`;
-        alert(msg);
+        showToast('success', msg);
       }
     } catch (e: any) {
       console.error('Bulk link error:', e);
       const msg = e?.message || (typeof e === 'string' ? e : 'Error al guardar vinculaciones.');
-      alert(msg);
+      showToast('error', msg);
     } finally {
       setBulkLinkSaving(false);
     }

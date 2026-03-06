@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, ArrowUpCircle, ArrowDownCircle, RotateCcw, ShoppingCart, Store, Zap, Download, Camera, CheckCircle } from 'lucide-react';
 import { api } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 
 interface StockMovement {
   id: string;
@@ -61,6 +62,7 @@ const movementTypeConfig: Record<string, { label: string; color: string; bgColor
 };
 
 const StockHistory: React.FC = () => {
+  const { showToast, showConfirm } = useNotification();
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -99,19 +101,22 @@ const StockHistory: React.FC = () => {
     return () => { abort.current = true; };
   }, [filterType, dateFrom, dateTo, limit, fetchMovements]);
 
-  const handleCreateSnapshot = async () => {
-    if (!confirm('¿Crear un snapshot del stock actual? Esto registrará el stock de todas las variantes como punto de partida.')) return;
-    
-    setSnapshotLoading(true);
-    try {
-      const result = await api.createStockSnapshot();
-      alert(`${result.message}\nVariantes procesadas: ${result.variantsProcessed || 0}`);
-      fetchMovements();
-    } catch (error: any) {
-      alert('Error: ' + (error.message || 'No se pudo crear el snapshot'));
-    } finally {
-      setSnapshotLoading(false);
-    }
+  const handleCreateSnapshot = () => {
+    showConfirm({
+      title: 'Crear snapshot de stock',
+      message: '¿Crear un snapshot del stock actual? Esto registrará el stock de todas las variantes como punto de partida.',
+      confirmLabel: 'Crear snapshot',
+      onConfirm: () => {
+        setSnapshotLoading(true);
+        api.createStockSnapshot()
+          .then((result) => {
+            showToast('success', `${result.message}\nVariantes procesadas: ${result.variantsProcessed || 0}`);
+            fetchMovements();
+          })
+          .catch((error: any) => showToast('error', error?.message || 'No se pudo crear el snapshot'))
+          .finally(() => setSnapshotLoading(false));
+      },
+    });
   };
 
   const handleImportHistory = async (days: number) => {

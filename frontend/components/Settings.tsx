@@ -4,6 +4,7 @@ import { Attribute, Role, ApiConfig, User, Order } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
+import { useNotification } from '../context/NotificationContext';
 
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
   if (!isOpen) return null;
@@ -42,10 +43,11 @@ interface SettingsProps {
   currentUser?: User;
 }
 
-const Settings: React.FC<SettingsProps> = ({ 
-  attributes, onCreateAttribute, onDeleteAttribute, role, 
-  users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser 
+const Settings: React.FC<SettingsProps> = ({
+  attributes, onCreateAttribute, onDeleteAttribute, role,
+  users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser
 }) => {
+  const { showToast } = useNotification();
   const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users'>('users');
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
@@ -170,10 +172,10 @@ const Settings: React.FC<SettingsProps> = ({
       if (url) {
         window.location.href = url;
       } else {
-        alert('No se pudo obtener la URL de autenticación');
+        showToast('error', 'No se pudo obtener la URL de autenticación');
       }
     } catch (e) {
-      alert('Error iniciando conexión');
+      showToast('error', 'Error iniciando conexión');
     }
   };
   
@@ -196,7 +198,7 @@ const Settings: React.FC<SettingsProps> = ({
       await api.disconnectIntegration(platform);
       setIntegrations(prev => ({ ...prev, [platform]: false }));
     } catch {
-      alert('Error desconectando');
+      showToast('error', 'Error desconectando');
     }
   };
 
@@ -349,7 +351,7 @@ const Settings: React.FC<SettingsProps> = ({
       setShowDeleteModal(false);
       window.location.reload(); // Reload to refresh state
     } catch (e: any) {
-      alert('Error eliminando productos: ' + (e.message || 'Error desconocido'));
+      showToast('error', 'Error eliminando productos: ' + (e.message || 'Error desconocido'));
     } finally {
       setLoadingSync(false);
     }
@@ -940,7 +942,7 @@ const Settings: React.FC<SettingsProps> = ({
                               setMlAutoMessageSaved(true);
                               setTimeout(() => setMlAutoMessageSaved(false), 3000);
                             } catch (e) {
-                              alert('Error guardando configuración');
+                              showToast('error', 'Error guardando configuración');
                             } finally {
                               setMlAutoMessageLoading(false);
                             }
