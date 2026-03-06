@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
@@ -689,6 +689,22 @@ const Settings: React.FC<SettingsProps> = ({
 
       {activeTab === 'integrations' && (
         <div className="space-y-6">
+          {/* Instalar app en tablet / móvil */}
+          <div className="bg-indigo-900/20 rounded-2xl border border-indigo-700/50 p-5">
+            <p className="text-sm font-bold text-indigo-200 flex items-center gap-2 mb-2">
+              <Smartphone size={18} /> Instalar LupoHub en tablet o móvil
+            </p>
+            <p className="text-xs text-slate-300 mb-2">
+              En la computadora suele aparecer el botón para instalar. En la <strong>tablet</strong> o el <strong>celular</strong> hacé lo siguiente:
+            </p>
+            <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
+              <li>Abrí LupoHub en <strong>Chrome</strong> (misma URL que en la compu).</li>
+              <li>Tocá el <strong>menú del navegador</strong> (los tres puntos ⋮ arriba a la derecha).</li>
+              <li>Elegí <strong>“Agregar a la pantalla de inicio”</strong> o <strong>“Instalar aplicación”</strong>.</li>
+              <li>Confirmá. El ícono de LupoHub quedará en la pantalla de inicio y se abrirá como app, sin la barra de Chrome.</li>
+            </ol>
+          </div>
+
           {/* Guía: nuevos artículos (Tango) → ML y TN */}
           <div className="bg-slate-800/80 rounded-2xl border border-slate-600 p-5">
             <p className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
