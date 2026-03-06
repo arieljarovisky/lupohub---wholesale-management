@@ -1789,54 +1789,65 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
         'Authentication': `bearer ${integration.access_token}`,
         'User-Agent': TN_USER_AGENT
       },
-      params: { page, per_page: perPage }
+      params: { page, per_page: perPage },
+      validateStatus: () => true
     });
-
-    const products = response.data || [];
+    if (response.status !== 200) {
+      const errMsg = (response.data && (response.data.description || response.data.message || response.data.error)) || response.statusText || 'Tienda Nube no respondió OK';
+      return res.status(response.status >= 400 ? 502 : 500).json({ message: 'Error obteniendo stock de Tienda Nube', detail: errMsg });
+    }
+    const raw = response.data;
+    const products = Array.isArray(raw) ? raw : [];
     const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
     const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
 
     const items: any[] = [];
     for (const p of products) {
-      const title = p.name?.es || p.name?.pt || p.name?.en || p.name || '';
-      const attrs = p.attributes || [];
-      let sizeIdx = -1;
-      let colorIdx = -1;
-      attrs.forEach((a: any, i: number) => {
-        const n = (a?.es ?? a?.en ?? a?.pt ?? '').toString();
-        if (isSizeAttr(n)) sizeIdx = i;
-        if (isColorAttr(n)) colorIdx = i;
-      });
-      let totalStock = 0;
-      const variations = (p.variants || []).map((v: any) => {
-        const stock = Number(v.stock) || 0;
-        totalStock += stock;
-        const values = v.values || [];
-        const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? (values[sizeIdx]?.es ?? values[sizeIdx]?.pt ?? values[sizeIdx]?.en ?? values[sizeIdx]) : '';
-        const colorVal = colorIdx >= 0 && colorIdx < values.length ? (values[colorIdx]?.es ?? values[colorIdx]?.pt ?? values[colorIdx]?.en ?? values[colorIdx]) : '';
-        const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
-        return {
-          variationId: v.id,
-          sku: v.sku || '',
-          size: String(toStr(sizeVal)),
-          color: String(toStr(colorVal)),
-          stock,
-          sold: 0
-        };
-      });
-      const img = (p.images && p.images[0]) ? (p.images[0].src || p.images[0].url) : '';
-      items.push({
-        id: String(p.id),
-        title,
-        status: 'active',
-        price: p.variants?.[0]?.price ?? 0,
-        totalStock,
-        soldTotal: 0,
-        thumbnail: img,
-        permalink: p.url || `https://tiendanube.com`,
-        hasVariations: variations.length > 1,
-        variations
-      });
+      try {
+        if (!p || typeof p !== 'object') continue;
+        const title = p.name?.es || p.name?.pt || p.name?.en || p.name || '';
+        const attrs = Array.isArray(p.attributes) ? p.attributes : [];
+        let sizeIdx = -1;
+        let colorIdx = -1;
+        attrs.forEach((a: any, i: number) => {
+          const n = (a?.es ?? a?.en ?? a?.pt ?? '').toString();
+          if (isSizeAttr(n)) sizeIdx = i;
+          if (isColorAttr(n)) colorIdx = i;
+        });
+        let totalStock = 0;
+        const variantsList = Array.isArray(p.variants) ? p.variants : [];
+        const variations = variantsList.map((v: any) => {
+          const stock = Number(v?.stock) || 0;
+          totalStock += stock;
+          const values = Array.isArray(v?.values) ? v.values : [];
+          const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? (values[sizeIdx]?.es ?? values[sizeIdx]?.pt ?? values[sizeIdx]?.en ?? values[sizeIdx]) : '';
+          const colorVal = colorIdx >= 0 && colorIdx < values.length ? (values[colorIdx]?.es ?? values[colorIdx]?.pt ?? values[colorIdx]?.en ?? values[colorIdx]) : '';
+          const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
+          return {
+            variationId: v?.id,
+            sku: v?.sku || '',
+            size: String(toStr(sizeVal)),
+            color: String(toStr(colorVal)),
+            stock,
+            sold: 0
+          };
+        });
+        const img = (p.images && p.images[0]) ? (p.images[0].src || p.images[0].url) : '';
+        items.push({
+          id: String(p.id),
+          title,
+          status: 'active',
+          price: variantsList[0]?.price ?? 0,
+          totalStock,
+          soldTotal: 0,
+          thumbnail: img,
+          permalink: p.url || 'https://tiendanube.com',
+          hasVariations: variations.length > 1,
+          variations
+        });
+      } catch (e) {
+        console.warn('[TN Stock] Producto omitido por formato inesperado:', p?.id, (e as Error)?.message);
+      }
     }
 
     const totalHeader = response.headers['x-total-count'] || response.headers['x-total'];
@@ -1848,8 +1859,9 @@ export const getTiendaNubeStock = async (req: Request, res: Response) => {
       limit: perPage
     });
   } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
     console.error('Error fetching TN stock:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Error obteniendo stock de Tienda Nube', error: error.message });
+    res.status(500).json({ message: 'Error obteniendo stock de Tienda Nube', detail: detail || 'Error de conexión' });
   }
 };
 
@@ -1877,9 +1889,15 @@ export const getTiendaNubeStockTotals = async (req: Request, res: Response) => {
           'Authentication': `bearer ${integration.access_token}`,
           'User-Agent': TN_USER_AGENT
         },
-        params: { page, per_page: perPage }
+        params: { page, per_page: perPage },
+        validateStatus: () => true
       });
-      const products = response.data || [];
+      if (response.status !== 200) {
+        const errMsg = (response.data && (response.data.description || response.data.message || response.data.error)) || response.statusText || 'Tienda Nube no respondió OK';
+        return res.status(response.status >= 400 ? 502 : 500).json({ message: 'Error obteniendo totales de Tienda Nube', detail: errMsg });
+      }
+      const raw = response.data;
+      const products = Array.isArray(raw) ? raw : [];
       if (products.length === 0) {
         hasMore = false;
         break;
@@ -1905,8 +1923,9 @@ export const getTiendaNubeStockTotals = async (req: Request, res: Response) => {
       noStockCount
     });
   } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
     console.error('Error fetching TN stock totals:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Error obteniendo totales de Tienda Nube', error: error.message });
+    res.status(500).json({ message: 'Error obteniendo totales de Tienda Nube', detail: detail || 'Error de conexión' });
   }
 };
 

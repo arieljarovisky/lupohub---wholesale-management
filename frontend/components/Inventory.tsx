@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -1580,119 +1580,147 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* LINK EXTERNAL IDS MODAL */}
       {linkingVariant && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-           <div className="bg-slate-900 rounded-3xl border border-slate-800 w-full max-w-md flex flex-col shadow-2xl animate-fade-in-up">
-              <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
-                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Link size={20} className="text-indigo-400" />
-                    Vincular Producto
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+           <div className="bg-slate-900 rounded-2xl border border-slate-700/80 w-full max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[90vh] overflow-hidden">
+              <div className="shrink-0 p-5 border-b border-slate-700/80 flex justify-between items-center">
+                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-indigo-500/20"><Link size={18} className="text-indigo-400" /></span>
+                    Vincular producto
                  </h3>
-                 <button onClick={() => setLinkingVariant(null)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition">
+                 <button onClick={() => setLinkingVariant(null)} className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 transition" aria-label="Cerrar">
                     <X size={20} />
                  </button>
               </div>
-              <div className="p-6 space-y-6">
-                 <div className="bg-blue-900/10 border border-blue-900/30 p-4 rounded-xl mb-4">
-                    <p className="text-xs text-blue-300 font-medium mb-1">SKU interno (LupoHub / Tango)</p>
-                    <p className="text-sm text-white font-mono">{linkingVariant.sku}</p>
+              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                 {/* SKU interno: solo lectura */}
+                 <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600/50 text-slate-300 text-sm font-mono">
+                       <Lock size={12} className="text-slate-500 shrink-0" />
+                       <span className="text-slate-500 text-xs font-normal mr-1">SKU interno</span>
+                       {linkingVariant.sku}
+                    </span>
                  </div>
 
-                 <div className="space-y-4">
-                    <div className="space-y-1">
-                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Tag size={12} className="text-amber-400"/> SKU en Mercado Libre y Tienda Nube</label>
-                       <input 
-                         type="text" 
-                         value={linkExternalSku}
-                         onChange={(e) => setLinkExternalSku(e.target.value)}
-                         placeholder="Mismo SKU que en ML y TN (para sincronizar)"
-                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-amber-500 outline-none font-mono text-sm"
-                       />
-                       <p className="text-[10px] text-slate-600 ml-1">Si ML y TN usan otro código que tu inventario, ingresalo acá. Se usa para sincronizar stock y para identificar pedidos.</p>
+                 {/* SKU externo (ML/TN) */}
+                 <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                       <Tag size={12} className="text-amber-400/80" />
+                       SKU en Mercado Libre y Tienda Nube
+                    </label>
+                    <input 
+                      type="text" 
+                      value={linkExternalSku}
+                      onChange={(e) => setLinkExternalSku(e.target.value)}
+                      placeholder="Ej: mismo código que en ML y TN"
+                      className="w-full bg-slate-800/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-amber-500/70 focus:ring-1 focus:ring-amber-500/30 outline-none font-mono text-sm transition"
+                    />
+                    <p className="text-[11px] text-slate-500">Código con el que sincronizás stock y se identifican pedidos. Si es distinto al interno, ingresalo acá.</p>
+                 </div>
+
+                 {/* Tienda Nube */}
+                 <div className="space-y-3 rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                       <Cloud size={12} className="text-cyan-400/80" />
+                       Tienda Nube
+                    </p>
+                    <div className="grid grid-cols-1 gap-3">
+                       <div>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID del producto</label>
+                          <input 
+                            type="text" 
+                            value={linkTnId}
+                            onChange={(e) => setLinkTnId(e.target.value)}
+                            placeholder="ID padre (grupo)"
+                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
+                          />
+                       </div>
+                       <div>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID de la variante</label>
+                          <input 
+                            type="text" 
+                            value={linkTnVariantId}
+                            onChange={(e) => setLinkTnVariantId(e.target.value)}
+                            placeholder="ID variante"
+                            className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
+                          />
+                       </div>
                     </div>
-                    <div className="space-y-1">
-                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Cloud size={12} className="text-blue-400"/> Tienda Nube (Producto ID)</label>
-                       <input 
-                         type="text" 
-                         value={linkTnId}
-                         onChange={(e) => setLinkTnId(e.target.value)}
-                         placeholder="ID del Producto (Parent)"
-                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm"
-                       />
-                       <p className="text-[10px] text-slate-600 ml-1">Se aplicará a todo el grupo {linkingVariant.sku.split('-').slice(0,-2).join('-') || 'Base'}</p>
-                    </div>
-                    <div className="space-y-1">
-                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Cloud size={12} className="text-blue-400"/> Tienda Nube (Variante ID)</label>
-                       <input 
-                         type="text" 
-                         value={linkTnVariantId}
-                         onChange={(e) => setLinkTnVariantId(e.target.value)}
-                         placeholder="ID de la Variante"
-                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-blue-500 outline-none font-mono text-sm"
-                       />
-                    </div>
-                    <div className="space-y-1">
-                       <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 ml-1"><Zap size={12} className="text-yellow-500"/> Mercado Libre (Item ID)</label>
+                    <p className="text-[10px] text-slate-500">Aplica al grupo {linkingVariant.sku.split('-').slice(0,-2).join('-') || 'base'}.</p>
+                 </div>
+
+                 {/* Mercado Libre */}
+                 <div className="space-y-3 rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                       <Zap size={12} className="text-amber-400/80" />
+                       Mercado Libre
+                    </p>
+                    <div>
+                       <label className="text-[11px] text-slate-500 block mb-1">Item ID</label>
                        <input 
                          type="text" 
                          value={linkMlId}
                          onChange={(e) => setLinkMlId(e.target.value)}
-                         placeholder="MLA..."
-                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm"
+                         placeholder="Ej: MLA123..."
+                         className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
                        />
                     </div>
-                    <div className="border-t border-slate-700 pt-4 space-y-4">
-                       <p className="text-[10px] font-black text-slate-500 uppercase">Elegir pack (unidades por publicación)</p>
-                       <p className="text-xs text-slate-500">Indicá cuántas unidades tiene cada publicación en ML y TN. El stock que se sincroniza será: stock local ÷ este número (ej. 100 un. con pack x2 → 50 en la publicación).</p>
-                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                             <label className="text-[10px] text-slate-500 font-bold">Mercado Libre</label>
-                             <div className="flex flex-wrap gap-2 mb-2">
-                                {[1, 2, 3, 6, 12].map((n) => (
-                                  <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setLinkPackMl(n)}
-                                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${linkPackMl === n ? 'bg-yellow-600 text-white ring-2 ring-yellow-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                  >
-                                    x{n}
-                                  </button>
-                                ))}
-                             </div>
-                             <input type="number" min={1} max={999} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-yellow-500 outline-none font-mono text-sm" placeholder="Otro" />
+                 </div>
+
+                 {/* Packs */}
+                 <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                       <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pack (unidades por publicación)</p>
+                       <span className="text-[10px] text-slate-500" title="Stock enviado = stock local ÷ pack">100 un. ÷ x2 = 50 en la publicación</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                       <div className="space-y-2">
+                          <label className="text-[11px] text-slate-500">Mercado Libre</label>
+                          <div className="flex flex-wrap gap-1.5">
+                             {[1, 2, 3, 6, 12].map((n) => (
+                               <button
+                                 key={n}
+                                 type="button"
+                                 onClick={() => setLinkPackMl(n)}
+                                 className={`px-2.5 py-1.5 rounded-lg text-sm font-bold transition ${linkPackMl === n ? 'bg-amber-500/90 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white'}`}
+                               >
+                                 x{n}
+                               </button>
+                             ))}
                           </div>
-                          <div className="space-y-2">
-                             <label className="text-[10px] text-slate-500 font-bold">Tienda Nube</label>
-                             <div className="flex flex-wrap gap-2 mb-2">
-                                {[1, 2, 3, 6, 12].map((n) => (
-                                  <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setLinkPackTn(n)}
-                                    className={`px-3 py-2 rounded-lg text-sm font-bold transition-all ${linkPackTn === n ? 'bg-cyan-600 text-white ring-2 ring-cyan-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                  >
-                                    x{n}
-                                  </button>
-                                ))}
-                             </div>
-                             <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:border-cyan-500 outline-none font-mono text-sm" placeholder="Otro" />
+                          <input type="number" min={1} max={999} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-amber-500/70" placeholder="Otro" />
+                       </div>
+                       <div className="space-y-2">
+                          <label className="text-[11px] text-slate-500">Tienda Nube</label>
+                          <div className="flex flex-wrap gap-1.5">
+                             {[1, 2, 3, 6, 12].map((n) => (
+                               <button
+                                 key={n}
+                                 type="button"
+                                 onClick={() => setLinkPackTn(n)}
+                                 className={`px-2.5 py-1.5 rounded-lg text-sm font-bold transition ${linkPackTn === n ? 'bg-cyan-500/90 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white'}`}
+                               >
+                                 x{n}
+                               </button>
+                             ))}
                           </div>
+                          <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-cyan-500/70" placeholder="Otro" />
                        </div>
                     </div>
                  </div>
               </div>
-              <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
+              <div className="shrink-0 p-5 border-t border-slate-700/80 flex justify-end gap-3 bg-slate-900/80">
                  <button 
                    onClick={() => setLinkingVariant(null)}
-                   className="px-4 py-2 rounded-xl font-bold text-slate-400 hover:bg-slate-800 hover:text-white transition text-sm"
+                   className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm"
                  >
                    Cancelar
                  </button>
                  <button 
                    onClick={handleSaveLink}
-                   className="px-6 py-2 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center gap-2 text-sm"
+                   className="px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98] transition flex items-center gap-2 text-sm"
                  >
                    <CheckCircle2 size={16} />
-                   Guardar Vínculos
+                   Guardar vínculos
                  </button>
               </div>
            </div>

@@ -263,6 +263,27 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  // Sincronizar solo ML → TN (sin tocar inventario local)
+  const handleSyncMLtoTN = async () => {
+    setShowStockSyncModal(true);
+    setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(true);
+    setStockSyncResult(null);
+    try {
+      const res = await api.syncMLtoTN();
+      setStockSyncResult({
+        platform: 'ML → Tienda Nube',
+        updated: res.updated,
+        errors: res.errors,
+        logs: res.updated > 0 || res.errors > 0 ? [`Actualizados: ${res.updated}, errores: ${res.errors}`] : ['Listo.']
+      });
+    } catch (e: any) {
+      setStockSyncResult({ platform: 'ML → Tienda Nube', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+    } finally {
+      setMlStockSyncLoading(false);
+    }
+  };
+
   // Opcional: importar stock desde ML a la app (alinear una vez con lo publicado en ML)
   const handleImportStockFromMercadoLibre = async () => {
     setShowStockSyncModal(true);
@@ -812,6 +833,15 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                           SINCRONIZAR LOS 3 (ML = REAL)
+                        </button>
+                        <button 
+                          onClick={handleSyncMLtoTN}
+                          disabled={mlStockSyncLoading}
+                          className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Copia el stock de Mercado Libre a Tienda Nube (sin tocar tu inventario local)"
+                        >
+                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          SINCRONIZAR MERCADO LIBRE CON TIENDA NUBE
                         </button>
                         <button 
                           onClick={handleTestMercadoLibre}
