@@ -334,47 +334,50 @@ const TiendaNubeStock: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    {(item.hasVariations || (item.variations && item.variations.length > 1)) && (
-                      <ChevronDown
-                        size={20}
-                        className={`text-slate-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
-                      />
-                    )}
+                    <ChevronDown
+                      size={20}
+                      className={`text-slate-500 transition-transform shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
+                    />
                   </div>
                 </div>
 
-                {isExpanded && item.variations && item.variations.length > 0 && (
+                {isExpanded && (
                   <div className="px-4 pb-4 border-t border-slate-700/30 pt-4">
-                    <p className="text-cyan-400 text-xs font-bold mb-3">VARIACIONES ({item.variations.length})</p>
-                    <div className="bg-slate-900/30 rounded-xl overflow-x-auto">
-                      <table className="w-full min-w-[400px]">
-                        <thead>
-                          <tr className="border-b border-slate-700/30">
-                            <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
-                            <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Color</th>
-                            <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Talle</th>
-                            <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Stock</th>
-                            <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Vendidos</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {item.variations.map((v, i) => (
-                            <tr key={i} className="border-b border-slate-700/20 last:border-0">
-                              <td className="p-3 text-slate-400 text-xs font-mono">{v.sku || '-'}</td>
-                              <td className="p-3 text-white text-sm">{v.color || '-'}</td>
-                              <td className="p-3 text-white text-sm">{v.size || '-'}</td>
-                              <td className={`p-3 text-right font-bold ${
-                                v.stock === 0 ? 'text-red-400' : v.stock < 5 ? 'text-orange-400' : 'text-green-400'
-                              }`}>
-                                {v.stock}
-                              </td>
-                              <td className="p-3 text-right text-slate-400">{v.sold ?? 0}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
+                    {item.variations && item.variations.length > 0 ? (
+                      <>
+                        <p className="text-cyan-400 text-xs font-bold mb-3">VARIACIONES ({item.variations.length})</p>
+                        <div className="bg-slate-900/30 rounded-xl overflow-x-auto">
+                          <table className="w-full min-w-[400px]">
+                            <thead>
+                              <tr className="border-b border-slate-700/30">
+                                <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">SKU</th>
+                                <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Color</th>
+                                <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-3">Talle</th>
+                                <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Stock</th>
+                                <th className="text-right text-[10px] text-slate-500 font-bold uppercase p-3">Vendidos</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {item.variations.map((v, i) => (
+                                <tr key={i} className="border-b border-slate-700/20 last:border-0">
+                                  <td className="p-3 text-slate-400 text-xs font-mono">{v.sku || '-'}</td>
+                                  <td className="p-3 text-white text-sm">{v.color || '-'}</td>
+                                  <td className="p-3 text-white text-sm">{v.size || '-'}</td>
+                                  <td className={`p-3 text-right font-bold ${
+                                    v.stock === 0 ? 'text-red-400' : v.stock < 5 ? 'text-orange-400' : 'text-green-400'
+                                  }`}>
+                                    {v.stock}
+                                  </td>
+                                  <td className="p-3 text-right text-slate-400">{v.sold ?? 0}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-slate-500 text-sm mb-3">Sin variaciones (producto único)</p>
+                    )}
                     {item.permalink && item.permalink !== 'https://tiendanube.com' && (
                       <div className="mt-4 flex justify-end">
                         <a
