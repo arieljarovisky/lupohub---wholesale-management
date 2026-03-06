@@ -45,7 +45,7 @@ export const api = {
   // --- PRODUCTS ---
   getProducts: async (): Promise<Product[]> => {
     return handleRequest(async () => {
-      const res = await request<any>('/products', 'GET');
+      const res = await request<any>('/products?per_page=5000', 'GET');
       const rows = Array.isArray(res) ? res : res.items;
       return rows.map((r: any) => ({
         id: r.id,

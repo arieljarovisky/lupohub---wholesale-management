@@ -9,7 +9,7 @@ export const getProducts = async (req: Request, res: Response) => {
   try {
     const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
-    const perPageNum = Math.min(100, Math.max(1, parseInt(per_page as string, 10) || 20));
+    const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
     const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'name' : 'sku');
     const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');

@@ -286,7 +286,24 @@ const App: React.FC = () => {
       for (let i = 0; i < settled.length; i++) {
         const r = settled[i];
         if (r.status === 'fulfilled') {
-          created.push(r.value as Product);
+          const raw = r.value as any;
+          const parts = (raw?.sku || '').toString().split('-');
+          const sizeCode = parts.length >= 2 ? parts[parts.length - 2] : '';
+          const colorCode = parts.length >= 1 ? parts[parts.length - 1] : '';
+          created.push({
+            id: raw.id,
+            sku: raw.sku,
+            name: raw.name,
+            category: raw.category ?? 'General',
+            price: Number(raw.base_price ?? raw.price ?? 0),
+            description: raw.description ?? '',
+            size: sizeCode,
+            color: colorCode,
+            stock: 0,
+            stock_total: 0,
+            integrations: { local: true, mercadoLibre: false, tiendaNube: false },
+            externalIds: raw.externalIds,
+          } as Product);
         } else {
           const msg = (r.reason?.message || '').toLowerCase();
           if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409')) {
@@ -300,7 +317,7 @@ const App: React.FC = () => {
         setProducts(prev => [...prev, ...created]);
       }
       if (duplicates > 0 && created.length === 0) {
-        showToast('info', `${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.`);
+        showToast('info', `${duplicates} variante(s) ya existían con ese SKU. No se creó ninguna nueva.\n\nLa variante ya está en tu inventario: buscá el grupo por SKU o expandí la fila para verla.`);
       } else if (duplicates > 0) {
         showToast('success', `${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
       } else if (created.length > 0) {
