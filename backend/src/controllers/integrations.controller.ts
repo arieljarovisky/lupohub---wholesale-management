@@ -1147,9 +1147,9 @@ const processTiendaNubeOrder = async (orderId: string) => {
           newStock,
           'VENTA_TIENDA_NUBE',
           `Orden TN: ${orderId}`,
-          false
+          true
         );
-        console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}`);
+        console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
       } else {
         console.log(`[TN Order] Variante no encontrada para TN variant_id=${tnVariantId} sku=${itemSku}`);
       }
@@ -1256,9 +1256,9 @@ const processMercadoLibreOrder = async (orderId: string) => {
           newStock,
           'VENTA_MERCADO_LIBRE',
           `Orden ML: ${orderId}`,
-          false
+          true
         );
-        console.log(`[ML Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}`);
+        console.log(`[ML Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
       } else if (mlVariationId || itemSku) {
         console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);
       }
@@ -1377,6 +1377,75 @@ Equipo Lupo`;
     console.error(`[ML Message] Error enviando mensaje para orden ${orderId}:`, error.response?.data || error.message);
   }
 };
+
+/** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. */
+export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: number }> {
+  const mlToken = await getValidMLToken();
+  const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+  if (!mlToken || !tnIntegration?.access_token || !tnIntegration?.store_id) {
+    return { updated: 0, errors: 0 };
+  }
+  const rows = await query(`
+    SELECT p.mercado_libre_id AS ml_id, pv.mercado_libre_variant_id AS ml_variant_id,
+           p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
+           COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+           COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+    FROM product_variants pv
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    WHERE p.mercado_libre_id IS NOT NULL AND pv.mercado_libre_variant_id IS NOT NULL
+      AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL
+  `);
+  if (!rows?.length) return { updated: 0, errors: 0 };
+  const byMlId = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const id = (r as any).ml_id;
+    if (!byMlId.has(id)) byMlId.set(id, []);
+    byMlId.get(id)!.push(r);
+  }
+  let updated = 0;
+  let errors = 0;
+  const mlIds = Array.from(byMlId.keys());
+  const batchSize = 10;
+  for (let i = 0; i < mlIds.length; i += batchSize) {
+    const batch = mlIds.slice(i, i + batchSize);
+    const itemPromises = batch.map((id: string) =>
+      axios.get(`https://api.mercadolibre.com/items/${id}`, {
+        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+      }).then(r => r.data).catch(() => null)
+    );
+    const items = await Promise.all(itemPromises);
+    for (let j = 0; j < batch.length; j++) {
+      const item = items[j];
+      const mlId = batch[j];
+      const variantRows = byMlId.get(mlId) || [];
+      if (!item) { errors += variantRows.length; continue; }
+      const variations = item.variations || [];
+      for (const vr of variantRows) {
+        const r = vr as any;
+        const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
+        const mlQty = v ? (v.available_quantity ?? 0) : (variations.length === 0 ? (item.available_quantity ?? 0) : 0);
+        const mlPack = Math.max(1, Number(r.ml_pack) || 1);
+        const tnPack = Math.max(1, Number(r.tn_pack) || 1);
+        const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+        try {
+          await axios.put(
+            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
+            { stock: tnStock },
+            { headers: { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT } }
+          );
+          updated++;
+        } catch {
+          errors++;
+        }
+      }
+    }
+  }
+  if (updated > 0 || errors > 0) {
+    console.log(`[AutoSync ML→TN] Actualizados: ${updated}, errores: ${errors}`);
+  }
+  return { updated, errors };
+}
 
 // Sincronizar todo el stock local a Tienda Nube
 export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {

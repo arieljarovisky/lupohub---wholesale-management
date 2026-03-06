@@ -372,6 +372,13 @@ export const api = {
     }, { message: 'Offline', importedFromML: 0, errorsFromML: 0, sentToTN: 0, errorsToTN: 0, logs: [] }, 'syncAllStockFromMercadoLibre');
   },
 
+  /** Sincronización solo ML → TN (automática en backend cada ~30 min; este endpoint para ejecutar ahora). */
+  syncMLtoTN: async (): Promise<{ message: string; updated: number; errors: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; updated: number; errors: number }>('/integrations/mercadolibre/sync-ml-to-tn', 'POST', undefined, undefined, 60000);
+    }, { message: 'Offline', updated: 0, errors: 0 }, 'syncMLtoTN');
+  },
+
   importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
     return handleRequest(async () => {
       return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);

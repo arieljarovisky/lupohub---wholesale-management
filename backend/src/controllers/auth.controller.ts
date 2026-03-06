@@ -28,10 +28,11 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const { password: _pwd, ...safeUser } = user;
+    const secret = JWT_SECRET();
     const token = jwt.sign(
       { id: safeUser.id, email: safeUser.email, role: safeUser.role },
-      JWT_SECRET(),
-      { expiresIn: JWT_EXPIRES_IN }
+      secret,
+      { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
     );
     return res.json({ user: safeUser, token });
   } catch (error) {
@@ -70,7 +71,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     const newToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       secret,
-      { expiresIn: JWT_EXPIRES_IN }
+      { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
     );
     return res.json({ token: newToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, commissionPercentage: user.commissionPercentage } });
   } catch {

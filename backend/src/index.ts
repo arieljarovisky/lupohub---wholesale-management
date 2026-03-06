@@ -22,6 +22,7 @@ import { addExternalSkuToVariants } from './database/add_external_sku';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
+import { runAutoSyncMLtoTN } from './controllers/integrations.controller';
 
 dotenv.config();
 
@@ -88,4 +89,11 @@ initDatabase().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  const intervalMin = Math.max(1, parseInt(process.env.SYNC_ML_TN_INTERVAL_MINUTES || '30', 10));
+  const intervalMs = intervalMin * 60 * 1000;
+  if (process.env.SYNC_ML_TN_AUTO !== '0' && process.env.SYNC_ML_TN_AUTO !== 'false') {
+    runAutoSyncMLtoTN().catch(() => {});
+    setInterval(() => runAutoSyncMLtoTN().catch(() => {}), intervalMs);
+    console.log(`[AutoSync] ML → TN cada ${intervalMin} min`);
+  }
 });

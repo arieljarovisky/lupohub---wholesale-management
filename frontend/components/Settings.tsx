@@ -839,7 +839,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">
-                      <strong>ML = real:</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> para traer el stock de Mercado Libre a LupoHub y enviarlo a Tienda Nube. Para enviar solo tu stock local a ML, usá <strong>LOCAL → ML</strong>. Para solo traer ML a la app sin tocar TN, usá{' '}
+                      <strong>Automático:</strong> El stock entre Mercado Libre y Tienda Nube se sincroniza solo cada ~30 min (ML → TN). <strong>Manual (tus artículos):</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> para traer ML a LupoHub y TN; usá <strong>LOCAL → ML</strong> para enviar tu inventario a ML. Para solo traer ML a la app sin tocar TN, usá{' '}
                       <button
                         type="button"
                         onClick={handleImportStockFromMercadoLibre}

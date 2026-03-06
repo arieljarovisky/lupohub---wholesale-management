@@ -16,6 +16,7 @@ import {
   syncAllStockToTiendaNube,
   syncAllStockToMercadoLibre,
   syncAllStockFromMercadoLibre,
+  runAutoSyncMLtoTN,
   importStockFromMercadoLibre,
   getTiendaNubeOrders,
   getTiendaNubeStock,
@@ -45,6 +46,7 @@ router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
 router.post('/mercadolibre/sync-from-ml', syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', importStockFromMercadoLibre);
+router.post('/mercadolibre/sync-ml-to-tn', (req, res) => runAutoSyncMLtoTN().then(r => res.json({ message: 'ML → TN ejecutado', ...r })).catch(e => res.status(500).json({ message: e.message })));
 router.post('/mercadolibre/webhook', handleMercadoLibreWebhook);
 
 // Tienda Nube
