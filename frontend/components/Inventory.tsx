@@ -669,7 +669,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkMlId(product.externalIds?.mercadoLibre || '');
     setLinkPackMl(1);
     setLinkPackTn(1);
-    setLinkExternalSku('');
+    setLinkExternalSku((product.sku ?? '').toString());
     setLinkMlVariantId('');
     setLinkSaveStockFromML(null);
     setLinkProduct(null);
@@ -682,9 +682,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setLinkPackMl(p.mercado_libre_pack_size ?? 1);
           setLinkPackTn(p.tienda_nube_pack_size ?? 1);
           const variant = (p as any).variants?.find((v: any) => v.variant_id === product.id);
-          setLinkExternalSku(variant?.external_sku ?? '');
+          setLinkExternalSku((variant?.external_sku ?? product.sku ?? '').toString());
         } else {
-          setLinkExternalSku('');
+          setLinkExternalSku((product.sku ?? '').toString());
         }
       });
     }
@@ -1601,29 +1601,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                 {/* SKU interno: solo lectura */}
-                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600/50 text-slate-300 text-sm font-mono">
-                       <Lock size={12} className="text-slate-500 shrink-0" />
-                       <span className="text-slate-500 text-xs font-normal mr-1">SKU interno</span>
-                       {linkingVariant.sku}
-                    </span>
-                 </div>
-
-                 {/* SKU externo (ML/TN) */}
-                 <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
-                       <Tag size={12} className="text-amber-400/80" />
-                       SKU en Mercado Libre y Tienda Nube
-                    </label>
-                    <input 
-                      type="text" 
-                      value={linkExternalSku}
-                      onChange={(e) => setLinkExternalSku(e.target.value)}
-                      placeholder="Ej: mismo código que en ML y TN"
-                      className="w-full bg-slate-800/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-amber-500/70 focus:ring-1 focus:ring-amber-500/30 outline-none font-mono text-sm transition"
-                    />
-                    <p className="text-[11px] text-slate-500">Código con el que sincronizás stock y se identifican pedidos. Si es distinto al interno, ingresalo acá.</p>
+                 {/* SKU unificado: inventario, ML y TN */}
+                 <div className="rounded-xl bg-indigo-900/20 border border-indigo-700/50 p-4 space-y-3">
+                    <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
+                       <Tag size={12} />
+                       SKU unificado (inventario, Mercado Libre y Tienda Nube)
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                       Usá el mismo código en los tres. Así se sincroniza el stock y se identifican los pedidos con un solo SKU.
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600/50 text-slate-400 text-xs">
+                          <Lock size={12} className="shrink-0" /> En inventario:
+                       </span>
+                       <span className="font-mono text-sm text-white">{linkingVariant.sku}</span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap items-center">
+                       <input 
+                         type="text" 
+                         value={linkExternalSku}
+                         onChange={(e) => setLinkExternalSku(e.target.value)}
+                         placeholder="Mismo código para ML y TN (o dejalo igual)"
+                         className="flex-1 min-w-[140px] bg-slate-800/60 border border-slate-600/60 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-indigo-500/70 focus:ring-1 focus:ring-indigo-500/30 outline-none font-mono text-sm transition"
+                       />
+                       <button
+                         type="button"
+                         onClick={() => setLinkExternalSku(linkingVariant.sku)}
+                         className="px-3 py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold whitespace-nowrap transition"
+                       >
+                          Usar mismo código
+                       </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                       Si en ML o TN usás otro código, ingresalo arriba. Si dejás el mismo que en inventario (o tocás &quot;Usar mismo código&quot;), queda unificado.
+                    </p>
                  </div>
 
                  {/* Tienda Nube */}
