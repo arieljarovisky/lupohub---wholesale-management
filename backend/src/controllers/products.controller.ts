@@ -51,6 +51,7 @@ export const getProducts = async (req: Request, res: Response) => {
     const rows = await query(
       `
       SELECT pv.id, pv.sku, p.name, p.category, p.base_price,
+             p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
              COALESCE(st.stock, 0) AS stock_total
       FROM products p
@@ -67,6 +68,8 @@ export const getProducts = async (req: Request, res: Response) => {
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
       sku: r.sku,
+      base_sku: r.base_sku,
+      product_id: r.product_id,
       name: r.name,
       category: r.category,
       base_price: Number(r.base_price ?? 0),
