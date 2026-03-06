@@ -1118,8 +1118,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (!existingGroup || existingGroup.length === 0) return;
     
     const baseProduct = existingGroup[0];
-    const skuParts = baseProduct.sku.split('-');
-    const skuBase = skuParts.length >= 3 ? skuParts.slice(0, -2).join('-') : baseProduct.sku;
+    const skuParts = (baseProduct.sku || '').split('-');
+    const skuBase = (baseProduct as any).base_sku != null && (baseProduct as any).base_sku !== ''
+      ? String((baseProduct as any).base_sku)
+      : (skuParts.length >= 3 ? skuParts.slice(0, -2).join('-') : baseProduct.sku);
 
     openCreationModal({
       name: baseProduct.name,
