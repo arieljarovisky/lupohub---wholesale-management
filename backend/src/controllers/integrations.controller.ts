@@ -10,6 +10,10 @@ const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
 const TN_TOKEN_URL = 'https://www.tiendanube.com/apps/authorize/token';
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
+/** Pausa entre requests a Tienda Nube para no superar el límite de solicitudes (configurable con TN_RATE_LIMIT_DELAY_MS, default 450ms). */
+const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '450', 10));
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 /** URL del frontend para redirigir después del OAuth (producción: tu dominio Vercel). */
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
@@ -1239,6 +1243,7 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         } catch {
           errors++;
         }
+        if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
       }
     }
   }
@@ -1291,6 +1296,7 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
         errors++;
         logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
       }
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
     }
 
     res.json({
@@ -1497,6 +1503,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
           tnErrors++;
           logs.push(`[TN ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
         }
+        if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
       }
     } else {
       logs.push('[2/2] Tienda Nube no conectada, se omitió el envío.');
