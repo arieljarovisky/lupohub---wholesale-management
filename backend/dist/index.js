@@ -29,9 +29,12 @@ const add_stock_movements_table_1 = require("./database/add_stock_movements_tabl
 const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
+const add_pack_size_products_1 = require("./database/add_pack_size_products");
+const add_external_sku_1 = require("./database/add_external_sku");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
+const integrations_controller_1 = require("./controllers/integrations.controller");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
@@ -73,6 +76,8 @@ function initDatabase() {
                 yield (0, add_dispatched_at_orders_1.addDispatchedAtToOrders)();
                 yield (0, fix_integrations_table_1.fixIntegrationsTable)();
                 yield (0, add_despachos_table_1.addDespachosTable)();
+                yield (0, add_pack_size_products_1.addPackSizeToProducts)();
+                yield (0, add_external_sku_1.addExternalSkuToVariants)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }
@@ -92,4 +97,11 @@ function initDatabase() {
 initDatabase().catch(console.error);
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
+    const intervalMin = Math.max(1, parseInt(process.env.SYNC_ML_TN_INTERVAL_MINUTES || '30', 10));
+    const intervalMs = intervalMin * 60 * 1000;
+    if (process.env.SYNC_ML_TN_AUTO !== '0' && process.env.SYNC_ML_TN_AUTO !== 'false') {
+        (0, integrations_controller_1.runAutoSyncMLtoTN)().catch(() => { });
+        setInterval(() => (0, integrations_controller_1.runAutoSyncMLtoTN)().catch(() => { }), intervalMs);
+        console.log(`[AutoSync] ML → TN cada ${intervalMin} min`);
+    }
 });

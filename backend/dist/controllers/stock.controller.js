@@ -129,28 +129,37 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.restoreStockForOrder = restoreStockForOrder;
-// Sincronizar stock a plataformas externas (TN y ML)
+// Aplicar pack size: stock en app es por unidad; en ML/TN puede ser por pack (ej. pack x2 → enviar stock/2).
+function stockForPlatform(localStock, packSize) {
+    const n = Math.max(0, Number(packSize) || 1);
+    return n <= 0 ? localStock : Math.floor(localStock / n);
+}
+// Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
 const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const variant = yield (0, db_1.get)(`SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, 
-              p.tienda_nube_id, p.mercado_libre_id, pv.sku
+              p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
+              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
        WHERE pv.id = ?`, [variantId]);
         if (!variant)
             return;
+        const stockTN = stockForPlatform(newStock, variant.tn_pack);
+        const stockML = stockForPlatform(newStock, variant.ml_pack);
+        const skuMLTN = variant.external_sku || variant.sku;
         // Sincronizar con Tienda Nube
         if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-            yield (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, newStock);
+            yield (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
         }
-        // Sincronizar con Mercado Libre
+        // Sincronizar con Mercado Libre (SKU externo = mismo que TN)
         if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-            yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, newStock);
+            yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
         }
-        else if (variant.sku) {
-            // Fallback por SKU cuando no tenemos mapeo de IDs de ML
-            yield (0, integrations_controller_1.updateMercadoLibreStock)(variant.sku, newStock);
+        else if (skuMLTN) {
+            yield (0, integrations_controller_1.updateMercadoLibreStock)(skuMLTN, stockML);
         }
     }
     catch (error) {
@@ -407,13 +416,13 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
                             const itemSku = (product.sku || product.variant_sku || '').toString().trim();
                             let variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
                             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`, [itemSku, itemSku]);
                             }
                             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
                                 variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv
                    JOIN product_colors pc ON pc.id = pv.product_color_id
                    JOIN products p ON p.id = pc.product_id
-                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`, [itemSku, `${itemSku}%`]);
+                   WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ? LIMIT 1`, [itemSku, `${itemSku}%`, itemSku]);
                             }
                             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                                 yield (0, db_1.execute)(`INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
@@ -460,13 +469,13 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
                                 variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
                             }
                             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.sku = ?`, [itemSku]);
+                                variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`, [itemSku, itemSku]);
                             }
                             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
                                 variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv
                    JOIN product_colors pc ON pc.id = pv.product_color_id
                    JOIN products p ON p.id = pc.product_id
-                   WHERE p.sku = ? OR pv.sku LIKE ? LIMIT 1`, [itemSku, `${itemSku}%`]);
+                   WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ? LIMIT 1`, [itemSku, `${itemSku}%`, itemSku]);
                             }
                             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                                 yield (0, db_1.execute)(`INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)

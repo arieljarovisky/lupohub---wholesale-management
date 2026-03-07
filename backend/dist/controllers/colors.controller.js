@@ -11,17 +11,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getColors = void 0;
 const db_1 = require("../database/db");
-// Patrones que son talles, NO colores
-const SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
-const isValidColor = (name) => {
-    if (!name)
-        return false;
-    const trimmed = name.trim();
-    // Si parece un talle, NO es un color válido
-    if (SIZE_PATTERNS.test(trimmed))
-        return false;
-    return true;
-};
 const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
@@ -45,19 +34,18 @@ const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 rows = yield (0, db_1.query)(`
           SELECT id, code, name, hex
           FROM colors
-          ORDER BY name ASC
+          ORDER BY COALESCE(NULLIF(TRIM(name), ''), code) ASC
         `);
             }
             else {
                 rows = yield (0, db_1.query)(`
           SELECT id, code, name, NULL AS hex
           FROM colors
-          ORDER BY name ASC
+          ORDER BY COALESCE(NULLIF(TRIM(name), ''), code) ASC
         `);
             }
-            // Filtrar solo colores válidos (excluir talles)
-            const validRows = (rows || []).filter((r) => isValidColor(r.name));
-            return res.json(validRows);
+            // Devolver todos los colores (incl. códigos numéricos de Tango). No filtrar por isValidColor.
+            return res.json(rows || []);
         }
         // 3) Fallback: atributos legacy (type='color')
         const attrs = yield (0, db_1.query)(`
@@ -71,7 +59,7 @@ const getColors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             code: a.name,
             name: a.name,
             hex: a.value || null
-        })).filter((a) => isValidColor(a.name));
+        }));
         return res.json(mapped);
     }
     catch (error) {

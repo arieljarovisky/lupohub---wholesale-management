@@ -11,19 +11,28 @@ router.get('/mercadolibre/test', integrations_controller_1.testMercadoLibreConne
 router.get('/mercadolibre/debug', integrations_controller_1.debugMercadoLibreItem);
 router.get('/mercadolibre/orders', integrations_controller_1.getMercadoLibreOrders);
 router.get('/mercadolibre/stock', integrations_controller_1.getMercadoLibreStock);
+router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLibreStockTotals);
+router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMessageConfig);
 router.post('/mercadolibre/sync', integrations_controller_1.syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', integrations_controller_1.syncAllStockToMercadoLibre);
+router.post('/mercadolibre/unify-sku', integrations_controller_1.unifySkuFromMercadoLibreTitles);
+router.post('/mercadolibre/sync-from-ml', integrations_controller_1.syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', integrations_controller_1.importStockFromMercadoLibre);
+router.post('/mercadolibre/sync-ml-to-tn', (req, res) => (0, integrations_controller_1.runAutoSyncMLtoTN)().then(r => res.json(Object.assign({ message: 'ML → TN ejecutado' }, r))).catch(e => res.status(500).json({ message: e.message })));
 router.post('/mercadolibre/webhook', integrations_controller_1.handleMercadoLibreWebhook);
 // Tienda Nube
 router.get('/tiendanube/auth', integrations_controller_1.getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCallback);
 router.get('/tiendanube/orders', integrations_controller_1.getTiendaNubeOrders);
+router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
+router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
+router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
 router.post('/tiendanube/sync', integrations_controller_1.syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', integrations_controller_1.syncAllStockToTiendaNube);
 router.post('/tiendanube/normalize-sizes', integrations_controller_1.normalizeSizesInTiendaNube);
+router.post('/tiendanube/unify-sku', integrations_controller_1.unifySkuInTiendaNube);
 router.post('/tiendanube/webhook', integrations_controller_1.handleTiendaNubeWebhook);
 router.delete('/:platform/disconnect', integrations_controller_1.disconnectIntegration);
 exports.default = router;

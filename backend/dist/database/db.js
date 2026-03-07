@@ -63,9 +63,11 @@ const query = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0
 });
 exports.query = query;
 // Wrapper para ejecuciones que modifican datos (INSERT, UPDATE, DELETE)
+// Retorna el ResultSetHeader (affectedRows, insertId, etc.) para poder comprobar filas afectadas
 const execute = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
     try {
-        yield pool.execute(sql, params);
+        const [rows] = yield pool.execute(sql, params);
+        return rows;
     }
     catch (error) {
         console.error(`Error executing command: ${sql}`, error);

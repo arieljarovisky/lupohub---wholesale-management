@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cleanInvalidSizes = exports.getSizes = void 0;
 const db_1 = require("../database/db");
+const talles_tango_1 = require("../talles-tango");
 // Talles válidos conocidos
 const VALID_SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
 const isValidSize = (code) => {
@@ -28,14 +29,17 @@ const getSizes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     `);
         const hasSizesTable = Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) > 0;
         if (hasSizesTable) {
-            // Consulta directa - la tabla sizes tiene size_code y name
+            // Consulta directa - la tabla sizes tiene size_code y name. Mostrar nombre real (P, M, G...) para códigos Tango.
             const rows = yield (0, db_1.query)(`
-        SELECT id, size_code AS code, COALESCE(NULLIF(name, ''), size_code) AS name
+        SELECT id, size_code AS code, name
         FROM sizes
         ORDER BY size_code ASC
       `);
-            // Filtrar solo talles válidos
-            const validRows = (rows || []).filter((r) => isValidSize(r.code));
+            const validRows = (rows || []).filter((r) => isValidSize(r.code)).map((r) => ({
+                id: r.id,
+                code: r.code,
+                name: (0, talles_tango_1.nombreTalleDesdeCodigo)(r.code) || r.name || r.code,
+            }));
             return res.json(validRows);
         }
         // Fallback: atributos legacy (type='size')
