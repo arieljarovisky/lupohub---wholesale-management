@@ -2736,9 +2736,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </div>
                   </div>
                   {syncResult.fromML && (
-                    <div className="bg-amber-900/20 border border-amber-700/40 p-3 rounded-xl text-xs text-amber-200/90 grid grid-cols-2 gap-2">
-                      <span>Desde ML → LupoHub:</span><span>{syncResult.fromML.imported} OK, {syncResult.fromML.errorsFromML} errores</span>
-                      <span>LupoHub → TN:</span><span>{syncResult.fromML.sentToTN} OK, {syncResult.fromML.errorsToTN} errores</span>
+                    <div className="space-y-2">
+                      <div className="bg-amber-900/20 border border-amber-700/40 p-3 rounded-xl text-xs text-amber-200/90 space-y-2">
+                        <p className="text-[10px] font-bold text-amber-400/90 uppercase mb-1">Flujo del stock</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <span>Mercado Libre → LupoHub:</span><span>{syncResult.fromML.imported} OK, {syncResult.fromML.errorsFromML} errores</span>
+                          <span>LupoHub → Tienda Nube:</span><span>{syncResult.fromML.sentToTN} OK, {syncResult.fromML.errorsToTN} errores</span>
+                        </div>
+                        <p className="text-slate-500 pt-1">LupoHub = esta app (tu base de datos). Tienda Nube = tu tienda online conectada.</p>
+                      </div>
+                      <div className="bg-blue-900/30 border border-blue-700/50 p-3 rounded-xl text-xs text-blue-200/90">
+                        <p className="font-semibold text-blue-300 mb-1">¿Por qué el resto sigue en 0?</p>
+                        <p className="text-slate-400">Solo se actualiza el stock de las <strong className="text-slate-300">variantes que ya vinculaste</strong> a una publicación de Mercado Libre. Las que no están vinculadas no se tocan. Para que tengan stock desde ML: abrí cada artículo en Mi inventario, expandilo y usá <strong className="text-slate-300">Vincular</strong> (o <strong className="text-slate-300">Vincular grupo con ML / TN</strong>) y completá el ID de la publicación de Mercado Libre. Después volvé a ejecutar &quot;Traer stock desde Mercado Libre&quot;.</p>
+                      </div>
                     </div>
                   )}
                   {syncResult.logs && syncResult.logs.length > 0 && (
