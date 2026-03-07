@@ -1248,32 +1248,51 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   return (
     <div className="space-y-4 relative">
-      {/* Toggle: Mi inventario vs Vista Mercado Libre vs Vista Tienda Nube */}
-      <div className="flex rounded-xl bg-slate-800/80 border border-slate-700 p-1">
-        <button
-          type="button"
-          onClick={() => setInventorySubView('mine')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'mine' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
-        >
-          <Package size={18} />
-          Mi inventario
-        </button>
-        <button
-          type="button"
-          onClick={() => setInventorySubView('ml')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'ml' ? 'bg-yellow-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
-        >
-          <Zap size={18} />
-          Vista Mercado Libre
-        </button>
-        <button
-          type="button"
-          onClick={() => setInventorySubView('tn')}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${inventorySubView === 'tn' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
-        >
-          <Cloud size={18} />
-          Vista Tienda Nube
-        </button>
+      {/* Navegación de vistas: Mi inventario | ML | TN */}
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-0">
+        {/* Móvil: dropdown compacto */}
+        <div className="sm:hidden relative w-full">
+          <select
+            value={inventorySubView}
+            onChange={(e) => setInventorySubView(e.target.value as 'mine' | 'ml' | 'tn')}
+            className="w-full bg-slate-800 border border-slate-600 rounded-xl py-3 pl-4 pr-10 text-white text-sm font-medium appearance-none cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            aria-label="Vista de inventario"
+          >
+            <option value="mine">Mi inventario</option>
+            <option value="ml">Vista Mercado Libre</option>
+            <option value="tn">Vista Tienda Nube</option>
+          </select>
+          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden>
+            <ChevronDown size={18} />
+          </div>
+        </div>
+        {/* Desktop: pestañas con estilo más suave */}
+        <div className="hidden sm:flex rounded-xl bg-slate-800/60 border border-slate-700/80 p-1 gap-0.5">
+          <button
+            type="button"
+            onClick={() => setInventorySubView('mine')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all min-w-0 ${inventorySubView === 'mine' ? 'bg-blue-600/80 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40'}`}
+          >
+            <Package size={18} className="shrink-0" />
+            <span className="truncate">Mi inventario</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setInventorySubView('ml')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all min-w-0 ${inventorySubView === 'ml' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40'}`}
+          >
+            <Zap size={18} className="shrink-0" />
+            <span className="truncate">Mercado Libre</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setInventorySubView('tn')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all min-w-0 ${inventorySubView === 'tn' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/40'}`}
+          >
+            <Cloud size={18} className="shrink-0" />
+            <span className="truncate">Tienda Nube</span>
+          </button>
+        </div>
       </div>
 
       {inventorySubView === 'ml' ? (
