@@ -1,7 +1,8 @@
 export enum Role {
   ADMIN = 'ADMIN',
   SELLER = 'SELLER',
-  WAREHOUSE = 'WAREHOUSE'
+  WAREHOUSE = 'WAREHOUSE',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export enum OrderStatus {
@@ -63,12 +64,14 @@ export interface ApiConfig {
 
 export interface Customer {
   id: string;
-  sellerId: string; // Linked to specific seller
+  sellerId?: string;
+  userId?: string;
   name: string;
   businessName: string; // Razón Social
   email: string;
   address: string;
   city: string;
+  priceListId?: string;
 }
 
 export interface OrderItem {
@@ -83,7 +86,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   customerId: string;
-  sellerId: string; // User ID
+  sellerId?: string | null; // null = pedido directo (cliente directo)
   pickedBy?: string; // Usuario de depósito que preparó/despachó
   dispatchedAt?: string; // Fecha/hora en que se despachó
   items: OrderItem[];
@@ -108,4 +111,13 @@ export interface User {
   email: string;
   password?: string; // New field for authentication
   commissionPercentage?: number; // Admin configurable
+  priceListId?: string;
+}
+
+export interface PriceList {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }

@@ -45,15 +45,15 @@ const Orders: React.FC<OrdersProps> = ({
 
   const canCancelOrder = (order: Order) =>
     (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PREPARATION) &&
-    (role === Role.ADMIN || role === Role.SELLER);
+    (role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER);
 
-  const canEditOrder = role === Role.ADMIN || role === Role.SELLER;
+  const canEditOrder = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
-        {(role === Role.SELLER || role === Role.ADMIN) && (
+        {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
           <button 
             onClick={() => onNavigate('create_order')}
             className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"

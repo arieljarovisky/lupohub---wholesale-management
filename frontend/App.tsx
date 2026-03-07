@@ -14,7 +14,7 @@ import StockHistory from './components/StockHistory';
 import Despachos from './components/Despachos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
-import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
+import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
@@ -54,7 +54,9 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [attributes, setAttributes] = useState<Attribute[]>(MOCK_ATTRIBUTES);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [myCustomer, setMyCustomer] = useState<Customer | null>(null);
   
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -77,9 +79,10 @@ const App: React.FC = () => {
     if (savedView && currentUser) {
       const role = currentUser.role;
       const allowedByRole: Record<string, Role[]> = {
-        dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+        dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         inventory: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER],
-        orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+        orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
+        create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
         mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
         stock_history: [Role.ADMIN, Role.WAREHOUSE],
@@ -111,8 +114,18 @@ const App: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
+      if (currentUser?.role === Role.CUSTOMER) {
+        const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders()]);
+        setMyCustomer(myC || null);
+        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined });
+        setProducts(fetchedProducts);
+        setOrders(fetchedOrders);
+        setCustomers(myC ? [myC] : []);
+        setAttributes([]);
+      } else {
+      const effectivePriceListId = currentUser?.role === Role.SELLER ? (currentUser as any).priceListId : undefined;
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
-        api.getProducts(),
+        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId } : undefined),
         api.getOrders(),
         api.getColors(),
         api.getSizes(),
@@ -137,13 +150,16 @@ const App: React.FC = () => {
       setAttributes([...sizeAttrs, ...colorAttrs]);
       if (currentUser?.role === Role.ADMIN) {
         try {
-          const fetchedUsers = await api.getUsers();
+          const [fetchedUsers, fetchedPriceLists] = await Promise.all([api.getUsers(), api.getPriceLists()]);
           setUsers(fetchedUsers);
+          setPriceLists(fetchedPriceLists);
         } catch {
           setUsers([]);
+          setPriceLists([]);
         }
       } else {
         setUsers([]);
+      }
       }
     } catch (error) {
       console.error("Error loading data form API", error);
@@ -195,6 +211,7 @@ const App: React.FC = () => {
 
   const getVisibleCustomers = () => {
     if (!currentUser) return [];
+    if (currentUser.role === Role.CUSTOMER) return myCustomer ? [myCustomer] : [];
     if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) return customers;
     return customers.filter(c => c.sellerId === currentUser.id);
   };
@@ -213,7 +230,9 @@ const App: React.FC = () => {
   const handleCreateOrder = async (newOrder: Order) => {
     try {
       const isEditing = !!editingOrder;
-      const savedOrder = isEditing ? await api.updateOrder(newOrder) : await api.createOrder(newOrder);
+      const orderToSave = { ...newOrder };
+      if (currentUser?.role === Role.CUSTOMER) orderToSave.sellerId = null;
+      const savedOrder = isEditing ? await api.updateOrder(orderToSave) : await api.createOrder(orderToSave);
       setOrders(prev => {
         if (isEditing) {
           return prev.map(o => o.id === savedOrder.id ? savedOrder : o);
@@ -358,6 +377,17 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateCustomer = async (customerId: string, data: Partial<Customer>) => {
+    try {
+      const updated = await api.updateCustomer(customerId, data);
+      setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, ...updated } : c));
+      if (myCustomer?.id === customerId) setMyCustomer(prev => prev ? { ...prev, ...updated } : null);
+    } catch (error) {
+      console.error(error);
+      showToast('error', 'Error al actualizar el cliente.');
+    }
+  };
+
   const handleStartPicking = async (order: Order) => {
     if (currentUser?.role === Role.WAREHOUSE) {
       try {
@@ -473,21 +503,22 @@ const App: React.FC = () => {
   }
 
   const mobileNavItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
     { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
-    { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+    { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
     { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
   ];
 
   const allMobileNavSections = [
     { title: 'Principal', items: [
-      { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+      { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
       { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
     ]},
     { title: 'Pedidos y canales', items: [
-      { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+      { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+      { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -523,7 +554,7 @@ const App: React.FC = () => {
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
-                 {baseView === 'orders' && 'Pedidos Mayoristas'}
+                 {baseView === 'orders' && (currentUser.role === Role.CUSTOMER ? 'Mis pedidos' : 'Pedidos Mayoristas')}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
@@ -574,6 +605,8 @@ const App: React.FC = () => {
               role={currentUser.role} 
               sellerId={currentUser.id} 
               onCreateCustomer={handleCreateCustomer}
+              onUpdateCustomer={handleUpdateCustomer}
+              priceLists={priceLists}
               orders={orders}
               products={products}
             />
@@ -594,12 +627,12 @@ const App: React.FC = () => {
             />
           )}
           {baseView === 'create_order' && (
-            <CreateOrder 
-              products={products} 
-              customers={getVisibleCustomers()} 
-              onSave={handleCreateOrder} 
-              onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }} 
-              sellerId={currentUser.id}
+            <CreateOrder
+              products={products}
+              customers={getVisibleCustomers()}
+              onSave={handleCreateOrder}
+              onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+              sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
               initialOrder={editingOrder}
             />
           )}

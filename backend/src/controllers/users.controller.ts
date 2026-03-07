@@ -9,7 +9,7 @@ export const listUsers = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Solo administradores pueden listar usuarios' });
     }
     const rows = await query(
-      `SELECT id, name, email, role, commission_percentage AS commissionPercentage 
+      `SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId
        FROM users ORDER BY name`
     );
     res.json(rows);
@@ -35,10 +35,10 @@ export const createUser = async (req: Request, res: Response) => {
     if (!name?.trim() || !email?.trim() || !password) {
       return res.status(400).json({ message: 'Nombre, email y contraseña son requeridos' });
     }
-    const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE'];
+    const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER'];
     const roleVal = (role || 'SELLER').toString().toUpperCase();
     if (!validRoles.includes(roleVal)) {
-      return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER o WAREHOUSE' });
+      return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE o CUSTOMER' });
     }
 
     const existing = await get('SELECT id FROM users WHERE email = ?', [email.trim()]);
@@ -52,6 +52,14 @@ export const createUser = async (req: Request, res: Response) => {
       `INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, ?, ?)`,
       [id, name.trim(), email.trim(), password, roleVal, commission]
     );
+
+    if (roleVal === 'CUSTOMER') {
+      const customerId = uuidv4();
+      await execute(
+        `INSERT INTO customers (id, user_id, seller_id, name, business_name, email, address, city) VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL)`,
+        [customerId, id, name.trim(), name.trim(), email.trim()]
+      );
+    }
 
     const created = await get(
       `SELECT id, name, email, role, commission_percentage AS commissionPercentage FROM users WHERE id = ?`,
@@ -85,9 +93,35 @@ export const deleteUser = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
     await execute('DELETE FROM users WHERE id = ?', [id]);
+    await execute('UPDATE customers SET user_id = NULL WHERE user_id = ?', [id]);
     res.json({ message: 'Usuario eliminado', id });
   } catch (error: any) {
     console.error('deleteUser:', error);
     res.status(500).json({ message: 'Error eliminando usuario' });
+  }
+};
+
+/** Actualizar usuario (ej. price_list_id para vendedores). Solo ADMIN. */
+export const updateUser = async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden actualizar usuarios' });
+    }
+    const { id } = req.params;
+    const body = req.body as { priceListId?: string | null };
+    const existing = await get('SELECT id FROM users WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ message: 'Usuario no encontrado' });
+    if (body.priceListId !== undefined) {
+      const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
+      await execute('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+    }
+    const updated = await get(
+      `SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?`,
+      [id]
+    );
+    res.json(updated);
+  } catch (error: any) {
+    console.error('updateUser:', error);
+    res.status(500).json({ message: 'Error actualizando usuario' });
   }
 };

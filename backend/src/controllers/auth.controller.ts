@@ -3,7 +3,6 @@ import { get } from '../database/db';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = () => process.env.JWT_SECRET || 'devsecret';
-/** Duración del token: 30 días (no expira cada 2h). */
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
 /** Ventana para refrescar: si el token expiró hace menos de 7 días, se puede renovar. */
 const REFRESH_GRACE_DAYS = 7;
@@ -16,7 +15,7 @@ export const login = async (req: Request, res: Response) => {
 
   try {
     const user = await get(
-      'SELECT id, name, email, role, commission_percentage AS commissionPercentage, password FROM users WHERE email = ?',
+      'SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId, password FROM users WHERE email = ?',
       [email]
     );
 
@@ -61,7 +60,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     }
 
     const user = await get(
-      'SELECT id, name, email, role, commission_percentage AS commissionPercentage FROM users WHERE id = ?',
+      'SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?',
       [decoded.id]
     );
     if (!user) {
@@ -73,8 +72,37 @@ export const refreshToken = async (req: Request, res: Response) => {
       secret,
       { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
     );
-    return res.json({ token: newToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, commissionPercentage: user.commissionPercentage } });
+    return res.json({ token: newToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, commissionPercentage: user.commissionPercentage, priceListId: user.priceListId ?? undefined } });
   } catch {
     return res.status(401).json({ message: 'Token inválido' });
+  }
+};
+
+/** Devuelve el cliente vinculado al usuario cuando el rol es CUSTOMER (cliente directo). */
+export const getMyCustomer = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const role = (req as any).user?.role;
+  if (!userId) return res.status(401).json({ message: 'No autorizado' });
+  if (role !== 'CUSTOMER') return res.status(403).json({ message: 'Solo para clientes directos' });
+  try {
+    const row = await get(
+      `SELECT id, user_id, seller_id, name, business_name, email, address, city, price_list_id FROM customers WHERE user_id = ?`,
+      [userId]
+    );
+    if (!row) return res.status(404).json({ message: 'No se encontró el perfil de cliente' });
+    res.json({
+      id: row.id,
+      userId: row.user_id,
+      sellerId: row.seller_id ?? '',
+      name: row.name,
+      businessName: row.business_name ?? '',
+      email: row.email ?? '',
+      address: row.address ?? '',
+      city: row.city ?? '',
+      priceListId: row.price_list_id ?? undefined
+    });
+  } catch (e) {
+    console.error('getMyCustomer:', e);
+    res.status(500).json({ message: 'Error obteniendo perfil de cliente' });
   }
 };

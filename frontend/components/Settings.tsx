@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone } from 'lucide-react';
-import { Attribute, Role, ApiConfig, User, Order } from '../types';
+import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
@@ -48,7 +48,7 @@ const Settings: React.FC<SettingsProps> = ({
   users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser
 }) => {
   const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users'>('users');
+  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists'>('users');
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
 
@@ -365,10 +365,24 @@ const Settings: React.FC<SettingsProps> = ({
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
+  // Price lists (solo ADMIN)
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [priceListsLoading, setPriceListsLoading] = useState(false);
+  const [editingPriceList, setEditingPriceList] = useState<PriceList | null>(null);
+  const [priceListItems, setPriceListItems] = useState<{ productId: string; price: number; sku?: string; name?: string }[]>([]);
+  const [productsForPriceList, setProductsForPriceList] = useState<{ id: string; sku: string; name: string; base_price?: number }[]>([]);
+
   useEffect(() => {
     const config = getApiConfig();
     setApiConfig(config);
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'pricelists' || activeTab === 'users') {
+      setPriceListsLoading(true);
+      api.getPriceLists().then(list => { setPriceLists(list); setPriceListsLoading(false); }).catch(() => setPriceListsLoading(false));
+    }
+  }, [activeTab]);
 
   if (role !== Role.ADMIN) {
     return (
@@ -485,6 +499,14 @@ const Settings: React.FC<SettingsProps> = ({
           COMISIONES
         </button>
         <button
+          onClick={() => setActiveTab('pricelists')}
+          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+            activeTab === 'pricelists' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+          }`}
+        >
+          LISTAS DE PRECIOS
+        </button>
+        <button
           onClick={() => setActiveTab('integrations')}
           className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
             activeTab === 'integrations' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
@@ -559,6 +581,7 @@ const Settings: React.FC<SettingsProps> = ({
                       >
                          <option value={Role.SELLER}>Vendedor</option>
                          <option value={Role.WAREHOUSE}>Depósito</option>
+                         <option value={Role.CUSTOMER}>Cliente directo</option>
                          <option value={Role.ADMIN}>Administrador</option>
                       </select>
                     </div>
@@ -611,6 +634,29 @@ const Settings: React.FC<SettingsProps> = ({
                                 Comisión: {u.commissionPercentage}%
                              </div>
                           )}
+                          {(u.role === Role.SELLER || u.role === Role.CUSTOMER) && (
+                             <div className="mt-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase">Lista de precios</label>
+                                <select
+                                  value={u.priceListId ?? ''}
+                                  onChange={async (e) => {
+                                    const value = e.target.value || null;
+                                    try {
+                                      const updated = await api.updateUser(u.id, { priceListId: value });
+                                      onUpdateUser?.(updated);
+                                    } catch (err: any) {
+                                      showToast('error', err?.message || 'Error actualizando lista de precios');
+                                    }
+                                  }}
+                                  className="mt-0.5 w-full max-w-[200px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                  <option value="">Precio base</option>
+                                  {priceLists.map(pl => (
+                                    <option key={pl.id} value={pl.id}>{pl.name}</option>
+                                  ))}
+                                </select>
+                             </div>
+                          )}
                        </div>
                     </div>
                     {currentUser?.id !== u.id && (
@@ -635,6 +681,215 @@ const Settings: React.FC<SettingsProps> = ({
               ))}
            </div>
         </div>
+      )}
+
+      {/* PRICE LISTS TAB */}
+      {activeTab === 'pricelists' && (
+        <div className="space-y-6">
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <DollarSign size={20} className="text-green-400" />
+              Listas de precios
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">
+              Creá listas y asigná precios por producto. Luego asigná cada lista a vendedores (en Usuarios) o a clientes con acceso a la app (en Clientes).
+            </p>
+            {priceListsLoading ? (
+              <div className="flex items-center gap-2 text-slate-500 py-4"><Loader2 size={20} className="animate-spin" /> Cargando listas...</div>
+            ) : (
+              <div className="space-y-3">
+                {priceLists.map(pl => (
+                  <div key={pl.id} className="bg-slate-900 border border-slate-700 rounded-2xl p-4 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-white">{pl.name}</h4>
+                      {pl.description && <p className="text-xs text-slate-500 mt-0.5">{pl.description}</p>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setEditingPriceList(pl);
+                          try {
+                            const [items, res] = await Promise.all([
+                              api.getPriceListItems(pl.id),
+                              api.getProductsPaged(1, 5000, undefined, 'sku', 'asc')
+                            ]);
+                            setPriceListItems(items.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                            const byProduct = new Map<string, { id: string; sku: string; name: string; base_price?: number }>();
+                            for (const p of res.items) {
+                              const pid = (p as any).product_id || (p as any).id;
+                              if (!byProduct.has(pid)) byProduct.set(pid, {
+                                id: pid,
+                                sku: (p as any).base_sku || (p as any).sku,
+                                name: (p as any).name,
+                                base_price: (p as any).price
+                              });
+                            }
+                            setProductsForPriceList(Array.from(byProduct.values()));
+                          } catch (e) {
+                            showToast('error', 'Error cargando ítems');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold"
+                      >
+                        Editar precios
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`¿Eliminar la lista "${pl.name}"?`)) return;
+                          try {
+                            await api.deletePriceList(pl.id);
+                            setPriceLists(prev => prev.filter(x => x.id !== pl.id));
+                            showToast('success', 'Lista eliminada');
+                          } catch (err: any) {
+                            showToast('error', err?.message || 'Error eliminando');
+                          }
+                        }}
+                        className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-900/10 rounded-lg"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6">
+                  <input
+                    type="text"
+                    placeholder="Nombre de la nueva lista (ej: Mayorista 10%)"
+                    id="new-price-list-name"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm mb-2"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const name = (e.target as HTMLInputElement).value?.trim();
+                        if (name) {
+                          api.createPriceList({ name }).then(created => {
+                            setPriceLists(prev => [...prev, created]);
+                            (e.target as HTMLInputElement).value = '';
+                            showToast('success', 'Lista creada');
+                          }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={async () => {
+                      const input = document.getElementById('new-price-list-name') as HTMLInputElement;
+                      const name = input?.value?.trim();
+                      if (!name) return;
+                      try {
+                        const created = await api.createPriceList({ name });
+                        setPriceLists(prev => [...prev, created]);
+                        input.value = '';
+                        showToast('success', 'Lista creada');
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error creando');
+                      }
+                    }}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                  >
+                    <Plus size={18} /> Crear lista
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar ítems de lista de precios */}
+      {editingPriceList && (
+        <Modal
+          isOpen={!!editingPriceList}
+          onClose={() => { setEditingPriceList(null); setPriceListItems([]); }}
+          title={`Precios: ${editingPriceList.name}`}
+          footer={
+            <div className="flex gap-2 w-full">
+              <button onClick={() => setEditingPriceList(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-bold text-sm">Cerrar</button>
+              <button
+                onClick={async () => {
+                  try {
+                    await api.setPriceListItems(editingPriceList!.id, priceListItems.map(i => ({ productId: i.productId, price: i.price })));
+                    showToast('success', 'Precios guardados');
+                    setEditingPriceList(null);
+                    setPriceListItems([]);
+                  } catch (err: any) {
+                    showToast('error', (err as any)?.message || 'Error guardando');
+                  }
+                }}
+                className="flex-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm"
+              >
+                Guardar
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            <p className="text-slate-400 text-xs">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
+            {priceListItems.map((item, idx) => (
+              <div key={item.productId} className="flex items-center gap-3 bg-slate-800 rounded-xl p-3 border border-slate-700">
+                <span className="text-xs font-mono text-slate-500 flex-1 truncate">{item.sku || item.productId}</span>
+                <span className="text-sm text-white truncate flex-1">{item.name || 'Producto'}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={item.price}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= 0) {
+                      setPriceListItems(prev => prev.map((x, i) => i === idx ? { ...x, price: v } : x));
+                    }
+                  }}
+                  className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPriceListItems(prev => prev.filter((_, i) => i !== idx))}
+                  className="p-1.5 text-slate-500 hover:text-red-400"
+                  aria-label="Quitar"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2 flex-wrap items-center border-t border-slate-700 pt-4">
+              <select
+                id="add-product-select"
+                className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm min-w-[180px]"
+              >
+                <option value="">Agregar producto...</option>
+                {productsForPriceList.filter(p => !priceListItems.some(i => i.productId === p.id)).map(p => (
+                  <option key={p.id} value={p.id}>{p.sku} – {p.name}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                id="add-product-price"
+                placeholder="Precio"
+                className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const sel = document.getElementById('add-product-select') as HTMLSelectElement;
+                  const priceInput = document.getElementById('add-product-price') as HTMLInputElement;
+                  const productId = sel?.value;
+                  const price = parseFloat(priceInput?.value || '0');
+                  if (!productId || isNaN(price) || price < 0) return;
+                  const prod = productsForPriceList.find(p => p.id === productId);
+                  setPriceListItems(prev => [...prev, { productId, price, sku: prod?.sku, name: prod?.name }]);
+                  sel.value = '';
+                  priceInput.value = '';
+                }}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold"
+              >
+                <Plus size={16} className="inline mr-1" /> Agregar
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {activeTab === 'sellers' && (

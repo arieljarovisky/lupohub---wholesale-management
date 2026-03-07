@@ -7,7 +7,7 @@ import { nombreTalleDesdeCodigo } from '../talles-tango';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total } = req.query as any;
+    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
@@ -18,6 +18,7 @@ export const getProducts = async (req: Request, res: Response) => {
     const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
     const filterSyncNone = sync_none === '1' || sync_none === 'true';
     const skipTotal = skip_total === '1' || skip_total === 'true';
+    const priceListId = (price_list_id && String(price_list_id).trim()) || null;
 
     const conditions: string[] = ['1=1'];
     const params: any[] = [];
@@ -37,6 +38,14 @@ export const getProducts = async (req: Request, res: Response) => {
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    const priceJoin = priceListId
+      ? `LEFT JOIN price_list_items pli ON pli.price_list_id = ? AND pli.product_id = p.id`
+      : '';
+    const priceSelect = priceListId
+      ? `COALESCE(pli.price, p.base_price) AS base_price`
+      : `p.base_price`;
+    const priceParams = priceListId ? [priceListId] : [];
+
     let total = 0;
     if (!skipTotal) {
       const totalRow = await get(
@@ -45,16 +54,17 @@ export const getProducts = async (req: Request, res: Response) => {
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
       JOIN product_variants pv ON pv.product_color_id = pc.id
+      ${priceJoin}
       ${whereClause}
       `,
-        params
+        [...priceParams, ...params]
       );
       total = Number(totalRow?.total || 0);
     }
 
     const rows = await query(
       `
-      SELECT pv.id, pv.sku, p.name, p.category, p.base_price,
+      SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
              COALESCE(st.stock, 0) AS stock_total
@@ -62,11 +72,12 @@ export const getProducts = async (req: Request, res: Response) => {
       JOIN product_colors pc ON pc.product_id = p.id
       JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks st ON st.variant_id = pv.id
+      ${priceJoin}
       ${whereClause}
       ORDER BY ${sortCol} ${sortDir}
       LIMIT ? OFFSET ?
       `,
-      [...params, perPageNum, offset]
+      [...priceParams, ...params, perPageNum, offset]
     );
 
     const mapped = (rows || []).map((r: any) => ({

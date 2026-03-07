@@ -25,27 +25,72 @@ export const api = {
       name: r.name,
       email: r.email,
       role: r.role,
-      commissionPercentage: r.commissionPercentage != null ? Number(r.commissionPercentage) : undefined
+      commissionPercentage: r.commissionPercentage != null ? Number(r.commissionPercentage) : undefined,
+      priceListId: r.priceListId ?? undefined
     })) as User[];
   },
-  createUser: async (data: { name: string; email: string; password: string; role: string; commissionPercentage?: number }): Promise<User> => {
+  createUser: async (data: { name: string; email: string; password: string; role: string; commissionPercentage?: number; priceListId?: string }): Promise<User> => {
     const created = await request<any>('/users', 'POST', data);
     return {
       id: created.id,
       name: created.name,
       email: created.email,
       role: created.role,
-      commissionPercentage: created.commissionPercentage != null ? Number(created.commissionPercentage) : undefined
+      commissionPercentage: created.commissionPercentage != null ? Number(created.commissionPercentage) : undefined,
+      priceListId: created.priceListId ?? undefined
+    } as User;
+  },
+  updateUser: async (id: string, data: { priceListId?: string | null }): Promise<User> => {
+    const updated = await request<any>(`/users/${id}`, 'PATCH', data);
+    return {
+      id: updated.id,
+      name: updated.name,
+      email: updated.email,
+      role: updated.role,
+      commissionPercentage: updated.commissionPercentage != null ? Number(updated.commissionPercentage) : undefined,
+      priceListId: updated.priceListId ?? undefined
     } as User;
   },
   deleteUser: async (id: string): Promise<void> => {
     await request<void>(`/users/${id}`, 'DELETE');
   },
 
+  // --- PRICE LISTS (solo ADMIN) ---
+  getPriceLists: async (): Promise<import('../types').PriceList[]> => {
+    const rows = await request<any[]>('/price-lists', 'GET');
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
+    }));
+  },
+  getPriceList: async (id: string): Promise<import('../types').PriceList & { items: { productId: string; price: number }[] }> => {
+    return request<any>(`/price-lists/${id}`, 'GET');
+  },
+  createPriceList: async (data: { name: string; description?: string }): Promise<import('../types').PriceList> => {
+    return request<any>('/price-lists', 'POST', data);
+  },
+  updatePriceList: async (id: string, data: { name?: string; description?: string }): Promise<import('../types').PriceList> => {
+    return request<any>(`/price-lists/${id}`, 'PUT', data);
+  },
+  deletePriceList: async (id: string): Promise<void> => {
+    await request<void>(`/price-lists/${id}`, 'DELETE');
+  },
+  getPriceListItems: async (id: string): Promise<{ id: string; productId: string; price: number; sku?: string; name?: string }[]> => {
+    return request<any[]>(`/price-lists/${id}/items`, 'GET');
+  },
+  setPriceListItems: async (id: string, items: { productId: string; price: number }[]): Promise<{ items: { productId: string; price: number }[] }> => {
+    return request<any>(`/price-lists/${id}/items`, 'PUT', items);
+  },
+
   // --- PRODUCTS ---
-  getProducts: async (): Promise<Product[]> => {
+  getProducts: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
     return handleRequest(async () => {
-      const res = await request<any>('/products?per_page=5000', 'GET');
+      const params = new URLSearchParams({ per_page: '5000' });
+      if (options?.priceListId) params.set('price_list_id', options.priceListId);
+      const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const rows = Array.isArray(res) ? res : res.items;
       return rows.map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
@@ -70,8 +115,10 @@ export const api = {
   },
 
   /** Igual que getProducts pero sin fallback: lanza si falla. Usar al refrescar después de crear para no pisar con MOCK. */
-  getProductsStrict: async (): Promise<Product[]> => {
-    const res = await request<any>('/products?per_page=5000', 'GET');
+  getProductsStrict: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
+    const params = new URLSearchParams({ per_page: '5000' });
+    if (options?.priceListId) params.set('price_list_id', options.priceListId);
+    const res = await request<any>(`/products?${params.toString()}`, 'GET');
     const rows = Array.isArray(res) ? res : (res && res.items) || [];
     return rows.map((r: any) => {
       const parts = (r.sku || '').toString().split('-');
@@ -322,13 +369,34 @@ export const api = {
       return (Array.isArray(rows) ? rows : []).map((r: any) => ({
         id: r.id,
         sellerId: r.sellerId ?? r.seller_id ?? '',
+        userId: r.userId ?? r.user_id ?? undefined,
         name: r.name ?? '',
         businessName: r.businessName ?? r.business_name ?? '',
         email: r.email ?? '',
         address: r.address ?? '',
-        city: r.city ?? ''
+        city: r.city ?? '',
+        priceListId: r.priceListId ?? r.price_list_id ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');
+  },
+
+  /** Perfil del cliente directo (solo cuando el usuario tiene rol CUSTOMER). */
+  getMyCustomer: async (): Promise<Customer | null> => {
+    try {
+      const r = await request<any>('/auth/me/customer', 'GET');
+      return {
+        id: r.id,
+        sellerId: r.sellerId ?? undefined,
+        name: r.name ?? '',
+        businessName: r.businessName ?? '',
+        email: r.email ?? '',
+        address: r.address ?? '',
+        city: r.city ?? '',
+        priceListId: r.priceListId ?? undefined
+      } as Customer;
+    } catch {
+      return null;
+    }
   },
 
   createCustomer: async (customer: Customer): Promise<Customer> => {
@@ -340,7 +408,8 @@ export const api = {
         businessName: customer.businessName,
         email: customer.email,
         address: customer.address,
-        city: customer.city
+        city: customer.city,
+        priceListId: customer.priceListId
       });
       return {
         id: created.id,
@@ -349,9 +418,24 @@ export const api = {
         businessName: created.businessName ?? created.business_name ?? '',
         email: created.email ?? '',
         address: created.address ?? '',
-        city: created.city ?? ''
+        city: created.city ?? '',
+        priceListId: created.priceListId ?? created.price_list_id ?? undefined
       } as Customer;
     }, customer, 'createCustomer');
+  },
+
+  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
+    const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
+    return {
+      id: updated.id,
+      sellerId: updated.sellerId ?? updated.seller_id ?? '',
+      name: updated.name ?? '',
+      businessName: updated.businessName ?? updated.business_name ?? '',
+      email: updated.email ?? '',
+      address: updated.address ?? '',
+      city: updated.city ?? '',
+      priceListId: updated.priceListId ?? updated.price_list_id ?? undefined
+    } as Customer;
   },
 
   // Ajuste manual de stock por variante (Admin o Depósito)

@@ -5,8 +5,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 export const getOrders = async (req: any, res: any) => {
   try {
-    // 1. Get Orders
-    const ordersRow = await query("SELECT * FROM orders ORDER BY date DESC");
+    let ordersRow = await query("SELECT * FROM orders ORDER BY date DESC");
+    const user = req.user;
+    if (user?.role === 'CUSTOMER') {
+      const { get } = await import('../database/db');
+      const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+      if (customer?.id) {
+        ordersRow = ordersRow.filter((o: any) => o.customer_id === customer.id);
+      } else {
+        ordersRow = [];
+      }
+    }
     
     // 2. Get Items for each order with productId (variant -> product_color -> product)
     const ordersFull = await Promise.all(ordersRow.map(async (order) => {
@@ -54,6 +63,17 @@ export const createOrder = async (req: any, res: any) => {
     return res.status(400).json({ message: "Datos de pedido inválidos" });
   }
 
+  const user = req.user;
+  let sellerId = newOrder.sellerId ?? null;
+  if (user?.role === 'CUSTOMER') {
+    const { get } = await import('../database/db');
+    const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+    if (!customer || customer.id !== newOrder.customerId) {
+      return res.status(403).json({ message: 'Como cliente directo solo podés crear pedidos para tu propio perfil' });
+    }
+    sellerId = null;
+  }
+
   const orderId = newOrder.id || uuidv4();
 
   try {
@@ -69,7 +89,7 @@ export const createOrder = async (req: any, res: any) => {
     const sqlDate = toSqlDate(newOrder.date);
     await execute(
       `INSERT INTO orders (id, customer_id, seller_id, date, status, total) VALUES (?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, newOrder.sellerId, sqlDate, newOrder.status, newOrder.total]
+      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -200,9 +220,10 @@ export const updateOrder = async (req: any, res: any) => {
       }
     };
     const sqlDate = toSqlDate(updated.date);
+    const sellerId = updated.sellerId ?? null;
     await execute(
       "UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ? WHERE id = ?",
-      [updated.customerId, updated.sellerId, sqlDate, updated.status, updated.total, id]
+      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
     for (const item of updated.items as any[]) {

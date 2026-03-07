@@ -9,7 +9,7 @@ interface CreateOrderProps {
   customers: Customer[];
   onSave: (order: Order) => void;
   onCancel: () => void;
-  sellerId: string;
+  sellerId?: string | null;
   initialOrder?: Order | null;
 }
 
@@ -53,6 +53,10 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       setRows(mappedRows);
     }
   }, [initialOrder, products]);
+
+  useEffect(() => {
+    if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
+  }, [customers, selectedCustomerId]);
 
   const searchTrimmed = searchTerm.trim().toLowerCase();
   const searchWords = searchTrimmed ? searchTrimmed.split(/\s+/).filter(Boolean) : [];
@@ -114,7 +118,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     onSave({
       id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
-      sellerId: initialOrder?.sellerId || sellerId,
+      sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: rows.map(r => ({
         variantId: r.variantId,
         productId: products.find(p => p.sku === r.sku)?.id,

@@ -7,11 +7,13 @@ interface CustomersProps {
   role: Role;
   sellerId: string;
   onCreateCustomer: (customer: Customer) => void;
+  onUpdateCustomer?: (customerId: string, data: Partial<Customer>) => void | Promise<void>;
   orders: Order[];
   products: Product[];
+  priceLists?: { id: string; name: string }[];
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, orders, products }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, orders, products, priceLists = [] }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -199,6 +201,30 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               Editar Datos
            </button>
         </div>
+
+        {role === Role.ADMIN && priceLists.length > 0 && onUpdateCustomer && (
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4">
+            <label className="block text-xs font-black text-slate-500 uppercase mb-2">Lista de precios (cliente con acceso a la app)</label>
+            <select
+              value={selectedCustomer.priceListId ?? ''}
+              onChange={async (e) => {
+                const value = e.target.value || null;
+                try {
+                  await Promise.resolve(onUpdateCustomer(selectedCustomer.id, { priceListId: value }));
+                  setSelectedCustomer(prev => prev ? { ...prev, priceListId: value ?? undefined } : null);
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              className="w-full max-w-xs bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="">Precio base</option>
+              {priceLists.map(pl => (
+                <option key={pl.id} value={pl.id}>{pl.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

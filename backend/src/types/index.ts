@@ -1,7 +1,8 @@
 export enum Role {
   ADMIN = 'ADMIN',
   SELLER = 'SELLER',
-  WAREHOUSE = 'WAREHOUSE'
+  WAREHOUSE = 'WAREHOUSE',
+  CUSTOMER = 'CUSTOMER'
 }
 
 export enum OrderStatus {
@@ -48,7 +49,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   customerId: string;
-  sellerId: string;
+  sellerId?: string | null;
   items: OrderItem[];
   total: number;
   status: OrderStatus;
