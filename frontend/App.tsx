@@ -12,7 +12,7 @@ import TiendaNubeOrders from './components/TiendaNubeOrders';
 import MercadoLibreOrders from './components/MercadoLibreOrders';
 import StockHistory from './components/StockHistory';
 import Despachos from './components/Despachos';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem } from './types';
 import { api } from './services/api';
@@ -674,6 +674,15 @@ const App: React.FC = () => {
                   </div>
                 );
               })}
+            </div>
+            <div className="shrink-0 p-4 pt-0 border-t border-slate-800">
+              <button
+                onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors touch-manipulation min-h-[48px] font-medium"
+              >
+                <LogOut size={20} />
+                Cerrar sesión
+              </button>
             </div>
           </div>
         </>
