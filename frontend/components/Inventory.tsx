@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2 } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2 } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
-import { syncAllStock } from '../services/apiIntegration';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
@@ -41,7 +40,11 @@ interface InventoryProps {
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
   const { showToast, showConfirm } = useNotification();
   const [searchTerm, setSearchTerm] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
+  const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | null>(null);
+  const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
+  const [showSyncResultModal, setShowSyncResultModal] = useState(false);
+  const syncMenuRef = useRef<HTMLDivElement>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -543,10 +546,89 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleSyncStock = async () => {
-    setIsSyncing(true);
-    await syncAllStock(products);
-    setTimeout(() => setIsSyncing(false), 1500);
+    setSyncMenuOpen(false);
+    setSyncLoading('both');
+    setSyncResult(null);
+    setShowSyncResultModal(true);
+    try {
+      const [tnRes, mlRes] = await Promise.all([
+        api.syncStockToTiendaNube(),
+        api.syncStockToMercadoLibre()
+      ]);
+      const totalUpdated = tnRes.updated + mlRes.updated;
+      const totalErrors = tnRes.errors + mlRes.errors;
+      const logs = [
+        ...(tnRes.logs || []).map(l => `[TN] ${l}`),
+        ...(mlRes.logs || []).map(l => `[ML] ${l}`)
+      ];
+      setSyncResult({
+        platform: 'Tienda Nube y Mercado Libre',
+        updated: totalUpdated,
+        errors: totalErrors,
+        logs
+      });
+      if (onImportComplete && (totalUpdated > 0 || totalErrors > 0)) onImportComplete();
+      if (totalErrors === 0 && totalUpdated > 0) showToast('success', `Sincronizado: ${totalUpdated} variantes a TN y ML.`);
+      else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el detalle.`);
+    } catch (e: any) {
+      setSyncResult({
+        platform: 'Error',
+        updated: 0,
+        errors: 1,
+        logs: [e?.message || 'Error de conexión']
+      });
+      showToast('error', e?.message || 'Error al sincronizar stock');
+    } finally {
+      setSyncLoading(null);
+    }
   };
+
+  const handleSyncToTiendaNube = async () => {
+    setSyncMenuOpen(false);
+    setSyncLoading('tn');
+    setSyncResult(null);
+    setShowSyncResultModal(true);
+    try {
+      const res = await api.syncStockToTiendaNube();
+      setSyncResult({ platform: 'Tienda Nube', ...res });
+      if (onImportComplete && (res.updated > 0 || res.errors > 0)) onImportComplete();
+      if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variantes enviadas a Tienda Nube.`);
+      else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+    } catch (e: any) {
+      setSyncResult({ platform: 'Tienda Nube', updated: 0, errors: 1, logs: [e?.message || 'Error de conexión'] });
+      showToast('error', e?.message || 'Error al sincronizar con Tienda Nube');
+    } finally {
+      setSyncLoading(null);
+    }
+  };
+
+  const handleSyncToMercadoLibre = async () => {
+    setSyncMenuOpen(false);
+    setSyncLoading('ml');
+    setSyncResult(null);
+    setShowSyncResultModal(true);
+    try {
+      const res = await api.syncStockToMercadoLibre();
+      setSyncResult({ platform: 'Mercado Libre', ...res });
+      if (onImportComplete && (res.updated > 0 || res.errors > 0)) onImportComplete();
+      if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variantes enviadas a Mercado Libre.`);
+      else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+    } catch (e: any) {
+      setSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e?.message || 'Error de conexión'] });
+      showToast('error', e?.message || 'Error al sincronizar con Mercado Libre');
+    } finally {
+      setSyncLoading(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!syncMenuOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (syncMenuRef.current && !syncMenuRef.current.contains(e.target as Node)) setSyncMenuOpen(false);
+    };
+    document.addEventListener('click', onOutside);
+    return () => document.removeEventListener('click', onOutside);
+  }, [syncMenuOpen]);
 
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
@@ -1330,14 +1412,52 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* Top Action Bar */}
       <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
         {isAdminOrWarehouse && (
-          <button 
-            onClick={handleSyncStock}
-            disabled={isSyncing}
-            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-blue-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm min-h-[44px]"
-          >
-            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
-            <span className="text-sm font-semibold hidden sm:inline">Sincronizar APIs</span>
-          </button>
+          <div className="flex-shrink-0 relative" ref={syncMenuRef}>
+            <button
+              type="button"
+              onClick={() => setSyncMenuOpen(prev => !prev)}
+              disabled={!!syncLoading}
+              className="flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-blue-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm min-h-[44px]"
+            >
+              {syncLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <RefreshCw size={18} />
+              )}
+              <span className="text-sm font-semibold hidden sm:inline">
+                {syncLoading === 'both' ? 'Sincronizando TN + ML…' : syncLoading === 'tn' ? 'Sincronizando TN…' : syncLoading === 'ml' ? 'Sincronizando ML…' : 'Sincronizar stock'}
+              </span>
+              <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {syncMenuOpen && !syncLoading && (
+              <div className="absolute left-0 top-full mt-1 py-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50">
+                <button
+                  type="button"
+                  onClick={handleSyncToTiendaNube}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                >
+                  <Cloud size={18} className="text-cyan-400" />
+                  Enviar a Tienda Nube
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncToMercadoLibre}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                >
+                  <Zap size={18} className="text-amber-400" />
+                  Enviar a Mercado Libre
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncStock}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-t border-slate-700"
+                >
+                  <RefreshCw size={18} className="text-blue-400" />
+                  Enviar a ambas (TN + ML)
+                </button>
+              </div>
+            )}
+          </div>
         )}
         
         <input
@@ -2491,6 +2611,60 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </button>
               </div>
            </div>
+        </div>
+      )}
+
+      {/* Modal resultado sincronización masiva */}
+      {showSyncResultModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]" onClick={() => { if (!syncLoading) setShowSyncResultModal(false); }}>
+          <div className="bg-slate-900 rounded-2xl w-full max-w-md border border-slate-800 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white">Sincronizar stock</h3>
+              <button type="button" onClick={() => { if (!syncLoading) setShowSyncResultModal(false); }} className="text-slate-400 hover:text-white p-2 rounded-lg" aria-label="Cerrar">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {syncLoading && (
+                <div className="py-6 flex flex-col items-center gap-3">
+                  <Loader2 className="animate-spin text-blue-500" size={32} />
+                  <p className="text-sm text-slate-300 font-medium">
+                    {syncLoading === 'both' ? 'Enviando a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
+                  </p>
+                  <p className="text-xs text-slate-500">Puede tardar unos minutos</p>
+                </div>
+              )}
+              {syncResult && !syncLoading && (
+                <>
+                  <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Actualizadas</p>
+                      <p className="text-xl font-bold text-green-400">{syncResult.updated}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Errores</p>
+                      <p className="text-xl font-bold text-red-400">{syncResult.errors}</p>
+                    </div>
+                  </div>
+                  {syncResult.logs && syncResult.logs.length > 0 && (
+                    <div className="bg-black/80 p-3 rounded-lg border border-slate-800 max-h-48 overflow-y-auto font-mono text-[10px]">
+                      {syncResult.logs.slice(0, 50).map((line, i) => (
+                        <div key={i} className={line.includes('[OK]') || line.includes('Updated') ? 'text-green-400' : line.includes('[ERROR]') || line.includes('Error') ? 'text-red-400' : 'text-slate-400'}>{line}</div>
+                      ))}
+                      {syncResult.logs.length > 50 && <div className="text-slate-500">… y {syncResult.logs.length - 50} líneas más</div>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {!syncLoading && (
+              <div className="p-4 border-t border-slate-800">
+                <button type="button" onClick={() => setShowSyncResultModal(false)} className="w-full py-2.5 rounded-xl font-semibold bg-slate-700 text-white hover:bg-slate-600 text-sm">
+                  Cerrar
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
         </>
