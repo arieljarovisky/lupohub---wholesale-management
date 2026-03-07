@@ -41,8 +41,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const { showToast, showConfirm } = useNotification();
   const [searchTerm, setSearchTerm] = useState('');
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
-  const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | null>(null);
-  const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
+  const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
+  const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
   const [showSyncResultModal, setShowSyncResultModal] = useState(false);
   const syncMenuRef = useRef<HTMLDivElement>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -543,6 +543,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  /** Mercado Libre = fuente de verdad: trae stock de ML a LupoHub y lo envía a Tienda Nube */
+  const handleSyncFromMercadoLibre = async () => {
+    setSyncMenuOpen(false);
+    setSyncLoading('fromML');
+    setSyncResult(null);
+    setShowSyncResultModal(true);
+    try {
+      const res = await api.syncAllStockFromMercadoLibre();
+      setSyncResult({
+        platform: 'Stock desde Mercado Libre',
+        updated: res.importedFromML + res.sentToTN,
+        errors: res.errorsFromML + res.errorsToTN,
+        logs: res.logs || [],
+        fromML: { imported: res.importedFromML, errorsFromML: res.errorsFromML, sentToTN: res.sentToTN, errorsToTN: res.errorsToTN }
+      });
+      if (onImportComplete) onImportComplete();
+      const totalOk = res.importedFromML + res.sentToTN;
+      const totalErr = res.errorsFromML + res.errorsToTN;
+      if (totalErr === 0 && totalOk > 0) showToast('success', `Stock actualizado desde Mercado Libre: ${res.importedFromML} variantes a LupoHub, ${res.sentToTN} enviadas a Tienda Nube.`);
+      else if (totalErr > 0) showToast('warning', `Actualizado con algunos errores. Revisá el detalle.`);
+    } catch (e: any) {
+      setSyncResult({
+        platform: 'Stock desde Mercado Libre',
+        updated: 0,
+        errors: 1,
+        logs: [e?.message || 'Error de conexión'],
+        fromML: undefined
+      });
+      showToast('error', e?.message || 'Error al traer stock desde Mercado Libre');
+    } finally {
+      setSyncLoading(null);
+    }
   };
 
   const handleSyncStock = async () => {
@@ -1425,12 +1459,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <RefreshCw size={18} />
               )}
               <span className="text-sm font-semibold hidden sm:inline">
-                {syncLoading === 'both' ? 'Sincronizando TN + ML…' : syncLoading === 'tn' ? 'Sincronizando TN…' : syncLoading === 'ml' ? 'Sincronizando ML…' : 'Sincronizar stock'}
+                {syncLoading === 'fromML' ? 'Traendo desde ML…' : syncLoading === 'both' ? 'Sincronizando TN + ML…' : syncLoading === 'tn' ? 'Sincronizando TN…' : syncLoading === 'ml' ? 'Sincronizando ML…' : 'Stock desde ML'}
               </span>
               <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {syncMenuOpen && !syncLoading && (
-              <div className="absolute left-0 top-full mt-1 py-1 min-w-[200px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50">
+              <div className="absolute left-0 top-full mt-1 py-1 min-w-[240px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50">
+                <div className="px-3 py-2 border-b border-slate-700">
+                  <p className="text-[10px] font-bold text-amber-400 uppercase">Fuente de verdad: Mercado Libre</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncFromMercadoLibre}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50"
+                >
+                  <Zap size={18} className="text-amber-400 shrink-0" />
+                  Traer stock desde Mercado Libre
+                </button>
+                <div className="px-3 py-1.5">
+                  <p className="text-[10px] text-slate-500">Enviar stock local a:</p>
+                </div>
                 <button
                   type="button"
                   onClick={handleSyncToTiendaNube}
@@ -1450,7 +1498,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <button
                   type="button"
                   onClick={handleSyncStock}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-t border-slate-700"
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
                 >
                   <RefreshCw size={18} className="text-blue-400" />
                   Enviar a ambas (TN + ML)
@@ -2619,7 +2667,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]" onClick={() => { if (!syncLoading) setShowSyncResultModal(false); }}>
           <div className="bg-slate-900 rounded-2xl w-full max-w-md border border-slate-800 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-white">Sincronizar stock</h3>
+              <h3 className="text-lg font-bold text-white">{syncResult?.platform || 'Sincronizar stock'}</h3>
               <button type="button" onClick={() => { if (!syncLoading) setShowSyncResultModal(false); }} className="text-slate-400 hover:text-white p-2 rounded-lg" aria-label="Cerrar">
                 <X size={20} />
               </button>
@@ -2629,7 +2677,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <div className="py-6 flex flex-col items-center gap-3">
                   <Loader2 className="animate-spin text-blue-500" size={32} />
                   <p className="text-sm text-slate-300 font-medium">
-                    {syncLoading === 'both' ? 'Enviando a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
+                    {syncLoading === 'fromML' ? 'Traendo stock desde Mercado Libre (ML → LupoHub → TN)…' : syncLoading === 'both' ? 'Enviando a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
                   </p>
                   <p className="text-xs text-slate-500">Puede tardar unos minutos</p>
                 </div>
@@ -2646,6 +2694,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       <p className="text-xl font-bold text-red-400">{syncResult.errors}</p>
                     </div>
                   </div>
+                  {syncResult.fromML && (
+                    <div className="bg-amber-900/20 border border-amber-700/40 p-3 rounded-xl text-xs text-amber-200/90 grid grid-cols-2 gap-2">
+                      <span>Desde ML → LupoHub:</span><span>{syncResult.fromML.imported} OK, {syncResult.fromML.errorsFromML} errores</span>
+                      <span>LupoHub → TN:</span><span>{syncResult.fromML.sentToTN} OK, {syncResult.fromML.errorsToTN} errores</span>
+                    </div>
+                  )}
                   {syncResult.logs && syncResult.logs.length > 0 && (
                     <div className="bg-black/80 p-3 rounded-lg border border-slate-800 max-h-48 overflow-y-auto font-mono text-[10px]">
                       {syncResult.logs.slice(0, 50).map((line, i) => (
