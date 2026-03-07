@@ -94,7 +94,7 @@ export const api = {
     }) as Product[];
   },
 
-  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
+  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
     return handleRequest(async () => {
       const syncMl = syncFilter === 'ML' || syncFilter === 'BOTH';
       const syncTn = syncFilter === 'TN' || syncFilter === 'BOTH';
@@ -107,7 +107,8 @@ export const api = {
         ...(dir ? { dir } : {}),
         ...(syncMl ? { sync_ml: '1' } : {}),
         ...(syncTn ? { sync_tn: '1' } : {}),
-        ...(syncNone ? { sync_none: '1' } : {})
+        ...(syncNone ? { sync_none: '1' } : {}),
+        ...(options?.skipTotal ? { skip_total: '1' } : {})
       });
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const items = (res.items || []).map((r: any) => {

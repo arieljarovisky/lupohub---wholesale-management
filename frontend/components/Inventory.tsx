@@ -306,27 +306,29 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   // 1. Server: cargar todos los productos (en páginas de 100) para que el paginado sea solo de vista
   const FETCH_PAGE_SIZE = 100;
   const MAX_PRODUCTS = 2000;
+  const loadIdRef = useRef(0);
   useEffect(() => {
     if (!serverMode) return;
+    const loadId = ++loadIdRef.current;
     (async () => {
       try {
         const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
         const first = await api.getProductsPaged(1, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
+        if (loadId !== loadIdRef.current) return;
         setServerTotal(first.total);
-        if (first.total <= FETCH_PAGE_SIZE) {
-          setServerItems(first.items);
-          return;
-        }
-        const allItems = [...first.items];
+        setServerItems(first.items);
+        if (first.total <= FETCH_PAGE_SIZE) return;
         const totalToLoad = Math.min(first.total, MAX_PRODUCTS);
         const totalPages = Math.ceil(totalToLoad / FETCH_PAGE_SIZE);
-        for (let p = 2; p <= totalPages; p++) {
-          const next = await api.getProductsPaged(p, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
-          allItems.push(...next.items);
-        }
-        setServerItems(allItems);
+        const restPages = await Promise.all(
+          Array.from({ length: totalPages - 1 }, (_, i) =>
+            api.getProductsPaged(i + 2, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync, { skipTotal: true })
+          )
+        );
+        if (loadId !== loadIdRef.current) return;
+        setServerItems(prev => [...prev, ...restPages.flatMap(r => r.items)]);
       } catch {
-        setServerMode(false);
+        if (loadId === loadIdRef.current) setServerMode(false);
       }
     })();
   }, [serverMode, searchTerm, sortKey, sortDir, filterSync, serverListRefreshKey]);

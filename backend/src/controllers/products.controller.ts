@@ -7,7 +7,7 @@ import { nombreTalleDesdeCodigo } from '../talles-tango';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none } = req.query as any;
+    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
@@ -17,6 +17,7 @@ export const getProducts = async (req: Request, res: Response) => {
     const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
     const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
     const filterSyncNone = sync_none === '1' || sync_none === 'true';
+    const skipTotal = skip_total === '1' || skip_total === 'true';
 
     const conditions: string[] = ['1=1'];
     const params: any[] = [];
@@ -36,17 +37,20 @@ export const getProducts = async (req: Request, res: Response) => {
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const totalRow = await get(
-      `
+    let total = 0;
+    if (!skipTotal) {
+      const totalRow = await get(
+        `
       SELECT COUNT(*) AS total
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
       JOIN product_variants pv ON pv.product_color_id = pc.id
       ${whereClause}
       `,
-      params
-    );
-    const total = Number(totalRow?.total || 0);
+        params
+      );
+      total = Number(totalRow?.total || 0);
+    }
 
     const rows = await query(
       `
