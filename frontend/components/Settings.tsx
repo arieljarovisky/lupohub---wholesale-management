@@ -9,7 +9,7 @@ import { useNotification } from '../context/NotificationContext';
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto pt-[env(safe-area-inset-top)] sm:pt-0">
       <div className="bg-slate-900 border-0 sm:border border-slate-700 rounded-none sm:rounded-3xl w-full max-w-md min-h-[100dvh] sm:min-h-0 max-h-[100dvh] sm:max-h-[90vh] shadow-2xl overflow-hidden animate-slide-up flex flex-col my-0 sm:my-4">
         <div className="p-4 sm:p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
           <h3 className="font-bold text-white text-lg truncate pr-2">{title}</h3>

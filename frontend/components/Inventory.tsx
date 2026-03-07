@@ -1818,7 +1818,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* CREATE PRODUCT MODAL */}
       {isCreating && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-           <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-800 w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col shadow-2xl animate-fade-in-up flex-1 sm:flex-initial">
+           <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-800 w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col shadow-2xl animate-fade-in-up flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
               {/* Modal Header */}
               <div className="p-4 sm:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl shrink-0">
                  <div className="flex items-center gap-3 min-w-0">
@@ -1995,7 +1995,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* LINK EXTERNAL IDS MODAL */}
       {linkingVariant && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
-           <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] sm:max-h-[90vh] overflow-hidden flex-1 sm:flex-initial">
+           <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] sm:max-h-[90vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
               <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700/80 flex justify-between items-center">
                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2 min-w-0">
                     <span className="p-1.5 rounded-lg bg-indigo-500/20 shrink-0"><Link size={18} className="text-indigo-400" /></span>
@@ -2235,7 +2235,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* Modal Vincular grupo en lote */}
       {showBulkLinkModal && bulkLinkGroupKey && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4" onClick={() => setShowBulkLinkModal(false)}>
-          <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700 shadow-2xl w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col flex-1 sm:flex-initial" onClick={e => e.stopPropagation()}>
+          <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700 shadow-2xl w-full sm:max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-700 flex justify-between items-center shrink-0">
               <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 min-w-0">
                 <Link size={20} className="text-indigo-400 shrink-0" />
@@ -2392,7 +2392,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Modal Asignar a Despacho */}
       {showDespachoModal && selectedProductForDespacho && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
            <div className="bg-slate-900 rounded-3xl w-full max-w-md border border-slate-800 shadow-2xl overflow-hidden">
               <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50 rounded-t-3xl">
                  <h3 className="text-lg font-bold text-white flex items-center gap-2">

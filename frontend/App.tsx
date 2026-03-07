@@ -399,7 +399,7 @@ const App: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="min-h-[100dvh] min-h-screen bg-slate-950 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)]">
         <div className="bg-slate-900 rounded-3xl shadow-2xl p-8 max-w-md w-full border border-slate-800 animate-fade-in-up">
           <div className="mb-8 flex flex-col items-center">
              <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center shadow-lg transform rotate-3 mb-4">
@@ -509,9 +509,9 @@ const App: React.FC = () => {
         />
       </div>
       
-      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto p-4 md:p-8 md:ml-64 relative scroll-area-ios">
+      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-4 pr-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios">
         {isLoading && (
-          <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
+          <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)]">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
              <p className="text-white font-bold">Sincronizando datos...</p>
           </div>
