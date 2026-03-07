@@ -386,20 +386,6 @@ export const api = {
       return await request<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }>('/integrations/tiendanube/normalize-sizes', 'POST');
     }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, logs: [] }, 'normalizeSizesInTiendaNube');
   },
-
-  /** Unificar SKU en Mercado Libre: usa el código del título (ej. Art. 12345 = primeros 5 números del SKU local) y actualiza las publicaciones con el SKU de tu stock local. */
-  unifySkuFromMercadoLibre: async (): Promise<{ message: string; updatedVariations: number; linkedItems: number; skipped: number; errors: number; logs: string[] }> => {
-    return handleRequest(async () => {
-      return await request<{ message: string; updatedVariations: number; linkedItems: number; skipped: number; errors: number; logs: string[] }>('/integrations/mercadolibre/unify-sku', 'POST', undefined, undefined, 300000);
-    }, { message: 'Offline', updatedVariations: 0, linkedItems: 0, skipped: 0, errors: 0, logs: [] }, 'unifySkuFromMercadoLibre');
-  },
-
-  /** Unificar SKU en Tienda Nube: actualiza el SKU de cada variante vinculada con el SKU de tu stock local. */
-  unifySkuInTiendaNube: async (): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
-    return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; total: number; logs: string[] }>('/integrations/tiendanube/unify-sku', 'POST', undefined, undefined, 180000);
-    }, { message: 'Offline', updated: 0, errors: 0, total: 0, logs: [] }, 'unifySkuInTiendaNube');
-  },
   
   syncProductsFromMercadoLibre: async (): Promise<{ message: string; linkedVariants: number; logs: string[] }> => {
     return handleRequest(async () => {

@@ -120,9 +120,6 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlStockSyncLoading, setMlStockSyncLoading] = useState(false);
   const [mlStockSyncIsImport, setMlStockSyncIsImport] = useState(false);
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
-  const [unifySkuResult, setUnifySkuResult] = useState<{ platform: 'ml' | 'tn'; updated: number; linkedItems?: number; skipped?: number; errors: number; logs: string[] } | null>(null);
-  const [showUnifySkuModal, setShowUnifySkuModal] = useState(false);
-  const [unifySkuLoading, setUnifySkuLoading] = useState(false);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
 
   // ML Auto Message Config
@@ -320,46 +317,6 @@ const Settings: React.FC<SettingsProps> = ({
       setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
     } finally {
       setLoadingNormalizeSizes(false);
-    }
-  };
-
-  const handleUnifySkuMercadoLibre = async () => {
-    setShowUnifySkuModal(true);
-    setUnifySkuResult(null);
-    setUnifySkuLoading(true);
-    try {
-      const res = await api.unifySkuFromMercadoLibre();
-      setUnifySkuResult({
-        platform: 'ml',
-        updated: res.updatedVariations ?? 0,
-        linkedItems: res.linkedItems ?? 0,
-        skipped: res.skipped ?? 0,
-        errors: res.errors ?? 0,
-        logs: res.logs || []
-      });
-    } catch (e: any) {
-      setUnifySkuResult({ platform: 'ml', updated: 0, errors: 1, logs: [e.message || 'Error al conectar con el servidor.'] });
-    } finally {
-      setUnifySkuLoading(false);
-    }
-  };
-
-  const handleUnifySkuTiendaNube = async () => {
-    setShowUnifySkuModal(true);
-    setUnifySkuResult(null);
-    setUnifySkuLoading(true);
-    try {
-      const res = await api.unifySkuInTiendaNube();
-      setUnifySkuResult({
-        platform: 'tn',
-        updated: res.updated ?? 0,
-        errors: res.errors ?? 0,
-        logs: res.logs || []
-      });
-    } catch (e: any) {
-      setUnifySkuResult({ platform: 'tn', updated: 0, errors: 1, logs: [e.message || 'Error al conectar con el servidor.'] });
-    } finally {
-      setUnifySkuLoading(false);
     }
   };
 
@@ -775,36 +732,6 @@ const Settings: React.FC<SettingsProps> = ({
             <p className="text-xs text-slate-500 mt-3">
               Los productos de TN y ML no se guardan en la base de datos; solo se usa el vínculo que vos cargás para enviar stock desde LupoHub hacia cada plataforma.
             </p>
-          </div>
-
-          {/* Unificar SKU: ML/TN con stock local */}
-          <div className="bg-amber-900/20 rounded-2xl border border-amber-700/50 p-5">
-            <p className="text-sm font-bold text-amber-200 flex items-center gap-2 mb-2">
-              <Link size={18} /> Unificar SKU con tu stock local
-            </p>
-            <p className="text-xs text-slate-300 mb-3">
-              Si en Mercado Libre el título tiene el código del artículo (ej. &quot;Art. 12345&quot;) y ese código coincide con los primeros números del SKU de tu stock local, podés actualizar <strong>masivamente</strong> los SKU en ML y TN para que usen el mismo código que tu depósito.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleUnifySkuMercadoLibre}
-                disabled={unifySkuLoading || !integrations.mercadolibre}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                title="Extrae el código del título de cada publicación en ML y actualiza el SKU con el de tu stock local"
-              >
-                {unifySkuLoading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                Unificar SKU en Mercado Libre (desde títulos)
-              </button>
-              <button
-                onClick={handleUnifySkuTiendaNube}
-                disabled={unifySkuLoading || !integrations.tiendanube}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                title="Actualiza el SKU de cada variante en TN con el SKU de las variantes ya vinculadas en LupoHub"
-              >
-                {unifySkuLoading ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-                Unificar SKU en Tienda Nube (desde vinculados)
-              </button>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1422,68 +1349,6 @@ const Settings: React.FC<SettingsProps> = ({
                     <div key={i} className={
                       line.includes('[OK]') ? 'text-green-400' : 
                       line.includes('[ERROR]') ? 'text-red-400' : 
-                      'text-slate-400'
-                    }>{line}</div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </Modal>
-
-      {/* Unificar SKU Result Modal */}
-      <Modal
-        isOpen={showUnifySkuModal}
-        onClose={() => { if (!unifySkuLoading) { setShowUnifySkuModal(false); setUnifySkuResult(null); } }}
-        title={unifySkuResult ? `Unificar SKU - ${unifySkuResult.platform === 'ml' ? 'Mercado Libre' : 'Tienda Nube'}` : 'Unificar SKU'}
-        footer={
-          <button
-            onClick={() => { setShowUnifySkuModal(false); setUnifySkuResult(null); }}
-            disabled={unifySkuLoading}
-            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-bold text-sm"
-          >
-            {unifySkuLoading ? 'Procesando...' : 'Cerrar'}
-          </button>
-        }
-      >
-        <div className="space-y-4">
-          {unifySkuLoading && !unifySkuResult && (
-            <div className="flex items-center justify-center gap-2 text-amber-400 py-8">
-              <Loader2 size={24} className="animate-spin" />
-              <span>Actualizando SKU en la plataforma...</span>
-            </div>
-          )}
-          {unifySkuResult && (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Actualizados</p>
-                  <p className="text-xl font-black text-green-400">{unifySkuResult.updated}</p>
-                </div>
-                {unifySkuResult.linkedItems != null && (
-                  <div>
-                    <p className="text-[10px] text-slate-500 uppercase font-black">Publicaciones</p>
-                    <p className="text-xl font-black text-slate-300">{unifySkuResult.linkedItems}</p>
-                  </div>
-                )}
-                {unifySkuResult.skipped != null && (
-                  <div>
-                    <p className="text-[10px] text-slate-500 uppercase font-black">Omitidos</p>
-                    <p className="text-xl font-black text-slate-400">{unifySkuResult.skipped}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores</p>
-                  <p className="text-xl font-black text-red-400">{unifySkuResult.errors}</p>
-                </div>
-              </div>
-              {unifySkuResult.logs.length > 0 && (
-                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-64 overflow-y-auto font-mono text-[10px]">
-                  {unifySkuResult.logs.map((line, i) => (
-                    <div key={i} className={
-                      line.includes('[OK]') ? 'text-green-400' :
-                      line.includes('[ERROR]') || line.includes('[SKIP]') ? (line.includes('[ERROR]') ? 'text-red-400' : 'text-amber-400') :
                       'text-slate-400'
                     }>{line}</div>
                   ))}
