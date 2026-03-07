@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import type { ToastType } from '../context/NotificationContext';
 
 interface MessageModalProps {
@@ -10,13 +10,14 @@ interface MessageModalProps {
   onClose: () => void;
 }
 
-const iconMap = {
+const iconMap: Record<ToastType, React.ComponentType<{ className?: string }>> = {
   success: CheckCircle2,
   error: AlertCircle,
   info: Info,
+  warning: AlertTriangle,
 };
 
-const styleMap = {
+const styleMap: Record<ToastType, { iconBg: string; iconColor: string; border: string }> = {
   success: {
     iconBg: 'bg-emerald-500/15',
     iconColor: 'text-emerald-400',
@@ -32,6 +33,11 @@ const styleMap = {
     iconColor: 'text-blue-400',
     border: 'border-blue-500/30',
   },
+  warning: {
+    iconBg: 'bg-amber-500/15',
+    iconColor: 'text-amber-400',
+    border: 'border-amber-500/30',
+  },
 };
 
 export function MessageModal({ open, type, title, message, onClose }: MessageModalProps) {
@@ -39,6 +45,7 @@ export function MessageModal({ open, type, title, message, onClose }: MessageMod
 
   const Icon = iconMap[type];
   const style = styleMap[type];
+  if (!style) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">

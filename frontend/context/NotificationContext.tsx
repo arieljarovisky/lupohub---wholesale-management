@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback, ReactNode } fr
 import { MessageModal } from '../components/MessageModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 
-export type ToastType = 'success' | 'error' | 'info';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface ToastState {
   open: boolean;
@@ -48,7 +48,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [confirm, setConfirm] = useState<ConfirmState>(defaultConfirm);
 
   const showToast = useCallback((type: ToastType, message: string, title?: string) => {
-    const t = type === 'error' ? 'Error' : type === 'success' ? 'Éxito' : 'Información';
+    const t = type === 'error' ? 'Error' : type === 'success' ? 'Éxito' : type === 'warning' ? 'Aviso' : 'Información';
     setToast({ open: true, type, title: title ?? t, message });
   }, []);
 
