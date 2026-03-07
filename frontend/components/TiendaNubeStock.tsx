@@ -100,29 +100,35 @@ const TiendaNubeStock: React.FC = () => {
       return;
     }
     let cancelled = false;
+    const pageSize = 50;
+    const maxSearchItems = 500;
     const fetchAllForSearch = async () => {
       setLoadingSearch(true);
       setAllItemsForSearch(null);
       try {
-        const all: TNStockItem[] = [];
-        let off = 0;
-        const pageSize = 50;
-        while (true) {
-          const res = await api.getTiendaNubeStock({ offset: off, limit: pageSize });
-          const list = res.items || [];
-          if (cancelled) return;
-          all.push(...list);
-          if (list.length < pageSize) break;
-          off += pageSize;
-        }
-        if (!cancelled) {
-          const sorted = all.sort((a, b) => a.title.localeCompare(b.title));
-          setAllItemsForSearch(sorted);
-        }
+        const first = await api.getTiendaNubeStock({ offset: 0, limit: pageSize });
+        if (cancelled) return;
+        const total = first.total || 0;
+        const firstItems = (first.items || []).sort((a: TNStockItem, b: TNStockItem) => a.title.localeCompare(b.title));
+        setAllItemsForSearch(firstItems);
+        setLoadingSearch(false);
+        if (total <= pageSize) return;
+        const totalToLoad = Math.min(total, maxSearchItems);
+        const restOffsets = Array.from(
+          { length: Math.ceil((totalToLoad - pageSize) / pageSize) },
+          (_, i) => pageSize + i * pageSize
+        );
+        const restPages = await Promise.all(
+          restOffsets.map(off => api.getTiendaNubeStock({ offset: off, limit: pageSize }))
+        );
+        if (cancelled) return;
+        const all = [...firstItems, ...restPages.flatMap(r => r.items || [])].sort((a, b) => a.title.localeCompare(b.title));
+        setAllItemsForSearch(all);
       } catch (e) {
-        if (!cancelled) setAllItemsForSearch([]);
-      } finally {
-        if (!cancelled) setLoadingSearch(false);
+        if (!cancelled) {
+          setAllItemsForSearch([]);
+          setLoadingSearch(false);
+        }
       }
     };
     fetchAllForSearch();

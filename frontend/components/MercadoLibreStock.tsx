@@ -94,36 +94,42 @@ const MercadoLibreStock: React.FC = () => {
     fetchStock();
   }, [offset]);
 
-  // Cuando hay búsqueda, cargar todas las publicaciones para filtrar en toda la lista
+  // Cuando hay búsqueda, cargar todas las publicaciones para filtrar (en paralelo, no en serie)
   useEffect(() => {
     if (!searchTerm.trim()) {
       setAllItemsForSearch(null);
       return;
     }
     let cancelled = false;
+    const pageSize = 50;
+    const maxSearchItems = 500;
     const fetchAllForSearch = async () => {
       setLoadingSearch(true);
       setAllItemsForSearch(null);
       try {
-        const all: MLStockItem[] = [];
-        let off = 0;
-        const pageSize = 50;
-        while (true) {
-          const res = await api.getMercadoLibreStock({ offset: off, limit: pageSize, status: 'active' });
-          const list = res.items || [];
-          if (cancelled) return;
-          all.push(...list);
-          if (list.length < pageSize) break;
-          off += pageSize;
-        }
-        if (!cancelled) {
-          const sorted = all.sort((a, b) => a.title.localeCompare(b.title));
-          setAllItemsForSearch(sorted);
-        }
+        const first = await api.getMercadoLibreStock({ offset: 0, limit: pageSize, status: 'active' });
+        if (cancelled) return;
+        const total = first.total || 0;
+        const firstItems = (first.items || []).sort((a, b) => a.title.localeCompare(b.title));
+        setAllItemsForSearch(firstItems);
+        setLoadingSearch(false);
+        if (total <= pageSize) return;
+        const totalToLoad = Math.min(total, maxSearchItems);
+        const restOffsets = Array.from(
+          { length: Math.ceil((totalToLoad - pageSize) / pageSize) },
+          (_, i) => pageSize + i * pageSize
+        );
+        const restPages = await Promise.all(
+          restOffsets.map(off => api.getMercadoLibreStock({ offset: off, limit: pageSize, status: 'active' }))
+        );
+        if (cancelled) return;
+        const all = [...firstItems, ...restPages.flatMap(r => r.items || [])].sort((a, b) => a.title.localeCompare(b.title));
+        setAllItemsForSearch(all);
       } catch (e) {
-        if (!cancelled) setAllItemsForSearch([]);
-      } finally {
-        if (!cancelled) setLoadingSearch(false);
+        if (!cancelled) {
+          setAllItemsForSearch([]);
+          setLoadingSearch(false);
+        }
       }
     };
     fetchAllForSearch();
