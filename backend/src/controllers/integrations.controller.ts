@@ -1393,7 +1393,8 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
         for (const item of items) {
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
-            for (const v of item.variations) {
+            for (let i = 0; i < item.variations.length; i++) {
+              const v = item.variations[i];
               const mlQty = v.available_quantity ?? 0;
               const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
               let row = await get(
@@ -1405,16 +1406,19 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
               );
               let linkedBySku = false;
               if (!row?.variant_id && mlSku) {
-                row = await get(
+                const allBySku = await query(
                   `SELECT pv.id as variant_id, p.id as product_id FROM product_variants pv
                    JOIN product_colors pc ON pc.id = pv.product_color_id
                    JOIN products p ON p.id = pc.product_id
-                   WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ? LIMIT 1`,
+                   WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                   ORDER BY pv.id`,
                   [mlSku]
                 );
-                if (row?.variant_id && row?.product_id) {
-                  await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(v.id), row.variant_id]);
-                  await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, row.product_id]);
+                const match = Array.isArray(allBySku) && allBySku[i] ? allBySku[i] : null;
+                if (match?.variant_id && match?.product_id) {
+                  row = { variant_id: match.variant_id };
+                  await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(v.id), match.variant_id]);
+                  await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, match.product_id]);
                   linkedBySku = true;
                 }
               }
@@ -1548,15 +1552,33 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
         for (const item of items) {
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
-            for (const v of item.variations) {
+            for (let i = 0; i < item.variations.length; i++) {
+              const v = item.variations[i];
               const mlQty = v.available_quantity ?? 0;
-              const row = await get(
+              const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
+              let row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
                  JOIN product_colors pc ON pc.id = pv.product_color_id
                  JOIN products p ON p.id = pc.product_id
                  WHERE p.mercado_libre_id = ? AND pv.mercado_libre_variant_id = ?`,
                 [item.id, v.id]
               );
+              if (!row?.variant_id && mlSku) {
+                const allBySku = await query(
+                  `SELECT pv.id as variant_id, p.id as product_id FROM product_variants pv
+                   JOIN product_colors pc ON pc.id = pv.product_color_id
+                   JOIN products p ON p.id = pc.product_id
+                   WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                   ORDER BY pv.id`,
+                  [mlSku]
+                );
+                const match = Array.isArray(allBySku) && allBySku[i] ? allBySku[i] : null;
+                if (match?.variant_id && match?.product_id) {
+                  row = { variant_id: match.variant_id };
+                  await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(v.id), match.variant_id]);
+                  await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, match.product_id]);
+                }
+              }
               if (row?.variant_id) {
                 const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
                 if (ok) { updated++; logs.push(`[OK] ${v.seller_custom_field || v.id}: ${mlQty}`); }
