@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2 } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
@@ -45,6 +46,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
   const [showSyncResultModal, setShowSyncResultModal] = useState(false);
   const syncMenuRef = useRef<HTMLDivElement>(null);
+  const [syncDropdownPosition, setSyncDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -658,10 +660,34 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   useEffect(() => {
     if (!syncMenuOpen) return;
     const onOutside = (e: MouseEvent) => {
-      if (syncMenuRef.current && !syncMenuRef.current.contains(e.target as Node)) setSyncMenuOpen(false);
+      const target = e.target as Node;
+      if (syncMenuRef.current?.contains(target)) return;
+      if ((target as Element).closest?.('[data-sync-dropdown]')) return;
+      setSyncMenuOpen(false);
     };
     document.addEventListener('click', onOutside);
     return () => document.removeEventListener('click', onOutside);
+  }, [syncMenuOpen]);
+
+  // Posicionar el dropdown del sync con posición fija para que no genere scroll en el contenedor
+  useEffect(() => {
+    if (!syncMenuOpen || !syncMenuRef.current) {
+      setSyncDropdownPosition(null);
+      return;
+    }
+    const update = () => {
+      if (syncMenuRef.current) {
+        const rect = syncMenuRef.current.getBoundingClientRect();
+        setSyncDropdownPosition({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 240) });
+      }
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
   }, [syncMenuOpen]);
 
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
@@ -1463,8 +1489,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               </span>
               <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-            {syncMenuOpen && !syncLoading && (
-              <div className="absolute left-0 top-full mt-1 py-1 min-w-[240px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50">
+            {syncMenuOpen && !syncLoading && syncDropdownPosition && createPortal(
+              <div
+                data-sync-dropdown
+                className="py-1 min-w-[240px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl"
+                style={{
+                  position: 'fixed',
+                  top: syncDropdownPosition.top,
+                  left: syncDropdownPosition.left,
+                  width: syncDropdownPosition.width,
+                  zIndex: 9999
+                }}
+              >
                 <div className="px-3 py-2 border-b border-slate-700">
                   <p className="text-[10px] font-bold text-amber-400 uppercase">Fuente de verdad: Mercado Libre</p>
                 </div>
@@ -1503,7 +1539,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   <RefreshCw size={18} className="text-blue-400" />
                   Enviar a ambas (TN + ML)
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}
