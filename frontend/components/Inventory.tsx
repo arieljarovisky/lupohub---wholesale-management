@@ -567,6 +567,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const totalErr = res.errorsFromML + res.errorsToTN;
       if (totalErr === 0 && totalOk > 0) showToast('success', `Stock actualizado desde Mercado Libre: ${res.importedFromML} variantes a LupoHub, ${res.sentToTN} enviadas a Tienda Nube.`);
       else if (totalErr > 0) showToast('warning', `Actualizado con algunos errores. Revisá el detalle.`);
+      setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({
         platform: 'Stock desde Mercado Libre',
@@ -606,6 +607,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (onImportComplete && (totalUpdated > 0 || totalErrors > 0)) onImportComplete();
       if (totalErrors === 0 && totalUpdated > 0) showToast('success', `Sincronizado: ${totalUpdated} variantes a TN y ML.`);
       else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el detalle.`);
+      setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({
         platform: 'Error',
@@ -630,6 +632,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (onImportComplete && (res.updated > 0 || res.errors > 0)) onImportComplete();
       if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variantes enviadas a Tienda Nube.`);
       else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+      setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({ platform: 'Tienda Nube', updated: 0, errors: 1, logs: [e?.message || 'Error de conexión'] });
       showToast('error', e?.message || 'Error al sincronizar con Tienda Nube');
@@ -649,6 +652,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (onImportComplete && (res.updated > 0 || res.errors > 0)) onImportComplete();
       if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variantes enviadas a Mercado Libre.`);
       else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+      setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e?.message || 'Error de conexión'] });
       showToast('error', e?.message || 'Error al sincronizar con Mercado Libre');
