@@ -1314,10 +1314,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           <button 
             onClick={handleSyncStock}
             disabled={isSyncing}
-            className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-blue-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm"
+            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-blue-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm min-h-[44px]"
           >
-            <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-            <span className="text-sm font-semibold">Sincronizar APIs</span>
+            <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
+            <span className="text-sm font-semibold hidden sm:inline">Sincronizar APIs</span>
           </button>
         )}
         
@@ -1332,27 +1332,27 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           type="button"
           onClick={() => tangoFileInputRef.current?.click()}
           disabled={importingTango}
-          className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-amber-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50"
+          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-amber-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
         >
-          {importingTango ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-          <span className="text-sm font-semibold">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
+          {importingTango ? <RefreshCw size={18} className="animate-spin" /> : <Upload size={18} />}
+          <span className="text-sm font-semibold hidden sm:inline">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
         </button>
         <button 
           onClick={exportProductsToExcel}
           disabled={exportingExcel}
-          className="flex-shrink-0 flex items-center gap-2 bg-slate-800 text-green-400 px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50"
+          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-green-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
         >
-          {exportingExcel ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
-          <span className="text-sm font-semibold">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
+          {exportingExcel ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
+          <span className="text-sm font-semibold hidden sm:inline">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
         </button>
 
         {isAdminOrWarehouse && (
           <button 
             onClick={() => openCreationModal()}
-            className="flex-shrink-0 flex items-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-900/20 active:scale-95 transition-transform"
+            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-indigo-600 text-white px-3 sm:px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-900/20 active:scale-95 transition-transform min-h-[44px]"
           >
             <Plus size={18} />
-            <span className="text-sm">Nuevo Modelo</span>
+            <span className="text-sm hidden sm:inline">Nuevo Modelo</span>
           </button>
         )}
       </div>
@@ -1384,7 +1384,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
         {/* Filters Panel */}
         {showFilters && (
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in">
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 sm:p-4 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 animate-fade-in">
              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Categoría</label>
                 <div className="relative">
@@ -1495,51 +1495,46 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const isFullyOut = displayTotalStock === 0;
 
           return (
-            <div key={groupKey} className={`bg-slate-800 rounded-2xl border transition-all overflow-hidden ${isExpanded ? 'border-blue-500/50 shadow-lg shadow-blue-900/10' : 'border-slate-700'}`}>
+            <div key={groupKey} className={`bg-slate-800 rounded-xl sm:rounded-2xl border transition-all overflow-hidden ${isExpanded ? 'border-blue-500/50 shadow-lg shadow-blue-900/10' : 'border-slate-700'}`}>
               {/* Group Header (Clickable) */}
               <div 
                 onClick={() => toggleGroup(groupKey)}
-                className="p-4 md:p-5 flex items-center justify-between cursor-pointer hover:bg-slate-750 transition-colors"
+                className="p-3 sm:p-4 md:p-5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-750 active:bg-slate-700/50 transition-colors touch-manipulation"
               >
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isFullyOut ? 'bg-red-900/20 text-red-500' : 'bg-blue-900/20 text-blue-400'}`}>
+                <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 ${isFullyOut ? 'bg-red-900/20 text-red-500' : 'bg-blue-900/20 text-blue-400'}`}>
                     <Box size={24} />
                   </div>
-                  <div>
-                    <h3 className="font-bold text-white text-lg leading-tight">{displayName}</h3>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                       <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-600" title="Código de artículo (Tango / sistema)">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-white text-base sm:text-lg leading-tight truncate">{displayName}</h3>
+                    <div className="flex items-center gap-1.5 sm:gap-2 mt-1 flex-wrap">
+                       <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-1.5 sm:px-2 py-0.5 rounded border border-slate-600 truncate max-w-[120px] sm:max-w-none" title="Código de artículo (Tango / sistema)">
                          {codigoLabel}
                        </span>
-                       <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-slate-400 px-2 py-0.5 rounded-lg border border-slate-700">
+                       <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-slate-400 px-1.5 sm:px-2 py-0.5 rounded-lg border border-slate-700">
                          {category}
                        </span>
-                       <span className="text-[10px] font-black text-green-400 bg-green-900/20 px-2 py-0.5 rounded-lg border border-green-900/30">
+                       <span className="text-[10px] font-black text-green-400 bg-green-900/20 px-1.5 sm:px-2 py-0.5 rounded-lg border border-green-900/30">
                          ${groupVariants[0]?.price?.toLocaleString()}
                        </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 md:gap-8">
-                   <div className="text-right hidden sm:block">
-                      <div className="text-[10px] uppercase font-black text-slate-500 tracking-widest mb-0.5">Stock Total</div>
-                      {isAdminOrWarehouse ? (
-                        <div className={`text-xl font-black ${isFullyOut ? 'text-red-500' : displayTotalStock < 50 ? 'text-yellow-500' : 'text-green-400'}`}>
-                           {displayTotalStock} <span className="text-xs text-slate-600">un.</span>
-                        </div>
-                      ) : (
-                        <div className={`text-sm font-black uppercase ${isFullyOut ? 'text-red-500' : 'text-green-400'}`}>
-                           {isFullyOut ? 'AGOTADO' : 'DISPONIBLE'}
-                        </div>
-                      )}
+                <div className="flex items-center gap-2 sm:gap-4 md:gap-8 shrink-0">
+                   {/* Stock: en móvil como pill, en desktop como bloque */}
+                   <div className="text-right">
+                      <div className={`px-2 py-1 rounded-lg font-black text-sm sm:text-base ${isFullyOut ? 'text-red-500 bg-red-900/20' : displayTotalStock < 50 ? 'text-yellow-500 bg-yellow-900/20' : 'text-green-400 bg-green-900/20'}`}>
+                         {displayTotalStock} <span className="text-[10px] sm:text-xs text-slate-500 font-normal">un</span>
+                      </div>
+                      <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest hidden sm:block">Stock</div>
                    </div>
                    
                    {/* Add Variant Button */}
                    {isAdminOrWarehouse && (
                      <button
                        onClick={(e) => { e.stopPropagation(); handleAddVariant(groupKey); }}
-                       className="p-2 bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-slate-300 transition-colors"
+                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                        title="Agregar variante a este modelo"
                      >
                        <PlusCircle size={20} />
@@ -1549,14 +1544,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
                      <button
                        onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
-                       className="p-2 bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors"
+                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                        title="Eliminar artículo y todas sus variantes"
                      >
                        <Trash2 size={20} />
                      </button>
                    )}
 
-                   <div className={`p-1.5 rounded-full transition-transform duration-300 ${isExpanded ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-700 text-slate-400'}`}>
+                   <div className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full transition-transform duration-300 ${isExpanded ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-700 text-slate-400'}`}>
                       <ChevronDown size={20} />
                    </div>
                 </div>
@@ -1587,7 +1582,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openBulkLinkModal(groupKey); }}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors"
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation"
                         >
                           <Link size={16} />
                           Vincular grupo con ML / TN
@@ -1631,23 +1626,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       const talleDisplay = labelTalle(sizeLabel) || sizeLabel;
 
                       return (
-                        <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
                            {/* Variant Info */}
-                           <div className="flex-1">
-                             <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-1.5 py-0.5 rounded border border-blue-900/30">
+                           <div className="flex-1 min-w-0">
+                             <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-1.5 py-0.5 rounded border border-blue-900/30 truncate max-w-[140px] sm:max-w-none">
                                    {product.sku}
                                 </span>
-                                <div className="flex gap-1">
+                                <div className="flex gap-1 shrink-0">
                                   {product.integrations?.tiendaNube && <Cloud size={12} className="text-blue-400" />}
                                   {product.integrations?.mercadoLibre && <Zap size={12} className="text-yellow-500" />}
                                 </div>
                              </div>
-                             <div className="flex items-center gap-3">
+                             <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-sm text-white font-medium">
                                    <span className="text-slate-500 font-normal text-xs uppercase mr-1">Talle:</span>{talleDisplay}
                                 </span>
-                                <span className="w-px h-3 bg-slate-700"></span>
+                                <span className="w-px h-3 bg-slate-700 hidden sm:inline"></span>
                                 <span className="text-sm text-white font-medium flex items-center gap-1">
                                    <span className="text-slate-500 font-normal text-xs uppercase mr-1">Color:</span>
                                    {colorLabel}
@@ -1656,39 +1651,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                            </div>
 
                            {/* Stock Control Area */}
-                           <div className="flex items-center justify-between md:justify-end gap-4 border-t md:border-t-0 border-slate-700 pt-3 md:pt-0">
+                           <div className="flex items-center justify-between md:justify-end gap-2 sm:gap-4 border-t md:border-t-0 border-slate-700 pt-3 md:pt-0 flex-wrap">
                               {isAdminOrWarehouse ? (
                                 <div className="flex items-center gap-3">
                                   {isEditing ? (
-                                    <div className="flex items-center gap-2 animate-fade-in bg-slate-900 p-1.5 rounded-lg border border-slate-600">
+                                    <div className="flex items-center gap-2 animate-fade-in bg-slate-900 p-2 sm:p-1.5 rounded-lg border border-slate-600">
                                       <button 
                                         onClick={() => adjustStock(product.id, product.stock, -1)}
-                                        className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded hover:bg-slate-700 text-slate-300 active:scale-95"
+                                        className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-slate-800 rounded-lg sm:rounded hover:bg-slate-700 text-slate-300 active:scale-95 touch-manipulation"
                                       >
-                                        <Minus size={16} />
+                                        <Minus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                       <input 
                                         type="number" 
                                         autoFocus
                                         value={product.stock}
                                         onChange={(e) => handleManualStockChange(product.id, e.target.value)}
-                                        className="w-12 bg-transparent text-center font-bold text-white text-lg outline-none"
+                                        className="w-14 sm:w-12 bg-transparent text-center font-bold text-white text-lg outline-none"
                                       />
                                       <button 
                                         onClick={() => adjustStock(product.id, product.stock, 1)}
-                                        className="w-8 h-8 flex items-center justify-center bg-blue-600 rounded text-white hover:bg-blue-500 active:scale-95"
+                                        className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-blue-600 rounded-lg sm:rounded text-white hover:bg-blue-500 active:scale-95 touch-manipulation"
                                       >
-                                        <Plus size={16} />
+                                        <Plus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                       <button 
                                         onClick={() => setEditingStockId(null)}
-                                        className="w-8 h-8 flex items-center justify-center bg-green-600 rounded text-white hover:bg-green-500 active:scale-95 ml-1"
+                                        className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-green-600 rounded-lg sm:rounded text-white hover:bg-green-500 active:scale-95 ml-1 touch-manipulation"
                                       >
-                                        <Check size={16} />
+                                        <Check size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                                        <div className="text-right">
                                          <span className={`block text-xl font-black leading-none ${isOut ? 'text-red-500' : isLow ? 'text-yellow-500' : 'text-white'}`}>
                                            {product.stock}
@@ -1697,27 +1692,27 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        </div>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}
-                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors"
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors touch-manipulation"
                                        title="Vincular con Mercado Libre / Tienda Nube"
                                       >
                                        <Link size={16} />
                                       </button>
                                       <button 
                                        onClick={() => handleOpenDespachoModal(product)}
-                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors"
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors touch-manipulation"
                                        title="Asignar a Despacho de Importación"
                                       >
                                        <Ship size={16} />
                                       </button>
                                       <button 
                                        onClick={() => setEditingStockId(product.id)}
-                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors"
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors touch-manipulation"
                                       >
                                        <Edit2 size={16} />
                                       </button>
                                       <button 
                                        onClick={() => handleDeleteVariant(product.id, product.sku || '')}
-                                       className="p-2 bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-400 border border-slate-700 transition-colors touch-manipulation"
                                        title="Eliminar variante"
                                       >
                                        <Trash2 size={16} />
@@ -1751,13 +1746,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         })()}
       </div>
 
-      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mt-4">
+      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mt-4 pb-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Ordenar</span>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:inline">Ordenar</span>
           <select 
             value={sortKey}
             onChange={(e) => { setSortKey(e.target.value as any); setCurrentPage(1); }}
-            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
+            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px] touch-manipulation"
           >
             <option value="SKU">Código</option>
             <option value="STOCK">Stock Total</option>
@@ -1772,13 +1767,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-            Página {displayGroupsInfo.safePage} de {displayGroupsInfo.totalPages}
+            Pág {displayGroupsInfo.safePage}/{displayGroupsInfo.totalPages}
           </span>
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por página</span>
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:inline">Por página</span>
           <select 
             value={pageSize}
             onChange={(e) => { setPageSize(parseInt(e.target.value)); setCurrentPage(1); }}
-            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px]"
+            className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px] touch-manipulation"
           >
             <option value={10}>10</option>
             <option value={20}>20</option>
