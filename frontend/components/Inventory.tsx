@@ -100,6 +100,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [loadingEditProduct, setLoadingEditProduct] = useState(false);
   const [savingEditProduct, setSavingEditProduct] = useState(false);
 
+  const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
+  const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string }>({ sku: '', externalSku: '' });
+  const [loadingEditVariant, setLoadingEditVariant] = useState(false);
+  const [savingEditVariant, setSavingEditVariant] = useState(false);
+
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
   const [selectedProductForDespacho, setSelectedProductForDespacho] = useState<any>(null);
@@ -1444,6 +1449,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }).finally(() => setLoadingEditProduct(false));
   }, [editingProductId]);
 
+  useEffect(() => {
+    if (!editingVariantId) return;
+    setLoadingEditVariant(true);
+    api.getVariantById(editingVariantId).then((v) => {
+      if (v) {
+        setEditVariantForm({
+          sku: v.sku ?? '',
+          externalSku: v.external_sku ?? ''
+        });
+      }
+    }).finally(() => setLoadingEditVariant(false));
+  }, [editingVariantId]);
+
   const handleSaveEditProduct = async () => {
     if (!editingProductId) return;
     const name = editProductForm.name.trim();
@@ -1477,6 +1495,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('error', e?.message || 'Error al guardar');
     } finally {
       setSavingEditProduct(false);
+    }
+  };
+
+  const handleSaveEditVariant = async () => {
+    if (!editingVariantId) return;
+    const variantId = editingVariantId;
+    setSavingEditVariant(true);
+    try {
+      await api.updateVariant(variantId, {
+        sku: editVariantForm.sku.trim() || undefined,
+        externalSku: editVariantForm.externalSku.trim() || undefined
+      });
+      showToast('success', 'Variante actualizada');
+      setEditingVariantId(null);
+      setServerListRefreshKey(k => k + 1);
+      const groupKey = Object.keys(loadedVariants).find(sku => loadedVariants[sku]?.some((v: any) => v.id === variantId));
+      if (groupKey) setLoadedVariants(prev => ({ ...prev, [groupKey]: undefined }));
+      onImportComplete?.();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al guardar variante');
+    } finally {
+      setSavingEditVariant(false);
     }
   };
 
@@ -2138,6 +2178,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        <Link size={16} />
                                       </button>
                                       <button 
+                                       onClick={() => setEditingVariantId(product.id)}
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors touch-manipulation"
+                                       title="Editar variante (SKU)"
+                                      >
+                                       <Tag size={16} />
+                                      </button>
+                                      <button 
                                        onClick={() => handleOpenDespachoModal(product)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors touch-manipulation"
                                        title="Asignar a Despacho de Importación"
@@ -2526,6 +2573,64 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </button>
                 <button onClick={handleSaveEditProduct} disabled={savingEditProduct} className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 flex items-center gap-2">
                   {savingEditProduct ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+                  Guardar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT VARIANT MODAL */}
+      {editingVariantId && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 rounded-t-3xl sm:rounded-2xl border border-slate-700 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
+            <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Tag size={20} className="text-amber-400" />
+                Editar variante
+              </h3>
+              <button onClick={() => setEditingVariantId(null)} className="p-2.5 min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition touch-manipulation shrink-0" aria-label="Cerrar">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 min-h-0">
+              {loadingEditVariant ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={32} className="text-amber-400 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">SKU (código interno)</label>
+                    <input
+                      type="text"
+                      value={editVariantForm.sku}
+                      onChange={(e) => setEditVariantForm(f => ({ ...f, sku: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
+                      placeholder="Ej. 0055402-250-099"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">SKU externo (ML / TN, opcional)</label>
+                    <input
+                      type="text"
+                      value={editVariantForm.externalSku}
+                      onChange={(e) => setEditVariantForm(f => ({ ...f, externalSku: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
+                      placeholder="Mismo código o el de la tienda"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {!loadingEditVariant && (
+              <div className="shrink-0 p-4 border-t border-slate-700 flex gap-3 justify-end">
+                <button onClick={() => setEditingVariantId(null)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium">
+                  Cancelar
+                </button>
+                <button onClick={handleSaveEditVariant} disabled={savingEditVariant} className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 flex items-center gap-2">
+                  {savingEditVariant ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
                   Guardar
                 </button>
               </div>

@@ -672,6 +672,69 @@ export const deleteVariant = async (req: any, res: any) => {
   }
 };
 
+/** Obtener una variante por ID (para formulario de edición) */
+export const getVariantById = async (req: Request, res: Response) => {
+  const { variantId } = req.params;
+  if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
+  try {
+    const row = await get(
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id,
+              p.name AS product_name, p.sku AS base_sku,
+              s.size_code, c.code AS color_code, c.name AS color_name,
+              COALESCE(st.stock, 0) AS stock
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN stocks st ON st.variant_id = pv.id
+       WHERE pv.id = ?`,
+      [variantId]
+    );
+    if (!row) return res.status(404).json({ message: 'Variante no encontrada' });
+    res.json(row);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo variante' });
+  }
+};
+
+/** Actualizar variante (SKU y/o external_sku) */
+export const updateVariant = async (req: Request, res: Response) => {
+  const { variantId } = req.params;
+  const { sku, externalSku } = req.body as { sku?: string; externalSku?: string };
+  if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
+  try {
+    const updates: string[] = [];
+    const values: any[] = [];
+    if (sku !== undefined) {
+      updates.push('sku = ?');
+      values.push(sku === '' ? null : String(sku).trim());
+    }
+    if (externalSku !== undefined) {
+      updates.push('external_sku = ?');
+      values.push(externalSku === '' ? null : String(externalSku).trim());
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'Indicá al menos un campo a actualizar (sku o externalSku)' });
+    }
+    values.push(variantId);
+    await execute(
+      `UPDATE product_variants SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+    const updated = await get(
+      `SELECT pv.id, pv.sku, pv.external_sku FROM product_variants pv WHERE pv.id = ?`,
+      [variantId]
+    );
+    if (!updated) return res.status(404).json({ message: 'Variante no encontrada' });
+    res.json(updated);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error actualizando variante' });
+  }
+};
+
 /** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
 export const deleteProduct = async (req: any, res: any) => {
   const productId = req.params.id;

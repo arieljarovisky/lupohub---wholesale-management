@@ -237,6 +237,21 @@ export const api = {
       return variants;
     }, [], 'getVariantsBySku');
   },
+
+  getVariantById: async (variantId: string): Promise<{ id: string; sku: string | null; external_sku: string | null; product_name: string; base_sku: string; size_code: string; color_code: string; color_name: string; stock: number } | null> => {
+    try {
+      const res = await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'GET');
+      return res;
+    } catch {
+      return null;
+    }
+  },
+
+  updateVariant: async (variantId: string, data: { sku?: string; externalSku?: string }): Promise<{ id: string; sku: string | null; external_sku: string | null }> => {
+    return handleRequest(async () => {
+      return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
+    }, data, 'updateVariant');
+  },
   
   getColors: async (): Promise<Array<{ code: string; name: string; hex?: string }>> => {
     return handleRequest(async () => {
