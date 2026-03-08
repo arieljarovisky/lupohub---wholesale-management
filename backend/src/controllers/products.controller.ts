@@ -735,26 +735,34 @@ export const updateVariant = async (req: Request, res: Response) => {
   }
 };
 
+/** Elimina un producto por ID (variantes, colores, stock en cascada). No elimina si alguna variante está en pedidos. */
+export async function deleteProductById(productId: string): Promise<{ deleted: boolean; error?: 'in_orders' | 'not_found' }> {
+  const inOrder = await get(
+    `SELECT 1 FROM order_items oi
+     JOIN product_variants pv ON pv.id = oi.variant_id
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pc.product_id = ? LIMIT 1`,
+    [productId]
+  );
+  if (inOrder) return { deleted: false, error: 'in_orders' };
+  const result = await execute('DELETE FROM products WHERE id = ?', [productId]);
+  const affected = result && (result as any).affectedRows;
+  if (affected === 0) return { deleted: false, error: 'not_found' };
+  return { deleted: true };
+}
+
 /** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
 export const deleteProduct = async (req: any, res: any) => {
   const productId = req.params.id;
   if (!productId) return res.status(400).json({ message: 'Falta productId' });
   try {
-    const inOrder = await get(
-      `SELECT 1 FROM order_items oi
-       JOIN product_variants pv ON pv.id = oi.variant_id
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       WHERE pc.product_id = ? LIMIT 1`,
-      [productId]
-    );
-    if (inOrder) {
-      return res.status(400).json({
-        message: 'No se puede eliminar el artículo porque alguna variante está en pedidos.',
-      });
-    }
-    const result = await execute('DELETE FROM products WHERE id = ?', [productId]);
-    const affected = result && (result as any).affectedRows;
-    if (affected === 0) {
+    const r = await deleteProductById(productId);
+    if (!r.deleted) {
+      if (r.error === 'in_orders') {
+        return res.status(400).json({
+          message: 'No se puede eliminar el artículo porque alguna variante está en pedidos.',
+        });
+      }
       return res.status(404).json({ message: 'Producto no encontrado' });
     }
     res.json({ message: 'Producto y variantes eliminados' });

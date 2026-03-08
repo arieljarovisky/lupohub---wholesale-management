@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import { execute, query, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import { deleteProductById } from './products.controller';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -2577,7 +2578,12 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     if (!mlToken) return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
 
     const existing = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [String(itemId)]);
-    if (existing) return res.status(409).json({ message: 'Este producto de ML ya está en tu inventario', productId: existing.id });
+    if (existing) {
+      const del = await deleteProductById(existing.id);
+      if (!del.deleted && del.error === 'in_orders') {
+        return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+      }
+    }
 
     let itemIdToFetch = String(itemId).trim();
     let itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
@@ -2594,7 +2600,12 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     if (!item || item.error) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
 
     const existingByMlId = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [itemIdToFetch]);
-    if (existingByMlId) return res.status(409).json({ message: 'Este producto de ML ya está en tu inventario', productId: existingByMlId.id });
+    if (existingByMlId) {
+      const del = await deleteProductById(existingByMlId.id);
+      if (!del.deleted && del.error === 'in_orders') {
+        return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+      }
+    }
 
     const title = (item.title || '').toString().trim() || 'Sin título';
     let variations: { variationId: string | number; sku: string; color: string; size: string; stock: number }[] = [];
@@ -2638,18 +2649,16 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
 
     const existingBySku = await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
     if (existingBySku) {
-      productId = existingBySku.id;
-      await execute(
-        `UPDATE products SET mercado_libre_id = ?, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?`,
-        [itemIdToFetch, title, productId]
-      );
-    } else {
-      productId = uuidv4();
-      await execute(
-        `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, itemIdToFetch]
-      );
+      const del = await deleteProductById(existingBySku.id);
+      if (!del.deleted && del.error === 'in_orders') {
+        return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+      }
     }
+    productId = uuidv4();
+    await execute(
+      `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, itemIdToFetch]
+    );
 
     let variantsCreated = 0;
     for (const v of variations) {
