@@ -1640,9 +1640,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       </div>
 
       {inventorySubView === 'ml' ? (
-        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} onProductImported={() => { setServerListRefreshKey(k => k + 1); onImportComplete?.(); }} showToast={showToast} />
+        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />
       ) : inventorySubView === 'tn' ? (
-        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} onProductImported={() => { setServerListRefreshKey(k => k + 1); onImportComplete?.(); }} showToast={showToast} />
+        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />
       ) : (
         <>
       {/* Ayuda: unificación código / nombre */}

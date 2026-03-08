@@ -27,7 +27,7 @@ type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
 interface TiendaNubeStockProps {
   searchTerm?: string;
   onSearchChange?: (value: string) => void;
-  onProductImported?: () => void;
+  onProductImported?: (baseSku?: string) => void;
   showToast?: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
 }
 
@@ -430,7 +430,7 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                           try {
                             const res = await api.importProductFromTiendaNube(item.id);
                             showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
-                            onProductImported?.();
+                            onProductImported?.(res.baseSku);
                           } catch (err: any) {
                             showToast?.('error', err?.message || 'Error al agregar a tu inventario');
                           } finally {
