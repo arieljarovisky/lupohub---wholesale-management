@@ -1402,11 +1402,12 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
             for (const v of item.variations) {
               const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
               if (!mlSku) continue;
+              const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
               const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
-                 WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                 WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                  LIMIT 1`,
-                [mlSku]
+                [mlSkuNorm]
               );
               if (!row?.variant_id) continue;
               const mlQty = v.available_quantity ?? 0;
@@ -1417,11 +1418,12 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
           } else {
             const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
             if (!mlSku) continue;
+            const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
             const variantRow = await get(
               `SELECT pv.id as variant_id FROM product_variants pv
-               WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+               WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                LIMIT 1`,
-              [mlSku]
+              [mlSkuNorm]
             );
             if (!variantRow?.variant_id) continue;
             const mlQty = item.available_quantity ?? 0;
@@ -1528,11 +1530,12 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
             for (const v of item.variations) {
               const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
               if (!mlSku) continue;
+              const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
               const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
-                 WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                 WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                  LIMIT 1`,
-                [mlSku]
+                [mlSkuNorm]
               );
               if (!row?.variant_id) continue;
               const mlQty = v.available_quantity ?? 0;
@@ -1543,11 +1546,12 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
           } else {
             const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
             if (!mlSku) continue;
+            const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
             const variantRow = await get(
               `SELECT pv.id as variant_id FROM product_variants pv
-               WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+               WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                LIMIT 1`,
-              [mlSku]
+              [mlSkuNorm]
             );
             if (!variantRow?.variant_id) continue;
             const mlQty = item.available_quantity ?? 0;
