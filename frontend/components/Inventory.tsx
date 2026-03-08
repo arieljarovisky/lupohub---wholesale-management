@@ -562,6 +562,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         logs: res.logs || [],
         fromML: { imported: res.importedFromML, errorsFromML: res.errorsFromML, sentToTN: res.sentToTN, errorsToTN: res.errorsToTN }
       });
+      if (res.logs?.length) {
+        console.group('[LupoHub] Stock desde ML - Logs');
+        res.logs.forEach((line: string) => console.log(line));
+        console.groupEnd();
+      }
       if (onImportComplete) onImportComplete();
       const totalOk = res.importedFromML + res.sentToTN;
       const totalErr = res.errorsFromML + res.errorsToTN;

@@ -261,6 +261,11 @@ const Settings: React.FC<SettingsProps> = ({
         errors: res.errorsFromML + res.errorsToTN,
         logs: res.logs || []
       });
+      if (res.logs?.length) {
+        console.group('[LupoHub] Sincronizar los 3 (ML = real) - Logs');
+        res.logs.forEach((line: string) => console.log(line));
+        console.groupEnd();
+      }
     } catch (e: any) {
       setStockSyncResult({ platform: 'ML → LupoHub → TN', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
     } finally {
@@ -298,6 +303,11 @@ const Settings: React.FC<SettingsProps> = ({
     try {
       const res = await api.importStockFromMercadoLibre();
       setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
+      if (res.logs?.length) {
+        console.group('[LupoHub] Importar desde ML - Logs');
+        res.logs.forEach((line: string) => console.log(line));
+        console.groupEnd();
+      }
     } catch (e: any) {
       setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
     } finally {
