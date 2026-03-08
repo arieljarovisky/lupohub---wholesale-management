@@ -432,7 +432,11 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                           setImportingItemId(item.id);
                           try {
                             const res = await api.importProductFromMercadoLibre(item.id);
-                            showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                            if (res.variantsCreated > 0) {
+                              showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                            } else {
+                              showToast?.('success', `"${res.name}" vinculado a tu inventario (las variantes ya existían)`);
+                            }
                             onProductImported?.(res.baseSku);
                           } catch (err: any) {
                             showToast?.('error', err?.message || 'Error al agregar a tu inventario');

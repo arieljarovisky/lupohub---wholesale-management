@@ -2579,11 +2579,22 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     const existing = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [String(itemId)]);
     if (existing) return res.status(409).json({ message: 'Este producto de ML ya está en tu inventario', productId: existing.id });
 
-    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
+    let itemIdToFetch = String(itemId).trim();
+    let itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
       headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-    });
+    }).catch(() => null);
+    if ((!itemRes || itemRes.status !== 200) && /^\d+$/.test(itemIdToFetch)) {
+      itemIdToFetch = `MLA${itemIdToFetch}`;
+      itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
+        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+      }).catch(() => null);
+    }
+    if (!itemRes || itemRes.status !== 200) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre. Si el ID es solo numérico (ej. 3270089), se intenta con MLA.' });
     const item = itemRes.data;
     if (!item || item.error) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+
+    const existingByMlId = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [itemIdToFetch]);
+    if (existingByMlId) return res.status(409).json({ message: 'Este producto de ML ya está en tu inventario', productId: existingByMlId.id });
 
     const title = (item.title || '').toString().trim() || 'Sin título';
     let variations: { variationId: string | number; sku: string; color: string; size: string; stock: number }[] = [];
@@ -2609,7 +2620,8 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
           stock: v.available_quantity || 0
         };
       });
-    } else {
+    }
+    if (variations.length === 0) {
       const sku = (item.seller_sku ?? item.seller_custom_field ?? item.id).toString().trim();
       variations = [{
         variationId: item.id,
@@ -2621,13 +2633,23 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     }
 
     const firstSku = variations[0]?.sku || '';
-    const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${itemId}`);
-    const productId = uuidv4();
+    const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${itemIdToFetch}`);
+    let productId: string;
 
-    await execute(
-      `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, String(itemId)]
-    );
+    const existingBySku = await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
+    if (existingBySku) {
+      productId = existingBySku.id;
+      await execute(
+        `UPDATE products SET mercado_libre_id = ?, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?`,
+        [itemIdToFetch, title, productId]
+      );
+    } else {
+      productId = uuidv4();
+      await execute(
+        `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, itemIdToFetch]
+      );
+    }
 
     let variantsCreated = 0;
     for (const v of variations) {
@@ -2664,8 +2686,12 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     });
   } catch (error: any) {
     const status = error.response?.status;
+    const code = error.code;
     const detail = error.response?.data?.message || error.message;
-    console.error('Error importing product from ML:', detail);
+    console.error('Error importing product from ML:', code || status, detail);
+    if (code === 'ER_DUP_ENTRY' || (detail && String(detail).includes('Duplicate entry'))) {
+      return res.status(409).json({ message: 'Ya existe un artículo con ese código (SKU). Editá el existente en Mi inventario para vincularlo con ML.', detail: String(detail) });
+    }
     res.status(status === 404 ? 404 : 500).json({ message: 'Error importando producto de Mercado Libre', detail });
   }
 };
