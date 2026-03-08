@@ -1,3 +1,4 @@
+import { Router } from 'express';
 import { login, refreshToken, getMyCustomer } from '../controllers/auth.controller';
 import { authMiddleware } from '../middleware/auth';
 
