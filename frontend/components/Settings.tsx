@@ -302,7 +302,14 @@ const Settings: React.FC<SettingsProps> = ({
     setStockSyncResult(null);
     try {
       const res = await api.importStockFromMercadoLibre();
-      setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
+      const hasTN = typeof res.sentToTN === 'number' || typeof res.errorsToTN === 'number';
+      setStockSyncResult({
+        platform: hasTN ? 'ML → LupoHub → TN' : 'Mercado Libre',
+        updated: res.updated + (res.sentToTN ?? 0),
+        errors: res.errors + (res.errorsToTN ?? 0),
+        logs: res.logs,
+        ...(hasTN && { fromML: { imported: res.updated, errorsFromML: res.errors, sentToTN: res.sentToTN ?? 0, errorsToTN: res.errorsToTN ?? 0 } })
+      });
       if (res.logs?.length) {
         console.group('[LupoHub] Importar desde ML - Logs');
         res.logs.forEach((line: string) => console.log(line));
@@ -1126,6 +1133,15 @@ const Settings: React.FC<SettingsProps> = ({
                           SINCRONIZAR LOS 3 (ML = REAL)
                         </button>
                         <button 
+                          onClick={handleImportStockFromMercadoLibre}
+                          disabled={mlStockSyncLoading}
+                          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Trae el stock de ML a LupoHub y lo envía a Tienda Nube"
+                        >
+                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          IMPORTAR DESDE ML
+                        </button>
+                        <button 
                           onClick={handleSyncMLtoTN}
                           disabled={mlStockSyncLoading}
                           className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
@@ -1160,15 +1176,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">
-                      <strong>Automático:</strong> El stock entre Mercado Libre y Tienda Nube se sincroniza solo cada ~30 min (ML → TN). <strong>Manual (tus artículos):</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> para traer ML a LupoHub y TN; usá <strong>LOCAL → ML</strong> para enviar tu inventario a ML. Para solo traer ML a la app sin tocar TN, usá{' '}
-                      <button
-                        type="button"
-                        onClick={handleImportStockFromMercadoLibre}
-                        disabled={mlStockSyncLoading}
-                        className="text-yellow-400 hover:text-yellow-300 underline disabled:opacity-50"
-                      >
-                        Importar desde ML
-                      </button>.
+                      <strong>Automático:</strong> El stock entre Mercado Libre y Tienda Nube se sincroniza solo cada ~30 min (ML → TN). <strong>Manual (tus artículos):</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> o <strong>Importar desde ML</strong> para traer el stock de ML a LupoHub y enviarlo también a Tienda Nube; usá <strong>LOCAL → ML</strong> para enviar tu inventario a ML.
                     </p>
 
                     {/* Mensaje Automático */}

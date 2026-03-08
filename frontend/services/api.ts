@@ -531,9 +531,9 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0 }, 'syncMLtoTN');
   },
 
-  importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
+  importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);
+      return await request<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'importStockFromMercadoLibre');
   },
 

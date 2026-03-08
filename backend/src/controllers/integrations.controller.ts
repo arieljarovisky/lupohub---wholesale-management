@@ -1510,12 +1510,16 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
 };
 
 // Opcional: importar stock desde Mercado Libre a la app (solo por SKU: seller_custom_field = SKU local; si no existe variante, se ignora).
+// Después de actualizar LupoHub, también envía el stock a Tienda Nube (variantes vinculadas).
 export const importStockFromMercadoLibre = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
     if (!mlToken) {
       return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
     }
+    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    const hasTN = !!(tnIntegration?.access_token && tnIntegration?.store_id);
+
     const { updateVariantStock } = await import('./stock.controller');
 
     let updated = 0;
@@ -1524,6 +1528,7 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
     const limit = 50;
     let offset = 0;
 
+    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
@@ -1601,10 +1606,52 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
       offset += limit;
     }
 
+    let tnUpdated = 0;
+    let tnErrors = 0;
+    if (hasTN) {
+      logs.push('[2/2] Enviando stock a Tienda Nube...');
+      const variants = await query(`
+        SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+               COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+        FROM product_variants pv
+        JOIN product_colors pc ON pc.id = pv.product_color_id
+        JOIN products p ON p.id = pc.product_id
+        LEFT JOIN stocks s ON s.variant_id = pv.id
+        WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
+      `);
+      for (const v of variants) {
+        try {
+          const pack = Math.max(1, Number((v as any).tn_pack) || 1);
+          const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+          await axios.put(
+            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
+            { stock: stockToSend },
+            {
+              headers: {
+                'Authentication': `bearer ${tnIntegration.access_token}`,
+                'Content-Type': 'application/json',
+                'User-Agent': TN_USER_AGENT
+              }
+            }
+          );
+          tnUpdated++;
+          logs.push(`[TN] ${v.sku}: ${stockToSend}`);
+        } catch (e: any) {
+          tnErrors++;
+          logs.push(`[TN ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
+        }
+        if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+      }
+    } else {
+      logs.push('[2/2] Tienda Nube no conectada, se omitió el envío.');
+    }
+
     res.json({
-      message: 'Stock importado desde Mercado Libre (solo variantes existentes por SKU)',
+      message: hasTN ? 'Stock importado desde Mercado Libre y enviado a Tienda Nube' : 'Stock importado desde Mercado Libre (solo variantes existentes por SKU)',
       updated,
       errors,
+      sentToTN: tnUpdated,
+      errorsToTN: tnErrors,
       logs
     });
   } catch (error: any) {
