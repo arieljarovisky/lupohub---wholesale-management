@@ -575,6 +575,20 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'importStockFromMercadoLibre');
   },
 
+  /** Crear producto en inventario local desde una publicación de Mercado Libre */
+  importProductFromMercadoLibre: async (itemId: string): Promise<{ productId: string; baseSku: string; name: string; variantsCreated: number }> => {
+    return handleRequest(async () => {
+      return await request<{ productId: string; baseSku: string; name: string; variantsCreated: number }>('/integrations/mercadolibre/import-product', 'POST', { itemId }, undefined, 60000);
+    }, { productId: '', baseSku: '', name: '', variantsCreated: 0 }, 'importProductFromMercadoLibre');
+  },
+
+  /** Crear producto en inventario local desde un producto de Tienda Nube */
+  importProductFromTiendaNube: async (productId: string | number): Promise<{ productId: string; baseSku: string; name: string; variantsCreated: number }> => {
+    return handleRequest(async () => {
+      return await request<{ productId: string; baseSku: string; name: string; variantsCreated: number }>('/integrations/tiendanube/import-product', 'POST', { productId: String(productId) }, undefined, 60000);
+    }, { productId: '', baseSku: '', name: '', variantsCreated: 0 }, 'importProductFromTiendaNube');
+  },
+
   // Órdenes de Tienda Nube
   getTiendaNubeOrders: async (params?: { page?: number; per_page?: number; status?: string; created_at_min?: string; created_at_max?: string; only_paid_pending_shipment?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {

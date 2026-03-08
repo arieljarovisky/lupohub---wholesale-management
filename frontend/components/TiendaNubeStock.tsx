@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check } from 'lucide-react';
+import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
 import { api } from '../services/api';
 
 interface TNStockItem {
@@ -27,9 +27,11 @@ type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
 interface TiendaNubeStockProps {
   searchTerm?: string;
   onSearchChange?: (value: string) => void;
+  onProductImported?: () => void;
+  showToast?: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
 }
 
-const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTermProp, onSearchChange }) => {
+const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTermProp, onSearchChange, onProductImported, showToast }) => {
   const [items, setItems] = useState<TNStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -49,6 +51,7 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
     noStockCount: number;
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [importingItemId, setImportingItemId] = useState<string | null>(null);
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(String(text)).then(() => {
       setCopiedId(label);
@@ -417,9 +420,32 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                     ) : (
                       <p className="text-slate-500 text-sm mb-3">Sin variaciones (producto único)</p>
                     )}
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (importingItemId) return;
+                          setImportingItemId(item.id);
+                          try {
+                            const res = await api.importProductFromTiendaNube(item.id);
+                            showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                            onProductImported?.();
+                          } catch (err: any) {
+                            showToast?.('error', err?.message || 'Error al agregar a tu inventario');
+                          } finally {
+                            setImportingItemId(null);
+                          }
+                        }}
+                        disabled={!!importingItemId}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50 transition-colors"
+                        title="Crear producto en Mi inventario y vincular con Tienda Nube"
+                      >
+                        {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                        Agregar a mi stock
+                      </button>
                     {item.permalink && item.permalink !== 'https://tiendanube.com' && (
-                      <div className="mt-4 flex justify-end">
-                        <a
+                      <a
                           href={item.permalink}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -428,8 +454,8 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                           Ver en Tienda Nube
                           <ExternalLink size={14} />
                         </a>
-                      </div>
                     )}
+                    </div>
                   </div>
                 )}
               </div>

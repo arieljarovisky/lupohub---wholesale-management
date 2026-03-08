@@ -982,7 +982,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setBulkLinkAssignments({});
   };
 
-  const handleDeleteVariant = (variantId: string, skuLabel: string) => {
+  const handleDeleteVariant = (variantId: string, skuLabel: string, groupKey?: string) => {
     showConfirm({
       title: 'Eliminar variante',
       message: `¿Eliminar la variante ${skuLabel}? Se borrará también su stock. No se puede deshacer.`,
@@ -991,6 +991,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         try {
           await api.deleteVariant(variantId);
           showToast('success', 'Variante eliminada');
+          setServerListRefreshKey(k => k + 1);
+          if (groupKey) {
+            setLoadedVariants(prev => {
+              const next = { ...prev };
+              if (Array.isArray(next[groupKey])) {
+                next[groupKey] = next[groupKey].filter((v: any) => v.id !== variantId);
+                if (next[groupKey].length === 0) next[groupKey] = undefined;
+              }
+              return next;
+            });
+          }
           onImportComplete?.();
         } catch (e: any) {
           showToast('error', e?.message || 'Error al eliminar la variante');
@@ -1008,6 +1019,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         try {
           await api.deleteProduct(productId);
           showToast('success', 'Artículo y variantes eliminados');
+          setServerListRefreshKey(k => k + 1);
+          setLoadedVariants(prev => ({ ...prev, [groupKey]: undefined }));
+          setServerItems(prev => prev.filter(p => p.id !== productId));
+          setServerTotal(t => Math.max(0, t - 1));
           onImportComplete?.();
         } catch (e: any) {
           showToast('error', e?.message || 'Error al eliminar el artículo');
@@ -1624,9 +1639,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       </div>
 
       {inventorySubView === 'ml' ? (
-        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} />
+        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} onProductImported={() => { setServerListRefreshKey(k => k + 1); onImportComplete?.(); }} showToast={showToast} />
       ) : inventorySubView === 'tn' ? (
-        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} />
+        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} onProductImported={() => { setServerListRefreshKey(k => k + 1); onImportComplete?.(); }} showToast={showToast} />
       ) : (
         <>
       {/* Ayuda: unificación código / nombre */}
@@ -2198,7 +2213,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        <Edit2 size={16} />
                                       </button>
                                       <button 
-                                       onClick={() => handleDeleteVariant(product.id, product.sku || '')}
+                                       onClick={() => handleDeleteVariant(product.id, product.sku || '', groupKey)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-400 border border-slate-700 transition-colors touch-manipulation"
                                        title="Eliminar variante"
                                       >

@@ -2544,6 +2544,237 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
   }
 };
 
+/** Asegurar que exista un talle; si no existe, crearlo. Devuelve id del size. */
+async function ensureSize(sizeCode: string): Promise<string> {
+  const code = (sizeCode || 'U').toString().trim() || 'U';
+  let row = await get(`SELECT id FROM sizes WHERE size_code = ?`, [code]);
+  if (row?.id) return row.id;
+  const id = uuidv4();
+  await execute(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [id, code, code]);
+  return id;
+}
+
+/** Asegurar que exista un color; si no existe, crearlo. Devuelve id del color. */
+async function ensureColor(codeOrName: string): Promise<string> {
+  const name = (codeOrName || 'Único').toString().trim() || 'Único';
+  const code = name.substring(0, 20).replace(/\s+/g, '_').toUpperCase() || 'UNI';
+  let row = await get(`SELECT id FROM colors WHERE code = ?`, [code]);
+  if (row?.id) return row.id;
+  row = await get(`SELECT id FROM colors WHERE name = ?`, [name]);
+  if (row?.id) return row.id;
+  const id = uuidv4();
+  await execute(`INSERT INTO colors (id, code, name) VALUES (?, ?, ?)`, [id, code, name]);
+  return id;
+}
+
+/** Importar un producto de Mercado Libre al inventario local: crea producto + variantes y vincula ML. */
+export const importProductFromMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    const { itemId } = req.body || {};
+    if (!itemId) return res.status(400).json({ message: 'Falta itemId' });
+
+    const mlToken = await getValidMLToken();
+    if (!mlToken) return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
+
+    const existing = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [String(itemId)]);
+    if (existing) return res.status(409).json({ message: 'Este producto de ML ya está en tu inventario', productId: existing.id });
+
+    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
+      headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+    });
+    const item = itemRes.data;
+    if (!item || item.error) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+
+    const title = (item.title || '').toString().trim() || 'Sin título';
+    let variations: { variationId: string | number; sku: string; color: string; size: string; stock: number }[] = [];
+
+    if (item.variations && item.variations.length > 0) {
+      variations = item.variations.map((v: any) => {
+        const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+        const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+        const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+        let color = '';
+        let size = '';
+        (v.attribute_combinations || []).forEach((attr: any) => {
+          const id = (attr.id || '').toString().toUpperCase();
+          const name = (attr.value_name || attr.name || '').toString().trim();
+          if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+          if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
+        });
+        return {
+          variationId: v.id,
+          sku,
+          color: color || 'Único',
+          size: size || 'U',
+          stock: v.available_quantity || 0
+        };
+      });
+    } else {
+      const sku = (item.seller_sku ?? item.seller_custom_field ?? item.id).toString().trim();
+      variations = [{
+        variationId: item.id,
+        sku: sku || `ML-${item.id}`,
+        color: 'Único',
+        size: 'U',
+        stock: item.available_quantity || 0
+      }];
+    }
+
+    const firstSku = variations[0]?.sku || '';
+    const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${itemId}`);
+    const productId = uuidv4();
+
+    await execute(
+      `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, String(itemId)]
+    );
+
+    let variantsCreated = 0;
+    for (const v of variations) {
+      const sizeCode = (v.size || 'U').toString().trim() || 'U';
+      const colorCode = (v.color || 'Único').toString().trim() || 'Único';
+      const sizeId = await ensureSize(sizeCode);
+      const colorId = await ensureColor(colorCode);
+
+      let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+      if (!productColorId) {
+        productColorId = uuidv4();
+        await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+      }
+
+      const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+      if (existingVariant) continue;
+
+      const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
+      const variantId = uuidv4();
+      await execute(
+        `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id) VALUES (?, ?, ?, ?, ?)`,
+        [variantId, productColorId, sizeId, variantSku, String(v.variationId)]
+      );
+      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
+      variantsCreated++;
+    }
+
+    res.status(201).json({
+      productId,
+      baseSku,
+      name: title,
+      variantsCreated,
+      message: 'Producto importado de Mercado Libre'
+    });
+  } catch (error: any) {
+    const status = error.response?.status;
+    const detail = error.response?.data?.message || error.message;
+    console.error('Error importing product from ML:', detail);
+    res.status(status === 404 ? 404 : 500).json({ message: 'Error importando producto de Mercado Libre', detail });
+  }
+};
+
+/** Importar un producto de Tienda Nube al inventario local: crea producto + variantes y vincula TN. */
+export const importProductFromTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const { productId: tnProductId } = req.body || {};
+    if (tnProductId == null || tnProductId === '') return res.status(400).json({ message: 'Falta productId de Tienda Nube' });
+
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+
+    const existing = await get(`SELECT id FROM products WHERE tienda_nube_id = ?`, [String(tnProductId)]);
+    if (existing) return res.status(409).json({ message: 'Este producto de Tienda Nube ya está en tu inventario', productId: existing.id });
+
+    const headers = { 'Authentication': `bearer ${integration.access_token}`, 'User-Agent': TN_USER_AGENT };
+    const [productRes, variantsRes] = await Promise.all([
+      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${tnProductId}`, { headers, validateStatus: () => true }),
+      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${tnProductId}/variants`, { headers, validateStatus: () => true })
+    ]);
+    if (productRes.status !== 200) {
+      const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
+      return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
+    }
+
+    const p = productRes.data;
+    const title = (p.name?.es ?? p.name?.pt ?? p.name?.en ?? p.name ?? '').toString().trim() || 'Sin título';
+    const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
+    const isSizeAttr = (n: string) => /talle|talla|size|tamano|tamaño/i.test(n);
+    const isColorAttr = (n: string) => /color|colour|cor/i.test(n);
+    let sizeIdx = -1, colorIdx = -1;
+    attrs.forEach((a: any, i: number) => {
+      const n = (a?.es ?? a?.en ?? a?.pt ?? '').toString();
+      if (isSizeAttr(n)) sizeIdx = i;
+      if (isColorAttr(n)) colorIdx = i;
+    });
+
+    let variantsList: any[] = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : (Array.isArray(p?.variants) ? p.variants : []);
+    const toStr = (x: any) => (x != null && typeof x === 'object' ? (x.es ?? x.pt ?? x.en) : x) ?? '';
+    let variations = variantsList.map((v: any) => {
+      const values = Array.isArray(v?.values) ? v.values : [];
+      const sizeVal = sizeIdx >= 0 && sizeIdx < values.length ? values[sizeIdx] : '';
+      const colorVal = colorIdx >= 0 && colorIdx < values.length ? values[colorIdx] : '';
+      return {
+        variantId: v?.id,
+        sku: (v?.sku || '').toString().trim() || `TN-${v?.id}`,
+        size: String(toStr(sizeVal)).trim() || 'U',
+        color: String(toStr(colorVal)).trim() || 'Único',
+        stock: Number(v?.stock) || 0
+      };
+    });
+
+    if (variations.length === 0) {
+      variations.push({
+        variantId: p.id,
+        sku: `TN-${p.id}`,
+        size: 'U',
+        color: 'Único',
+        stock: 0
+      });
+    }
+
+    const baseSku = variations[0]?.sku?.replace(/-[^-]+-[^-]+$/, '') || `TN-${tnProductId}`;
+    const productId = uuidv4();
+    await execute(
+      `INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [productId, baseSku, title, 'General', variations[0]?.stock ? 0 : 0, null, String(tnProductId)]
+    );
+
+    let variantsCreated = 0;
+    for (const v of variations) {
+      const sizeId = await ensureSize(v.size);
+      const colorId = await ensureColor(v.color);
+
+      let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+      if (!productColorId) {
+        productColorId = uuidv4();
+        await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+      }
+
+      const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+      if (existingVariant) continue;
+
+      const variantId = uuidv4();
+      await execute(
+        `INSERT INTO product_variants (id, product_color_id, size_id, sku, tienda_nube_variant_id) VALUES (?, ?, ?, ?, ?)`,
+        [variantId, productColorId, sizeId, v.sku, String(v.variantId)]
+      );
+      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
+      variantsCreated++;
+    }
+
+    res.status(201).json({
+      productId,
+      baseSku,
+      name: title,
+      variantsCreated,
+      message: 'Producto importado de Tienda Nube'
+    });
+  } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
+    console.error('Error importing product from TN:', detail);
+    res.status(500).json({ message: 'Error importando producto de Tienda Nube', detail });
+  }
+};
+
 // Obtener configuración de mensaje automático de ML
 export const getMLAutoMessageConfig = async (req: Request, res: Response) => {
   try {

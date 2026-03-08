@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check } from 'lucide-react';
+import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
 import { api } from '../services/api';
 
 interface MLStockItem {
@@ -27,9 +27,11 @@ type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
 interface MercadoLibreStockProps {
   searchTerm?: string;
   onSearchChange?: (value: string) => void;
+  onProductImported?: () => void;
+  showToast?: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
 }
 
-const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searchTermProp, onSearchChange }) => {
+const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searchTermProp, onSearchChange, onProductImported, showToast }) => {
   const [items, setItems] = useState<MLStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -49,6 +51,7 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
     noStockCount: number;
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [importingItemId, setImportingItemId] = useState<string | null>(null);
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(text).then(() => {
       setCopiedId(label);
@@ -420,7 +423,30 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                     ) : (
                       <p className="text-slate-500 text-sm mb-3">Sin variaciones (producto único)</p>
                     )}
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (importingItemId) return;
+                          setImportingItemId(item.id);
+                          try {
+                            const res = await api.importProductFromMercadoLibre(item.id);
+                            showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                            onProductImported?.();
+                          } catch (err: any) {
+                            showToast?.('error', err?.message || 'Error al agregar a tu inventario');
+                          } finally {
+                            setImportingItemId(null);
+                          }
+                        }}
+                        disabled={!!importingItemId}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 transition-colors"
+                        title="Crear producto en Mi inventario y vincular con esta publicación"
+                      >
+                        {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                        Agregar a mi stock
+                      </button>
                       <a
                         href={item.permalink}
                         target="_blank"
