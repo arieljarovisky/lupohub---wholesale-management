@@ -270,6 +270,26 @@ export const getProductStockTotalBySku = async (sku: string): Promise<number> =>
   return Number(row?.stock_total || 0);
 };
 
+/** Obtener un producto por ID (para formulario de edición) */
+export const getProductById = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID requerido' });
+  try {
+    const product = await get(
+      `SELECT id, sku, name, category, base_price, description,
+              COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+              COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+       FROM products WHERE id = ?`,
+      [id]
+    );
+    if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
+    res.json(product);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo producto' });
+  }
+};
+
 export const getProductBySku = async (req: any, res: any) => {
   const { sku } = req.params;
   try {

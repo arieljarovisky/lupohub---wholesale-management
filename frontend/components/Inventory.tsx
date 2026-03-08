@@ -94,6 +94,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [bulkLinkAssignments, setBulkLinkAssignments] = useState<Record<string, { ml?: string; tn?: string }>>({});
   const [bulkLinkSaving, setBulkLinkSaving] = useState(false);
 
+  // Editar producto (artículo)
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editProductForm, setEditProductForm] = useState<{ name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string }>({ name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1' });
+  const [loadingEditProduct, setLoadingEditProduct] = useState(false);
+  const [savingEditProduct, setSavingEditProduct] = useState(false);
+
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
   const [selectedProductForDespacho, setSelectedProductForDespacho] = useState<any>(null);
@@ -1421,6 +1427,59 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     });
   };
 
+  useEffect(() => {
+    if (!editingProductId) return;
+    setLoadingEditProduct(true);
+    api.getProductById(editingProductId).then((p) => {
+      if (p) {
+        setEditProductForm({
+          name: p.name || '',
+          category: p.category || 'General',
+          base_price: String(p.base_price ?? ''),
+          description: p.description || '',
+          mercadoLibrePackSize: String(p.mercado_libre_pack_size ?? 1),
+          tiendaNubePackSize: String(p.tienda_nube_pack_size ?? 1)
+        });
+      }
+    }).finally(() => setLoadingEditProduct(false));
+  }, [editingProductId]);
+
+  const handleSaveEditProduct = async () => {
+    if (!editingProductId) return;
+    const name = editProductForm.name.trim();
+    const base_price = parseFloat(editProductForm.base_price);
+    const mlPack = parseInt(editProductForm.mercadoLibrePackSize, 10);
+    const tnPack = parseInt(editProductForm.tiendaNubePackSize, 10);
+    if (!name) {
+      showToast('error', 'El nombre es obligatorio');
+      return;
+    }
+    if (isNaN(base_price) || base_price < 0) {
+      showToast('error', 'Precio debe ser un número mayor o igual a 0');
+      return;
+    }
+    setSavingEditProduct(true);
+    try {
+      await api.updateProduct({
+        id: editingProductId,
+        name,
+        category: editProductForm.category || 'General',
+        price: base_price,
+        description: editProductForm.description || undefined,
+        mercadoLibrePackSize: isNaN(mlPack) || mlPack < 1 ? undefined : mlPack,
+        tiendaNubePackSize: isNaN(tnPack) || tnPack < 1 ? undefined : tnPack
+      } as Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number });
+      showToast('success', 'Producto actualizado');
+      setEditingProductId(null);
+      setServerListRefreshKey(k => k + 1);
+      onImportComplete?.();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al guardar');
+    } finally {
+      setSavingEditProduct(false);
+    }
+  };
+
   const toggleSizeSelection = (sizeName: string) => {
     setSelectedSizes(prev => 
       prev.includes(sizeName) ? prev.filter(s => s !== sizeName) : [...prev, sizeName]
@@ -1900,13 +1959,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    )}
                    {/* Delete product (all variants) */}
                    {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
-                     <button
-                       onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
-                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
-                       title="Eliminar artículo y todas sus variantes"
-                     >
-                       <Trash2 size={20} />
-                     </button>
+                     <>
+                       <button
+                         onClick={(e) => { e.stopPropagation(); setEditingProductId((groupVariants[0] as any).product_id); }}
+                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         title="Editar artículo"
+                       >
+                         <Edit2 size={20} />
+                       </button>
+                       <button
+                         onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
+                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         title="Eliminar artículo y todas sus variantes"
+                       >
+                         <Trash2 size={20} />
+                       </button>
+                     </>
                    )}
 
                    <div className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full transition-transform duration-300 ${isExpanded ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-700 text-slate-400'}`}>
@@ -2358,6 +2426,111 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </div>
               </div>
            </div>
+        </div>
+      )}
+
+      {/* EDIT PRODUCT MODAL */}
+      {editingProductId && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 rounded-t-3xl sm:rounded-2xl border border-slate-700 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
+            <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Edit2 size={20} className="text-amber-400" />
+                Editar artículo
+              </h3>
+              <button onClick={() => setEditingProductId(null)} className="p-2.5 min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition touch-manipulation shrink-0" aria-label="Cerrar">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 min-h-0">
+              {loadingEditProduct ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={32} className="text-amber-400 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nombre</label>
+                    <input
+                      type="text"
+                      value={editProductForm.name}
+                      onChange={(e) => setEditProductForm(f => ({ ...f, name: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      placeholder="Nombre del artículo"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Categoría</label>
+                    <input
+                      type="text"
+                      value={editProductForm.category}
+                      onChange={(e) => setEditProductForm(f => ({ ...f, category: e.target.value }))}
+                      list="edit-category-list"
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      placeholder="General"
+                    />
+                    <datalist id="edit-category-list">{categories.map(c => <option key={c} value={c} />)}</datalist>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Precio base</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={editProductForm.base_price}
+                      onChange={(e) => setEditProductForm(f => ({ ...f, base_price: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Descripción (opcional)</label>
+                    <textarea
+                      value={editProductForm.description}
+                      onChange={(e) => setEditProductForm(f => ({ ...f, description: e.target.value }))}
+                      rows={3}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none resize-none"
+                      placeholder="Descripción del artículo"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Pack ML (x)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editProductForm.mercadoLibrePackSize}
+                        onChange={(e) => setEditProductForm(f => ({ ...f, mercadoLibrePackSize: e.target.value }))}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Pack TN (x)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editProductForm.tiendaNubePackSize}
+                        onChange={(e) => setEditProductForm(f => ({ ...f, tiendaNubePackSize: e.target.value }))}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Pack: cuántas unidades por caja en ML/TN (ej. x2 = enviar stock/2).</p>
+                </>
+              )}
+            </div>
+            {!loadingEditProduct && (
+              <div className="shrink-0 p-4 border-t border-slate-700 flex gap-3 justify-end">
+                <button onClick={() => setEditingProductId(null)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium">
+                  Cancelar
+                </button>
+                <button onClick={handleSaveEditProduct} disabled={savingEditProduct} className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 flex items-center gap-2">
+                  {savingEditProduct ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
+                  Guardar
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

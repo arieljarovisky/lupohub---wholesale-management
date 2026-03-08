@@ -208,6 +208,15 @@ export const api = {
     }
   },
 
+  getProductById: async (id: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; description?: string; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number } | null> => {
+    try {
+      const res = await request<any>(`/products/by-id/${encodeURIComponent(id)}`, 'GET');
+      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1 } : null;
+    } catch {
+      return null;
+    }
+  },
+
   getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
     return handleRequest(async () => {
       const res = await request<any>(`/products/${sku}`, 'GET');
