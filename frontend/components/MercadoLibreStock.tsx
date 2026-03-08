@@ -24,12 +24,19 @@ interface MLStockItem {
 
 type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
 
-const MercadoLibreStock: React.FC = () => {
+interface MercadoLibreStockProps {
+  searchTerm?: string;
+  onSearchChange?: (value: string) => void;
+}
+
+const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searchTermProp, onSearchChange }) => {
   const [items, setItems] = useState<MLStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [internalSearchTerm, setInternalSearchTerm] = useState('');
+  const searchTerm = searchTermProp !== undefined ? searchTermProp : internalSearchTerm;
+  const setSearchTerm = onSearchChange ?? setInternalSearchTerm;
   const [allItemsForSearch, setAllItemsForSearch] = useState<MLStockItem[] | null>(null);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);

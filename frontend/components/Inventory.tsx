@@ -105,6 +105,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [importingTango, setImportingTango] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>('mine');
+  const [mlSearchTerm, setMlSearchTerm] = useState('');
+  const [tnSearchTerm, setTnSearchTerm] = useState('');
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
@@ -172,17 +174,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   }
 
   useEffect(() => {
-    try {
-      console.table(products.map(p => ({
-        id: p.id,
-        sku: p.sku,
-        name: p.name,
-        category: p.category,
-        stock: (p as any).stock_total ?? (p as any).stock ?? 0,
-        price: (p as any).base_price ?? (p as any).price ?? 0
-      })));
-    } catch {
-      console.log('Productos', products);
+    if (import.meta.env.DEV && products.length > 0) {
+      try {
+        console.table(products.map(p => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          category: p.category,
+          stock: (p as any).stock_total ?? (p as any).stock ?? 0,
+          price: (p as any).base_price ?? (p as any).price ?? 0
+        })));
+      } catch {
+        console.log('Productos', products);
+      }
     }
   }, [products]);
 
@@ -565,6 +569,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (res.logs?.length) {
         console.group('[LupoHub] Stock desde ML - Logs');
         res.logs.forEach((line: string) => console.log(line));
+        console.groupEnd();
+      } else {
+        console.group('[LupoHub] Stock desde ML - Logs');
+        console.log(`Sync finalizado. LupoHub: ${res.importedFromML} actualizados, ${res.errorsFromML} errores. TN: ${res.sentToTN} enviados, ${res.errorsToTN} errores.`);
         console.groupEnd();
       }
       if (onImportComplete) onImportComplete();
@@ -1447,9 +1455,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       </div>
 
       {inventorySubView === 'ml' ? (
-        <MercadoLibreStock />
+        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} />
       ) : inventorySubView === 'tn' ? (
-        <TiendaNubeStock />
+        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} />
       ) : (
         <>
       {/* Ayuda: unificación código / nombre */}
