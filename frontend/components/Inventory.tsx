@@ -51,6 +51,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [selectionModeEnabled, setSelectionModeEnabled] = useState(false);
   const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | null>(null);
   
   // Creation Modal State
@@ -1897,8 +1898,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
       </div>
 
+      {/* Botón para activar modo selección (solo Mi inventario, admin/warehouse) */}
+      {inventorySubView === 'mine' && isAdminOrWarehouse && !selectionModeEnabled && (
+        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-slate-800/60 border border-slate-600 rounded-xl">
+          <span className="text-slate-400 text-sm">Para enviar variantes a Mercado Libre o Tienda Nube, activá la selección.</span>
+          <button
+            type="button"
+            onClick={() => setSelectionModeEnabled(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold transition-colors"
+          >
+            <Check size={18} className="opacity-80" />
+            Seleccionar variantes
+          </button>
+        </div>
+      )}
+
       {/* Barra de selección para enviar a TN/ML */}
-      {inventorySubView === 'mine' && selectedVariantIds.length > 0 && (
+      {inventorySubView === 'mine' && selectionModeEnabled && selectedVariantIds.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
           <span className="text-amber-200 font-semibold text-sm">
             {selectedVariantIds.length} variante{selectedVariantIds.length !== 1 ? 's' : ''} seleccionada{selectedVariantIds.length !== 1 ? 's' : ''}
@@ -1925,6 +1941,27 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             <X size={16} />
             Limpiar selección
+          </button>
+          <button
+            onClick={() => setSelectionModeEnabled(false)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-medium"
+            title="Ocultar cuadros de selección"
+          >
+            Listo
+          </button>
+        </div>
+      )}
+
+      {/* Barra cuando modo selección está activo pero sin variantes seleccionadas: opción de cerrar */}
+      {inventorySubView === 'mine' && selectionModeEnabled && selectedVariantIds.length === 0 && (
+        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-slate-800/60 border border-slate-600 rounded-xl">
+          <span className="text-slate-400 text-sm">Expandí un artículo y marcá las variantes a enviar.</span>
+          <button
+            type="button"
+            onClick={() => setSelectionModeEnabled(false)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-medium"
+          >
+            Cerrar selección
           </button>
         </div>
       )}
@@ -1959,7 +1996,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 className="p-3 sm:p-4 md:p-5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-750 active:bg-slate-700/50 transition-colors touch-manipulation"
               >
                 <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
-                  {isAdminOrWarehouse && (
+                  {isAdminOrWarehouse && selectionModeEnabled && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); toggleGroupSelection(groupKey, groupVariants); }}
@@ -2108,7 +2145,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
                       return (
                         <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
-                           {isAdminOrWarehouse && (
+                           {isAdminOrWarehouse && selectionModeEnabled && (
                              <button
                                type="button"
                                onClick={() => toggleVariantSelection(product.id)}
