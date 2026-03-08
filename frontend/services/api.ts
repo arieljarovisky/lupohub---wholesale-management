@@ -503,6 +503,20 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
   },
 
+  /** Enviar stock solo de variantes seleccionadas a Tienda Nube */
+  syncSelectedStockToTiendaNube: async (variantIds: string[]): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; updated: number; errors: number; total: number; logs: string[] }>('/integrations/tiendanube/sync-stock-selected', 'POST', { variantIds }, undefined, 120000);
+    }, { message: 'Offline', updated: 0, errors: 0, total: 0, logs: [] }, 'syncSelectedStockToTiendaNube');
+  },
+
+  /** Enviar stock solo de variantes seleccionadas a Mercado Libre */
+  syncSelectedStockToMercadoLibre: async (variantIds: string[]): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; updated: number; errors: number; total: number; logs: string[] }>('/integrations/mercadolibre/sync-stock-selected', 'POST', { variantIds }, undefined, 120000);
+    }, { message: 'Offline', updated: 0, errors: 0, total: 0, logs: [] }, 'syncSelectedStockToMercadoLibre');
+  },
+
   /** ML = fuente de verdad: importa stock desde ML a LupoHub y luego envía a Tienda Nube */
   syncAllStockFromMercadoLibre: async (): Promise<{
     message: string;

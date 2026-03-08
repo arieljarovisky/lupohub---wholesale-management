@@ -1312,6 +1312,76 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   }
 };
 
+// Enviar stock solo de variantes seleccionadas a Tienda Nube
+export const syncSelectedStockToTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const variantIds = Array.isArray(req.body?.variantIds) ? req.body.variantIds.filter((id: unknown) => typeof id === 'string' && id.length > 0) : [];
+    if (variantIds.length === 0) {
+      return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
+    }
+
+    const integration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token || !integration?.store_id) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+
+    const placeholders = variantIds.map(() => '?').join(',');
+    const variants = await query(
+      `SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.id IN (${placeholders})
+         AND pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL`,
+      variantIds
+    );
+
+    let updated = 0;
+    let errors = 0;
+    const logs: string[] = [];
+
+    for (const v of variants) {
+      try {
+        const pack = Math.max(1, Number((v as any).tn_pack) || 1);
+        const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+        await axios.put(
+          `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
+          { stock: stockToSend },
+          {
+            headers: {
+              'Authentication': `bearer ${integration.access_token}`,
+              'Content-Type': 'application/json',
+              'User-Agent': TN_USER_AGENT
+            }
+          }
+        );
+        updated++;
+        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
+      } catch (e: any) {
+        errors++;
+        logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
+      }
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+    }
+
+    const skipped = variantIds.length - variants.length;
+    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) sin vínculo TN o no encontradas, omitidas.`);
+
+    res.json({
+      message: 'Stock enviado a Tienda Nube (selección)',
+      updated,
+      errors,
+      total: variants.length,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error syncing selected stock to TN:', error);
+    res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+  }
+};
+
 // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
 export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
@@ -1356,6 +1426,65 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     });
   } catch (error: any) {
     console.error('Error syncing stock to ML:', error);
+    res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+  }
+};
+
+// Enviar stock solo de variantes seleccionadas a Mercado Libre
+export const syncSelectedStockToMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    const variantIds = Array.isArray(req.body?.variantIds) ? req.body.variantIds.filter((id: unknown) => typeof id === 'string' && id.length > 0) : [];
+    if (variantIds.length === 0) {
+      return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
+    }
+
+    const { updateMercadoLibreStockByVariant } = await import('./stock.controller');
+    const placeholders = variantIds.map(() => '?').join(',');
+    const variants = await query(
+      `SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku,
+              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.id IN (${placeholders})
+         AND pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL`,
+      variantIds
+    );
+
+    let updated = 0;
+    let errors = 0;
+    const logs: string[] = [];
+
+    for (const v of variants) {
+      const pack = Math.max(1, Number((v as any).ml_pack) || 1);
+      const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+      const ok = await updateMercadoLibreStockByVariant(
+        v.mercado_libre_id,
+        v.mercado_libre_variant_id,
+        stockToSend
+      );
+      if (ok) {
+        updated++;
+        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
+      } else {
+        errors++;
+        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
+      }
+    }
+
+    const skipped = variantIds.length - variants.length;
+    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) sin vínculo ML o no encontradas, omitidas.`);
+
+    res.json({
+      message: 'Stock enviado a Mercado Libre (selección)',
+      updated,
+      errors,
+      total: variants.length,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error syncing selected stock to ML:', error);
     res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
   }
 };

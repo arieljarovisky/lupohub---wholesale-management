@@ -15,6 +15,8 @@ import {
   handleMercadoLibreWebhook,
   syncAllStockToTiendaNube,
   syncAllStockToMercadoLibre,
+  syncSelectedStockToTiendaNube,
+  syncSelectedStockToMercadoLibre,
   syncAllStockFromMercadoLibre,
   runAutoSyncMLtoTN,
   importStockFromMercadoLibre,
@@ -47,6 +49,7 @@ router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
+router.post('/mercadolibre/sync-stock-selected', syncSelectedStockToMercadoLibre);
 router.post('/mercadolibre/sync-from-ml', syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', importStockFromMercadoLibre);
 router.post('/mercadolibre/sync-ml-to-tn', (req, res) => runAutoSyncMLtoTN().then(r => res.json({ message: 'ML → TN ejecutado', ...r })).catch(e => res.status(500).json({ message: e.message })));
@@ -61,6 +64,7 @@ router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', syncAllStockToTiendaNube);
+router.post('/tiendanube/sync-stock-selected', syncSelectedStockToTiendaNube);
 router.post('/tiendanube/normalize-sizes', normalizeSizesInTiendaNube);
 router.post('/tiendanube/webhook', handleTiendaNubeWebhook);
 

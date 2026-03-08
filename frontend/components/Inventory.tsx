@@ -50,6 +50,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | null>(null);
   
   // Creation Modal State
   const [isCreating, setIsCreating] = useState(false);
@@ -674,6 +676,38 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  const handleSyncSelectedToTiendaNube = async () => {
+    if (selectedVariantIds.length === 0) return;
+    setSyncSelectedLoading('tn');
+    try {
+      const res = await api.syncSelectedStockToTiendaNube(selectedVariantIds);
+      if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variante(s) enviadas a Tienda Nube.`);
+      else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+      else showToast('info', 'Ninguna variante con vínculo TN en la selección.');
+      setServerListRefreshKey(k => k + 1);
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al enviar a Tienda Nube');
+    } finally {
+      setSyncSelectedLoading(null);
+    }
+  };
+
+  const handleSyncSelectedToMercadoLibre = async () => {
+    if (selectedVariantIds.length === 0) return;
+    setSyncSelectedLoading('ml');
+    try {
+      const res = await api.syncSelectedStockToMercadoLibre(selectedVariantIds);
+      if (res.errors === 0 && res.updated > 0) showToast('success', `${res.updated} variante(s) enviadas a Mercado Libre.`);
+      else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
+      else showToast('info', 'Ninguna variante con vínculo ML en la selección.');
+      setServerListRefreshKey(k => k + 1);
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al enviar a Mercado Libre');
+    } finally {
+      setSyncSelectedLoading(null);
+    }
+  };
+
   useEffect(() => {
     if (!syncMenuOpen) return;
     const onOutside = (e: MouseEvent) => {
@@ -770,6 +804,42 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const val = (p as any).stock_total ?? (p as any).stock ?? 0;
       return val > 0 && val < 20;
     });
+  };
+
+  const selectedSet = React.useMemo(() => new Set(selectedVariantIds), [selectedVariantIds]);
+
+  const getVariantIdsForGroup = (groupKey: string, groupVariants: Product[]): string[] => {
+    const list = loadedVariants[groupKey]?.length ? loadedVariants[groupKey] : getGroupFilteredVariants(groupKey, groupVariants);
+    return list.map(p => String(p.id)).filter(Boolean);
+  };
+
+  const toggleVariantSelection = (variantId: string) => {
+    setSelectedVariantIds(prev => {
+      const set = new Set(prev);
+      if (set.has(variantId)) set.delete(variantId);
+      else set.add(variantId);
+      return Array.from(set);
+    });
+  };
+
+  const toggleGroupSelection = (groupKey: string, groupVariants: Product[]) => {
+    const ids = getVariantIdsForGroup(groupKey, groupVariants);
+    if (ids.length === 0) return;
+    const set = new Set(selectedVariantIds);
+    const allSelected = ids.every(id => set.has(id));
+    if (allSelected) ids.forEach(id => set.delete(id));
+    else ids.forEach(id => set.add(id));
+    setSelectedVariantIds(Array.from(set));
+  };
+
+  const isGroupFullySelected = (groupKey: string, groupVariants: Product[]) => {
+    const ids = getVariantIdsForGroup(groupKey, groupVariants);
+    return ids.length > 0 && ids.every(id => selectedSet.has(id));
+  };
+
+  const isGroupPartiallySelected = (groupKey: string, groupVariants: Product[]) => {
+    const ids = getVariantIdsForGroup(groupKey, groupVariants);
+    return ids.some(id => selectedSet.has(id));
   };
 
   // Grupos ya filtrados y ordenados + total de páginas (para que el paginado refleje los filtros)
@@ -1713,6 +1783,38 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
       </div>
 
+      {/* Barra de selección para enviar a TN/ML */}
+      {inventorySubView === 'mine' && selectedVariantIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+          <span className="text-amber-200 font-semibold text-sm">
+            {selectedVariantIds.length} variante{selectedVariantIds.length !== 1 ? 's' : ''} seleccionada{selectedVariantIds.length !== 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={handleSyncSelectedToTiendaNube}
+            disabled={!!syncSelectedLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold disabled:opacity-50"
+          >
+            {syncSelectedLoading === 'tn' ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+            Enviar a Tienda Nube
+          </button>
+          <button
+            onClick={handleSyncSelectedToMercadoLibre}
+            disabled={!!syncSelectedLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold disabled:opacity-50"
+          >
+            {syncSelectedLoading === 'ml' ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+            Enviar a Mercado Libre
+          </button>
+          <button
+            onClick={() => setSelectedVariantIds([])}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium"
+          >
+            <X size={16} />
+            Limpiar selección
+          </button>
+        </div>
+      )}
+
       {/* Grouped List Container */}
       <div className="space-y-4">
         {(() => {
@@ -1743,6 +1845,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 className="p-3 sm:p-4 md:p-5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-750 active:bg-slate-700/50 transition-colors touch-manipulation"
               >
                 <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                  {isAdminOrWarehouse && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); toggleGroupSelection(groupKey, groupVariants); }}
+                      className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-lg border-2 flex items-center justify-center transition-colors touch-manipulation"
+                      title={isGroupFullySelected(groupKey, groupVariants) ? 'Quitar artículo de la selección' : 'Seleccionar artículo (todas las variantes)'}
+                      style={{
+                        borderColor: isGroupFullySelected(groupKey, groupVariants) ? 'rgb(234 179 8)' : isGroupPartiallySelected(groupKey, groupVariants) ? 'rgb(234 179 8)' : 'rgb(71 85 105)',
+                        backgroundColor: isGroupFullySelected(groupKey, groupVariants) ? 'rgba(234,179,8,0.2)' : isGroupPartiallySelected(groupKey, groupVariants) ? 'rgba(234,179,8,0.1)' : 'transparent'
+                      }}
+                    >
+                      {isGroupFullySelected(groupKey, groupVariants) && <Check size={18} className="text-amber-400" strokeWidth={3} />}
+                      {!isGroupFullySelected(groupKey, groupVariants) && isGroupPartiallySelected(groupKey, groupVariants) && <span className="w-2 h-2 rounded-full bg-amber-500" />}
+                    </button>
+                  )}
                   <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 ${isFullyOut ? 'bg-red-900/20 text-red-500' : 'bg-blue-900/20 text-blue-400'}`}>
                     <Box size={24} />
                   </div>
@@ -1868,6 +1985,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
                       return (
                         <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+                           {isAdminOrWarehouse && (
+                             <button
+                               type="button"
+                               onClick={() => toggleVariantSelection(product.id)}
+                               className="shrink-0 w-7 h-7 sm:w-8 sm:h-8 rounded-lg border-2 flex items-center justify-center transition-colors self-start md:self-center"
+                               title={selectedSet.has(product.id) ? 'Quitar de la selección' : 'Seleccionar variante'}
+                               style={{
+                                 borderColor: selectedSet.has(product.id) ? 'rgb(234 179 8)' : 'rgb(71 85 105)',
+                                 backgroundColor: selectedSet.has(product.id) ? 'rgba(234,179,8,0.2)' : 'transparent'
+                               }}
+                             >
+                               {selectedSet.has(product.id) && <Check size={16} className="text-amber-400" strokeWidth={3} />}
+                             </button>
+                           )}
                            {/* Variant Info */}
                            <div className="flex-1 min-w-0">
                              <div className="flex items-center gap-2 mb-1 flex-wrap">
