@@ -1400,32 +1400,50 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
             for (const v of item.variations) {
-              const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
-              if (!mlSku) continue;
+              const sellerCustom = (v.seller_custom_field ?? '').toString().trim();
+              const sellerSku = (v.seller_sku ?? '').toString().trim();
+              const mlSku = sellerCustom || sellerSku;
+              if (!mlSku) {
+                logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
+                continue;
+              }
               const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
+              logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → usando="${mlSku}" normalizado="${mlSkuNorm}"`);
               const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
                  WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                  LIMIT 1`,
                 [mlSkuNorm]
               );
-              if (!row?.variant_id) continue;
+              if (!row?.variant_id) {
+                logs.push(`[SKU ML] sin variante local para "${mlSku}" (normalizado: ${mlSkuNorm})`);
+                continue;
+              }
               const mlQty = v.available_quantity ?? 0;
               const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
               if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
               else { errors++; logs.push(`[ERROR] ${mlSku}`); }
             }
           } else {
-            const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
-            if (!mlSku) continue;
+            const sellerCustom = (item.seller_custom_field ?? '').toString().trim();
+            const sellerSku = (item.seller_sku ?? '').toString().trim();
+            const mlSku = sellerCustom || sellerSku;
+            if (!mlSku) {
+              logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
+              continue;
+            }
             const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
+            logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → usando="${mlSku}" normalizado="${mlSkuNorm}"`);
             const variantRow = await get(
               `SELECT pv.id as variant_id FROM product_variants pv
                WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                LIMIT 1`,
               [mlSkuNorm]
             );
-            if (!variantRow?.variant_id) continue;
+            if (!variantRow?.variant_id) {
+              logs.push(`[SKU ML] sin variante local para ítem "${mlSku}" (normalizado: ${mlSkuNorm})`);
+              continue;
+            }
             const mlQty = item.available_quantity ?? 0;
             const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
             if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
@@ -1528,32 +1546,50 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
             for (const v of item.variations) {
-              const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
-              if (!mlSku) continue;
+              const sellerCustom = (v.seller_custom_field ?? '').toString().trim();
+              const sellerSku = (v.seller_sku ?? '').toString().trim();
+              const mlSku = sellerCustom || sellerSku;
+              if (!mlSku) {
+                logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
+                continue;
+              }
               const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
+              logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → usando="${mlSku}" normalizado="${mlSkuNorm}"`);
               const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
                  WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                  LIMIT 1`,
                 [mlSkuNorm]
               );
-              if (!row?.variant_id) continue;
+              if (!row?.variant_id) {
+                logs.push(`[SKU ML] sin variante local para "${mlSku}" (normalizado: ${mlSkuNorm})`);
+                continue;
+              }
               const mlQty = v.available_quantity ?? 0;
               const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
               if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
               else { errors++; logs.push(`[ERROR] ${mlSku}`); }
             }
           } else {
-            const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
-            if (!mlSku) continue;
+            const sellerCustom = (item.seller_custom_field ?? '').toString().trim();
+            const sellerSku = (item.seller_sku ?? '').toString().trim();
+            const mlSku = sellerCustom || sellerSku;
+            if (!mlSku) {
+              logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
+              continue;
+            }
             const mlSkuNorm = mlSku.replace(/-/g, '').replace(/\s/g, '');
+            logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → usando="${mlSku}" normalizado="${mlSkuNorm}"`);
             const variantRow = await get(
               `SELECT pv.id as variant_id FROM product_variants pv
                WHERE REPLACE(REPLACE(TRIM(COALESCE(pv.external_sku, pv.sku)), '-', ''), ' ', '') = ?
                LIMIT 1`,
               [mlSkuNorm]
             );
-            if (!variantRow?.variant_id) continue;
+            if (!variantRow?.variant_id) {
+              logs.push(`[SKU ML] sin variante local para ítem "${mlSku}" (normalizado: ${mlSkuNorm})`);
+              continue;
+            }
             const mlQty = item.available_quantity ?? 0;
             const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
             if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
