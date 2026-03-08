@@ -1377,7 +1377,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
     const limit = 50;
     let offset = 0;
 
-    logs.push('[1/2] Importando stock desde Mercado Libre (fuente de verdad)...');
+    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
@@ -1399,69 +1399,35 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
         for (const item of items) {
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
-            for (let i = 0; i < item.variations.length; i++) {
-              const v = item.variations[i];
-              const mlQty = v.available_quantity ?? 0;
+            for (const v of item.variations) {
               const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
-              let row = await get(
+              if (!mlSku) continue;
+              const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
-                 JOIN product_colors pc ON pc.id = pv.product_color_id
-                 JOIN products p ON p.id = pc.product_id
-                 WHERE p.mercado_libre_id = ? AND pv.mercado_libre_variant_id = ?`,
-                [item.id, v.id]
-              );
-              let linkedBySku = false;
-              if (!row?.variant_id && mlSku) {
-                const allBySku = await query(
-                  `SELECT pv.id as variant_id, p.id as product_id FROM product_variants pv
-                   JOIN product_colors pc ON pc.id = pv.product_color_id
-                   JOIN products p ON p.id = pc.product_id
-                   WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
-                   ORDER BY pv.id`,
-                  [mlSku]
-                );
-                const match = Array.isArray(allBySku) && allBySku[i] ? allBySku[i] : null;
-                if (match?.variant_id && match?.product_id) {
-                  row = { variant_id: match.variant_id };
-                  await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(v.id), match.variant_id]);
-                  await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, match.product_id]);
-                  linkedBySku = true;
-                }
-              }
-              if (row?.variant_id) {
-                const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
-                if (ok) { updated++; logs.push(`[OK] ${v.seller_custom_field || v.id}: ${mlQty}${linkedBySku ? ' (vinculado por SKU)' : ''}`); }
-                else { errors++; logs.push(`[ERROR] ${v.seller_custom_field || v.id}`); }
-              }
-            }
-          } else {
-            const mlQty = item.available_quantity ?? 0;
-            let variantRow = await get(
-              `SELECT pv.id as variant_id FROM product_variants pv
-               JOIN product_colors pc ON pc.id = pv.product_color_id
-               JOIN products p ON p.id = pc.product_id
-               WHERE p.mercado_libre_id = ? LIMIT 1`,
-              [item.id]
-            );
-            const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
-            if (!variantRow?.variant_id && mlSku) {
-              variantRow = await get(
-                `SELECT pv.id as variant_id, p.id as product_id FROM product_variants pv
-                 JOIN product_colors pc ON pc.id = pv.product_color_id
-                 JOIN products p ON p.id = pc.product_id
-                 WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ? LIMIT 1`,
+                 WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                 LIMIT 1`,
                 [mlSku]
               );
-              if (variantRow?.variant_id && variantRow?.product_id) {
-                await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(item.id), variantRow.variant_id]);
-                await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, variantRow.product_id]);
-              }
+              if (!row?.variant_id) continue;
+              const mlQty = v.available_quantity ?? 0;
+              const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
+              if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
+              else { errors++; logs.push(`[ERROR] ${mlSku}`); }
             }
-            if (variantRow?.variant_id) {
-              const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
-              if (ok) { updated++; logs.push(`[OK] ${item.id}: ${mlQty}`); }
-              else { errors++; logs.push(`[ERROR] ${item.id}`); }
-            }
+          } else {
+            const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
+            if (!mlSku) continue;
+            const variantRow = await get(
+              `SELECT pv.id as variant_id FROM product_variants pv
+               WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+               LIMIT 1`,
+              [mlSku]
+            );
+            if (!variantRow?.variant_id) continue;
+            const mlQty = item.available_quantity ?? 0;
+            const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
+            if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
+            else { errors++; logs.push(`[ERROR] ${mlSku}`); }
           }
         }
       }
@@ -1523,7 +1489,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
   }
 };
 
-// Opcional: importar stock desde Mercado Libre a la app (útil para alinear una vez o si ML fue actualizado fuera de la app)
+// Opcional: importar stock desde Mercado Libre a la app (solo por SKU: seller_custom_field = SKU local; si no existe variante, se ignora).
 export const importStockFromMercadoLibre = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -1559,53 +1525,35 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
         for (const item of items) {
           if (!item) continue;
           if (item.variations && item.variations.length > 0) {
-            for (let i = 0; i < item.variations.length; i++) {
-              const v = item.variations[i];
-              const mlQty = v.available_quantity ?? 0;
+            for (const v of item.variations) {
               const mlSku = (v.seller_custom_field ?? v.seller_sku ?? '').toString().trim();
-              let row = await get(
+              if (!mlSku) continue;
+              const row = await get(
                 `SELECT pv.id as variant_id FROM product_variants pv
-                 JOIN product_colors pc ON pc.id = pv.product_color_id
-                 JOIN products p ON p.id = pc.product_id
-                 WHERE p.mercado_libre_id = ? AND pv.mercado_libre_variant_id = ?`,
-                [item.id, v.id]
+                 WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+                 LIMIT 1`,
+                [mlSku]
               );
-              if (!row?.variant_id && mlSku) {
-                const allBySku = await query(
-                  `SELECT pv.id as variant_id, p.id as product_id FROM product_variants pv
-                   JOIN product_colors pc ON pc.id = pv.product_color_id
-                   JOIN products p ON p.id = pc.product_id
-                   WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
-                   ORDER BY pv.id`,
-                  [mlSku]
-                );
-                const match = Array.isArray(allBySku) && allBySku[i] ? allBySku[i] : null;
-                if (match?.variant_id && match?.product_id) {
-                  row = { variant_id: match.variant_id };
-                  await execute(`UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`, [String(v.id), match.variant_id]);
-                  await execute(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [item.id, match.product_id]);
-                }
-              }
-              if (row?.variant_id) {
-                const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
-                if (ok) { updated++; logs.push(`[OK] ${v.seller_custom_field || v.id}: ${mlQty}`); }
-                else { errors++; logs.push(`[ERROR] ${v.seller_custom_field || v.id}`); }
-              }
+              if (!row?.variant_id) continue;
+              const mlQty = v.available_quantity ?? 0;
+              const ok = await updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
+              if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
+              else { errors++; logs.push(`[ERROR] ${mlSku}`); }
             }
           } else {
-            const mlQty = item.available_quantity ?? 0;
+            const mlSku = (item.seller_custom_field ?? item.seller_sku ?? '').toString().trim();
+            if (!mlSku) continue;
             const variantRow = await get(
               `SELECT pv.id as variant_id FROM product_variants pv
-               JOIN product_colors pc ON pc.id = pv.product_color_id
-               JOIN products p ON p.id = pc.product_id
-               WHERE p.mercado_libre_id = ? LIMIT 1`,
-              [item.id]
+               WHERE TRIM(COALESCE(pv.external_sku, pv.sku)) = ?
+               LIMIT 1`,
+              [mlSku]
             );
-            if (variantRow?.variant_id) {
-              const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
-              if (ok) { updated++; logs.push(`[OK] ${item.id}: ${mlQty}`); }
-              else { errors++; logs.push(`[ERROR] ${item.id}`); }
-            }
+            if (!variantRow?.variant_id) continue;
+            const mlQty = item.available_quantity ?? 0;
+            const ok = await updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
+            if (ok) { updated++; logs.push(`[OK] ${mlSku}: ${mlQty}`); }
+            else { errors++; logs.push(`[ERROR] ${mlSku}`); }
           }
         }
       }
@@ -1614,7 +1562,7 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
     }
 
     res.json({
-      message: 'Stock importado desde Mercado Libre',
+      message: 'Stock importado desde Mercado Libre (solo variantes existentes por SKU)',
       updated,
       errors,
       logs
