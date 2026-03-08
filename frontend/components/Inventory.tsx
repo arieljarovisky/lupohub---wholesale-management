@@ -810,7 +810,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return sum + Number(val);
     }, 0);
   };
+  /** Stock total para mostrar en el encabezado: si hay variantes cargadas (expandido), sumar desde ahí; si no, usar groupVariants/totalStock. Así el total coincide con lo que se ve al expandir. */
+  const getGroupDisplayStockResolved = (groupKey: string, groupVariants: Product[], totalStock: number): number => {
+    const loaded = loadedVariants[groupKey];
+    if (loaded?.length > 0) {
+      const list = filterColor === 'ALL' ? loaded : loaded.filter(p => checkColorMatch(p, filterColor));
+      return list.reduce((sum, p) => sum + Number((p as any).stock ?? (p as any).stock_total ?? 0), 0);
+    }
+    return filterColor === 'ALL' ? totalStock : getGroupDisplayStock(groupKey, groupVariants);
+  };
   const getGroupHasLowStock = (groupKey: string, groupVariants: Product[]) => {
+    const loaded = loadedVariants[groupKey];
+    if (loaded?.length > 0) {
+      const list = filterColor === 'ALL' ? loaded : loaded.filter(p => checkColorMatch(p, filterColor));
+      return list.some(p => {
+        const val = Number((p as any).stock ?? (p as any).stock_total ?? 0);
+        return val > 0 && val < 20;
+      });
+    }
     const variants = getGroupFilteredVariants(groupKey, groupVariants);
     return variants.some(p => {
       const val = (p as any).stock_total ?? (p as any).stock ?? 0;
@@ -1983,9 +2000,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const displayName = hasRealName ? rawName : `Artículo ${skuLabel}`;
           const codigoLabel = `Código: ${skuLabel}`;
           
-          const filteredTotalStock = getGroupDisplayStock(groupKey, groupVariants);
+          const displayTotalStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
           const hasLowStock = getGroupHasLowStock(groupKey, groupVariants);
-          const displayTotalStock = filterColor === 'ALL' ? totalStock : filteredTotalStock;
           const isFullyOut = displayTotalStock === 0;
 
           return (
