@@ -2232,7 +2232,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       <button 
                                        onClick={() => setEditingVariantId(product.id)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors touch-manipulation"
-                                       title="Editar variante (SKU)"
+                                       title="Editar código de la variante (ej. 0052302140111-M-AZUL_MARINO_-_BLANCO)"
                                       >
                                        <Tag size={16} />
                                       </button>
