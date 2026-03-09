@@ -663,6 +663,7 @@ const App: React.FC = () => {
                 onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
+                role={currentUser.role}
               />
             </Suspense>
           )}

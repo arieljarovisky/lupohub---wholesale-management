@@ -11,6 +11,7 @@ interface CreateOrderProps {
   onCancel: () => void;
   sellerId?: string | null;
   initialOrder?: Order | null;
+  role?: Role;
 }
 
 interface OrderRow {
@@ -24,7 +25,8 @@ interface OrderRow {
   isBackorder: boolean;
 }
 
-const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder }) => {
+const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role }) => {
+  const hideStock = role === Role.SELLER || role === Role.CUSTOMER;
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [rows, setRows] = useState<OrderRow[]>([]);
@@ -309,8 +311,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
                   <span className="text-sm font-black text-green-400 tabular-nums">${p.price.toLocaleString()}</span>
-                  <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
-                    {p.stock <= 0 ? 'Sin stock' : `${p.stock} un.`}
+                  <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
+                    {p.stock <= 0 ? 'Sin stock' : hideStock ? 'Disponible' : `${p.stock} un.`}
                   </span>
                 </div>
               </button>
