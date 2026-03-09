@@ -65,7 +65,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [healthMessage, setHealthMessage] = useState<string>('');
 
   // Integration Logic
-  const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean }>({ mercadolibre: false, tiendanube: false });
+  const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>({ mercadolibre: false, tiendanube: false });
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
 
   // Mercado Libre Test Connection
@@ -1042,6 +1042,12 @@ const Settings: React.FC<SettingsProps> = ({
                 </p>
                 {integrations.tiendanube && (
                   <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex flex-col gap-4">
+                    {integrations.tiendanubeStoreId && (
+                      <p className="text-slate-400 text-xs">
+                        <span className="text-slate-500">Store ID (para webhooks/pruebas):</span>{' '}
+                        <code className="bg-slate-800 px-1.5 py-0.5 rounded text-cyan-400 font-mono">{integrations.tiendanubeStoreId}</code>
+                      </p>
+                    )}
                     <div className="flex flex-wrap justify-between items-center gap-2">
                       <div>
                         <p className="text-xs text-slate-500">Estado de sincronización</p>

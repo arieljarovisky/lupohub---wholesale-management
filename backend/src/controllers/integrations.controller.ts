@@ -74,10 +74,12 @@ async function getValidMLToken(): Promise<{ access_token: string; user_id: strin
 
 export const getIntegrationStatus = async (req: Request, res: Response) => {
   try {
-    const integrations = await query('SELECT platform, updated_at FROM integrations');
+    const integrations = await query('SELECT platform, store_id, user_id FROM integrations');
+    const tn = integrations.find((i: any) => i.platform === 'tiendanube');
     const status = {
       mercadolibre: integrations.find((i: any) => i.platform === 'mercadolibre') ? true : false,
-      tiendanube: integrations.find((i: any) => i.platform === 'tiendanube') ? true : false,
+      tiendanube: !!tn,
+      tiendanubeStoreId: (tn?.store_id || tn?.user_id) || null,
     };
     res.json(status);
   } catch (error) {

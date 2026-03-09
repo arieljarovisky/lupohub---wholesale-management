@@ -470,9 +470,9 @@ export const api = {
   },
 
   // --- INTEGRATIONS ---
-  getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean }> => {
+  getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }> => {
     return handleRequest(async () => {
-      return await request<{ mercadolibre: boolean; tiendanube: boolean }>('/integrations/status', 'GET');
+      return await request<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>('/integrations/status', 'GET');
     }, { mercadolibre: false, tiendanube: false }, 'getIntegrationStatus');
   },
 
