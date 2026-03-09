@@ -38,9 +38,31 @@ interface InventoryProps {
   onImportComplete?: () => void;
 }
 
+const INVENTORY_STORAGE_KEY = 'lupo_inventory';
+
+function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn' } {
+  try {
+    const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
+    if (!raw) return { search: '', page: 1, subView: 'mine' };
+    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string };
+    const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
+    const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
+    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView };
+  } catch {
+    return { search: '', page: 1, subView: 'mine' };
+  }
+}
+
+function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn') {
+  try {
+    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView }));
+  } catch {}
+}
+
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
   const { showToast, showConfirm } = useNotification();
-  const [searchTerm, setSearchTerm] = useState('');
+  const stored = getStoredInventoryState();
+  const [searchTerm, setSearchTerm] = useState(stored.search);
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
@@ -124,7 +146,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
-  const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>('mine');
+  const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
   const [tnSearchTerm, setTnSearchTerm] = useState('');
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
@@ -141,13 +163,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [colorOpen, setColorOpen] = useState(false);
   const [sortKey, setSortKey] = useState<'SKU' | 'STOCK' | 'VARIANTS'>('SKU');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(stored.page);
   const [pageSize, setPageSize] = useState(10);
   const [serverMode, setServerMode] = useState(true);
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
+
+  // Persistir búsqueda, página y pestaña para que al actualizar la página se mantengan
+  useEffect(() => {
+    setStoredInventoryState(searchTerm, currentPage, inventorySubView);
+  }, [searchTerm, currentPage, inventorySubView]);
 
   const availableSizes = attributes.filter(a => a.type === 'size');
   
