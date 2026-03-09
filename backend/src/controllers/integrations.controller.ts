@@ -2336,6 +2336,36 @@ export const getMercadoLibreStockTotals = async (req: Request, res: Response) =>
 };
 
 // Obtener stock de Mercado Libre
+/** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
+function mlBaseTitle(title: string): string {
+  const t = title.trim();
+  const words = t.split(/\s+/);
+  if (words.length <= 1) return t;
+  const last = words[words.length - 1];
+  const secondLast = words[words.length - 2];
+  const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
+  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
+  if (sizeLike.test(last) && words.length >= 2) {
+    if (colorLike.test(secondLast)) return words.slice(0, -2).join(' ');
+    return words.slice(0, -1).join(' ');
+  }
+  return t;
+}
+
+/** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
+function mlColorSizeFromTitle(title: string): { color: string; size: string } {
+  const words = title.trim().split(/\s+/);
+  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
+  const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
+  if (words.length >= 2 && sizeLike.test(words[words.length - 1])) {
+    const size = words[words.length - 1];
+    const color = colorLike.test(words[words.length - 2]) ? words[words.length - 2] : '';
+    return { color, size };
+  }
+  if (words.length >= 1) return { color: '', size: words[words.length - 1] || '' };
+  return { color: '', size: '' };
+}
+
 export const getMercadoLibreStock = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -2358,7 +2388,7 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
     }
 
     // Obtener detalles completos de cada item (necesario para variaciones con atributos)
-    const items: any[] = [];
+    let items: any[] = [];
     
     // Procesar en paralelo pero limitado a 10 concurrent requests
     const batchSize = 10;
@@ -2382,16 +2412,14 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       for (const item of batchResults) {
         if (!item) continue;
         
-        // Si tiene variaciones, obtener stock por variación
+        // Si tiene variaciones, obtener stock por variación (una sola publicación con varias variantes)
         if (item.variations && item.variations.length > 0) {
           let totalStock = 0;
           const variations = item.variations.map((v: any) => {
             totalStock += v.available_quantity || 0;
-            // SKU: en ML se gestiona como atributo SELLER_SKU en details de la variación (/items con include_attributes=all)
             const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
             const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
             const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
-            // Extraer color y talle de attribute_combinations (IDs pueden variar por categoría/país)
             let color = '';
             let size = '';
             (v.attribute_combinations || []).forEach((attr: any) => {
@@ -2424,7 +2452,7 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
             variations
           });
         } else {
-          // Sin variaciones
+          // Sin variaciones en la API: puede ser una publicación por variante (mismo producto, varios ítems). Se agrupa después.
           items.push({
             id: item.id,
             title: item.title,
@@ -2441,9 +2469,55 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       }
     }
 
+    // Agrupar ítems que son la misma publicación por variante (mismo título base, ej. "... 40900 Blanco G" -> base "... 40900")
+    const withVariations = items.filter((i: any) => i.hasVariations && i.variations && i.variations.length > 0);
+    const withoutVariations = items.filter((i: any) => !i.hasVariations || !i.variations || i.variations.length === 0);
+    const byBaseTitle: Record<string, typeof withoutVariations> = {};
+    for (const it of withoutVariations) {
+      const base = mlBaseTitle(it.title);
+      if (!byBaseTitle[base]) byBaseTitle[base] = [];
+      byBaseTitle[base].push(it);
+    }
+    const grouped: any[] = [];
+    for (const base of Object.keys(byBaseTitle)) {
+      const group = byBaseTitle[base];
+      if (group.length === 0) continue;
+      if (group.length === 1) {
+        grouped.push(group[0]);
+        continue;
+      }
+      const first = group[0];
+      const variations = group.map((it: any) => {
+        const { color, size } = mlColorSizeFromTitle(it.title);
+        return {
+          variationId: it.id,
+          sku: it.id,
+          color,
+          size,
+          stock: it.totalStock || 0,
+          sold: it.soldTotal || 0
+        };
+      });
+      const totalStock = group.reduce((s: number, it: any) => s + (it.totalStock || 0), 0);
+      const soldTotal = group.reduce((s: number, it: any) => s + (it.soldTotal || 0), 0);
+      grouped.push({
+        id: first.id,
+        title: base,
+        status: first.status,
+        price: first.price,
+        totalStock,
+        soldTotal,
+        thumbnail: first.thumbnail,
+        permalink: first.permalink,
+        hasVariations: true,
+        variations
+      });
+    }
+    items = [...withVariations, ...grouped];
+
     res.json({
       items,
-      total: itemsRes.data.paging?.total || items.length,
+      total: itemsRes.data.paging?.total ?? items.length,
       offset: parseInt(offset as string),
       limit: parseInt(limit as string)
     });
