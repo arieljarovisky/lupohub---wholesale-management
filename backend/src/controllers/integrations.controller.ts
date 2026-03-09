@@ -2348,10 +2348,15 @@ export const getMercadoLibreStockTotals = async (req: Request, res: Response) =>
 };
 
 // Obtener stock de Mercado Libre
+/** Normaliza título para agrupar: quita espacios de más y unifica. */
+function mlNormalizeTitle(title: string): string {
+  return (title || '').trim().replace(/\s+/g, ' ');
+}
+
 /** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
 function mlBaseTitle(title: string): string {
-  const t = title.trim();
-  const words = t.split(/\s+/);
+  const t = mlNormalizeTitle(title);
+  const words = t.split(/\s+/).filter(Boolean);
   if (words.length <= 1) return t;
   const last = words[words.length - 1];
   const secondLast = words[words.length - 2];
@@ -2361,12 +2366,14 @@ function mlBaseTitle(title: string): string {
     if (colorLike.test(secondLast)) return words.slice(0, -2).join(' ');
     return words.slice(0, -1).join(' ');
   }
+  // Si el último no es talle, puede ser solo color (ej. "... Nude") o título sin variante al final
+  if (colorLike.test(last) && words.length >= 1) return words.slice(0, -1).join(' ');
   return t;
 }
 
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title: string): { color: string; size: string } {
-  const words = title.trim().split(/\s+/);
+  const words = mlNormalizeTitle(title).split(/\s+/).filter(Boolean);
   const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
   const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
   if (words.length >= 2 && sizeLike.test(words[words.length - 1])) {
@@ -2486,15 +2493,16 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
     // Agrupar ítems que son la misma publicación por variante (mismo título base, ej. "... 40900 Blanco G" -> base "... 40900")
     const withVariations = items.filter((i: any) => i.hasVariations && i.variations && i.variations.length > 0);
     const withoutVariations = items.filter((i: any) => !i.hasVariations || !i.variations || i.variations.length === 0);
-    const byBaseTitle: Record<string, typeof withoutVariations> = {};
+    const byBaseKey: Record<string, { baseTitle: string; list: typeof withoutVariations }> = {};
     for (const it of withoutVariations) {
-      const base = mlBaseTitle(it.title);
-      if (!byBaseTitle[base]) byBaseTitle[base] = [];
-      byBaseTitle[base].push(it);
+      const baseTitle = mlBaseTitle(it.title);
+      const key = baseTitle.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!byBaseKey[key]) byBaseKey[key] = { baseTitle, list: [] };
+      byBaseKey[key].list.push(it);
     }
     const grouped: any[] = [];
-    for (const base of Object.keys(byBaseTitle)) {
-      const group = byBaseTitle[base];
+    for (const _key of Object.keys(byBaseKey)) {
+      const { baseTitle, list: group } = byBaseKey[_key];
       if (group.length === 0) continue;
       if (group.length === 1) {
         grouped.push(group[0]);
@@ -2517,7 +2525,7 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       const soldTotal = group.reduce((s: number, it: any) => s + (it.soldTotal || 0), 0);
       grouped.push({
         id: first.id,
-        title: base,
+        title: baseTitle,
         status: first.status,
         price: first.price,
         totalStock,
