@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request } from './httpClient';
+import httpClient, { request, requestFormData, getBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -781,5 +781,28 @@ export const api = {
     return handleRequest(async () => {
       return await request<any[]>('/despachos/productos-sin-despacho', 'GET');
     }, [], 'getProductosSinDespacho');
+  },
+
+  // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
+  getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
+    return handleRequest(async () => {
+      const rows = await request<any[]>('/catalogs', 'GET');
+      return Array.isArray(rows) ? rows : [];
+    }, [], 'getCatalogs');
+  },
+  uploadCatalog: async (file: File, name?: string): Promise<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (name && name.trim()) formData.append('name', name.trim());
+    return requestFormData('/catalogs/upload', formData);
+  },
+  createCatalogUrl: async (name: string, url: string): Promise<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string }> => {
+    return request<any>('/catalogs', 'POST', { name: name.trim(), url: url.trim() });
+  },
+  deleteCatalog: async (id: string): Promise<void> => {
+    await request<void>(`/catalogs/${id}`, 'DELETE');
+  },
+  getCatalogFileBlob: async (id: string): Promise<Blob> => {
+    return getBlob(`/catalogs/${id}/file`);
   }
 };

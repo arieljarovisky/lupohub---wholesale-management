@@ -112,4 +112,24 @@ export const request = async <T = any>(path: string, method: HttpMethod = 'GET',
   }
 };
 
-export default { request, setBaseUrl, setAuthToken };
+/** POST con FormData (para subir archivos). No setea Content-Type. */
+export const requestFormData = async <T = any>(path: string, formData: FormData, timeout = 60000): Promise<T> => {
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const response = await axios.post(url, formData, { headers, timeout });
+  return response.data;
+};
+
+/** GET que devuelve Blob (para descargar/ver archivos con auth). */
+export const getBlob = async (path: string): Promise<Blob> => {
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
+  const headers: Record<string, string> = {};
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const response = await axios.get(url, { responseType: 'blob', headers, timeout: 60000 });
+  return response.data;
+};
+
+export const getBaseUrl = () => baseUrl;
+
+export default { request, requestFormData, getBlob, setBaseUrl, setAuthToken };

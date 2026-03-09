@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList } from './types';
 import { api } from './services/api';
@@ -9,6 +9,7 @@ import { useNotification } from './context/NotificationContext';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Inventory = lazy(() => import('./components/Inventory'));
+const Catalogs = lazy(() => import('./components/Catalogs'));
 const Orders = lazy(() => import('./components/Orders'));
 const Visits = lazy(() => import('./components/Visits'));
 const Settings = lazy(() => import('./components/Settings'));
@@ -87,7 +88,7 @@ const App: React.FC = () => {
       const role = currentUser.role;
       const allowedByRole: Record<string, Role[]> = {
         dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
-        inventory: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER],
+        inventory: [Role.ADMIN, Role.WAREHOUSE],
         orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
@@ -96,6 +97,7 @@ const App: React.FC = () => {
         despachos: [Role.ADMIN],
         customers: [Role.ADMIN, Role.SELLER],
         visits: [Role.ADMIN, Role.SELLER],
+        catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
         settings: [Role.ADMIN]
       };
       const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
@@ -511,15 +513,16 @@ const App: React.FC = () => {
 
   const mobileNavItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-    { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
+    { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE] },
     { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
     { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
+    { id: 'catalogs', icon: BookOpen, label: 'Catálogos', roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
   ];
 
   const allMobileNavSections = [
     { title: 'Principal', items: [
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-      { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.SELLER] },
+      { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
     ]},
@@ -532,6 +535,7 @@ const App: React.FC = () => {
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
+      { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN] },
     ]},
   ];
@@ -568,6 +572,7 @@ const App: React.FC = () => {
                  {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
+                 {baseView === 'catalogs' && 'Catálogos'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
                  {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido')}
@@ -674,6 +679,11 @@ const App: React.FC = () => {
           {baseView === 'mercadolibre_orders' && (
             <Suspense fallback={<ViewFallback />}>
               <MercadoLibreOrders />
+            </Suspense>
+          )}
+          {baseView === 'catalogs' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Catalogs role={currentUser.role} />
             </Suspense>
           )}
           {baseView === 'stock_history' && (

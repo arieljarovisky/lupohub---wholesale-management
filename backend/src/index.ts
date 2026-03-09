@@ -13,6 +13,7 @@ import despachosRoutes from './routes/despachos.routes';
 import usersRoutes from './routes/users.routes';
 import customersRoutes from './routes/customers.routes';
 import priceListsRoutes from './routes/price_lists.routes';
+import catalogsRoutes from './routes/catalogs.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
@@ -23,6 +24,7 @@ import { addExternalSkuToVariants } from './database/add_external_sku';
 import { addMercadoLibreItemIdToVariants } from './database/add_mercado_libre_item_id';
 import { addCustomerDirect } from './database/add_customer_direct';
 import { addPriceLists } from './database/add_price_lists';
+import { addCatalogsTable } from './database/add_catalogs_table';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -53,6 +55,7 @@ app.use('/api/despachos', despachosRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/price-lists', priceListsRoutes);
+app.use('/api/catalogs', catalogsRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -79,6 +82,7 @@ async function initDatabase() {
       await addMercadoLibreItemIdToVariants();
       await addCustomerDirect();
       await addPriceLists();
+      await addCatalogsTable();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {
