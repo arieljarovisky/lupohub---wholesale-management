@@ -1,10 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
+import * as XLSX from 'xlsx';
+
+/** Parsea Excel para lista de precios: detecta columnas SKU y Precio por cabecera o usa A y B. */
+async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
+  if (rows.length === 0) return [];
+  const first = rows[0].map(c => String(c ?? '').toLowerCase().trim());
+  const skuKw = ['sku', 'código', 'codigo', 'articulo', 'cod'];
+  const priceKw = ['precio', 'price', 'importe', 'precio unitario'];
+  let skuCol = first.findIndex(h => skuKw.some(k => (h || '').includes(k)));
+  let priceCol = first.findIndex(h => priceKw.some(k => (h || '').includes(k)));
+  if (skuCol < 0) skuCol = 0;
+  if (priceCol < 0) priceCol = 1;
+  const hasHeader = skuKw.some(k => (first[skuCol] || '').includes(k)) || priceKw.some(k => (first[priceCol] || '').includes(k));
+  const start = hasHeader ? 1 : 0;
+  const items: { sku: string; price: number }[] = [];
+  for (let i = start; i < rows.length; i++) {
+    const sku = String(rows[i][skuCol] ?? '').trim();
+    const p = rows[i][priceCol];
+    const price = typeof p === 'number' ? p : parseFloat(String(p ?? '0').replace(/[^\d.,-]/g, '').replace(',', '.'));
+    if (sku && !isNaN(price) && price >= 0) items.push({ sku, price });
+  }
+  return items;
+}
 
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
   if (!isOpen) return null;
@@ -897,7 +925,7 @@ const Settings: React.FC<SettingsProps> = ({
           <div className="space-y-4 max-h-[60vh] overflow-y-auto">
             <p className="text-slate-400 text-xs">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
             {/* Acciones masivas */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
                 <p className="text-xs font-bold text-slate-400 uppercase mb-2">Rellenar desde catálogo</p>
                 <p className="text-slate-500 text-xs mb-2">Todos los productos con precio base. Opcional: multiplicador (ej. 0.9 = 10% descuento).</p>
@@ -964,6 +992,36 @@ const Settings: React.FC<SettingsProps> = ({
                         showToast('success', `Importados ${res.imported} precios${res.notFound?.length ? `. No encontrados: ${res.notFound.length}` : ''}`);
                       } catch (err: any) {
                         showToast('error', (err as any)?.message || 'Error importando');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar desde Excel</p>
+                <p className="text-slate-500 text-xs mb-2">.xlsx o .xls con columnas SKU y Precio (o cabeceras &quot;código&quot;, &quot;precio&quot;).</p>
+                <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                  <FileSpreadsheet size={14} /> Elegir Excel
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !editingPriceList) return;
+                      e.target.value = '';
+                      try {
+                        const items = await parsePriceListExcel(file);
+                        if (items.length === 0) {
+                          showToast('error', 'No se encontraron filas válidas (SKU + precio). Revisá las columnas.');
+                          return;
+                        }
+                        const res = await api.setPriceListItemsBySku(editingPriceList.id, items);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Importados ${res.imported} precios desde Excel${res.notFound?.length ? `. No encontrados: ${res.notFound.length}` : ''}`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error importando Excel');
                       }
                     }}
                   />

@@ -87,12 +87,17 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(p);
     }
-    return Array.from(map.entries()).map(([key, variants]) => ({
-      key,
-      productName: variants[0]?.name ?? 'Producto',
-      category: variants[0]?.category,
-      variants
-    }));
+    return Array.from(map.entries()).map(([key, variants]) => {
+      const first = variants[0];
+      const code = (first as any)?.base_sku ?? (first?.sku ? String(first.sku).replace(/-[^-]+-[^-]+$/, '').trim() || first.sku : '');
+      return {
+        key,
+        productName: first?.name ?? 'Producto',
+        productCode: code || undefined,
+        category: first?.category,
+        variants
+      };
+    });
   }, [filteredSearchProducts]);
 
   const addItem = async (product: Product) => {
@@ -334,27 +339,30 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
             {searchTrimmed ? `${filteredSearchProducts.length} resultado(s) · Tocá un producto para agregarlo` : 'Mostrando los primeros 30. Escribí para buscar.'}
           </p>
           <div className="flex-1 overflow-y-auto space-y-4 min-h-0 touch-scroll overscroll-contain">
-            {groupedSearchProducts.map(({ key, productName, category, variants }) => (
+            {groupedSearchProducts.map(({ key, productName, productCode, category, variants }) => (
               <div key={key} className="rounded-xl border border-slate-700 overflow-hidden bg-slate-800/60">
                 <div className="px-4 py-2.5 border-b border-slate-700 bg-slate-800/80">
-                  <div className="font-bold text-white text-sm">{productName}</div>
-                  {category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">{category}</span>}
+                  <div className="font-bold text-white text-sm">
+                    {productName}
+                    {productCode && <span className="text-slate-400 font-mono font-normal ml-1">({productCode})</span>}
+                  </div>
+                  {category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded mt-1 inline-block">{category}</span>}
                 </div>
                 <div className="divide-y divide-slate-700/80">
                   {variants.map(p => (
                     <button
                       key={p.id}
                       onClick={() => addItem(p)}
-                      className={`w-full text-left min-h-[72px] py-3 px-4 flex justify-between items-center gap-4 active:scale-[0.99] hover:bg-slate-700/50 transition-colors touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10' : ''}`}
+                      className={`w-full text-left min-h-[80px] py-3 px-4 flex justify-between items-center gap-4 active:scale-[0.99] hover:bg-slate-700/50 transition-colors touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10' : ''}`}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                          <span className="text-xs font-mono font-bold text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-xs font-mono text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
                           {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
                         </div>
-                        <div className="text-slate-300 text-sm">
-                          {(p.color || p.size) && <span className="font-medium">{(p.color && p.size) ? `${p.color} · ${p.size}` : (p.color || p.size)}</span>}
-                          {!(p.color || p.size) && <span className="text-slate-500">Variante</span>}
+                        <div className="text-slate-300 text-sm flex flex-wrap gap-x-4 gap-y-0.5">
+                          <span><span className="text-slate-500">Talle:</span> {labelTalle(p.size) || p.size || '—'}</span>
+                          <span><span className="text-slate-500">Color:</span> {p.color || '—'}</span>
                         </div>
                       </div>
                       <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
