@@ -15,6 +15,7 @@ type DateRange = '7' | '15' | '30' | '60' | '90';
 
 const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, role, onNavigate }) => {
   const isWarehouse = role === Role.WAREHOUSE;
+  const isCustomer = role === Role.CUSTOMER;
   const [loading, setLoading] = useState(true);
   const [tnOrders, setTnOrders] = useState<any[]>([]);
   const [mlOrders, setMlOrders] = useState<any[]>([]);
@@ -43,6 +44,15 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const dates = getDateRange(parseInt(dateRange));
     
     try {
+      // Clientes directos: no cargar TN ni ML ni catálogo; solo usan los pedidos que ya reciben por props
+      if (isCustomer) {
+        setAllProducts([]);
+        setProductCount(0);
+        setTnOrders([]);
+        setMlOrders([]);
+        setLoading(false);
+        return;
+      }
       if (isWarehouse) {
         // Depósito: productos + órdenes TN y ML pendientes de despacho (sin montos sensibles)
         const dates = getDateRange(15);
@@ -224,6 +234,123 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       <div className="flex flex-col items-center justify-center h-96">
         <Loader2 className="animate-spin text-blue-500 mb-4" size={48} />
         <p className="text-slate-400">Cargando dashboard...</p>
+      </div>
+    );
+  }
+
+  // Dashboard para clientes directos: solo sus métricas, sin TN ni ML
+  if (isCustomer) {
+    const myOrders = orders || [];
+    const pendingOrders = myOrders.filter(o => o.status === OrderStatus.CONFIRMED || o.status === OrderStatus.PREPARATION);
+    const dispatchedOrders = myOrders.filter(o => o.status === OrderStatus.DISPATCHED);
+    const totalComprado = dispatchedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const recentOrders = [...myOrders].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 8);
+
+    const getStatusColor = (status: string) => {
+      switch (status) {
+        case OrderStatus.DISPATCHED: return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+        case OrderStatus.CONFIRMED:
+        case OrderStatus.PREPARATION: return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+        case OrderStatus.CANCELLED: return 'bg-red-500/20 text-red-400 border-red-500/40';
+        case OrderStatus.DRAFT: return 'bg-slate-500/20 text-slate-400 border-slate-500/40';
+        default: return 'bg-slate-500/20 text-slate-400 border-slate-500/40';
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Mi espacio</h2>
+          <p className="text-slate-500 text-sm mt-0.5">Resumen de tus pedidos mayoristas</p>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-4 sm:p-5 border border-blue-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-blue-400 text-xs font-semibold uppercase">Total pedidos</span>
+              <ShoppingCart size={18} className="text-blue-400" />
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-white">{myOrders.length}</p>
+            <p className="text-slate-500 text-xs mt-1">Todos los tiempos</p>
+          </div>
+          <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 rounded-xl p-4 sm:p-5 border border-amber-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-amber-400 text-xs font-semibold uppercase">Pendientes</span>
+              <Clock size={18} className="text-amber-400" />
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-white">{pendingOrders.length}</p>
+            <p className="text-slate-500 text-xs mt-1">Por despachar</p>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 rounded-xl p-4 sm:p-5 border border-emerald-500/20 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-emerald-400 text-xs font-semibold uppercase">Total comprado</span>
+              <DollarSign size={18} className="text-emerald-400" />
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-emerald-400">${Math.round(totalComprado).toLocaleString('es-AR')}</p>
+            <p className="text-slate-500 text-xs mt-1">Pedidos despachados</p>
+          </div>
+        </div>
+
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="p-4 border-b border-slate-700/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={18} className="text-blue-400" />
+              <h3 className="font-bold text-white">Últimos pedidos</h3>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onNavigate?.('orders')}
+                className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold transition-colors"
+              >
+                Ver todos
+              </button>
+              <button
+                onClick={() => onNavigate?.('create_order')}
+                className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <Package size={16} /> Nuevo pedido
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            {recentOrders.length > 0 ? (
+              <ul className="space-y-2">
+                {recentOrders.map(o => (
+                  <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-3 border-b border-slate-700/50 last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-white font-medium text-sm">Pedido #{String(o.id).slice(-8)}</p>
+                      <p className="text-slate-500 text-xs">{o.date}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded-lg text-xs font-bold border ${getStatusColor(o.status)}`}>
+                        {o.status}
+                      </span>
+                      <span className="text-emerald-400 font-bold text-sm">${Number(o.total || 0).toLocaleString('es-AR')}</span>
+                    </div>
+                    <button
+                      onClick={() => onNavigate?.('orders')}
+                      className="w-full sm:w-auto text-left sm:text-center text-blue-400 hover:text-blue-300 text-xs font-semibold"
+                    >
+                      Ver detalle →
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-center py-12">
+                <ShoppingCart size={40} className="mx-auto text-slate-600 mb-3" />
+                <p className="text-slate-500 font-medium">Aún no tenés pedidos</p>
+                <p className="text-slate-600 text-sm mt-1">Creá tu primer pedido mayorista</p>
+                <button
+                  onClick={() => onNavigate?.('create_order')}
+                  className="mt-4 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm"
+                >
+                  Nuevo pedido
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
