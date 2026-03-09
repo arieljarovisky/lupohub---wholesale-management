@@ -53,6 +53,12 @@ const movementTypeConfig: Record<string, { label: string; color: string; bgColor
     bgColor: 'bg-slate-500/10',
     icon: <ArrowDownCircle size={16} />
   },
+  'IMPORTACION_ML': { 
+    label: 'Importación ML', 
+    color: 'text-amber-400', 
+    bgColor: 'bg-amber-500/10',
+    icon: <ArrowDownCircle size={16} />
+  },
   'SNAPSHOT_INICIAL': { 
     label: 'Stock Inicial', 
     color: 'text-emerald-400', 
@@ -254,6 +260,11 @@ const StockHistory: React.FC = () => {
             <div>
               <p className="text-xl font-black text-cyan-400">{stats.ventasTN}</p>
               <p className="text-[10px] text-slate-500 uppercase">Tienda Nube</p>
+              {stats.ventasTN === 0 && stats.total > 0 && (
+                <p className="text-[10px] text-slate-500 mt-0.5" title="El backend debe tener BACKEND_URL con HTTPS y el webhook order/paid registrado; las variantes deben estar vinculadas por ID o SKU.">
+                  ¿No aparecen? Revisá webhook y vinculación.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -332,7 +343,8 @@ const StockHistory: React.FC = () => {
             <option value="PEDIDO_MAYORISTA">Pedidos Mayoristas</option>
             <option value="AJUSTE_MANUAL">Ajustes Manuales</option>
             <option value="DEVOLUCION">Devoluciones</option>
-            <option value="IMPORTACION_TN">Importaciones</option>
+            <option value="IMPORTACION_TN">Importación TN</option>
+            <option value="IMPORTACION_ML">Importación ML</option>
           </select>
 
           <div className="flex gap-2">

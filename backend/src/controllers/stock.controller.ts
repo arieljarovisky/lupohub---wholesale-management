@@ -37,6 +37,7 @@ export const logStockMovement = async (
     );
   } catch (error) {
     console.error('Error logging stock movement:', error);
+    throw error;
   }
 };
 

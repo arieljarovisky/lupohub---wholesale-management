@@ -862,7 +862,7 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
 
     // Procesar solo cuando la orden se paga (descontar stock una sola vez)
     if (event === 'order/paid') {
-      const orderId = req.body.id ?? req.body.order_id ?? req.body.order?.id;
+      const orderId = req.body.id ?? req.body.order_id ?? req.body.order?.id ?? req.body.data?.id ?? req.body.data?.order_id;
       if (orderId) await processTiendaNubeOrder(String(orderId));
     }
 
@@ -911,9 +911,12 @@ const processTiendaNubeOrder = async (orderId: string) => {
     const { updateVariantStock } = await import('./stock.controller');
 
     for (const item of order.products || []) {
-      const tnVariantId = item.variant_id;
-      const quantity = item.quantity;
+      const tnVariantIdRaw = item.variant_id ?? item.variantId;
+      const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
+      const quantity = Math.max(0, parseInt(String(item.quantity ?? 0), 10) || 0);
       const itemSku = (item.sku || item.variant_sku || '').toString().trim();
+
+      if (quantity === 0) continue;
 
       let variant = null;
       if (tnVariantId) {
@@ -946,16 +949,20 @@ const processTiendaNubeOrder = async (orderId: string) => {
       }
 
       if (variant?.id) {
-        const currentStock = variant.current_stock || 0;
+        const currentStock = Number(variant.current_stock) || 0;
         const newStock = Math.max(0, currentStock - quantity);
-        await updateVariantStock(
+        const ok = await updateVariantStock(
           variant.id,
           newStock,
           'VENTA_TIENDA_NUBE',
           `Orden TN: ${orderId}`,
           true
         );
-        console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+        if (ok) {
+          console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+        } else {
+          console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
+        }
       } else {
         console.log(`[TN Order] Variante no encontrada para TN variant_id=${tnVariantId} sku=${itemSku}`);
       }
