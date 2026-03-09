@@ -7,7 +7,7 @@ import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 
-/** Parsea Excel para lista de precios: detecta columnas SKU y Precio por cabecera o usa A y B. */
+/** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
   const data = new Uint8Array(await file.arrayBuffer());
   const workbook = XLSX.read(data, { type: 'array' });
@@ -15,19 +15,24 @@ async function parsePriceListExcel(file: File): Promise<{ sku: string; price: nu
   if (!sheetName) return [];
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
   if (rows.length === 0) return [];
-  const first = rows[0].map(c => String(c ?? '').toLowerCase().trim());
-  const skuKw = ['sku', 'código', 'codigo', 'articulo', 'cod'];
-  const priceKw = ['precio', 'price', 'importe', 'precio unitario'];
-  let skuCol = first.findIndex(h => skuKw.some(k => (h || '').includes(k)));
-  let priceCol = first.findIndex(h => priceKw.some(k => (h || '').includes(k)));
+  const first = rows[0].map(c => String(c ?? '').trim());
+  const firstLower = first.map(h => h.toLowerCase());
+  // Nombres típicos en listas de precios (es-AR): artículo/código y precio
+  const skuKw = ['sku', 'código', 'codigo', 'articulo', 'artículo', 'art', 'cod', 'article', 'descripción', 'producto', 'item'];
+  const priceKw = ['precio', 'price', 'importe', 'precio unitario', 'p. unit', 'p.unit', 'unitario', 'lista', 'precio lista', 'valor', 'pvp'];
+  let skuCol = firstLower.findIndex(h => skuKw.some(k => (h || '').includes(k)));
+  let priceCol = firstLower.findIndex(h => priceKw.some(k => (h || '').includes(k)));
   if (skuCol < 0) skuCol = 0;
   if (priceCol < 0) priceCol = 1;
-  const hasHeader = skuKw.some(k => (first[skuCol] || '').includes(k)) || priceKw.some(k => (first[priceCol] || '').includes(k));
-  const start = hasHeader ? 1 : 0;
+  if (priceCol === skuCol) priceCol = skuCol + 1;
+  const looksLikeHeader = (val: string) => !/^\d+$/.test(String(val).trim()) && (firstLower[skuCol] && skuKw.some(k => firstLower[skuCol].includes(k)) || firstLower[priceCol] && priceKw.some(k => firstLower[priceCol].includes(k)));
+  const start = looksLikeHeader(firstLower[skuCol] + firstLower[priceCol]) ? 1 : 0;
   const items: { sku: string; price: number }[] = [];
   for (let i = start; i < rows.length; i++) {
-    const sku = String(rows[i][skuCol] ?? '').trim();
+    const rawSku = rows[i][skuCol];
     const p = rows[i][priceCol];
+    let sku = rawSku == null ? '' : typeof rawSku === 'number' ? String(rawSku) : String(rawSku).trim();
+    if (sku && typeof rawSku === 'number' && sku.length <= 8) sku = sku.padStart(Math.max(sku.length, 7), '0');
     const price = typeof p === 'number' ? p : parseFloat(String(p ?? '0').replace(/[^\d.,-]/g, '').replace(',', '.'));
     if (sku && !isNaN(price) && price >= 0) items.push({ sku, price });
   }
