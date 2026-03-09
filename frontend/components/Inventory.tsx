@@ -2172,8 +2172,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
           const rawName = (groupVariants[0]?.name || '').toString().trim();
-          const hasRealName = rawName.length > 0 && rawName !== skuLabel;
-          const displayName = hasRealName ? rawName : `Artículo ${skuLabel}`;
+          const displayName = rawName ? `${skuLabel} - ${rawName}` : skuLabel;
           const codigoLabel = `Código: ${skuLabel}`;
           
           const displayTotalStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
