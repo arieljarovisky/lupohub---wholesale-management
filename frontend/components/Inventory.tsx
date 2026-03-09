@@ -1977,21 +1977,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       </div>
 
       {/* Search Bar & Filters */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+      <div className="space-y-4 w-full">
+        <div className="flex flex-col sm:flex-row gap-2 w-full min-w-0">
+          <div className="relative flex-1 w-full min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
             <input 
               type="text" 
               placeholder="Buscar Código de Producto..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm"
+              className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm box-border"
             />
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
-            className={`min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+            className={`flex-shrink-0 min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
