@@ -537,7 +537,9 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
   }
 
   try {
-    console.log('[bulkLinkVariants] Actualizando', links.length, 'variantes, productId:', productId, 'ML:', mercadoLibreItemId, 'TN:', tiendaNubeProductId);
+    const withMlItem = links.filter((l: any) => l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== '').length;
+    const withTn = links.filter((l: any) => l.tiendaNubeVariantId != null && String(l.tiendaNubeVariantId) !== '').length;
+    console.log('[bulkLinkVariants] Actualizando', links.length, 'variantes, productId:', productId, 'ML padre:', mercadoLibreItemId, 'TN producto:', tiendaNubeProductId, '| links con ML publicación propia:', withMlItem, 'con TN:', withTn);
     let resolvedProductId = productId;
     if ((mercadoLibreItemId || tiendaNubeProductId) && !resolvedProductId && links.length > 0) {
       const row = await get(

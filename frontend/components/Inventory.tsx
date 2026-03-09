@@ -1292,7 +1292,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const links = bulkLinkVariants.map(v => {
         const ml = bulkLinkAssignments[v.variantId]?.ml?.trim() || '';
         const tn = bulkLinkAssignments[v.variantId]?.tn?.trim() || '';
-        const isMlItemId = /^MLA\d+$/i.test(ml);
+        const isMlItemId = /^ML[A-Z]?\d+$/i.test(ml);
         return {
           variantId: String(v.variantId),
           mercadoLibreVariantId: !isMlItemId && ml ? ml : undefined,
