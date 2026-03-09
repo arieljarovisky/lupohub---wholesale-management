@@ -397,6 +397,19 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteCustomer = async (customerId: string) => {
+    try {
+      await api.deleteCustomer(customerId);
+      setCustomers(prev => prev.filter(c => c.id !== customerId));
+      if (myCustomer?.id === customerId) setMyCustomer(null);
+      showToast('success', 'Cliente eliminado.');
+    } catch (error: any) {
+      console.error(error);
+      const msg = error?.message || (typeof error === 'string' ? error : '');
+      showToast('error', msg.includes('pedidos') ? 'No se puede eliminar: el cliente tiene pedidos asociados.' : 'Error al eliminar el cliente.');
+    }
+  };
+
   const handleStartPicking = async (order: Order) => {
     if (currentUser?.role === Role.WAREHOUSE) {
       try {
@@ -627,6 +640,7 @@ const App: React.FC = () => {
                 sellerId={currentUser.id} 
                 onCreateCustomer={handleCreateCustomer}
                 onUpdateCustomer={handleUpdateCustomer}
+                onDeleteCustomer={handleDeleteCustomer}
                 priceLists={priceLists}
                 orders={orders}
                 products={products}

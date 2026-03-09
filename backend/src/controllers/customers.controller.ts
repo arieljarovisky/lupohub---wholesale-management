@@ -118,3 +118,25 @@ export const updateCustomer = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error actualizando cliente' });
   }
 };
+
+/** Eliminar cliente. No se permite si tiene pedidos asociados. */
+export const deleteCustomer = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    const orderRow = await get('SELECT 1 FROM orders WHERE customer_id = ? LIMIT 1', [id]);
+    if (orderRow) {
+      return res.status(400).json({
+        message: 'No se puede eliminar el cliente porque tiene pedidos asociados. Eliminá o reassigná los pedidos primero.'
+      });
+    }
+
+    await execute('DELETE FROM customers WHERE id = ?', [id]);
+    res.status(204).send();
+  } catch (error: any) {
+    console.error('deleteCustomer:', error);
+    res.status(500).json({ message: 'Error eliminando cliente' });
+  }
+};

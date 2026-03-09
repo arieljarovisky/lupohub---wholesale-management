@@ -464,7 +464,9 @@ export const api = {
     } as Customer;
   },
 
-  // Ajuste manual de stock por variante (Admin o Depósito)
+  deleteCustomer: async (id: string): Promise<void> => {
+    await request<void>(`/customers/${id}`, 'DELETE');
+  },
   updateVariantStock: async (variantId: string, stock: number): Promise<void> => {
     return handleRequest(async () => {
       await request<void>(`/stock/variant/${variantId}`, 'PUT', { stock });
