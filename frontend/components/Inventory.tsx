@@ -40,6 +40,50 @@ interface InventoryProps {
 
 const INVENTORY_STORAGE_KEY = 'lupo_inventory';
 
+const INVENTORY_STORAGE_KEY = 'lupo_inventory';
+
+/** Parsea Excel de stock: columna CODIGO (puede estar fusionada), COLOR, y columnas P, M, G, GG, XG, XXG, XXXG. */
+async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
+  if (rows.length < 2) return [];
+  const headers = (rows[0] || []).map(h => String(h ?? '').trim().toUpperCase());
+  const codigoCol = headers.findIndex(h => h === 'CODIGO' || h === 'CÓDIGO' || h === 'COD');
+  const colorCol = headers.findIndex(h => h === 'COLOR' || h === 'COL');
+  const sizeCols: { key: string; index: number }[] = [];
+  const sizeNames = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+  for (const name of sizeNames) {
+    const idx = headers.findIndex(h => h === name);
+    if (idx >= 0) sizeCols.push({ key: name, index: idx });
+  }
+  if (codigoCol < 0 || colorCol < 0 || sizeCols.length === 0) return [];
+  let lastCodigo = '';
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const rawCodigo = row[codigoCol];
+    const codigo = rawCodigo != null && String(rawCodigo).trim() !== '' ? String(rawCodigo).trim() : lastCodigo;
+    if (codigo) lastCodigo = codigo;
+    const rawColor = row[colorCol];
+    const color = rawColor != null ? String(rawColor).trim() : '';
+    if (!codigo || !color) continue;
+    const obj: Record<string, unknown> = { codigo, color };
+    for (const { key, index } of sizeCols) {
+      const v = row[index];
+      if (v === null || v === undefined || v === '') obj[key] = 0;
+      else if (typeof v === 'number') obj[key] = v;
+      else if (String(v).trim().toUpperCase() === 'X') obj[key] = 0;
+      else obj[key] = parseInt(String(v).replace(/\D/g, ''), 10) || 0;
+    }
+    out.push(obj);
+  }
+  return out;
+}
+
 function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn' } {
   try {
     const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
@@ -145,6 +189,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
+  const [importingStockExcel, setImportingStockExcel] = useState(false);
+  const [stockExcelResult, setStockExcelResult] = useState<{ updated: number; notFoundCount: number; notFound?: string[]; errors?: string[] } | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
@@ -152,6 +198,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
+  const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter States
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -596,6 +643,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  const handleImportStockExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingStockExcel(true);
+    setStockExcelResult(null);
+    try {
+      const rows = await parseStockExcel(file);
+      if (rows.length === 0) {
+        showToast('warning', 'El Excel no tiene filas válidas. Necesitá columnas CODIGO, COLOR y tallas (P, M, G, GG, XG, XXG, XXXG).');
+        return;
+      }
+      const res = await api.importStockFromExcel(rows);
+      setStockExcelResult({
+        updated: res.updated ?? 0,
+        notFoundCount: res.notFoundCount ?? (res.notFound?.length ?? 0),
+        notFound: res.notFound,
+        errors: res.errors
+      });
+      setServerListRefreshKey(k => k + 1);
+      onImportComplete?.();
+      if ((res.notFoundCount ?? 0) > 0) {
+        showToast('success', `Stock actualizado: ${res.updated} variantes. No encontradas: ${res.notFoundCount}.`);
+      } else {
+        showToast('success', `Stock importado: ${res.updated} variantes actualizadas.`);
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando stock desde Excel.');
+    } finally {
+      setImportingStockExcel(false);
+      e.target.value = '';
+    }
   };
 
   /** Mercado Libre = fuente de verdad: trae stock de ML a LupoHub y lo envía a Tienda Nube */
@@ -1847,6 +1927,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   {importingTango ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <Upload size={18} className="text-amber-400" />}
                   Importar Tango
                 </button>
+                <button type="button" onClick={() => { setTopDotsOpen(false); stockExcelFileInputRef.current?.click(); }} disabled={importingStockExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
+                  {importingStockExcel ? <Loader2 size={18} className="animate-spin text-cyan-400" /> : <Package size={18} className="text-cyan-400" />}
+                  Importar stock desde Excel
+                </button>
                 <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
                   {exportingExcel ? <Loader2 size={18} className="animate-spin text-green-400" /> : <Download size={18} className="text-green-400" />}
                   Exportar Excel
@@ -1946,6 +2030,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           className="hidden"
           onChange={handleImportTangoFile}
         />
+        <input
+          ref={stockExcelFileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportStockExcel}
+        />
         <button
           type="button"
           onClick={() => tangoFileInputRef.current?.click()}
@@ -1954,6 +2045,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         >
           {importingTango ? <RefreshCw size={18} className="animate-spin" /> : <Upload size={18} />}
           <span className="text-sm font-semibold hidden sm:inline">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => stockExcelFileInputRef.current?.click()}
+          disabled={importingStockExcel}
+          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-cyan-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
+        >
+          {importingStockExcel ? <Loader2 size={18} className="animate-spin" /> : <Package size={18} />}
+          <span className="text-sm font-semibold hidden sm:inline">{importingStockExcel ? 'Importando stock…' : 'Importar stock Excel'}</span>
         </button>
         <button 
           onClick={exportProductsToExcel}

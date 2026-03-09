@@ -12,6 +12,7 @@ export type StockMovementType =
   | 'DEVOLUCION'
   | 'IMPORTACION_TN'
   | 'IMPORTACION_ML'
+  | 'IMPORTACION_EXCEL'
   | 'SNAPSHOT_INICIAL';
 
 interface StockMovement {
@@ -691,5 +692,135 @@ export const importSalesHistory = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error importing sales history:', error);
     res.status(500).json({ message: 'Error importando historial', error: error.message });
+  }
+};
+
+/** Normaliza código/SKU para búsqueda: quitar guiones, barras y espacios. */
+function normalizeCodigo(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .replace(/[-/\s]/g, '')
+    .toUpperCase();
+}
+
+/** Escapa % y _ para uso en LIKE. */
+function escapeLike(s: string): string {
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/** Resuelve variant_id por código de producto (base SKU), código de color y código de talle. Prueba exacto, normalizado y "empieza con". */
+async function getVariantIdByCodigoColorSize(
+  codigo: string,
+  colorCode: string,
+  sizeCode: string
+): Promise<string | null> {
+  const codigoTrim = (codigo ?? '').toString().trim();
+  const colorStr = (colorCode ?? '').toString().trim();
+  const sizeStr = (sizeCode ?? '').toString().trim();
+  if (!codigoTrim || !colorStr || !sizeStr) return null;
+
+  let row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`,
+    [codigoTrim, colorStr, sizeStr]
+  );
+  if (row?.variant_id) return row.variant_id;
+
+  const normalized = normalizeCodigo(codigoTrim);
+  if (!normalized) return null;
+
+  row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) = ? AND c.code = ? AND s.size_code = ?`,
+    [normalized, colorStr, sizeStr]
+  );
+  if (row?.variant_id) return row.variant_id;
+
+  const pattern = escapeLike(normalized) + '%';
+  row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) LIKE ? AND c.code = ? AND s.size_code = ?
+     LIMIT 1`,
+    [pattern, colorStr, sizeStr]
+  );
+  return row?.variant_id || null;
+}
+
+const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+
+function parseStockValue(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number' && !Number.isNaN(v)) return Math.max(0, Math.floor(v));
+  const s = String(v).trim().toUpperCase();
+  if (s === 'X' || s === '-' || s === 'N/A') return 0;
+  const n = parseFloat(s.replace(/[^\d.,-]/g, '').replace(',', '.'));
+  return Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n));
+}
+
+export const importStockFromExcel = async (req: Request, res: Response) => {
+  try {
+    const { rows: rawRows } = req.body as { rows?: Array<Record<string, unknown>> };
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      return res.status(400).json({
+        message: 'Se requiere un array "rows" con las filas del Excel (columnas CODIGO, COLOR y tallas P, M, G, etc.).'
+      });
+    }
+
+    const notFound: string[] = [];
+    const errors: string[] = [];
+    let updated = 0;
+
+    for (const row of rawRows) {
+      const codigo = (row.codigo ?? row.CODIGO ?? row.Codigo ?? '').toString().trim();
+      const colorRaw = row.color ?? row.COLOR ?? row.Color;
+      const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      if (!codigo || !colorStr) continue;
+
+      for (const sizeCode of EXCEL_SIZE_COLUMNS) {
+        const rawVal = row[sizeCode] ?? row[sizeCode.toLowerCase()];
+        const stock = parseStockValue(rawVal);
+        const variantId = await getVariantIdByCodigoColorSize(codigo, colorStr, sizeCode);
+        if (!variantId) {
+          const key = `${codigo}-${colorStr}-${sizeCode}`;
+          if (!notFound.includes(key)) notFound.push(key);
+          continue;
+        }
+        const ok = await updateVariantStock(
+          variantId,
+          stock,
+          'IMPORTACION_EXCEL',
+          'Importación Excel',
+          true
+        );
+        if (ok) updated++;
+        else errors.push(`Error actualizando ${codigo} color ${colorStr} talle ${sizeCode}`);
+      }
+    }
+
+    res.json({
+      message: 'Importación de stock completada',
+      updated,
+      notFound: notFound.slice(0, 200),
+      notFoundCount: notFound.length,
+      errors: errors.length > 0 ? errors.slice(0, 50) : undefined
+    });
+  } catch (error: any) {
+    console.error('Error importing stock from Excel:', error);
+    res.status(500).json({ message: 'Error importando stock desde Excel', error: error.message });
   }
 };

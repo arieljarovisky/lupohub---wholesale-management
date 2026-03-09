@@ -91,15 +91,39 @@ const App: React.FC = () => {
   // Fetch Data on Login
   useEffect(() => {
     const savedUser = localStorage.getItem('lupo_current_user');
+    const savedToken = localStorage.getItem('lupo_api_token');
+    if (savedToken) setAuthToken(savedToken);
+
+    if (!currentUser && savedToken) {
+      // Refrescar usuario desde el backend para tener priceListId (y datos) actualizados
+      api.refreshUser()
+        .then((res) => {
+          if (res.user) {
+            setCurrentUser(res.user);
+            try {
+              localStorage.setItem('lupo_current_user', JSON.stringify(res.user));
+              if (res.token) localStorage.setItem('lupo_api_token', res.token);
+              if (res.token) setAuthToken(res.token);
+            } catch {}
+          } else if (savedUser) {
+            try {
+              setCurrentUser(JSON.parse(savedUser) as User);
+            } catch {}
+          }
+        })
+        .catch(() => {
+          if (savedUser) {
+            try {
+              setCurrentUser(JSON.parse(savedUser) as User);
+            } catch {}
+          }
+        });
+      return;
+    }
     if (savedUser && !currentUser) {
       try {
-        const parsed = JSON.parse(savedUser) as User;
-        setCurrentUser(parsed);
+        setCurrentUser(JSON.parse(savedUser) as User);
       } catch {}
-    }
-    const savedToken = localStorage.getItem('lupo_api_token');
-    if (savedToken) {
-      setAuthToken(savedToken);
     }
     // Restore last view if available and allowed
     const savedView = localStorage.getItem('lupo_current_view');
@@ -151,7 +175,7 @@ const App: React.FC = () => {
         setCustomers(myC ? [myC] : []);
         setAttributes([]);
       } else {
-      const effectivePriceListId = currentUser?.role === Role.SELLER ? (currentUser as any).priceListId : undefined;
+      const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
         api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId, perPage: 400 } : { perPage: 400 }),
         api.getOrders(),

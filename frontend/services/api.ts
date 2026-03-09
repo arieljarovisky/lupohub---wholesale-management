@@ -17,6 +17,23 @@ export const api = {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
   },
 
+  /** Refresca el token y devuelve el usuario actualizado (incl. priceListId). Usar al cargar la app con sesión guardada. */
+  refreshUser: async (): Promise<{ user: User; token: string | null }> => {
+    const res = await request<{ user: any; token: string | null }>(`/auth/refresh`, 'POST', {});
+    const u = res?.user;
+    return {
+      user: u ? {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        commissionPercentage: u.commissionPercentage != null ? Number(u.commissionPercentage) : undefined,
+        priceListId: u.priceListId ?? undefined
+      } : (res as any).user,
+      token: res?.token ?? null
+    };
+  },
+
   // --- USERS (solo ADMIN, requiere token) ---
   getUsers: async (): Promise<User[]> => {
     const rows = await request<any[]>('/users', 'GET');
@@ -483,6 +500,11 @@ export const api = {
     return handleRequest(async () => {
       await request<void>(`/stock/variant/${variantId}`, 'PUT', { stock });
     }, undefined, 'updateVariantStock');
+  },
+
+  /** Importar stock desde Excel (filas con codigo, color, y columnas P, M, G, GG, XG, XXG, XXXG). */
+  importStockFromExcel: async (rows: Array<Record<string, unknown>>): Promise<{ message: string; updated: number; notFound?: string[]; notFoundCount?: number; errors?: string[] }> => {
+    return request<any>('/stock/import-excel', 'POST', { rows });
   },
 
   // --- INTEGRATIONS ---
