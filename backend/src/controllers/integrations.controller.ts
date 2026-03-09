@@ -855,10 +855,11 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
     const { event, store_id } = req.body;
     console.log(`[TN Webhook] Evento: ${event}, Store: ${store_id}`);
     
-    // Verificar que el store_id coincide
-    const integration = await get(`SELECT store_id FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration || integration.store_id !== store_id?.toString()) {
-      console.log('[TN Webhook] Store ID no coincide, ignorando');
+    // Verificar que el store_id coincide (comparar como string por si viene número de la DB o del body)
+    const integration = await get(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    const storedStoreId = (integration?.store_id ?? integration?.user_id)?.toString();
+    if (!integration || storedStoreId !== (store_id != null ? String(store_id) : '')) {
+      console.log('[TN Webhook] Store ID no coincide (recibido:', store_id, ', guardado:', storedStoreId, '), ignorando');
       return res.status(200).json({ received: true, ignored: true });
     }
 
