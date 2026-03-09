@@ -68,10 +68,13 @@ export const getProducts = async (req: Request, res: Response) => {
              p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
-             COALESCE(st.stock, 0) AS stock_total
+             COALESCE(st.stock, 0) AS stock_total,
+             c.name AS color_name, s.size_code AS size_code, s.name AS size_name
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
       JOIN product_variants pv ON pv.product_color_id = pc.id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN stocks st ON st.variant_id = pv.id
       ${priceJoin}
       ${whereClause}
@@ -90,6 +93,9 @@ export const getProducts = async (req: Request, res: Response) => {
       category: r.category,
       base_price: Number(r.base_price ?? 0),
       stock_total: Number(r.stock_total ?? 0),
+      color_name: r.color_name ?? null,
+      size_code: r.size_code ?? null,
+      size_name: r.size_name ?? null,
       externalIds: {
         tiendaNube: r.tienda_nube_id,
         mercadoLibre: r.mercado_libre_id,

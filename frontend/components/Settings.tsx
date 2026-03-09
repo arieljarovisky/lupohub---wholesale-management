@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
@@ -752,6 +752,23 @@ const Settings: React.FC<SettingsProps> = ({
                       </button>
                       <button
                         onClick={async () => {
+                          const name = window.prompt(`Duplicar "${pl.name}". Nombre de la nueva lista:`, `${pl.name} (copia)`);
+                          if (!name?.trim()) return;
+                          try {
+                            const created = await api.duplicatePriceList(pl.id, name.trim());
+                            setPriceLists(prev => [...prev, created]);
+                            showToast('success', 'Lista duplicada');
+                          } catch (err: any) {
+                            showToast('error', err?.message || 'Error duplicando');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-xs font-bold flex items-center gap-1"
+                        title="Duplicar lista"
+                      >
+                        <Copy size={14} /> Duplicar
+                      </button>
+                      <button
+                        onClick={async () => {
                           if (!confirm(`¿Eliminar la lista "${pl.name}"?`)) return;
                           try {
                             await api.deletePriceList(pl.id);
@@ -769,43 +786,80 @@ const Settings: React.FC<SettingsProps> = ({
                     </div>
                   </div>
                 ))}
-                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6">
-                  <input
-                    type="text"
-                    placeholder="Nombre de la nueva lista (ej: Mayorista 10%)"
-                    id="new-price-list-name"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm mb-2"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const name = (e.target as HTMLInputElement).value?.trim();
-                        if (name) {
-                          api.createPriceList({ name }).then(created => {
+                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nueva lista (una)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nombre (ej: Mayorista 10%)"
+                        id="new-price-list-name"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const name = (e.target as HTMLInputElement).value?.trim();
+                            if (name) {
+                              api.createPriceList({ name }).then(created => {
+                                setPriceLists(prev => [...prev, created]);
+                                (e.target as HTMLInputElement).value = '';
+                                showToast('success', 'Lista creada');
+                              }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          const input = document.getElementById('new-price-list-name') as HTMLInputElement;
+                          const name = input?.value?.trim();
+                          if (!name) return;
+                          try {
+                            const created = await api.createPriceList({ name });
                             setPriceLists(prev => [...prev, created]);
-                            (e.target as HTMLInputElement).value = '';
+                            input.value = '';
                             showToast('success', 'Lista creada');
-                          }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
+                          } catch (err: any) {
+                            showToast('error', (err as any)?.message || 'Error creando');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shrink-0"
+                      >
+                        <Plus size={18} /> Crear lista
+                      </button>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-700 pt-4">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Creación masiva (varias listas)</label>
+                    <p className="text-slate-400 text-xs mb-2">Un nombre por línea. Se crean todas de una vez.</p>
+                    <textarea
+                      id="bulk-price-list-names"
+                      placeholder="Mayorista 10%&#10;Mayorista 20%&#10;Retail&#10;Promo Verano"
+                      rows={4}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-y"
+                    />
+                    <button
+                      onClick={async () => {
+                        const ta = document.getElementById('bulk-price-list-names') as HTMLTextAreaElement;
+                        const text = ta?.value?.trim() || '';
+                        const names = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                        if (names.length === 0) {
+                          showToast('error', 'Escribí al menos un nombre (uno por línea)');
+                          return;
                         }
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={async () => {
-                      const input = document.getElementById('new-price-list-name') as HTMLInputElement;
-                      const name = input?.value?.trim();
-                      if (!name) return;
-                      try {
-                        const created = await api.createPriceList({ name });
-                        setPriceLists(prev => [...prev, created]);
-                        input.value = '';
-                        showToast('success', 'Lista creada');
-                      } catch (err: any) {
-                        showToast('error', (err as any)?.message || 'Error creando');
-                      }
-                    }}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                  >
-                    <Plus size={18} /> Crear lista
-                  </button>
+                        try {
+                          const { created, count } = await api.createPriceListsBulk(names);
+                          setPriceLists(prev => [...prev, ...created]);
+                          ta.value = '';
+                          showToast('success', `Se crearon ${count} listas`);
+                        } catch (err: any) {
+                          showToast('error', (err as any)?.message || 'Error creando listas');
+                        }
+                      }}
+                      className="mt-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                    >
+                      <Plus size={18} /> Crear listas
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -842,6 +896,80 @@ const Settings: React.FC<SettingsProps> = ({
         >
           <div className="space-y-4 max-h-[60vh] overflow-y-auto">
             <p className="text-slate-400 text-xs">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
+            {/* Acciones masivas */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Rellenar desde catálogo</p>
+                <p className="text-slate-500 text-xs mb-2">Todos los productos con precio base. Opcional: multiplicador (ej. 0.9 = 10% descuento).</p>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="1"
+                    id="fill-multiplier"
+                    className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const input = document.getElementById('fill-multiplier') as HTMLInputElement;
+                      const mult = input?.value ? parseFloat(input.value) : 1;
+                      if (!editingPriceList) return;
+                      try {
+                        const { items, count } = await api.fillPriceListFromBase(editingPriceList.id, mult);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Se cargaron ${count} productos`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error');
+                      }
+                    }}
+                    className="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                  >
+                    Rellenar
+                  </button>
+                </div>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar por CSV</p>
+                <p className="text-slate-500 text-xs mb-2">Archivo con líneas: SKU;precio o SKU,precio. Reemplaza los precios de esos SKU.</p>
+                <label className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                  <FileUp size={14} /> Elegir archivo
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !editingPriceList) return;
+                      e.target.value = '';
+                      try {
+                        const text = await file.text();
+                        const lines = text.split(/\r?\n/).filter(Boolean);
+                        const items: { sku: string; price: number }[] = [];
+                        for (const line of lines) {
+                          const [sku, priceStr] = line.includes(';') ? line.split(';') : line.split(',');
+                          const skuTrim = (sku || '').trim();
+                          const price = parseFloat((priceStr || '0').trim().replace(/[^\d.,-]/g, '').replace(',', '.'));
+                          if (skuTrim && !isNaN(price)) items.push({ sku: skuTrim, price });
+                        }
+                        if (items.length === 0) {
+                          showToast('error', 'No se encontraron líneas válidas (SKU;precio o SKU,precio)');
+                          return;
+                        }
+                        const res = await api.setPriceListItemsBySku(editingPriceList.id, items);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Importados ${res.imported} precios${res.notFound?.length ? `. No encontrados: ${res.notFound.length}` : ''}`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error importando');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
             {priceListItems.map((item, idx) => (
               <div key={item.productId} className="flex items-center gap-3 bg-slate-800 rounded-xl p-3 border border-slate-700">
                 <span className="text-xs font-mono text-slate-500 flex-1 truncate">{item.sku || item.productId}</span>

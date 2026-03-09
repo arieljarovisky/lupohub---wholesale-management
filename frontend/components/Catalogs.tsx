@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X } from 'lucide-react';
+import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X, AlertCircle } from 'lucide-react';
 import { Role } from '../types';
 import { api } from '../services/api';
 
@@ -60,7 +60,13 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
       window.open(blobUrl, '_blank', 'noopener');
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (e: any) {
-      alert(e?.message || 'No se pudo abrir el archivo');
+      const msg = e?.message || '';
+      const is404 = typeof msg === 'string' && (msg.includes('404') || msg.includes('No encontrado') || msg.includes('not found'));
+      const friendly = is404
+        ? 'El archivo no está disponible en el servidor. Puede que el catálogo se haya subido en otro entorno o el archivo ya no exista.'
+        : (msg || 'No se pudo abrir el archivo.');
+      setError(friendly);
+      setTimeout(() => setError(''), 8000);
     } finally {
       setOpenLoadingId(null);
     }
@@ -197,9 +203,26 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
         </div>
       )}
 
+      {error && list.length > 0 && (
+        <div className="bg-amber-900/30 border border-amber-700 rounded-xl px-4 py-3 flex items-start gap-3">
+          <AlertCircle className="text-amber-400 shrink-0 mt-0.5" size={20} />
+          <div className="flex-1 min-w-0">
+            <p className="text-amber-200 text-sm font-medium">{error}</p>
+          </div>
+          <button type="button" onClick={() => setError('')} className="text-amber-400 hover:text-white shrink-0" aria-label="Cerrar"> <X size={18} /> </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 size={40} className="animate-spin text-emerald-500" />
+        </div>
+      ) : error && !list.length ? (
+        <div className="bg-red-900/20 border border-red-800 rounded-2xl p-6 text-center">
+          <AlertCircle className="mx-auto text-red-400 mb-2" size={32} />
+          <p className="text-red-300 font-medium">Error al cargar los catálogos</p>
+          <p className="text-slate-400 text-sm mt-1">{error}</p>
+          <p className="text-slate-500 text-xs mt-2">Verificá que estés logueado y que la conexión con el servidor sea correcta.</p>
         </div>
       ) : list.length === 0 ? (
         <div className="bg-slate-800/50 rounded-2xl border border-slate-700 border-dashed p-8 sm:p-12 text-center">

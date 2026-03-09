@@ -31,7 +31,7 @@ export const uploadCatalogMiddleware = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 }).single('file');
 
-/** GET /api/catalogs - Listar catálogos (ADMIN, SELLER, CUSTOMER) */
+/** GET /api/catalogs - Listar catálogos. Cualquier usuario autenticado (ADMIN, SELLER, CUSTOMER). */
 export const listCatalogs = async (req: Request, res: Response) => {
   try {
     const rows = await query(`
@@ -134,7 +134,7 @@ export const createCatalogWithUrl = async (req: Request, res: Response) => {
   }
 };
 
-/** GET /api/catalogs/:id/file - Ver/descargar archivo (o redirigir si es URL) */
+/** GET /api/catalogs/:id/file - Ver/descargar archivo (o redirigir si es URL). Cualquier usuario autenticado. */
 export const getCatalogFile = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

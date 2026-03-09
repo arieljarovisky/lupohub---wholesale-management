@@ -84,6 +84,18 @@ export const api = {
   setPriceListItems: async (id: string, items: { productId: string; price: number }[]): Promise<{ items: { productId: string; price: number }[] }> => {
     return request<any>(`/price-lists/${id}/items`, 'PUT', items);
   },
+  createPriceListsBulk: async (names: string[]): Promise<{ created: import('../types').PriceList[]; count: number }> => {
+    return request<any>('/price-lists/bulk', 'POST', { names });
+  },
+  duplicatePriceList: async (id: string, newName: string): Promise<import('../types').PriceList> => {
+    return request<any>(`/price-lists/${id}/duplicate`, 'POST', { name: newName });
+  },
+  fillPriceListFromBase: async (id: string, multiplier?: number): Promise<{ items: { productId: string; price: number }[]; count: number }> => {
+    return request<any>(`/price-lists/${id}/fill-from-base`, 'POST', multiplier != null ? { multiplier } : {});
+  },
+  setPriceListItemsBySku: async (id: string, items: { sku: string; price: number }[]): Promise<{ items: { productId: string; price: number }[]; imported: number; notFound?: string[] }> => {
+    return request<any>(`/price-lists/${id}/items/by-sku`, 'PUT', { items });
+  },
 
   // --- PRODUCTS ---
   getProducts: async (options?: { priceListId?: string | null; perPage?: number }): Promise<Product[]> => {
@@ -95,8 +107,8 @@ export const api = {
       const rows = Array.isArray(res) ? res : res.items;
       return rows.map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
-        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
         return {
           id: r.id,
           sku: r.sku,
@@ -104,8 +116,8 @@ export const api = {
           product_id: r.product_id,
           name: r.name,
           category: r.category,
-          size,
-          color,
+          size: r.size_name ?? r.size_code ?? sizeDerived,
+          color: r.color_name ?? colorDerived,
           stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
@@ -124,8 +136,8 @@ export const api = {
     const rows = Array.isArray(res) ? res : (res && res.items) || [];
     return rows.map((r: any) => {
       const parts = (r.sku || '').toString().split('-');
-      const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-      const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+      const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+      const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
       return {
         id: r.id,
         sku: r.sku,
@@ -133,8 +145,8 @@ export const api = {
         product_id: r.product_id,
         name: r.name,
         category: r.category,
-        size,
-        color,
+        size: r.size_name ?? r.size_code ?? sizeDerived,
+        color: r.color_name ?? colorDerived,
         stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
         price: Number((r as any).base_price ?? (r as any).price ?? 0),
         description: r.description ?? '',
@@ -162,8 +174,8 @@ export const api = {
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const items = (res.items || []).map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
-        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
         return {
           id: r.id,
           sku: r.sku,
@@ -171,8 +183,8 @@ export const api = {
           product_id: r.product_id,
           name: r.name,
           category: r.category,
-          size,
-          color,
+          size: r.size_name ?? r.size_code ?? sizeDerived,
+          color: r.color_name ?? colorDerived,
           stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
@@ -787,10 +799,8 @@ export const api = {
 
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
-    return handleRequest(async () => {
-      const rows = await request<any[]>('/catalogs', 'GET');
-      return Array.isArray(rows) ? rows : [];
-    }, [], 'getCatalogs');
+    const rows = await request<any[]>('/catalogs', 'GET');
+    return Array.isArray(rows) ? rows : [];
   },
   uploadCatalog: async (file: File, name?: string): Promise<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string }> => {
     const formData = new FormData();

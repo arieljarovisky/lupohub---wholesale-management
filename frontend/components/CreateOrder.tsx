@@ -73,10 +73,27 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       const sku = (p.sku || '').toLowerCase();
       const name = (p.name || '').toLowerCase();
       const category = (p.category || '').toLowerCase();
-      const allText = `${sku} ${name} ${category}`;
+      const color = (p.color || '').toLowerCase();
+      const allText = `${sku} ${name} ${category} ${color}`;
       return searchWords.every(word => allText.includes(word));
     }).slice(0, 50);
   }, [products, searchTrimmed]);
+
+  /** Agrupar por producto (base_sku o product_id) para mostrar variantes bajo el mismo nombre. */
+  const groupedSearchProducts = React.useMemo(() => {
+    const map = new Map<string, Product[]>();
+    for (const p of filteredSearchProducts) {
+      const key = (p as any).product_id || (p as any).base_sku || p.id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return Array.from(map.entries()).map(([key, variants]) => ({
+      key,
+      productName: variants[0]?.name ?? 'Producto',
+      category: variants[0]?.category,
+      variants
+    }));
+  }, [filteredSearchProducts]);
 
   const addItem = async (product: Product) => {
     if (isReadOnly) return;
@@ -316,34 +333,45 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           <p className="text-xs text-slate-500 mb-2 px-1 shrink-0">
             {searchTrimmed ? `${filteredSearchProducts.length} resultado(s) · Tocá un producto para agregarlo` : 'Mostrando los primeros 30. Escribí para buscar.'}
           </p>
-          <div className="flex-1 overflow-y-auto space-y-2 min-h-0 touch-scroll overscroll-contain">
-            {filteredSearchProducts.map(p => (
-              <button 
-                key={p.id} 
-                onClick={() => addItem(p)}
-                className={`w-full text-left min-h-[80px] py-4 px-4 rounded-xl border transition-all flex justify-between items-center gap-4 active:scale-[0.99] hover:border-blue-500/40 touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-800/80 border-slate-700 hover:bg-slate-800'}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <span className="text-xs font-mono font-bold text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
-                    {p.category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded shrink-0">{p.category}</span>}
-                    {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
-                  </div>
-                  <div className="font-bold text-white text-sm leading-tight line-clamp-2 sm:truncate">{p.name}</div>
-                  {(p.size || p.color) && <div className="text-xs text-slate-500 mt-0.5">{[p.size, p.color].filter(Boolean).join(' • ')}</div>}
+          <div className="flex-1 overflow-y-auto space-y-4 min-h-0 touch-scroll overscroll-contain">
+            {groupedSearchProducts.map(({ key, productName, category, variants }) => (
+              <div key={key} className="rounded-xl border border-slate-700 overflow-hidden bg-slate-800/60">
+                <div className="px-4 py-2.5 border-b border-slate-700 bg-slate-800/80">
+                  <div className="font-bold text-white text-sm">{productName}</div>
+                  {category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">{category}</span>}
                 </div>
-                <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
-                  <span className="text-sm font-black text-green-400 tabular-nums">${p.price.toLocaleString()}</span>
-                  <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
-                    {p.stock <= 0 ? 'Sin stock' : hideStock ? 'Disponible' : `${p.stock} un.`}
-                  </span>
-                  <span className="text-blue-400 text-[10px] font-semibold mt-0.5 flex items-center gap-0.5">
-                    <Plus size={12}/> Agregar
-                  </span>
+                <div className="divide-y divide-slate-700/80">
+                  {variants.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => addItem(p)}
+                      className={`w-full text-left min-h-[72px] py-3 px-4 flex justify-between items-center gap-4 active:scale-[0.99] hover:bg-slate-700/50 transition-colors touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10' : ''}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
+                          {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
+                        </div>
+                        <div className="text-slate-300 text-sm">
+                          {(p.color || p.size) && <span className="font-medium">{(p.color && p.size) ? `${p.color} · ${p.size}` : (p.color || p.size)}</span>}
+                          {!(p.color || p.size) && <span className="text-slate-500">Variante</span>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
+                        <span className="text-sm font-black text-green-400 tabular-nums">${p.price.toLocaleString()}</span>
+                        <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
+                          {p.stock <= 0 ? 'Sin stock' : hideStock ? 'Disponible' : `${p.stock} un.`}
+                        </span>
+                        <span className="text-blue-400 text-[10px] font-semibold mt-0.5 flex items-center gap-0.5">
+                          <Plus size={12}/> Agregar
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              </button>
+              </div>
             ))}
-            {filteredSearchProducts.length === 0 && (
+            {groupedSearchProducts.length === 0 && (
               <div className="text-center py-12 text-slate-500">
                 <Package className="mx-auto mb-2 opacity-50" size={32}/>
                 <p className="font-semibold">No hay resultados</p>
