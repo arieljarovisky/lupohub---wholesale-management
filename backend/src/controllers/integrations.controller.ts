@@ -1221,13 +1221,17 @@ Equipo Lupo`;
   }
 };
 
-/** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. */
+/** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. Incluye variantes con publicación padre (mercado_libre_id + variant_id) y variantes con publicación propia (mercado_libre_item_id). */
 export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: number }> {
   const mlToken = await getValidMLToken();
   const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
   if (!mlToken || !tnIntegration?.access_token || !tnIntegration?.store_id) {
     return { updated: 0, errors: 0 };
   }
+  let updated = 0;
+  let errors = 0;
+
+  // 1) Variantes con publicación padre ML (una publicación con varias variaciones)
   const rows = await query(`
     SELECT p.mercado_libre_id AS ml_id, pv.mercado_libre_variant_id AS ml_variant_id,
            p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
@@ -1239,35 +1243,88 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
     WHERE p.mercado_libre_id IS NOT NULL AND pv.mercado_libre_variant_id IS NOT NULL
       AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL
   `);
-  if (!rows?.length) return { updated: 0, errors: 0 };
-  const byMlId = new Map<string, typeof rows>();
-  for (const r of rows) {
-    const id = (r as any).ml_id;
-    if (!byMlId.has(id)) byMlId.set(id, []);
-    byMlId.get(id)!.push(r);
+  if (rows?.length) {
+    const byMlId = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const id = (r as any).ml_id;
+      if (!byMlId.has(id)) byMlId.set(id, []);
+      byMlId.get(id)!.push(r);
+    }
+    const mlIds = Array.from(byMlId.keys());
+    const batchSize = 10;
+    for (let i = 0; i < mlIds.length; i += batchSize) {
+      const batch = mlIds.slice(i, i + batchSize);
+      const itemPromises = batch.map((id: string) =>
+        axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        }).then(r => r.data).catch(() => null)
+      );
+      const items = await Promise.all(itemPromises);
+      for (let j = 0; j < batch.length; j++) {
+        const item = items[j];
+        const mlId = batch[j];
+        const variantRows = byMlId.get(mlId) || [];
+        if (!item) { errors += variantRows.length; continue; }
+        const variations = item.variations || [];
+        for (const vr of variantRows) {
+          const r = vr as any;
+          const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
+          const mlQty = v ? (v.available_quantity ?? 0) : (variations.length === 0 ? (item.available_quantity ?? 0) : 0);
+          const mlPack = Math.max(1, Number(r.ml_pack) || 1);
+          const tnPack = Math.max(1, Number(r.tn_pack) || 1);
+          const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+          try {
+            await axios.put(
+              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
+              { stock: tnStock },
+              { headers: { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT } }
+            );
+            updated++;
+          } catch (e: any) {
+            errors++;
+            console.warn(`[AutoSync ML→TN] Error TN PUT variante ml_variant=${r.ml_variant_id} tn=${r.tn_id}/${r.tn_variant_id}:`, e.response?.data?.message || e.message);
+          }
+          if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+        }
+      }
+    }
   }
-  let updated = 0;
-  let errors = 0;
-  const mlIds = Array.from(byMlId.keys());
-  const batchSize = 10;
-  for (let i = 0; i < mlIds.length; i += batchSize) {
-    const batch = mlIds.slice(i, i + batchSize);
-    const itemPromises = batch.map((id: string) =>
-      axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
-        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-      }).then(r => r.data).catch(() => null)
-    );
-    const items = await Promise.all(itemPromises);
-    for (let j = 0; j < batch.length; j++) {
-      const item = items[j];
-      const mlId = batch[j];
-      const variantRows = byMlId.get(mlId) || [];
-      if (!item) { errors += variantRows.length; continue; }
-      const variations = item.variations || [];
-      for (const vr of variantRows) {
-        const r = vr as any;
-        const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
-        const mlQty = v ? (v.available_quantity ?? 0) : (variations.length === 0 ? (item.available_quantity ?? 0) : 0);
+
+  // 2) Variantes con publicación propia en ML (cada variante = un ítem ML). Sincronizar stock ML → TN.
+  const rowsByItem = await query(`
+    SELECT pv.mercado_libre_item_id AS ml_item_id,
+           p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
+           COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+           COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
+           pv.sku
+    FROM product_variants pv
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    WHERE pv.mercado_libre_item_id IS NOT NULL
+      AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL
+  `);
+  if (rowsByItem?.length) {
+    const batchSize = 10;
+    for (let i = 0; i < rowsByItem.length; i += batchSize) {
+      const batch = rowsByItem.slice(i, i + batchSize) as any[];
+      const itemPromises = batch.map((row: any) =>
+        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        }).then(r => r.data).catch(() => null)
+      );
+      const items = await Promise.all(itemPromises);
+      for (let j = 0; j < batch.length; j++) {
+        const item = items[j];
+        const r = batch[j];
+        if (!item) {
+          errors++;
+          console.warn(`[AutoSync ML→TN] No se pudo obtener ítem ML ${r.ml_item_id} (SKU ${r.sku})`);
+          continue;
+        }
+        const variations = item.variations || [];
+        const mlQty = variations.length === 0
+          ? (item.available_quantity ?? 0)
+          : (variations.length === 1 ? (variations[0].available_quantity ?? 0) : 0);
         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -1278,13 +1335,15 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
             { headers: { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT } }
           );
           updated++;
-        } catch {
+        } catch (e: any) {
           errors++;
+          console.warn(`[AutoSync ML→TN] Error TN PUT ítem propio ml_item=${r.ml_item_id} tn=${r.tn_id}/${r.tn_variant_id} (SKU ${r.sku}):`, e.response?.data?.message || e.message);
         }
         if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
       }
     }
   }
+
   if (updated > 0 || errors > 0) {
     console.log(`[AutoSync ML→TN] Actualizados: ${updated}, errores: ${errors}`);
   }
@@ -1457,7 +1516,9 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
         logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
       } else {
         errors++;
-        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
+        const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
+        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}`);
+        console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
       }
     }
 

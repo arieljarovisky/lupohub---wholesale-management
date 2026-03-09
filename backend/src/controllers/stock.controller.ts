@@ -278,7 +278,7 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
     console.log(`[ML Stock] Item ${itemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
     return false;
   } catch (e: any) {
-    console.error('[ML Stock] Error actualizando publicación única:', e.response?.data || e.message);
+    console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, e.response?.data || e.message);
     return false;
   }
 };
