@@ -703,6 +703,13 @@ function normalizeCodigo(s: string): string {
     .toUpperCase();
 }
 
+/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
+function padArticleCodeTo7(s: string): string {
+  const digits = String(s ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+
 /** Escapa % y _ para uso en LIKE. */
 function escapeLike(s: string): string {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -730,6 +737,21 @@ async function getVariantIdByCodigoColorSize(
     [codigoTrim, colorStr, sizeStr]
   );
   if (row?.variant_id) return row.variant_id;
+
+  const padded = padArticleCodeTo7(codigoTrim);
+  if (padded && padded !== codigoTrim) {
+    row = await get(
+      `SELECT pv.id AS variant_id
+       FROM products p
+       JOIN product_colors pc ON pc.product_id = p.id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       JOIN sizes s ON s.id = pv.size_id
+       WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`,
+      [padded, colorStr, sizeStr]
+    );
+    if (row?.variant_id) return row.variant_id;
+  }
 
   const normalized = normalizeCodigo(codigoTrim);
   if (!normalized) return null;

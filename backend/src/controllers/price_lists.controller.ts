@@ -297,6 +297,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
     const notFound: string[] = [];
     const normalizeSku = (s: string) => String(s).replace(/[-/\s]/g, '').trim();
     const escapeLike = (s: string) => String(s).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const padArticleCodeTo7 = (s: string) => { const d = String(s).replace(/\D/g, ''); return d ? (d.length <= 7 ? d.padStart(7, '0') : d) : ''; };
     for (const it of input) {
       const sku = String(it?.sku ?? '').trim();
       const price = Number(it?.price);
@@ -313,6 +314,26 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
           [sku]
         );
         if (byVariant?.id) productId = byVariant.id;
+      }
+      if (!productId) {
+        const padded = padArticleCodeTo7(sku);
+        if (padded && padded !== sku) {
+          const byBasePadded = await get(`SELECT id FROM products WHERE sku = ?`, [padded]);
+          if (byBasePadded?.id) productId = byBasePadded.id;
+        }
+      }
+      if (!productId) {
+        const padded = padArticleCodeTo7(sku);
+        if (padded && padded !== sku) {
+          const byVarPadded = await get(
+            `SELECT pc.product_id AS id FROM product_variants pv
+             JOIN product_colors pc ON pc.id = pv.product_color_id
+             WHERE pv.sku = ?
+             LIMIT 1`,
+            [padded]
+          );
+          if (byVarPadded?.id) productId = byVarPadded.id;
+        }
       }
       if (!productId) {
         const normalized = normalizeSku(sku);

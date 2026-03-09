@@ -40,7 +40,12 @@ interface InventoryProps {
 
 const INVENTORY_STORAGE_KEY = 'lupo_inventory';
 
-const INVENTORY_STORAGE_KEY = 'lupo_inventory';
+/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
+function padArticleCodeTo7(s: string): string {
+  const digits = String(s ?? '').replace(/\D/g, '');
+  if (!digits) return s;
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
 
 /** Parsea Excel de stock: columna CODIGO (puede estar fusionada), COLOR, y columnas P, M, G, GG, XG, XXG, XXXG. */
 async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
@@ -71,7 +76,7 @@ async function parseStockExcel(file: File): Promise<Array<Record<string, unknown
     const rawColor = row[colorCol];
     const color = rawColor != null ? String(rawColor).trim() : '';
     if (!codigo || !color) continue;
-    const obj: Record<string, unknown> = { codigo, color };
+    const obj: Record<string, unknown> = { codigo: padArticleCodeTo7(codigo), color };
     for (const { key, index } of sizeCols) {
       const v = row[index];
       if (v === null || v === undefined || v === '') obj[key] = 0;
