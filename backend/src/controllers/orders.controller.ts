@@ -16,37 +16,49 @@ export const getOrders = async (req: any, res: any) => {
         ordersRow = [];
       }
     }
-    
-    // 2. Get Items for each order with productId (variant -> product_color -> product)
-    const ordersFull = await Promise.all(ordersRow.map(async (order) => {
-      const items = await query(`
-        SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-               pc.product_id AS productId
-        FROM order_items i
-        JOIN product_variants pv ON pv.id = i.variant_id
-        JOIN product_colors pc ON pc.id = pv.product_color_id
-        WHERE i.order_id = ?
-      `, [order.id]);
-      
-      const itemsMapped = (items as any[]).map((row: any) => ({
-        variantId: row.variantId,
-        productId: row.productId,
-        quantity: row.quantity,
-        picked: row.picked ?? 0,
-        priceAtMoment: Number(row.priceAtMoment)
-      }));
-      
-      return {
-        id: order.id,
-        customerId: order.customer_id,
-        sellerId: order.seller_id,
-        date: order.date,
-        status: order.status,
-        total: Number(order.total),
-        pickedBy: order.picked_by ?? undefined,
-        dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
-        items: itemsMapped
-      };
+
+    if (ordersRow.length === 0) {
+      return res.json([]);
+    }
+
+    const orderIds = ordersRow.map((o: any) => o.id);
+    const placeholders = orderIds.map(() => '?').join(',');
+    const itemsRows = await query(`
+      SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             pc.product_id AS productId
+      FROM order_items i
+      JOIN product_variants pv ON pv.id = i.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      WHERE i.order_id IN (${placeholders})
+    `, orderIds);
+
+    const itemsByOrderId: Record<string, any[]> = {};
+    for (const o of ordersRow) {
+      itemsByOrderId[o.id] = [];
+    }
+    for (const row of itemsRows as any[]) {
+      const items = itemsByOrderId[row.order_id];
+      if (items) {
+        items.push({
+          variantId: row.variantId,
+          productId: row.productId,
+          quantity: row.quantity,
+          picked: row.picked ?? 0,
+          priceAtMoment: Number(row.priceAtMoment)
+        });
+      }
+    }
+
+    const ordersFull = ordersRow.map((order: any) => ({
+      id: order.id,
+      customerId: order.customer_id,
+      sellerId: order.seller_id,
+      date: order.date,
+      status: order.status,
+      total: Number(order.total),
+      pickedBy: order.picked_by ?? undefined,
+      dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
+      items: itemsByOrderId[order.id] || []
     }));
 
     res.json(ordersFull);

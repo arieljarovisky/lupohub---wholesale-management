@@ -86,9 +86,10 @@ export const api = {
   },
 
   // --- PRODUCTS ---
-  getProducts: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
+  getProducts: async (options?: { priceListId?: string | null; perPage?: number }): Promise<Product[]> => {
     return handleRequest(async () => {
-      const params = new URLSearchParams({ per_page: '5000' });
+      const perPage = options?.perPage ?? 5000;
+      const params = new URLSearchParams({ per_page: String(perPage) });
       if (options?.priceListId) params.set('price_list_id', options.priceListId);
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const rows = Array.isArray(res) ? res : res.items;
@@ -115,8 +116,9 @@ export const api = {
   },
 
   /** Igual que getProducts pero sin fallback: lanza si falla. Usar al refrescar después de crear para no pisar con MOCK. */
-  getProductsStrict: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
-    const params = new URLSearchParams({ per_page: '5000' });
+  getProductsStrict: async (options?: { priceListId?: string | null; perPage?: number }): Promise<Product[]> => {
+    const perPage = options?.perPage ?? 5000;
+    const params = new URLSearchParams({ per_page: String(perPage) });
     if (options?.priceListId) params.set('price_list_id', options.priceListId);
     const res = await request<any>(`/products?${params.toString()}`, 'GET');
     const rows = Array.isArray(res) ? res : (res && res.items) || [];

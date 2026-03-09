@@ -9,7 +9,7 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView, userRole, onLogout }) => {
   const menuSections = [
     {
       title: 'Principal',
@@ -140,6 +140,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, userRole, 
       </div>
     </div>
   );
-};
+});
 
 export default Sidebar;

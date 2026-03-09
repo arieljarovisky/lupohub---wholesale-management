@@ -18,7 +18,7 @@ interface OrdersProps {
   onDeleteOrder?: (orderId: string) => void;
 }
 
-const Orders: React.FC<OrdersProps> = ({ 
+const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
   onNavigate, onStartPicking, onEditOrder, onDeleteOrder 
@@ -183,6 +183,6 @@ const Orders: React.FC<OrdersProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default Orders;

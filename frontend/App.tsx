@@ -1,23 +1,30 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import Inventory from './components/Inventory';
-import Orders from './components/Orders';
-import Visits from './components/Visits';
-import Settings from './components/Settings';
-import CreateOrder from './components/CreateOrder';
-import Customers from './components/Customers';
-import OrderPicking from './components/OrderPicking';
-import TiendaNubeOrders from './components/TiendaNubeOrders';
-import MercadoLibreOrders from './components/MercadoLibreOrders';
-import StockHistory from './components/StockHistory';
-import Despachos from './components/Despachos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Inventory = lazy(() => import('./components/Inventory'));
+const Orders = lazy(() => import('./components/Orders'));
+const Visits = lazy(() => import('./components/Visits'));
+const Settings = lazy(() => import('./components/Settings'));
+const CreateOrder = lazy(() => import('./components/CreateOrder'));
+const Customers = lazy(() => import('./components/Customers'));
+const OrderPicking = lazy(() => import('./components/OrderPicking'));
+const TiendaNubeOrders = lazy(() => import('./components/TiendaNubeOrders'));
+const MercadoLibreOrders = lazy(() => import('./components/MercadoLibreOrders'));
+const StockHistory = lazy(() => import('./components/StockHistory'));
+const Despachos = lazy(() => import('./components/Despachos'));
+
+const ViewFallback = () => (
+  <div className="flex items-center justify-center py-24">
+    <Loader2 size={32} className="text-blue-500 animate-spin" />
+  </div>
+);
 
 const App: React.FC = () => {
   const { showToast } = useNotification();
@@ -117,7 +124,7 @@ const App: React.FC = () => {
       if (currentUser?.role === Role.CUSTOMER) {
         const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders()]);
         setMyCustomer(myC || null);
-        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined });
+        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined, perPage: 400 });
         setProducts(fetchedProducts);
         setOrders(fetchedOrders);
         setCustomers(myC ? [myC] : []);
@@ -125,7 +132,7 @@ const App: React.FC = () => {
       } else {
       const effectivePriceListId = currentUser?.role === Role.SELLER ? (currentUser as any).priceListId : undefined;
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
-        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId } : undefined),
+        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId, perPage: 400 } : { perPage: 400 }),
         api.getOrders(),
         api.getColors(),
         api.getSizes(),
@@ -188,7 +195,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setCurrentUser(null);
     setLoginError('');
     setProducts([]);
@@ -196,7 +203,7 @@ const App: React.FC = () => {
     localStorage.removeItem('lupo_current_user');
     localStorage.removeItem('lupo_api_token');
     setAuthToken(null);
-  };
+  }, []);
 
   const handleUpdateStock = async (productId: string, newStock: number) => {
     const previousProducts = [...products];
@@ -209,12 +216,12 @@ const App: React.FC = () => {
     }
   };
 
-  const getVisibleCustomers = () => {
+  const getVisibleCustomers = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.role === Role.CUSTOMER) return myCustomer ? [myCustomer] : [];
     if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) return customers;
     return customers.filter(c => c.sellerId === currentUser.id);
-  };
+  }, [currentUser, myCustomer, customers]);
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
      const previousOrders = [...orders];
@@ -577,72 +584,108 @@ const App: React.FC = () => {
              )}
           </header>
 
-          {baseView === 'dashboard' && <Dashboard products={products} orders={orders} role={currentUser.role} onNavigate={setCurrentView} />}
+          {baseView === 'dashboard' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Dashboard products={products} orders={orders} role={currentUser.role} onNavigate={setCurrentView} />
+            </Suspense>
+          )}
           {baseView === 'inventory' && (
-            <Inventory 
-              products={products} 
-              attributes={attributes} 
-              role={currentUser.role} 
-              onCreateProducts={handleCreateProducts}
-              onUpdateStock={handleUpdateStock}
-              onImportComplete={loadData}
-            />
+            <Suspense fallback={<ViewFallback />}>
+              <Inventory 
+                products={products} 
+                attributes={attributes} 
+                role={currentUser.role} 
+                onCreateProducts={handleCreateProducts}
+                onUpdateStock={handleUpdateStock}
+                onImportComplete={loadData}
+              />
+            </Suspense>
           )}
           {baseView === 'orders' && (
-            <Orders 
-              orders={orders} products={products} customers={getVisibleCustomers()} 
-              users={users} role={currentUser.role} currentUserId={currentUser.id} 
-              onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
-              onNavigate={setCurrentView} onStartPicking={handleStartPicking}
-              onEditOrder={handleEditOrder}
-              onDeleteOrder={handleDeleteOrder}
-            />
+            <Suspense fallback={<ViewFallback />}>
+              <Orders 
+                orders={orders} products={products} customers={getVisibleCustomers} 
+                users={users} role={currentUser.role} currentUserId={currentUser.id} 
+                onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
+                onNavigate={setCurrentView} onStartPicking={handleStartPicking}
+                onEditOrder={handleEditOrder}
+                onDeleteOrder={handleDeleteOrder}
+              />
+            </Suspense>
           )}
           
           {baseView === 'customers' && (
-            <Customers 
-              customers={getVisibleCustomers()} 
-              role={currentUser.role} 
-              sellerId={currentUser.id} 
-              onCreateCustomer={handleCreateCustomer}
-              onUpdateCustomer={handleUpdateCustomer}
-              priceLists={priceLists}
-              orders={orders}
-              products={products}
-            />
+            <Suspense fallback={<ViewFallback />}>
+              <Customers 
+                customers={getVisibleCustomers} 
+                role={currentUser.role} 
+                sellerId={currentUser.id} 
+                onCreateCustomer={handleCreateCustomer}
+                onUpdateCustomer={handleUpdateCustomer}
+                priceLists={priceLists}
+                orders={orders}
+                products={products}
+              />
+            </Suspense>
           )}
-          {baseView === 'visits' && <Visits visits={MOCK_VISITS} role={currentUser.role} />}
+          {baseView === 'visits' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Visits visits={MOCK_VISITS} role={currentUser.role} />
+            </Suspense>
+          )}
           {baseView === 'settings' && (
-            <Settings 
-              attributes={attributes} 
-              onCreateAttribute={handleCreateAttribute} 
-              onDeleteAttribute={handleDeleteAttribute} 
-              role={currentUser.role} 
-              users={users}
-              onUpdateUser={handleUpdateUser}
-              onCreateUser={handleCreateUser}
-              onDeleteUser={handleDeleteUser}
-              orders={orders}
-              currentUser={currentUser}
-            />
+            <Suspense fallback={<ViewFallback />}>
+              <Settings 
+                attributes={attributes} 
+                onCreateAttribute={handleCreateAttribute} 
+                onDeleteAttribute={handleDeleteAttribute} 
+                role={currentUser.role} 
+                users={users}
+                onUpdateUser={handleUpdateUser}
+                onCreateUser={handleCreateUser}
+                onDeleteUser={handleDeleteUser}
+                orders={orders}
+                currentUser={currentUser}
+              />
+            </Suspense>
           )}
           {baseView === 'create_order' && (
-            <CreateOrder
-              products={products}
-              customers={getVisibleCustomers()}
-              onSave={handleCreateOrder}
-              onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
-              sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
-              initialOrder={editingOrder}
-            />
+            <Suspense fallback={<ViewFallback />}>
+              <CreateOrder
+                products={products}
+                customers={getVisibleCustomers}
+                onSave={handleCreateOrder}
+                onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+                sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
+                initialOrder={editingOrder}
+              />
+            </Suspense>
           )}
           {baseView === 'order_picking' && activePickingOrder && (
-            <OrderPicking order={activePickingOrder} products={products} currentUserId={currentUser.id} users={users} onFinishPicking={handleFinishPicking} onCancel={() => setCurrentView('orders')} />
+            <Suspense fallback={<ViewFallback />}>
+              <OrderPicking order={activePickingOrder} products={products} currentUserId={currentUser.id} users={users} onFinishPicking={handleFinishPicking} onCancel={() => setCurrentView('orders')} />
+            </Suspense>
           )}
-          {baseView === 'tiendanube_orders' && <TiendaNubeOrders />}
-          {baseView === 'mercadolibre_orders' && <MercadoLibreOrders />}
-          {baseView === 'stock_history' && <StockHistory />}
-          {baseView === 'despachos' && <Despachos />}
+          {baseView === 'tiendanube_orders' && (
+            <Suspense fallback={<ViewFallback />}>
+              <TiendaNubeOrders />
+            </Suspense>
+          )}
+          {baseView === 'mercadolibre_orders' && (
+            <Suspense fallback={<ViewFallback />}>
+              <MercadoLibreOrders />
+            </Suspense>
+          )}
+          {baseView === 'stock_history' && (
+            <Suspense fallback={<ViewFallback />}>
+              <StockHistory />
+            </Suspense>
+          )}
+          {baseView === 'despachos' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Despachos />
+            </Suspense>
+          )}
         </div>
       </main>
 
