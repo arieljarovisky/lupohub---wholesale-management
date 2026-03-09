@@ -296,6 +296,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
     const resolved: { productId: string; price: number }[] = [];
     const notFound: string[] = [];
     const normalizeSku = (s: string) => String(s).replace(/[-/\s]/g, '').trim();
+    const escapeLike = (s: string) => String(s).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
     for (const it of input) {
       const sku = String(it?.sku ?? '').trim();
       const price = Number(it?.price);
@@ -339,9 +340,10 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
       if (!productId) {
         const normalized = normalizeSku(sku);
         if (normalized) {
+          const pattern = escapeLike(normalized) + '%';
           const byBaseStarts = await get(
-            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', ''), '/', ''), ' ') LIKE CONCAT(?, '%') LIMIT 1`,
-            [normalized]
+            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', ''), '/', ''), ' ') LIKE ? LIMIT 1`,
+            [pattern]
           );
           if (byBaseStarts?.id) productId = byBaseStarts.id;
         }
@@ -349,12 +351,13 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
       if (!productId) {
         const normalized = normalizeSku(sku);
         if (normalized) {
+          const pattern = escapeLike(normalized) + '%';
           const byVarStarts = await get(
             `SELECT pc.product_id AS id FROM product_variants pv
              JOIN product_colors pc ON pc.id = pv.product_color_id
-             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', ''), '/', ''), ' ') LIKE CONCAT(?, '%')
+             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', ''), '/', ''), ' ') LIKE ?
              LIMIT 1`,
-            [normalized]
+            [pattern]
           );
           if (byVarStarts?.id) productId = byVarStarts.id;
         }
@@ -363,17 +366,19 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
       else notFound.push(sku);
     }
     await execute('DELETE FROM price_list_items WHERE price_list_id = ?', [id]);
-    for (const it of resolved) {
+    const byProduct = new Map<string, number>();
+    for (const it of resolved) byProduct.set(it.productId, it.price);
+    for (const [productId, price] of byProduct) {
       await execute(
         `INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`,
-        [uuidv4(), id, it.productId, it.price]
+        [uuidv4(), id, productId, price]
       );
     }
     const items = await query(
       `SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ? ORDER BY product_id`,
       [id]
     );
-    res.json({ items: items || [], imported: resolved.length, notFound: notFound.length ? notFound : undefined });
+    res.json({ items: items || [], imported: byProduct.size, notFound: notFound.length ? notFound : undefined });
   } catch (error: any) {
     console.error('setPriceListItemsBySku:', error);
     res.status(500).json({ message: 'Error importando por SKU' });
