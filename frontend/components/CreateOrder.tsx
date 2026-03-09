@@ -56,9 +56,11 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     }
   }, [initialOrder, products]);
 
+  const isCustomerLocked = role === Role.CUSTOMER;
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
-  }, [customers, selectedCustomerId]);
+    if (isCustomerLocked && customers.length === 1) setSelectedCustomerId(customers[0].id);
+  }, [customers, selectedCustomerId, isCustomerLocked]);
 
   const searchTrimmed = searchTerm.trim().toLowerCase();
   const searchWords = searchTrimmed ? searchTrimmed.split(/\s+/).filter(Boolean) : [];
@@ -86,12 +88,14 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     } else {
       const variants = await api.getVariantsBySku(product.sku);
       if (variants.length <= 1) {
-        const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', stock: product.stock };
+        const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', colorCode: '', stock: product.stock };
+        const fullCode = [product.sku, v.sizeCode, v.colorCode].filter(Boolean).join('-');
+        const desc = [product.name, v.colorName || null, fullCode].filter(Boolean).join(' · ');
         setRows(prev => [...prev, {
           id: Date.now().toString(),
           variantId: v.variantId || undefined,
           sku: product.sku,
-          description: `${product.name}${v.sizeCode ? ' (' + labelTalle(v.sizeCode) + ')' : ''}${v.colorName ? ' - ' + v.colorName : ''}`,
+          description: desc || `${product.name} (${labelTalle(v.sizeCode || '')}) - ${v.colorName}`,
           price: product.price,
           quantity: 1,
           isBackorder: (v.stock ?? 0) <= 0
@@ -157,29 +161,35 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         </div>
       </div>
 
-      {/* Cliente: selector ancho y alto táctil en móvil */}
+      {/* Cliente: selector (bloqueado para cliente directo) */}
       <div className="bg-slate-800 p-3 sm:p-4 rounded-2xl border border-slate-700 shrink-0">
         <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Cliente</label>
-        <select 
-          disabled={!!initialOrder || isReadOnly}
-          className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
-          value={selectedCustomerId}
-          onChange={(e) => setSelectedCustomerId(e.target.value)}
-        >
-          <option value="">Seleccionar cliente...</option>
-          {customers.map(c => <option key={c.id} value={c.id}>{c.businessName}</option>)}
-        </select>
+        {isCustomerLocked ? (
+          <div className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm text-white min-h-[48px] flex items-center">
+            {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
+          </div>
+        ) : (
+          <select 
+            disabled={!!initialOrder || isReadOnly}
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
+            value={selectedCustomerId}
+            onChange={(e) => setSelectedCustomerId(e.target.value)}
+          >
+            <option value="">Seleccionar cliente...</option>
+            {customers.map(c => <option key={c.id} value={c.id}>{c.businessName}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0 touch-scroll overscroll-contain">
-        <div className="flex justify-between items-center mb-2 px-1 gap-2">
-           <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Detalle ({rows.length})</h3>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+           <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Detalle del pedido · {rows.length} {rows.length === 1 ? 'ítem' : 'ítems'}</h3>
            {!isReadOnly && (
              <button 
                onClick={() => setIsSearching(true)} 
-               className="min-h-[44px] px-4 py-2 flex items-center gap-1.5 text-blue-400 font-bold text-sm rounded-xl bg-slate-800/80 border border-slate-700 active:scale-[0.98] touch-manipulation"
+               className="min-h-[48px] px-5 py-2.5 flex items-center justify-center gap-2 text-white font-bold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 border border-blue-500/50 active:scale-[0.98] touch-manipulation shadow-lg shadow-blue-900/20"
              >
-               <Plus size={18}/> Agregar
+               <Plus size={20} strokeWidth={2.5}/> Agregar productos
              </button>
            )}
         </div>
@@ -232,10 +242,20 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           </div>
         ))}
         {rows.length === 0 && (
-          <div className="text-center py-20 bg-slate-900/30 rounded-3xl border-2 border-dashed border-slate-800">
-            <Package size={48} className="mx-auto text-slate-800 mb-4 opacity-50" />
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest">El pedido está vacío</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => !isReadOnly && setIsSearching(true)}
+            disabled={isReadOnly}
+            className="w-full text-center py-12 sm:py-16 bg-slate-800/50 hover:bg-slate-800 rounded-2xl border-2 border-dashed border-slate-600 hover:border-blue-500/50 transition-colors disabled:opacity-50 disabled:pointer-events-none group"
+          >
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-slate-700 group-hover:bg-blue-600/20 flex items-center justify-center transition-colors">
+                <Plus size={28} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
+              </div>
+              <p className="text-slate-400 group-hover:text-slate-300 font-bold">El pedido está vacío</p>
+              <p className="text-slate-500 text-sm">Tocá para agregar productos</p>
+            </div>
+          </button>
         )}
       </div>
 
@@ -260,20 +280,23 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
       {isSearching && (
         <div className="fixed inset-0 bg-slate-950 z-[100] flex flex-col animate-fade-in pt-[env(safe-area-inset-top)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <div className="flex items-center gap-2 sm:gap-3 mb-3 shrink-0">
-            <button 
-              onClick={() => setIsSearching(false)} 
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition touch-manipulation" 
-              aria-label="Cerrar"
-            >
-              <ArrowLeft size={22}/>
-            </button>
-            <div className="flex-1 min-w-0 relative">
+          <div className="shrink-0 mb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <button 
+                onClick={() => setIsSearching(false)} 
+                className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition touch-manipulation" 
+                aria-label="Cerrar"
+              >
+                <ArrowLeft size={22}/>
+              </button>
+              <h3 className="font-bold text-white text-lg">Agregar productos</h3>
+            </div>
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20}/>
               <input 
                 autoFocus
                 type="text" 
-                placeholder="SKU, nombre o categoría..."
+                placeholder="Buscar por SKU, nombre o categoría..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 pl-11 pr-10 outline-none text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-xl text-base min-h-[48px]"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -291,19 +314,19 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
             </div>
           </div>
           <p className="text-xs text-slate-500 mb-2 px-1 shrink-0">
-            {searchTrimmed ? `${filteredSearchProducts.length} resultado(s). Tocá para agregar.` : 'Primeros 30. Escribí para filtrar.'}
+            {searchTrimmed ? `${filteredSearchProducts.length} resultado(s) · Tocá un producto para agregarlo` : 'Mostrando los primeros 30. Escribí para buscar.'}
           </p>
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0 touch-scroll overscroll-contain">
             {filteredSearchProducts.map(p => (
               <button 
                 key={p.id} 
                 onClick={() => addItem(p)}
-                className={`w-full text-left min-h-[72px] py-3.5 px-3 rounded-xl border transition-all flex justify-between items-center gap-3 active:scale-[0.99] hover:border-slate-600 touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-900 border-slate-800'}`}
+                className={`w-full text-left min-h-[80px] py-4 px-4 rounded-xl border transition-all flex justify-between items-center gap-4 active:scale-[0.99] hover:border-blue-500/40 touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-800/80 border-slate-700 hover:bg-slate-800'}`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <span className="text-xs font-mono font-bold text-blue-400 truncate max-w-[120px] sm:max-w-none">{p.sku}</span>
-                    {p.category && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded shrink-0">{p.category}</span>}
+                    <span className="text-xs font-mono font-bold text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
+                    {p.category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded shrink-0">{p.category}</span>}
                     {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
                   </div>
                   <div className="font-bold text-white text-sm leading-tight line-clamp-2 sm:truncate">{p.name}</div>
@@ -314,6 +337,9 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                   <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
                     {p.stock <= 0 ? 'Sin stock' : hideStock ? 'Disponible' : `${p.stock} un.`}
                   </span>
+                  <span className="text-blue-400 text-[10px] font-semibold mt-0.5 flex items-center gap-0.5">
+                    <Plus size={12}/> Agregar
+                  </span>
                 </div>
               </button>
             ))}
@@ -321,16 +347,16 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
               <div className="text-center py-12 text-slate-500">
                 <Package className="mx-auto mb-2 opacity-50" size={32}/>
                 <p className="font-semibold">No hay resultados</p>
-                <p className="text-sm mt-1">Probá con otras palabras</p>
+                <p className="text-sm mt-1">Probá con otras palabras o otro SKU</p>
               </div>
             )}
           </div>
           <div className="pt-3 border-t border-slate-800 flex gap-2 shrink-0">
             <button
               onClick={() => setIsSearching(false)}
-              className="flex-1 min-h-[48px] py-3 rounded-xl bg-slate-800 text-white font-bold border border-slate-700 hover:bg-slate-700 active:scale-[0.99] transition touch-manipulation"
+              className="flex-1 min-h-[48px] py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-500/50 active:scale-[0.99] transition touch-manipulation"
             >
-              Listo ({rows.length})
+              Listo {rows.length > 0 ? `(${rows.length} en el pedido)` : ''}
             </button>
           </div>
         </div>
@@ -357,11 +383,13 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
               <button
                 key={v.variantId}
                 onClick={() => {
+                  const fullCode = [variantSelect.sku, v.sizeCode, v.colorCode].filter(Boolean).join('-');
+                  const desc = [variantSelect.productName, v.colorName, fullCode].filter(Boolean).join(' · ');
                   setRows(prev => [...prev, {
                     id: Date.now().toString(),
                     variantId: v.variantId,
                     sku: variantSelect.sku,
-                    description: `${variantSelect.productName} (${labelTalle(v.sizeCode)}) - ${v.colorName}`,
+                    description: desc || `${variantSelect.productName} (${labelTalle(v.sizeCode)}) - ${v.colorName}`,
                     price: variantSelect.price,
                     quantity: 1,
                     isBackorder: v.stock <= 0
