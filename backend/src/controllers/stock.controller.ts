@@ -159,7 +159,7 @@ function stockForPlatform(localStock: number, packSize: number | null | undefine
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
     const variant = await get(
-      `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, 
+      `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
               COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
@@ -185,8 +185,12 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       );
     }
 
-    // Sincronizar con Mercado Libre (SKU externo = mismo que TN)
-    if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
+    // Sincronizar con Mercado Libre
+    if (variant.mercado_libre_item_id) {
+      // Publicación única por variante (una publicación ML = esta variante)
+      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
+    } else if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
+      // Publicación con variaciones (una publicación ML con varias variantes)
       await updateMercadoLibreStockByVariant(
         variant.mercado_libre_id,
         variant.mercado_libre_variant_id,
@@ -232,6 +236,49 @@ export const updateTiendaNubeStock = async (
     return true;
   } catch (error: any) {
     console.error('[TN Stock] Error:', error.response?.data || error.message);
+    return false;
+  }
+};
+
+// Actualizar stock en Mercado Libre cuando la variante tiene su propia publicación (ítem sin variaciones o con una sola).
+export const updateMercadoLibreStockByItem = async (itemId: string, stock: number): Promise<boolean> => {
+  const integration = await get(
+    `SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`
+  );
+  if (!integration?.access_token) {
+    console.log('[ML Stock] No hay integración configurada');
+    return false;
+  }
+  const headers = {
+    'Authorization': `Bearer ${integration.access_token}`,
+    'Content-Type': 'application/json'
+  };
+  try {
+    const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+    const item = getRes.data;
+    const variations: any[] = item.variations || [];
+    if (variations.length === 0) {
+      await axios.put(
+        `https://api.mercadolibre.com/items/${itemId}`,
+        { available_quantity: stock },
+        { headers }
+      );
+      console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
+      return true;
+    }
+    if (variations.length === 1) {
+      await axios.put(
+        `https://api.mercadolibre.com/items/${itemId}`,
+        { variations: [{ id: variations[0].id, available_quantity: stock }] },
+        { headers }
+      );
+      console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
+      return true;
+    }
+    console.log(`[ML Stock] Item ${itemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
+    return false;
+  } catch (e: any) {
+    console.error('[ML Stock] Error actualizando publicación única:', e.response?.data || e.message);
     return false;
   }
 };

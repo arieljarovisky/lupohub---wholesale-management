@@ -1423,15 +1423,16 @@ export const syncSelectedStockToTiendaNube = async (req: Request, res: Response)
 // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
 export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
-    const { updateMercadoLibreStockByVariant } = await import('./stock.controller');
+    const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
     const variants = await query(`
-      SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku,
+      SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
       FROM product_variants pv
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL
+      WHERE (pv.mercado_libre_item_id IS NOT NULL)
+         OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
     `);
 
     let updated = 0;
@@ -1441,11 +1442,16 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     for (const v of variants) {
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-      const ok = await updateMercadoLibreStockByVariant(
-        v.mercado_libre_id,
-        v.mercado_libre_variant_id,
-        stockToSend
-      );
+      let ok = false;
+      if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
+      } else {
+        ok = await updateMercadoLibreStockByVariant(
+          v.mercado_libre_id,
+          v.mercado_libre_variant_id,
+          stockToSend
+        );
+      }
       if (ok) {
         updated++;
         logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
@@ -1476,17 +1482,18 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
       return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
     }
 
-    const { updateMercadoLibreStockByVariant } = await import('./stock.controller');
+    const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
     const placeholders = variantIds.map(() => '?').join(',');
     const variants = await query(
-      `SELECT pv.id, pv.mercado_libre_variant_id, p.mercado_libre_id, s.stock, pv.sku,
+      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.id IN (${placeholders})
-         AND pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL`,
+         AND ((pv.mercado_libre_item_id IS NOT NULL)
+              OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL))`,
       variantIds
     );
 
@@ -1497,11 +1504,16 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     for (const v of variants) {
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-      const ok = await updateMercadoLibreStockByVariant(
-        v.mercado_libre_id,
-        v.mercado_libre_variant_id,
-        stockToSend
-      );
+      let ok = false;
+      if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
+      } else {
+        ok = await updateMercadoLibreStockByVariant(
+          v.mercado_libre_id,
+          v.mercado_libre_variant_id,
+          stockToSend
+        );
+      }
       if (ok) {
         updated++;
         logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
@@ -2453,6 +2465,7 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
           });
         } else {
           // Sin variaciones en la API: puede ser una publicación por variante (mismo producto, varios ítems). Se agrupa después.
+          const itemSku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
           items.push({
             id: item.id,
             title: item.title,
@@ -2463,7 +2476,8 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
             thumbnail: item.thumbnail,
             permalink: item.permalink,
             hasVariations: false,
-            variations: []
+            variations: [],
+            sku: itemSku || undefined
           });
         }
       }
@@ -2489,9 +2503,10 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
       const first = group[0];
       const variations = group.map((it: any) => {
         const { color, size } = mlColorSizeFromTitle(it.title);
+        const sku = (it.sku != null && it.sku !== '') ? it.sku : '';
         return {
           variationId: it.id,
-          sku: it.id,
+          sku,
           color,
           size,
           stock: it.totalStock || 0,

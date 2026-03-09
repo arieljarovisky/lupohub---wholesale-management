@@ -1275,7 +1275,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkingVariant(product);
     setLinkTnId(product.externalIds?.tiendaNube || '');
     setLinkTnVariantId(product.externalIds?.tiendaNubeVariant || '');
-    setLinkMlId(product.externalIds?.mercadoLibre || '');
+    setLinkMlId((product.externalIds as any)?.mercadoLibreItemId || product.externalIds?.mercadoLibre || '');
     setLinkPackMl(1);
     setLinkPackTn(1);
     setLinkExternalSku((product.sku ?? '').toString());
@@ -2830,6 +2830,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                        Mercado Libre
                     </p>
                     <p className="text-[10px] text-slate-500">Al guardar con Item ID, se trae el stock actual de ML a tu inventario.</p>
+                    <p className="text-[10px] text-amber-400/90">Si esta variante tiene su propia publicación en ML (una por talle/color), poné solo el ID de esa publicación abajo y guardá. El stock se sincronizará con esa publicación.</p>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID publicación (ítem) ML</label>

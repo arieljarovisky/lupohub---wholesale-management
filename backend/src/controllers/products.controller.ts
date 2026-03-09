@@ -67,6 +67,7 @@ export const getProducts = async (req: Request, res: Response) => {
       SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
+             pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
              COALESCE(st.stock, 0) AS stock_total
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
@@ -91,7 +92,10 @@ export const getProducts = async (req: Request, res: Response) => {
       stock_total: Number(r.stock_total ?? 0),
       externalIds: {
         tiendaNube: r.tienda_nube_id,
-        mercadoLibre: r.mercado_libre_id
+        mercadoLibre: r.mercado_libre_id,
+        tiendaNubeVariant: r.tienda_nube_variant_id,
+        mercadoLibreVariant: r.mercado_libre_variant_id,
+        mercadoLibreItemId: r.mercado_libre_item_id
       }
     }));
 
@@ -320,7 +324,7 @@ export const getProductBySku = async (req: any, res: any) => {
       `SELECT p.sku, pv.sku AS variant_sku, pv.external_sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
-              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id
+              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id
        FROM products p
        JOIN product_colors pc ON pc.product_id=p.id
        JOIN colors c ON c.id=pc.color_id
@@ -336,7 +340,8 @@ export const getProductBySku = async (req: any, res: any) => {
       ...v,
       externalIds: {
         tiendaNubeVariant: v.tienda_nube_variant_id,
-        mercadoLibreVariant: v.mercado_libre_variant_id
+        mercadoLibreVariant: v.mercado_libre_variant_id,
+        mercadoLibreItemId: v.mercado_libre_item_id
       }
     }));
 
@@ -436,16 +441,17 @@ export const updateProductExternalIds = async (req: any, res: any) => {
 export const updateVariantExternalIds = async (req: any, res: any) => {
   const { variantId } = req.params;
   const { tiendaNubeVariantId, mercadoLibreVariantId, mercadoLibreItemId, externalSku } = req.body;
-  if (!variantId) return res.status(400).json({ message: 'ID de variante inv?lido' });
+  if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
 
   try {
     await execute(
       `UPDATE product_variants SET 
          tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
          mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
+         mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
          external_sku = COALESCE(?, external_sku)
        WHERE id = ?`,
-      [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, externalSku !== undefined ? externalSku : null, variantId]
+      [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, mercadoLibreItemId ?? null, externalSku !== undefined ? externalSku : null, variantId]
     );
 
     let stockFromML: number | null = null;
@@ -500,6 +506,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       variantId,
       tiendaNubeVariantId,
       mercadoLibreVariantId,
+      mercadoLibreItemId: mercadoLibreItemId ?? undefined,
       externalSku: externalSku ?? undefined,
       stockFromML: stockFromML ?? undefined
     });
@@ -678,7 +685,7 @@ export const getVariantById = async (req: Request, res: Response) => {
   if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
   try {
     const row = await get(
-      `SELECT pv.id, pv.sku, pv.external_sku, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id,
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.name AS product_name, p.sku AS base_sku,
               s.size_code, c.code AS color_code, c.name AS color_name,
               COALESCE(st.stock, 0) AS stock
