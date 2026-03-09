@@ -461,6 +461,23 @@ export const updateVariantStockEndpoint = async (req: Request, res: Response) =>
   }
 };
 
+// Endpoint: Eliminar el snapshot inicial (todos los movimientos SNAPSHOT_INICIAL) para poder crear uno nuevo
+export const deleteStockSnapshot = async (req: Request, res: Response) => {
+  try {
+    const result = await execute(
+      `DELETE FROM stock_movements WHERE movement_type = 'SNAPSHOT_INICIAL'`
+    );
+    const deleted = Number((result as any)?.affectedRows) || 0;
+    res.json({
+      message: deleted > 0 ? `Snapshot inicial eliminado (${deleted} registros).` : 'No había snapshot inicial para eliminar.',
+      deleted
+    });
+  } catch (error: any) {
+    console.error('Error deleting stock snapshot:', error);
+    res.status(500).json({ message: 'Error eliminando snapshot', error: error.message });
+  }
+};
+
 // Endpoint: Crear snapshot inicial de todo el stock actual
 export const createStockSnapshot = async (req: Request, res: Response) => {
   try {

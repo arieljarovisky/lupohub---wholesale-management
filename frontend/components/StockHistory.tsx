@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, ArrowUpCircle, ArrowDownCircle, RotateCcw, ShoppingCart, Store, Zap, Download, Camera, CheckCircle } from 'lucide-react';
+import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, ArrowUpCircle, ArrowDownCircle, RotateCcw, ShoppingCart, Store, Zap, Download, Camera, CheckCircle, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 
@@ -74,6 +74,7 @@ const StockHistory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotDeleteLoading, setSnapshotDeleteLoading] = useState(false);
   const [importResult, setImportResult] = useState<{ message: string; logs: string[] } | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [filterType, setFilterType] = useState<string>('');
@@ -121,6 +122,24 @@ const StockHistory: React.FC = () => {
           })
           .catch((error: any) => showToast('error', error?.message || 'No se pudo crear el snapshot'))
           .finally(() => setSnapshotLoading(false));
+      },
+    });
+  };
+
+  const handleDeleteSnapshot = () => {
+    showConfirm({
+      title: 'Eliminar snapshot inicial',
+      message: '¿Eliminar el snapshot inicial? Los registros de stock inicial se quitarán del historial. Después podés crear un nuevo snapshot si lo necesitás.',
+      confirmLabel: 'Eliminar snapshot',
+      onConfirm: () => {
+        setSnapshotDeleteLoading(true);
+        api.deleteStockSnapshot()
+          .then((result) => {
+            showToast('success', result.message || 'Snapshot eliminado.');
+            fetchMovements();
+          })
+          .catch((error: any) => showToast('error', error?.message || 'No se pudo eliminar el snapshot'))
+          .finally(() => setSnapshotDeleteLoading(false));
       },
     });
   };
@@ -219,6 +238,15 @@ const StockHistory: React.FC = () => {
           >
             {snapshotLoading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
             Snapshot Inicial
+          </button>
+          <button
+            onClick={handleDeleteSnapshot}
+            disabled={snapshotDeleteLoading}
+            className="bg-slate-600 hover:bg-red-600/80 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 transition-all text-sm"
+            title="Eliminar el snapshot inicial para poder crear uno nuevo"
+          >
+            {snapshotDeleteLoading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            Eliminar snapshot
           </button>
           <button
             onClick={fetchMovements}

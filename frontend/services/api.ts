@@ -706,6 +706,13 @@ export const api = {
     }, { message: 'Error' }, 'createStockSnapshot');
   },
 
+  // Eliminar snapshot inicial para poder crear uno nuevo
+  deleteStockSnapshot: async (): Promise<{ message: string; deleted: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; deleted: number }>('/stock/snapshot', 'DELETE');
+    }, { message: 'Error', deleted: 0 }, 'deleteStockSnapshot');
+  },
+
   // Importar historial de ventas
   importSalesHistory: async (days: number = 60): Promise<{ message: string; totalImported: number; logs: string[] }> => {
     return handleRequest(async () => {
