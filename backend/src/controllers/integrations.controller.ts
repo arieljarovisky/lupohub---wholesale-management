@@ -11,9 +11,32 @@ const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
 const TN_TOKEN_URL = 'https://www.tiendanube.com/apps/authorize/token';
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
-/** Pausa entre requests a Tienda Nube para no superar el límite de solicitudes (configurable con TN_RATE_LIMIT_DELAY_MS, default 450ms). */
-const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '450', 10));
+/** Pausa entre requests a Tienda Nube para no superar el límite de solicitudes (configurable con TN_RATE_LIMIT_DELAY_MS, default 800ms). */
+const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+/** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
+async function putTnVariantWithRetry(
+  url: string,
+  body: { stock: number },
+  headers: Record<string, string>,
+  maxRetries = 2
+): Promise<void> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await axios.put(url, body, { headers });
+      return;
+    } catch (e: any) {
+      const is429 = e.response?.status === 429;
+      if (is429 && attempt < maxRetries) {
+        const waitMs = 2000 + attempt * 1500;
+        await sleep(waitMs);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
 
 /** URL del frontend para redirigir después del OAuth (producción: tu dominio Vercel). */
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -1274,10 +1297,10 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           const tnPack = Math.max(1, Number(r.tn_pack) || 1);
           const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
           try {
-            await axios.put(
+            await putTnVariantWithRetry(
               `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
               { stock: tnStock },
-              { headers: { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT } }
+              { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT }
             );
             updated++;
           } catch (e: any) {
@@ -1329,10 +1352,10 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
         try {
-          await axios.put(
+          await putTnVariantWithRetry(
             `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
             { stock: tnStock },
-            { headers: { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT } }
+            { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT }
           );
           updated++;
         } catch (e: any) {
