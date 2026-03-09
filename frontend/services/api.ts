@@ -575,10 +575,10 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'importStockFromMercadoLibre');
   },
 
-  /** Crear producto en inventario local desde una publicación de Mercado Libre */
-  importProductFromMercadoLibre: async (itemId: string): Promise<{ productId: string; baseSku: string; name: string; variantsCreated: number }> => {
+  /** Crear producto en inventario local desde una publicación de Mercado Libre (itemId) o varias publicaciones agrupadas (itemIds). */
+  importProductFromMercadoLibre: async (payload: { itemId?: string; itemIds?: string[] }): Promise<{ productId: string; baseSku: string; name: string; variantsCreated: number }> => {
     return handleRequest(async () => {
-      return await request<{ productId: string; baseSku: string; name: string; variantsCreated: number }>('/integrations/mercadolibre/import-product', 'POST', { itemId }, undefined, 60000);
+      return await request<{ productId: string; baseSku: string; name: string; variantsCreated: number }>('/integrations/mercadolibre/import-product', 'POST', payload, undefined, 120000);
     }, { productId: '', baseSku: '', name: '', variantsCreated: 0 }, 'importProductFromMercadoLibre');
   },
 

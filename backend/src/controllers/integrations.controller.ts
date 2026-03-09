@@ -2472,7 +2472,16 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
           });
         } else {
           // Sin variaciones en la API: puede ser una publicación por variante (mismo producto, varios ítems). Se agrupa después.
-          const itemSku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+          let itemSku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+          if (!itemSku && Array.isArray(item.attributes)) {
+            const skuAttr = item.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+            if (skuAttr) itemSku = (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim();
+          }
+          if (!itemSku && item.variations && item.variations.length === 1) {
+            const v0 = item.variations[0];
+            const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+            itemSku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : (v0.seller_sku ?? v0.seller_custom_field ?? '')).toString().trim();
+          }
           items.push({
             id: item.id,
             title: item.title,
@@ -2702,36 +2711,123 @@ async function ensureColor(codeOrName: string): Promise<string> {
   return id;
 }
 
-/** Importar un producto de Mercado Libre al inventario local: crea producto + variantes y vincula ML. */
+/** Importar un producto de Mercado Libre al inventario local: crea producto + variantes y vincula ML. Acepta itemId (una publicación) o itemIds (varias publicaciones agrupadas = una por variante). */
 export const importProductFromMercadoLibre = async (req: Request, res: Response) => {
   try {
-    const { itemId } = req.body || {};
-    if (!itemId) return res.status(400).json({ message: 'Falta itemId' });
+    const { itemId, itemIds } = req.body || {};
+    const idsToImport: string[] = Array.isArray(itemIds) && itemIds.length > 0
+      ? itemIds.map((id: any) => String(id).trim()).filter(Boolean)
+      : itemId != null && itemId !== '' ? [String(itemId).trim()] : [];
+    if (idsToImport.length === 0) return res.status(400).json({ message: 'Falta itemId o itemIds' });
 
     const mlToken = await getValidMLToken();
     if (!mlToken) return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
 
-    const existing = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [String(itemId)]);
-    if (existing) {
-      const del = await deleteProductById(existing.id);
-      if (!del.deleted && del.error === 'in_orders') {
-        return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+    const isMultiItem = idsToImport.length > 1;
+
+    if (!isMultiItem) {
+      const existing = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [idsToImport[0]]);
+      if (existing) {
+        const del = await deleteProductById(existing.id);
+        if (!del.deleted && del.error === 'in_orders') {
+          return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+        }
       }
     }
 
-    let itemIdToFetch = String(itemId).trim();
-    let itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
-      headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-    }).catch(() => null);
-    if ((!itemRes || itemRes.status !== 200) && /^\d+$/.test(itemIdToFetch)) {
-      itemIdToFetch = `MLA${itemIdToFetch}`;
-      itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
+    const fetchOne = async (itemIdToFetch: string): Promise<any> => {
+      let itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
         headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
       }).catch(() => null);
+      if ((!itemRes || itemRes.status !== 200) && /^\d+$/.test(itemIdToFetch)) {
+        itemIdToFetch = `MLA${itemIdToFetch}`;
+        itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        }).catch(() => null);
+      }
+      if (!itemRes || itemRes.status !== 200) return null;
+      const item = itemRes.data;
+      return item?.error ? null : item;
+    };
+
+    if (isMultiItem) {
+      const items = await Promise.all(idsToImport.map(id => fetchOne(id)));
+      const validItems = items.filter(Boolean);
+      if (validItems.length === 0) return res.status(404).json({ message: 'No se encontró ninguna publicación en Mercado Libre' });
+
+      const first = validItems[0];
+      const title = mlBaseTitle((first.title || '').toString().trim()) || 'Sin título';
+      const variations: { variationId: string; sku: string; color: string; size: string; stock: number; mlItemId: string }[] = [];
+      for (const item of validItems) {
+        const mlItemId = (item.id || '').toString().trim();
+        let sku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+        if (!sku && item.variations && item.variations.length === 1) {
+          const v0 = item.variations[0];
+          const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+          sku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : (v0.seller_sku ?? v0.seller_custom_field ?? '')).toString().trim();
+        }
+        if (!sku) sku = `ML-${mlItemId}`;
+        const { color, size } = mlColorSizeFromTitle((item.title || '').toString().trim());
+        variations.push({
+          variationId: mlItemId,
+          sku,
+          color: color || 'Único',
+          size: size || 'U',
+          stock: item.available_quantity ?? (item.variations?.[0]?.available_quantity ?? 0),
+          mlItemId
+        });
+      }
+
+      const firstSku = variations[0]?.sku || '';
+      const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${validItems[0].id}`);
+      const existingBySku = await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
+      if (existingBySku) {
+        const del = await deleteProductById(existingBySku.id);
+        if (!del.deleted && del.error === 'in_orders') {
+          return res.status(400).json({ message: 'No se puede reemplazar: el artículo ya está en pedidos.' });
+        }
+      }
+      const productId = uuidv4();
+      await execute(
+        `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [productId, baseSku, title, 'General', first.price || 0, first.description?.plain_text || null, null]
+      );
+
+      let variantsCreated = 0;
+      for (const v of variations) {
+        const sizeCode = (v.size || 'U').toString().trim() || 'U';
+        const colorCode = (v.color || 'Único').toString().trim() || 'Único';
+        const sizeId = await ensureSize(sizeCode);
+        const colorId = await ensureColor(colorCode);
+        let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+        if (!productColorId) {
+          productColorId = uuidv4();
+          await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+        }
+        const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+        if (existingVariant) continue;
+        const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
+        const variantId = uuidv4();
+        await execute(
+          `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`,
+          [variantId, productColorId, sizeId, variantSku, null, v.mlItemId]
+        );
+        await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
+        variantsCreated++;
+      }
+      return res.status(201).json({
+        productId,
+        baseSku,
+        name: title,
+        variantsCreated,
+        message: 'Producto importado de Mercado Libre (variantes agrupadas)'
+      });
     }
-    if (!itemRes || itemRes.status !== 200) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre. Si el ID es solo numérico (ej. 3270089), se intenta con MLA.' });
-    const item = itemRes.data;
-    if (!item || item.error) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+
+    let itemIdToFetch = idsToImport[0];
+    const item = await fetchOne(itemIdToFetch);
+    if (!item) return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre. Si el ID es solo numérico (ej. 3270089), se intenta con MLA.' });
+    if (item.id) itemIdToFetch = String(item.id);
 
     const existingByMlId = await get(`SELECT id FROM products WHERE mercado_libre_id = ?`, [itemIdToFetch]);
     if (existingByMlId) {
@@ -2742,7 +2838,7 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
     }
 
     const title = (item.title || '').toString().trim() || 'Sin título';
-    let variations: { variationId: string | number; sku: string; color: string; size: string; stock: number }[] = [];
+    let variations: { variationId: string | number; sku: string; color: string; size: string; stock: number; mlItemId?: string }[] = [];
 
     if (item.variations && item.variations.length > 0) {
       variations = item.variations.map((v: any) => {
@@ -2767,13 +2863,20 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
       });
     }
     if (variations.length === 0) {
-      const sku = (item.seller_sku ?? item.seller_custom_field ?? item.id).toString().trim();
+      let sku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+      if (!sku && item.variations && item.variations.length === 1) {
+        const v0 = item.variations[0];
+        const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+        sku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : (v0.seller_sku ?? v0.seller_custom_field ?? '')).toString().trim();
+      }
+      if (!sku) sku = (item.id ?? itemIdToFetch).toString();
       variations = [{
         variationId: item.id,
         sku: sku || `ML-${item.id}`,
         color: 'Único',
         size: 'U',
-        stock: item.available_quantity || 0
+        stock: item.available_quantity || 0,
+        mlItemId: (item.id || '').toString()
       }];
     }
 
@@ -2812,9 +2915,11 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
 
       const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
       const variantId = uuidv4();
+      const mlVariantId = v.variationId != null ? String(v.variationId) : null;
+      const mlItemId = (v as any).mlItemId ?? null;
       await execute(
-        `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id) VALUES (?, ?, ?, ?, ?)`,
-        [variantId, productColorId, sizeId, variantSku, String(v.variationId)]
+        `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`,
+        [variantId, productColorId, sizeId, variantSku, mlVariantId, mlItemId]
       );
       await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
       variantsCreated++;
