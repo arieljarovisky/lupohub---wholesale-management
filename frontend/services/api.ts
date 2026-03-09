@@ -349,7 +349,7 @@ export const api = {
     productId?: string;
     mercadoLibreItemId?: string;
     tiendaNubeProductId?: string;
-    links: Array<{ variantId: string; mercadoLibreVariantId?: string | number; tiendaNubeVariantId?: string | number; externalSku?: string }>;
+    links: Array<{ variantId: string; mercadoLibreVariantId?: string | number; mercadoLibreItemId?: string; tiendaNubeVariantId?: string | number; externalSku?: string }>;
   }): Promise<{ updated: number; synced?: number; productId?: string }> => {
     return request<{ updated: number; synced?: number; productId?: string }>('/products/variants/bulk-link', 'POST', payload);
   },

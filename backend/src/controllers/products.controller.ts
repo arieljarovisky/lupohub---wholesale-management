@@ -526,6 +526,7 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
     links: Array<{
       variantId: string;
       mercadoLibreVariantId?: string | number;
+      mercadoLibreItemId?: string;
       tiendaNubeVariantId?: string | number;
       externalSku?: string;
     }>;
@@ -563,17 +564,21 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       }
     }
     for (const link of links) {
-      const { variantId, mercadoLibreVariantId, tiendaNubeVariantId, externalSku } = link;
+      const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
       if (!variantId) continue;
+      const mlVarId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId) : null;
+      const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
       await execute(
         `UPDATE product_variants SET
            tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
            mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
+           mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
            external_sku = COALESCE(?, external_sku)
          WHERE id = ?`,
         [
           tiendaNubeVariantId != null && tiendaNubeVariantId !== '' ? String(tiendaNubeVariantId) : null,
-          mercadoLibreVariantId != null && mercadoLibreVariantId !== '' ? String(mercadoLibreVariantId) : null,
+          mlVarId,
+          mlItemId,
           externalSku !== undefined && externalSku !== null ? String(externalSku) : null,
           variantId
         ]
@@ -582,22 +587,43 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
 
     // Traer stock de Mercado Libre al inventario local (ML = fuente de verdad)
     let synced = 0;
-    const mlItemId = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
-    if (mlItemId) {
-      const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
-      if (integration?.access_token) {
+    const parentMlItemId = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
+    const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+    if (integration?.access_token) {
+      // Caso 1: variantes con publicación propia (cada una tiene mercadoLibreItemId en el link)
+      for (const link of links) {
+        const perItemId = (link as any).mercadoLibreItemId != null && String((link as any).mercadoLibreItemId).trim() !== '' ? String((link as any).mercadoLibreItemId).trim() : null;
+        if (!link.variantId || !perItemId) continue;
         try {
           const itemRes = await axios.get(
-            `https://api.mercadolibre.com/items/${mlItemId}?include_attributes=all`,
+            `https://api.mercadolibre.com/items/${perItemId}?include_attributes=all`,
+            { headers: { Authorization: `Bearer ${integration.access_token}` } }
+          );
+          const item = itemRes.data;
+          const qty = item?.available_quantity ?? (item?.variations?.[0]?.available_quantity ?? 0);
+          await execute(
+            `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
+            [link.variantId, qty]
+          );
+          synced++;
+        } catch (err: any) {
+          console.warn('[bulkLinkVariants] Error trayendo ítem ML (publicación propia)', link.variantId, perItemId, err?.message);
+        }
+      }
+      // Caso 2: publicación padre con variaciones (mismo ID para todas)
+      if (parentMlItemId && links.some(l => l.mercadoLibreVariantId != null && String(l.mercadoLibreVariantId) !== '')) {
+        try {
+          const itemRes = await axios.get(
+            `https://api.mercadolibre.com/items/${parentMlItemId}?include_attributes=all`,
             { headers: { Authorization: `Bearer ${integration.access_token}` } }
           );
           const item = itemRes.data;
           const variations = item?.variations || [];
           const hasVariations = variations.length > 0;
-
           for (const link of links) {
             const hasMl = link.mercadoLibreVariantId != null && String(link.mercadoLibreVariantId) !== '';
-            if (!link.variantId || !hasMl) continue;
+            const hasPerItem = (link as any).mercadoLibreItemId != null && String((link as any).mercadoLibreItemId).trim() !== '';
+            if (!link.variantId || !hasMl || hasPerItem) continue;
             try {
               let qty = 0;
               if (hasVariations) {
@@ -616,7 +642,7 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
             }
           }
         } catch (mlErr: any) {
-          console.warn('[bulkLinkVariants] Error trayendo ?tem de ML:', mlErr?.response?.data || mlErr?.message);
+          console.warn('[bulkLinkVariants] Error trayendo ítem de ML:', mlErr?.response?.data || mlErr?.message);
         }
       }
     }

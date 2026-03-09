@@ -1114,8 +1114,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setBulkLinkVariants(variants);
       const assignments: Record<string, { ml: string; tn: string }> = {};
       variants.forEach((v: any) => {
+        const mlVal = (v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== '')
+          ? String(v.externalIds.mercadoLibreItemId).trim()
+          : (v.externalIds?.mercadoLibreVariant != null ? String(v.externalIds.mercadoLibreVariant) : '');
         assignments[v.variantId] = {
-          ml: v.externalIds?.mercadoLibreVariant ? String(v.externalIds.mercadoLibreVariant) : '',
+          ml: mlVal,
           tn: v.externalIds?.tiendaNubeVariant ? String(v.externalIds.tiendaNubeVariant) : ''
         };
       });
@@ -1214,12 +1217,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const links = bulkLinkVariants.map(v => {
         const ml = bulkLinkAssignments[v.variantId]?.ml?.trim() || '';
         const tn = bulkLinkAssignments[v.variantId]?.tn?.trim() || '';
+        const isMlItemId = /^MLA\d+$/i.test(ml);
         return {
           variantId: String(v.variantId),
-          mercadoLibreVariantId: ml || undefined,
+          mercadoLibreVariantId: !isMlItemId && ml ? ml : undefined,
+          mercadoLibreItemId: isMlItemId ? ml : undefined,
           tiendaNubeVariantId: tn || undefined
         };
-      }).filter(l => l.mercadoLibreVariantId || l.tiendaNubeVariantId);
+      }).filter(l => l.mercadoLibreVariantId != null || l.mercadoLibreItemId != null || l.tiendaNubeVariantId != null);
       if (links.length === 0) {
         showToast('info', 'Asigná al menos una variación ML o variante TN en la tabla.');
         setBulkLinkSaving(false);
@@ -2965,6 +2970,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               <p className="text-sm text-slate-400">
                 Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
               </p>
+              <p className="text-sm text-amber-200/90 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
+                <strong>Si cada variante es una publicación en ML</strong> (sin ID padre): no hace falta cargar &quot;ID publicación Mercado Libre&quot;. Escribí en la columna <strong>Variación ML</strong> el ID de cada publicación (ej. MLA3022605728) por fila y guardá.
+              </p>
               {bulkLinkLoading && bulkLinkVariants.length === 0 ? (
                 <div className="text-slate-400 py-8 text-center">Cargando variantes del grupo...</div>
               ) : (
@@ -3036,29 +3044,42 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 <span className="text-slate-500 ml-2">— {v.size} / {v.color}</span>
                               </td>
                               <td className="p-3">
-                                <select
-                                  value={bulkLinkAssignments[v.variantId]?.ml ?? ''}
-                                  onChange={(e) => {
-                                    const mlVal = e.target.value;
-                                    const mlOpt = bulkLinkMlVariations.find(m => String(m.variationId) === mlVal);
-                                    const tnMatch = mlOpt && bulkLinkTnVariants.find(t => bulkLinkSkuMatch(mlOpt.sku, t.sku));
-                                    setBulkLinkAssignments(prev => ({
-                                      ...prev,
-                                      [v.variantId]: {
-                                        ml: mlVal,
-                                        tn: tnMatch ? String(tnMatch.variantId) : (prev[v.variantId]?.tn ?? '')
-                                      }
-                                    }));
-                                  }}
-                                  className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
-                                >
-                                  <option value="">—</option>
-                                  {bulkLinkMlVariations.map(m => (
-                                    <option key={String(m.variationId)} value={String(m.variationId)}>
-                                      {m.sku || '(sin SKU)'} — {[m.size, m.color].filter(Boolean).join(' ') || '—'}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="flex flex-col gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={bulkLinkAssignments[v.variantId]?.ml ?? ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value.trim();
+                                      setBulkLinkAssignments(prev => ({
+                                        ...prev,
+                                        [v.variantId]: { ...prev[v.variantId], ml: val }
+                                      }));
+                                    }}
+                                    placeholder="MLA... (cada variante = una publicación)"
+                                    className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs font-mono"
+                                  />
+                                  {bulkLinkMlVariations.length > 0 && (
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        const mlVal = e.target.value;
+                                        if (!mlVal) return;
+                                        setBulkLinkAssignments(prev => ({
+                                          ...prev,
+                                          [v.variantId]: { ...prev[v.variantId], ml: mlVal }
+                                        }));
+                                      }}
+                                      className="w-full max-w-[220px] bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-slate-300 text-xs"
+                                    >
+                                      <option value="">Rellenar desde publicación cargada</option>
+                                      {bulkLinkMlVariations.map(m => (
+                                        <option key={String(m.variationId)} value={String(m.variationId)}>
+                                          {m.sku || '(sin SKU)'} — {[m.size, m.color].filter(Boolean).join(' ') || '—'}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </div>
                               </td>
                               <td className="p-3">
                                 <select
