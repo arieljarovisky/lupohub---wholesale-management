@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2 } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
@@ -47,6 +47,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [showSyncResultModal, setShowSyncResultModal] = useState(false);
   const syncMenuRef = useRef<HTMLDivElement>(null);
   const [syncDropdownPosition, setSyncDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [topDotsOpen, setTopDotsOpen] = useState(false);
+  const topDotsRef = useRef<HTMLDivElement>(null);
+  const [topDotsPosition, setTopDotsPosition] = useState<{ top: number; left: number } | null>(null);
+  const [cardDotsOpenKey, setCardDotsOpenKey] = useState<string | null>(null);
+  const cardDotsRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [cardDotsPosition, setCardDotsPosition] = useState<{ top: number; left: number } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -752,6 +758,75 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       window.removeEventListener('resize', update);
     };
   }, [syncMenuOpen]);
+
+  useEffect(() => {
+    if (!topDotsOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (topDotsRef.current?.contains(target)) return;
+      if ((target as Element).closest?.('[data-top-dots-dropdown]')) return;
+      setTopDotsOpen(false);
+    };
+    document.addEventListener('click', onOutside);
+    return () => document.removeEventListener('click', onOutside);
+  }, [topDotsOpen]);
+
+  useEffect(() => {
+    if (!topDotsOpen || !topDotsRef.current) {
+      setTopDotsPosition(null);
+      return;
+    }
+    const update = () => {
+      if (topDotsRef.current) {
+        const rect = topDotsRef.current.getBoundingClientRect();
+        setTopDotsPosition({ top: rect.bottom + 4, left: rect.right - 200 });
+      }
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [topDotsOpen]);
+
+  useEffect(() => {
+    if (!cardDotsOpenKey) return;
+    const onOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const key = cardDotsOpenKey;
+      const el = key ? cardDotsRefs.current[key] : null;
+      if (el?.contains(target)) return;
+      if ((target as Element).closest?.('[data-card-dots-dropdown]')) return;
+      setCardDotsOpenKey(null);
+    };
+    document.addEventListener('click', onOutside);
+    return () => document.removeEventListener('click', onOutside);
+  }, [cardDotsOpenKey]);
+
+  useEffect(() => {
+    if (!cardDotsOpenKey) {
+      setCardDotsPosition(null);
+      return;
+    }
+    const update = () => {
+      const el = cardDotsRefs.current[cardDotsOpenKey];
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        setCardDotsPosition({ top: rect.bottom + 4, left: Math.min(rect.left, window.innerWidth - 200) });
+      }
+    };
+    update();
+    const t = requestAnimationFrame(update);
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      cancelAnimationFrame(t);
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [cardDotsOpenKey]);
 
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
@@ -1695,6 +1770,74 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Top Action Bar */}
       <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
+        {/* Móvil: menú de tres puntos con todas las acciones */}
+        <div className="flex sm:hidden items-center gap-2 w-full">
+          <div className="flex-1 min-w-0" />
+          <div className="relative shrink-0" ref={topDotsRef}>
+            <button
+              type="button"
+              onClick={() => setTopDotsOpen(prev => !prev)}
+              className="flex items-center justify-center w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 active:bg-slate-600 transition-colors touch-manipulation"
+              aria-label="Acciones"
+            >
+              <MoreVertical size={22} />
+            </button>
+            {topDotsOpen && topDotsPosition && createPortal(
+              <div
+                data-top-dots-dropdown
+                className="py-1.5 min-w-[220px] bg-slate-800 border border-slate-600 rounded-xl shadow-xl z-[9999]"
+                style={{
+                  position: 'fixed',
+                  top: topDotsPosition.top,
+                  left: Math.max(8, Math.min(topDotsPosition.left, window.innerWidth - 228)),
+                  zIndex: 9999
+                }}
+              >
+                {isAdminOrWarehouse && (
+                  <>
+                    <div className="px-3 py-2 border-b border-slate-700">
+                      <p className="text-[10px] font-bold text-amber-400 uppercase">Stock desde ML</p>
+                    </div>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
+                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
+                      Traer stock desde Mercado Libre
+                    </button>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToTiendaNube(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
+                      <Cloud size={18} className="text-cyan-400" />
+                      Enviar a Tienda Nube
+                    </button>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
+                      <Zap size={18} className="text-amber-400" />
+                      Enviar a Mercado Libre
+                    </button>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-b border-slate-700/50">
+                      <RefreshCw size={18} className="text-blue-400" />
+                      Enviar a ambas (TN + ML)
+                    </button>
+                  </>
+                )}
+                <button type="button" onClick={() => { setTopDotsOpen(false); tangoFileInputRef.current?.click(); }} disabled={importingTango} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
+                  {importingTango ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <Upload size={18} className="text-amber-400" />}
+                  Importar Tango
+                </button>
+                <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
+                  {exportingExcel ? <Loader2 size={18} className="animate-spin text-green-400" /> : <Download size={18} className="text-green-400" />}
+                  Exportar Excel
+                </button>
+                {isAdminOrWarehouse && (
+                  <button type="button" onClick={() => { setTopDotsOpen(false); openCreationModal(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-indigo-200 hover:bg-indigo-500/20 rounded-lg border-t border-slate-700/50">
+                    <Plus size={18} className="text-indigo-400" />
+                    Nuevo Modelo
+                  </button>
+                )}
+              </div>,
+              document.body
+            )}
+          </div>
+        </div>
+
+        {/* Desktop: botones visibles */}
+        <div className="hidden sm:flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-2 flex-1">
         {isAdminOrWarehouse && (
           <div className="flex-shrink-0 relative" ref={syncMenuRef}>
             <button
@@ -1803,6 +1946,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             <span className="text-sm hidden sm:inline">Nuevo Modelo</span>
           </button>
         )}
+      </div>
       </div>
 
       {/* Search Bar & Filters */}
@@ -2052,7 +2196,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </div>
 
                 <div className="flex flex-row flex-wrap items-center justify-end sm:justify-start gap-3 sm:gap-4 md:gap-8 shrink-0">
-                   {/* Stock: en móvil como pill, en desktop como bloque */}
+                   {/* Stock */}
                    <div className="text-right">
                       <div className={`px-2 py-1 rounded-lg font-black text-sm sm:text-base ${isFullyOut ? 'text-red-500 bg-red-900/20' : displayTotalStock < 50 ? 'text-yellow-500 bg-yellow-900/20' : 'text-green-400 bg-green-900/20'}`}>
                          {displayTotalStock} <span className="text-[10px] sm:text-xs text-slate-500 font-normal">un</span>
@@ -2060,29 +2204,84 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest hidden sm:block">Stock</div>
                    </div>
                    
-                   {/* Add Variant Button */}
+                   {/* Móvil: menú de tres puntos (Agregar variante, Editar, Eliminar) */}
+                   {isAdminOrWarehouse && (
+                     <div className="sm:hidden relative" ref={el => { cardDotsRefs.current[groupKey] = el; }}>
+                       <button
+                         type="button"
+                         onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(prev => prev === groupKey ? null : groupKey); }}
+                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         aria-label="Acciones del artículo"
+                       >
+                         <MoreVertical size={20} />
+                       </button>
+                       {cardDotsOpenKey === groupKey && cardDotsPosition && createPortal(
+                         <div
+                           data-card-dots-dropdown
+                           className="py-1 min-w-[200px] bg-slate-800 border border-slate-600 rounded-xl shadow-xl z-[9998]"
+                           style={{
+                             position: 'fixed',
+                             top: cardDotsPosition.top,
+                             left: Math.max(8, cardDotsPosition.left),
+                             zIndex: 9998
+                           }}
+                         >
+                           <button
+                             type="button"
+                             onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); handleAddVariant(groupKey); }}
+                             className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                           >
+                             <PlusCircle size={18} className="text-blue-400 shrink-0" />
+                             Agregar variante
+                           </button>
+                           {(groupVariants[0] as any)?.product_id && (
+                             <>
+                               <button
+                                 type="button"
+                                 onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); setEditingProductId((groupVariants[0] as any).product_id); }}
+                                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                               >
+                                 <Edit2 size={18} className="text-amber-400 shrink-0" />
+                                 Editar artículo
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
+                                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-red-200 hover:bg-red-900/30 rounded-lg"
+                               >
+                                 <Trash2 size={18} className="shrink-0" />
+                                 Eliminar artículo
+                               </button>
+                             </>
+                           )}
+                         </div>,
+                         document.body
+                       )}
+                     </div>
+                   )}
+
+                   {/* Desktop: botones individuales */}
                    {isAdminOrWarehouse && (
                      <button
                        onClick={(e) => { e.stopPropagation(); handleAddVariant(groupKey); }}
-                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                       className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                        title="Agregar variante a este modelo"
                      >
                        <PlusCircle size={20} />
                      </button>
                    )}
-                   {/* Delete product (all variants) */}
                    {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
                      <>
                        <button
                          onClick={(e) => { e.stopPropagation(); setEditingProductId((groupVariants[0] as any).product_id); }}
-                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                          title="Editar artículo"
                        >
                          <Edit2 size={20} />
                        </button>
                        <button
                          onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
-                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                          title="Eliminar artículo y todas sus variantes"
                        >
                          <Trash2 size={20} />
