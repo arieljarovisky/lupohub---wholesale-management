@@ -7,19 +7,38 @@ import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
 
-const Dashboard = lazy(() => import('./components/Dashboard'));
-const Inventory = lazy(() => import('./components/Inventory'));
-const Catalogs = lazy(() => import('./components/Catalogs'));
-const Orders = lazy(() => import('./components/Orders'));
-const Visits = lazy(() => import('./components/Visits'));
-const Settings = lazy(() => import('./components/Settings'));
-const CreateOrder = lazy(() => import('./components/CreateOrder'));
-const Customers = lazy(() => import('./components/Customers'));
-const OrderPicking = lazy(() => import('./components/OrderPicking'));
-const TiendaNubeOrders = lazy(() => import('./components/TiendaNubeOrders'));
-const MercadoLibreOrders = lazy(() => import('./components/MercadoLibreOrders'));
-const StockHistory = lazy(() => import('./components/StockHistory'));
-const Despachos = lazy(() => import('./components/Despachos'));
+/** Si falla la carga del chunk (ej. 404 tras un nuevo deploy), recarga la página para cargar la versión nueva. */
+function lazyWithReload<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+): React.LazyExoticComponent<T> {
+  return lazy(() =>
+    factory().catch((err: Error & { name?: string }) => {
+      const isChunkError =
+        err?.message?.includes('Failed to fetch dynamically imported module') ||
+        err?.message?.includes('Importing a module script failed') ||
+        err?.name === 'ChunkLoadError';
+      if (isChunkError) {
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    })
+  );
+}
+
+const Dashboard = lazyWithReload(() => import('./components/Dashboard'));
+const Inventory = lazyWithReload(() => import('./components/Inventory'));
+const Catalogs = lazyWithReload(() => import('./components/Catalogs'));
+const Orders = lazyWithReload(() => import('./components/Orders'));
+const Visits = lazyWithReload(() => import('./components/Visits'));
+const Settings = lazyWithReload(() => import('./components/Settings'));
+const CreateOrder = lazyWithReload(() => import('./components/CreateOrder'));
+const Customers = lazyWithReload(() => import('./components/Customers'));
+const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
+const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
+const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
+const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
+const Despachos = lazyWithReload(() => import('./components/Despachos'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
