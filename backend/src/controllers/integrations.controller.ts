@@ -879,8 +879,14 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
 // Procesar orden de Tienda Nube y descontar stock
 const processTiendaNubeOrder = async (orderId: string) => {
   try {
-    const integration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
     if (!integration?.access_token) return;
+
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      console.error('[TN Order] No hay store_id ni user_id en la integración');
+      return;
+    }
 
     // Idempotencia: no descontar dos veces la misma orden (p. ej. si TN reenvía el webhook)
     const alreadyProcessed = await get(
@@ -892,15 +898,36 @@ const processTiendaNubeOrder = async (orderId: string) => {
       return;
     }
 
-    const orderRes = await axios.get(
-      `https://api.tiendanube.com/v1/${integration.store_id}/orders/${orderId}`,
-      {
-        headers: {
-          'Authentication': `bearer ${integration.access_token}`,
-          'User-Agent': TN_USER_AGENT
-        }
-      }
+    const headers = {
+      'Authentication': `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT
+    };
+
+    let orderRes = await axios.get(
+      `https://api.tiendanube.com/v1/${storeId}/orders/${orderId}`,
+      { headers, validateStatus: () => true }
     );
+
+    // Si 404, puede que el webhook haya enviado el "number" (ej. 1909) en vez del "id" interno; buscar por q
+    if (orderRes.status === 404) {
+      const searchRes = await axios.get(
+        `https://api.tiendanube.com/v1/${storeId}/orders`,
+        { params: { q: orderId, per_page: 1 }, headers, validateStatus: () => true }
+      );
+      if (searchRes.status === 200 && Array.isArray(searchRes.data) && searchRes.data.length > 0) {
+        const foundId = searchRes.data[0].id;
+        console.log(`[TN Order] Orden encontrada por número: ${orderId} -> id ${foundId}`);
+        orderRes = await axios.get(
+          `https://api.tiendanube.com/v1/${storeId}/orders/${foundId}`,
+          { headers }
+        );
+      }
+    }
+
+    if (orderRes.status !== 200) {
+      console.error(`[TN Order] Error al obtener orden ${orderId}: ${orderRes.status}`, orderRes.data);
+      return;
+    }
 
     const order = orderRes.data;
     console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}`);
