@@ -2623,10 +2623,14 @@ export const getMercadoLibreStock = async (req: Request, res: Response) => {
 // Obtener variaciones de un ítem de Mercado Libre por ID (para vincular por ID padre)
 export const getMercadoLibreItemVariations = async (req: Request, res: Response) => {
   try {
-    const { itemId } = req.params;
+    let { itemId } = req.params;
     if (!itemId) {
       return res.status(400).json({ message: 'Falta itemId' });
     }
+    itemId = String(itemId).trim();
+    if (/^ML\-/i.test(itemId)) itemId = itemId.replace(/^ML\-/i, '');
+    if (!itemId) return res.status(400).json({ message: 'ID de publicación ML inválido' });
+
     const mlToken = await getValidMLToken();
     if (!mlToken) {
       return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
