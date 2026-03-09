@@ -1689,7 +1689,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       )}
 
       {/* Top Action Bar */}
-      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
+      <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
         {isAdminOrWarehouse && (
           <div className="flex-shrink-0 relative" ref={syncMenuRef}>
             <button
@@ -2009,7 +2009,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {/* Group Header (Clickable) */}
               <div 
                 onClick={() => toggleGroup(groupKey)}
-                className="p-3 sm:p-4 md:p-5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-750 active:bg-slate-700/50 transition-colors touch-manipulation"
+                className="p-3 sm:p-4 md:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-2 cursor-pointer hover:bg-slate-750 active:bg-slate-700/50 transition-colors touch-manipulation"
               >
                 <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                   {isAdminOrWarehouse && selectionModeEnabled && (
@@ -2027,13 +2027,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       {!isGroupFullySelected(groupKey, groupVariants) && isGroupPartiallySelected(groupKey, groupVariants) && <span className="w-2 h-2 rounded-full bg-amber-500" />}
                     </button>
                   )}
-                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 ${isFullyOut ? 'bg-red-900/20 text-red-500' : 'bg-blue-900/20 text-blue-400'}`}>
+                  <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0 flex-shrink-0 ${isFullyOut ? 'bg-red-900/20 text-red-500' : 'bg-blue-900/20 text-blue-400'}`}>
                     <Box size={24} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-white text-base sm:text-lg leading-tight truncate">{displayName}</h3>
+                    <h3 className="font-bold text-white text-base sm:text-lg leading-snug line-clamp-2 break-words">{displayName}</h3>
                     <div className="flex items-center gap-1.5 sm:gap-2 mt-1 flex-wrap">
-                       <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-1.5 sm:px-2 py-0.5 rounded border border-slate-600 truncate max-w-[120px] sm:max-w-none" title="Código de artículo (Tango / sistema)">
+                       <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-1.5 sm:px-2 py-0.5 rounded border border-slate-600 max-w-[200px] sm:max-w-none truncate" title="Código de artículo (Tango / sistema)">
                          {codigoLabel}
                        </span>
                        <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-slate-400 px-1.5 sm:px-2 py-0.5 rounded-lg border border-slate-700">
@@ -2046,7 +2046,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 sm:gap-4 md:gap-8 shrink-0">
+                <div className="flex flex-row flex-wrap items-center justify-end sm:justify-start gap-3 sm:gap-4 md:gap-8 shrink-0">
                    {/* Stock: en móvil como pill, en desktop como bloque */}
                    <div className="text-right">
                       <div className={`px-2 py-1 rounded-lg font-black text-sm sm:text-base ${isFullyOut ? 'text-red-500 bg-red-900/20' : displayTotalStock < 50 ? 'text-yellow-500 bg-yellow-900/20' : 'text-green-400 bg-green-900/20'}`}>
