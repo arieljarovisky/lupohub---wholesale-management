@@ -222,17 +222,15 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       );
     }
 
-    // Sincronizar con Mercado Libre
-    if (variant.mercado_libre_item_id) {
-      // Publicación única por variante (una publicación ML = esta variante)
-      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
-    } else if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-      // Publicación con variaciones (una publicación ML con varias variantes)
+    // Sincronizar con Mercado Libre: priorizar variación cuando exista (publicación con varias tallas/colores)
+    if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
       await updateMercadoLibreStockByVariant(
         variant.mercado_libre_id,
         variant.mercado_libre_variant_id,
         stockML
       );
+    } else if (variant.mercado_libre_item_id) {
+      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
     } else if (skuMLTN) {
       await updateMercadoLibreStock(skuMLTN, stockML);
     }
