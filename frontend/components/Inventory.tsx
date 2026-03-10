@@ -242,6 +242,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverMode, setServerMode] = useState(true);
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
+  const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number }>>({});
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
@@ -551,21 +552,42 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const categories = React.useMemo(() => Array.from(new Set(products.map(p => p.category))), [products]);
   const sizes = React.useMemo(() => Array.from(new Set(products.map(p => (p as any).size).filter(Boolean))), [products]);
-  
-  const sizeOptions = (() => {
+
+  // Opciones de talle sin duplicados: 130 y P son el mismo talle, mostramos uno solo (preferimos código numérico para que coincida con SKU)
+  const SIZE_ORDER = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG', 'S', 'L', 'XL', 'XXL', 'XXXL', 'XS'];
+  const sizeOptions = React.useMemo(() => {
     const attrSizes = attributes.filter(a => a.type === 'size');
     const opts = attrSizes.map(a => {
       const code = (((a as any).code || a.name || '') as string).toString().toUpperCase();
       const label = (a as any).code ? `${((a as any).code || '').toString().toUpperCase()} - ${(a.name || '').toString()}` : (a.name || '').toString();
       return { code, label };
     }).filter(s => s.code);
-    if (opts.length > 0) {
-      const uniqueByCode = Array.from(new Map(opts.map(o => [o.code, o])).values());
-      return uniqueByCode;
+    if (opts.length === 0) {
+      const derived = Array.from(new Set(products.map(p => getProductSizeCode(p)).filter(Boolean)));
+      return derived.map(code => ({ code, label: code }));
     }
-    const derived = Array.from(new Set(products.map(p => getProductSizeCode(p)).filter(Boolean)));
-    return derived.map(code => ({ code, label: code }));
-  })();
+    const byCanonical = new Map<string, { code: string; label: string }>();
+    for (const o of opts) {
+      const canonical = (nombreTalleDesdeCodigo(o.code) || o.code).toUpperCase();
+      const existing = byCanonical.get(canonical);
+      const oIsNumeric = /^\d{2,3}$/.test(o.code);
+      if (!existing || (oIsNumeric && !/^\d{2,3}$/.test(existing.code))) {
+        byCanonical.set(canonical, o);
+      }
+    }
+    const list = Array.from(byCanonical.values());
+    list.sort((a, b) => {
+      const ca = (nombreTalleDesdeCodigo(a.code) || a.code).toUpperCase();
+      const cb = (nombreTalleDesdeCodigo(b.code) || b.code).toUpperCase();
+      const ia = SIZE_ORDER.indexOf(ca);
+      const ib = SIZE_ORDER.indexOf(cb);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return ca.localeCompare(cb);
+    });
+    return list;
+  }, [attributes, products]);
 
   const selectedColorItem = filterColor !== 'ALL' ? availableColors.find(c => (c as any).name === filterColor || (c as any).code === filterColor) : null;
   const selectedColorLabel = selectedColorItem ? `${(selectedColorItem as any).name || ''}` : colorQuery;
@@ -584,6 +606,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return sku;
     })));
   }, [serverMode, serverItems, products]);
+
+  // Si el filtro de talle guardado (ej. "P") ya no está en las opciones pero hay una opción equivalente (ej. "130 - P"), usar ese value
+  useEffect(() => {
+    if (filterSize === 'ALL' || sizeOptions.some(o => o.code === filterSize)) return;
+    const canonicalFilter = (nombreTalleDesdeCodigo(filterSize) || filterSize).toUpperCase();
+    const match = sizeOptions.find(o => (nombreTalleDesdeCodigo(o.code) || o.code).toUpperCase() === canonicalFilter);
+    if (match) setFilterSize(match.code);
+  }, [sizeOptions, filterSize]);
 
   // Solo al elegir un color: cargar variantes de pocos grupos para filtrar (máx 8, 2 en paralelo)
   useEffect(() => {
@@ -620,6 +650,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+          if (!cancelled && res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+        }).catch(() => {});
       } catch {
         // ignore
       } finally {
@@ -1173,6 +1206,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+          if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+        }).catch(() => {});
       }).catch(() => {
         // keep fallback group items
       }).finally(() => {
@@ -2635,6 +2671,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                            {product.stock}
                                          </span>
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
+                                       </div>
+                                       <div className="flex flex-col gap-0.5 text-xs">
+                                         <div className="flex items-center gap-1.5">
+                                           <Zap size={10} className="text-amber-500 shrink-0" />
+                                           <span className="text-slate-400">ML:</span>
+                                           <span className={product.integrations?.mercadoLibre ? 'text-white font-medium' : 'text-amber-500/90'}>
+                                             {product.integrations?.mercadoLibre
+                                               ? (variantExternalStocks[product.id]?.stockML !== undefined
+                                                 ? String(variantExternalStocks[product.id].stockML)
+                                                 : '—')
+                                               : 'Falta sincronizar'}
+                                           </span>
+                                         </div>
+                                         <div className="flex items-center gap-1.5">
+                                           <Cloud size={10} className="text-blue-400 shrink-0" />
+                                           <span className="text-slate-400">TN:</span>
+                                           <span className={product.integrations?.tiendaNube ? 'text-white font-medium' : 'text-amber-500/90'}>
+                                             {product.integrations?.tiendaNube
+                                               ? (variantExternalStocks[product.id]?.stockTN !== undefined
+                                                 ? String(variantExternalStocks[product.id].stockTN)
+                                                 : '—')
+                                               : 'Falta sincronizar'}
+                                           </span>
+                                         </div>
                                        </div>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}
