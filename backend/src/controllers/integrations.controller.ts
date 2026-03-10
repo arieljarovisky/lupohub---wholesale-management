@@ -1532,14 +1532,14 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
-      } else {
+      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
+      } else if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
       }
       if (ok) {
         updated++;
@@ -1596,14 +1596,14 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
-      } else {
+      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
+      } else if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
       }
       if (ok) {
         updated++;
