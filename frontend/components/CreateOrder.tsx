@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, OrderItem, Role } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
@@ -32,9 +32,16 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedSearchProductKey, setExpandedSearchProductKey] = useState<string | null>(null);
   const [variantSelect, setVariantSelect] = useState<{ sku: string; productName: string; price: number; variants: Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number }> } | null>(null);
 
   const isReadOnly = initialOrder?.status === OrderStatus.DISPATCHED;
+
+  /** Cantidad en el pedido para una variante (por variantId; en la lista cada ítem tiene p.id = variant id). */
+  const getQuantityInCart = (variantId: string | undefined) => {
+    if (!variantId) return 0;
+    return rows.reduce((sum, r) => (r.variantId === variantId ? sum + r.quantity : sum), 0);
+  };
 
   useEffect(() => {
     if (initialOrder) {
@@ -105,12 +112,28 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
   const addItem = async (product: Product) => {
     if (isReadOnly) return;
-    const baseSku = (product as any).base_sku ?? (product.sku || '').replace(/-[^-]+-[^-]+$/, '').trim() || product.sku;
+    const baseSku = (product as any).base_sku ?? (((product.sku || '').replace(/-[^-]+-[^-]+$/, '').trim() || product.sku));
     const existing = rows.find(r => r.sku === product.sku || r.sku === baseSku);
     const isBackorder = product.stock <= 0;
 
     if (existing) {
       updateQuantity(existing.id, existing.quantity + 1);
+      setSearchTerm('');
+      setIsSearching(false);
+      return;
+    }
+    // Si el producto ya es una variante de la lista (tiene id = variant id), agregar directo sin abrir selector
+    if (product.id) {
+      const desc = [product.name, product.size, product.color].filter(Boolean).join(' · ') || product.name || 'Variante';
+      setRows(prev => [...prev, {
+        id: Date.now().toString(),
+        variantId: String(product.id),
+        sku: product.sku,
+        description: desc,
+        price: product.price,
+        quantity: 1,
+        isBackorder: product.stock <= 0
+      }]);
       setSearchTerm('');
       setIsSearching(false);
       return;
@@ -313,7 +336,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           <div className="shrink-0 mb-3">
             <div className="flex items-center gap-2 mb-3">
               <button 
-                onClick={() => setIsSearching(false)} 
+                onClick={() => { setIsSearching(false); setExpandedSearchProductKey(null); }} 
                 className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition touch-manipulation" 
                 aria-label="Cerrar"
               >
@@ -344,49 +367,105 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
             </div>
           </div>
           <p className="text-xs text-slate-500 mb-2 px-1 shrink-0">
-            {searchTrimmed ? `${filteredSearchProducts.length} resultado(s) · Tocá un producto para agregarlo` : 'Mostrando los primeros 30. Escribí para buscar.'}
+            {searchTrimmed ? `${filteredSearchProducts.length} resultado(s) · Tocá un artículo para ver variantes` : 'Mostrando los primeros 30. Escribí para buscar. Tocá un artículo para ver variantes.'}
           </p>
-          <div className="flex-1 overflow-y-auto space-y-4 min-h-0 touch-scroll overscroll-contain">
-            {groupedSearchProducts.map(({ key, productName, productCode, category, variants }) => (
-              <div key={key} className="rounded-xl border border-slate-700 overflow-hidden bg-slate-800/60">
-                <div className="px-4 py-2.5 border-b border-slate-700 bg-slate-800/80">
-                  <div className="font-bold text-white text-sm">
-                    {productName}
-                    {productCode && <span className="text-slate-400 font-mono font-normal ml-1">({productCode})</span>}
-                  </div>
-                  {category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded mt-1 inline-block">{category}</span>}
-                </div>
-                <div className="divide-y divide-slate-700/80">
-                  {variants.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => addItem(p)}
-                      className={`w-full text-left min-h-[80px] py-3 px-4 flex justify-between items-center gap-4 active:scale-[0.99] hover:bg-slate-700/50 transition-colors touch-manipulation ${p.stock <= 0 ? 'bg-red-900/10' : ''}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-xs font-mono text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
-                          {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
-                        </div>
-                        <div className="text-slate-300 text-sm flex flex-wrap gap-x-4 gap-y-0.5">
-                          <span><span className="text-slate-500">Talle:</span> {labelTalle(p.size) || p.size || '—'}</span>
-                          <span><span className="text-slate-500">Color:</span> {p.color || '—'}</span>
-                        </div>
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-0 touch-scroll overscroll-contain">
+            {groupedSearchProducts.map(({ key, productName, productCode, category, variants }) => {
+              const isExpanded = expandedSearchProductKey === key;
+              const totalInCart = variants.reduce((sum, p) => sum + getQuantityInCart(p.id), 0);
+              return (
+                <div key={key} className="rounded-xl border border-slate-700 overflow-hidden bg-slate-800/60">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedSearchProductKey(prev => prev === key ? null : key)}
+                    className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-700/50 active:bg-slate-700 transition-colors touch-manipulation"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-white text-sm flex items-center gap-2">
+                        {isExpanded ? <ChevronDown size={18} className="text-slate-400 shrink-0" /> : <ChevronRight size={18} className="text-slate-400 shrink-0" />}
+                        {productName}
+                        {productCode && <span className="text-slate-400 font-mono font-normal">({productCode})</span>}
                       </div>
-                      <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
-                        <span className="text-sm font-black text-green-400 tabular-nums">${p.price.toLocaleString()}</span>
-                        <span className={`text-[10px] font-bold ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
-                          {p.stock <= 0 ? 'Sin stock' : hideStock ? 'Disponible' : `${p.stock} un.`}
-                        </span>
-                        <span className="text-blue-400 text-[10px] font-semibold mt-0.5 flex items-center gap-0.5">
-                          <Plus size={12}/> Agregar
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+                      {category && <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded mt-1 inline-block">{category}</span>}
+                    </div>
+                    {totalInCart > 0 && (
+                      <span className="shrink-0 min-w-[28px] h-7 px-2 flex items-center justify-center rounded-lg bg-blue-600 text-white text-sm font-black tabular-nums">
+                        {totalInCart}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-slate-500 shrink-0">{variants.length} variante{variants.length !== 1 ? 's' : ''}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="divide-y divide-slate-700/80 border-t border-slate-700">
+                      {variants.map(p => {
+                        const qty = getQuantityInCart(p.id);
+                        const existingRow = rows.find(r => r.variantId === p.id);
+                        return (
+                          <div
+                            key={p.id}
+                            className={`min-h-[72px] py-2.5 px-4 flex justify-between items-center gap-4 ${p.stock <= 0 ? 'bg-red-900/10' : 'bg-slate-900/30'}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                                <span className="text-xs font-mono text-blue-400 truncate max-w-[140px] sm:max-w-none">{p.sku}</span>
+                                {p.stock <= 0 && <span className="text-[10px] bg-red-900/60 text-red-200 px-1.5 py-0.5 rounded font-semibold shrink-0">Pendiente</span>}
+                              </div>
+                              <div className="text-slate-300 text-sm flex flex-wrap gap-x-4 gap-y-0.5">
+                                <span><span className="text-slate-500">Talle:</span> {labelTalle(p.size) || p.size || '—'}</span>
+                                <span><span className="text-slate-500">Color:</span> {p.color || '—'}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-sm font-black text-green-400 tabular-nums w-12 text-right">${p.price.toLocaleString()}</span>
+                              <span className={`text-[10px] font-bold w-10 text-right ${p.stock <= 0 ? 'text-red-400' : hideStock ? 'text-slate-500' : p.stock < 20 ? 'text-yellow-500' : 'text-slate-500'}`}>
+                                {p.stock <= 0 ? '—' : hideStock ? '—' : `${p.stock} un.`}
+                              </span>
+                              <div className="flex items-center bg-slate-800 rounded-lg border border-slate-600 min-h-[40px]">
+                                {qty > 0 ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (existingRow) {
+                                          if (existingRow.quantity <= 1) removeRow(existingRow.id);
+                                          else updateQuantity(existingRow.id, existingRow.quantity - 1);
+                                        }
+                                      }}
+                                      className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white active:scale-95 touch-manipulation"
+                                      aria-label="Quitar una"
+                                    >
+                                      <Minus size={16} />
+                                    </button>
+                                    <span className="w-8 text-center font-black text-white text-sm tabular-nums">{qty}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); existingRow ? updateQuantity(existingRow.id, existingRow.quantity + 1) : addItem(p); }}
+                                      className="w-9 h-9 flex items-center justify-center text-blue-400 hover:text-blue-300 active:scale-95 touch-manipulation"
+                                      aria-label="Agregar una"
+                                    >
+                                      <Plus size={16} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); addItem(p); }}
+                                    className="px-3 h-9 flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold text-sm active:scale-95 touch-manipulation"
+                                  >
+                                    <Plus size={14} /> Agregar
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {groupedSearchProducts.length === 0 && (
               <div className="text-center py-12 text-slate-500">
                 <Package className="mx-auto mb-2 opacity-50" size={32}/>
@@ -397,10 +476,10 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           </div>
           <div className="pt-3 border-t border-slate-800 flex gap-2 shrink-0">
             <button
-              onClick={() => setIsSearching(false)}
+              onClick={() => { setIsSearching(false); setExpandedSearchProductKey(null); }}
               className="flex-1 min-h-[48px] py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-500/50 active:scale-[0.99] transition touch-manipulation"
             >
-              Listo {rows.length > 0 ? `(${rows.length} en el pedido)` : ''}
+              Listo {rows.length > 0 ? `(${rows.reduce((s, r) => s + r.quantity, 0)} un. en el pedido)` : ''}
             </button>
           </div>
         </div>
