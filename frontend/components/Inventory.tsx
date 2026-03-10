@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
@@ -89,22 +89,23 @@ async function parseStockExcel(file: File): Promise<Array<Record<string, unknown
   return out;
 }
 
-function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn' } {
+function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean } {
   try {
     const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
-    if (!raw) return { search: '', page: 1, subView: 'mine' };
-    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string };
+    if (!raw) return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
+    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean };
     const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
     const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
-    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView };
+    const hideZeroStock = parsed.hideZeroStock === true;
+    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView, hideZeroStock };
   } catch {
-    return { search: '', page: 1, subView: 'mine' };
+    return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
   }
 }
 
-function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn') {
+function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn', hideZeroStock?: boolean) {
   try {
-    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView }));
+    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView, hideZeroStock: hideZeroStock === true }));
   } catch {}
 }
 
@@ -112,6 +113,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
+  const [hideZeroStock, setHideZeroStock] = useState(stored.hideZeroStock ?? false);
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
@@ -225,8 +227,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Persistir búsqueda, página y pestaña para que al actualizar la página se mantengan
   useEffect(() => {
-    setStoredInventoryState(searchTerm, currentPage, inventorySubView);
-  }, [searchTerm, currentPage, inventorySubView]);
+    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock);
+  }, [searchTerm, currentPage, inventorySubView, hideZeroStock]);
 
   const availableSizes = attributes.filter(a => a.type === 'size');
   
@@ -1068,6 +1070,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const category = groupVariants[0]?.category || 'General';
       return { groupKey, groupVariants, totalStock, category };
     });
+    if (hideZeroStock) {
+      groups = groups.filter(g => g.totalStock > 0);
+    }
     if (filterColor !== 'ALL') {
       groups = groups.filter(g => {
         const variants = getGroupFilteredVariants(g.groupKey, g.groupVariants);
@@ -1089,7 +1094,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
     const safePage = Math.min(currentPage, totalPages);
     return { displayGroups: groups, totalPages, safePage };
-  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants]);
+  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
 
   // Si tras filtrar la página actual supera el total, volver a la última página válida
   React.useEffect(() => {
@@ -2100,7 +2105,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
-            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL') && (
+            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL' || hideZeroStock) && (
               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             )}
           </button>
@@ -2192,6 +2197,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
              </div>
+
+             <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => { setHideZeroStock(prev => !prev); setCurrentPage(1); }}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm font-bold transition-colors touch-manipulation min-h-[42px] ${hideZeroStock ? 'bg-slate-700 border-cyan-500 text-cyan-300' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                  title={hideZeroStock ? 'Mostrar todas las variantes' : 'Ocultar variantes con 0 stock'}
+                >
+                  <EyeOff size={16} />
+                  Ocultar sin stock
+                </button>
+             </div>
           </div>
         )}
       </div>
@@ -2273,6 +2290,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const pageGroups = displayGroups.slice(start, end);
           return pageGroups.map(({ groupKey, groupVariants, totalStock, category }) => {
           const variantsToRender = getGroupFilteredVariants(groupKey, groupVariants);
+          const variantsToShow = hideZeroStock
+            ? variantsToRender.filter(p => Number((p as any).stock ?? (p as any).stock_total ?? 0) > 0)
+            : variantsToRender;
 
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
@@ -2446,7 +2466,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {isExpanded && (
                 <div className="border-t border-slate-700 bg-slate-900/30 animate-fade-in">
                   <div className="p-2 sm:p-4 space-y-2">
-                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToRender.length > 0 && (
+                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
                       <div className="flex justify-end">
                         <button
                           type="button"
@@ -2463,12 +2483,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         Cargando variantes...
                       </div>
                     )}
-                    {!loadingVariantsByGroup[groupKey] && variantsToRender.length === 0 && filterColor !== 'ALL' && (
+                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock) && (
                       <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
-                        No hay variantes para el color seleccionado.
+                        {hideZeroStock ? 'No hay variantes con stock para mostrar.' : 'No hay variantes para el color seleccionado.'}
                       </div>
                     )}
-                    {[...variantsToRender]
+                    {[...variantsToShow]
                       .sort((a, b) => {
                         const partsA = (a.sku || '').toString().split('-');
                         const partsB = (b.sku || '').toString().split('-');
