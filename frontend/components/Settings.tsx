@@ -1321,22 +1321,31 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button 
+                          onClick={handleSyncStockToMercadoLibre}
+                          disabled={mlStockSyncLoading}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Tu stock (LupoHub) es la fuente de verdad: envía tu inventario a Mercado Libre"
+                        >
+                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                          ENVIAR MI STOCK A ML
+                        </button>
+                        <button 
                           onClick={handleSyncAllFromMercadoLibre}
                           disabled={mlStockSyncLoading}
                           className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                          title="Mercado Libre = fuente de verdad: trae el stock de ML a LupoHub y lo envía a Tienda Nube"
+                          title="Opcional: trae el stock de ML a LupoHub y envíalo a Tienda Nube"
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          SINCRONIZAR LOS 3 (ML = REAL)
+                          IMPORTAR DESDE ML (OPCIONAL)
                         </button>
                         <button 
                           onClick={handleImportStockFromMercadoLibre}
                           disabled={mlStockSyncLoading}
                           className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                          title="Trae el stock de ML a LupoHub y lo envía a Tienda Nube"
+                          title="Trae el stock de ML a LupoHub (solo por SKU) y envía a TN"
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          IMPORTAR DESDE ML
+                          IMPORTAR DESDE ML (POR SKU)
                         </button>
                         <button 
                           onClick={handleSyncMLtoTN}
@@ -1345,7 +1354,7 @@ const Settings: React.FC<SettingsProps> = ({
                           title="Copia el stock de Mercado Libre a Tienda Nube (sin tocar tu inventario local)"
                         >
                           {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          SINCRONIZAR MERCADO LIBRE CON TIENDA NUBE
+                          ML → TIENDA NUBE
                         </button>
                         <button 
                           onClick={handleTestMercadoLibre}
@@ -1362,18 +1371,10 @@ const Settings: React.FC<SettingsProps> = ({
                           <RefreshCw size={14} />
                           VINCULAR PRODUCTOS
                         </button>
-                        <button 
-                          onClick={handleSyncStockToMercadoLibre}
-                          disabled={mlStockSyncLoading}
-                          className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                        >
-                          {mlStockSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                          LOCAL → ML
-                        </button>
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">
-                      <strong>Automático:</strong> El stock entre Mercado Libre y Tienda Nube se sincroniza solo cada ~30 min (ML → TN). <strong>Manual (tus artículos):</strong> Usá <strong>Sincronizar los 3 (ML = real)</strong> o <strong>Importar desde ML</strong> para traer el stock de ML a LupoHub y enviarlo también a Tienda Nube; usá <strong>LOCAL → ML</strong> para enviar tu inventario a ML.
+                      <strong>Fuente de verdad:</strong> Tu inventario en LupoHub es la fuente de verdad. Usá <strong>Enviar mi stock a ML</strong> para enviar tu stock a Mercado Libre (y en Inventario podés enviar también a Tienda Nube o a ambas). <strong>Importar desde ML</strong> es opcional, solo si en algún momento querés traer el stock desde ML a LupoHub.
                     </p>
 
                     {/* Mensaje Automático */}

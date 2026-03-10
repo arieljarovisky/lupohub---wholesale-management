@@ -761,7 +761,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
-  /** Mercado Libre = fuente de verdad: trae stock de ML a LupoHub y lo envía a Tienda Nube */
+  /** Opcional: importar stock desde ML a LupoHub y enviar a TN (ML como fuente en ese flujo). */
   const handleSyncFromMercadoLibre = async () => {
     setSyncMenuOpen(false);
     setSyncLoading('fromML');
@@ -1992,23 +1992,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 {isAdminOrWarehouse && (
                   <>
                     <div className="px-3 py-2 border-b border-slate-700">
-                      <p className="text-[10px] font-bold text-amber-400 uppercase">Stock desde ML</p>
+                      <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
                     </div>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
-                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
-                      Traer stock desde Mercado Libre
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50">
+                      <Zap size={18} className="text-amber-400 shrink-0" />
+                      Enviar mi stock a Mercado Libre
                     </button>
                     <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToTiendaNube(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
                       <Cloud size={18} className="text-cyan-400" />
-                      Enviar a Tienda Nube
-                    </button>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
-                      <Zap size={18} className="text-amber-400" />
-                      Enviar a Mercado Libre
+                      Enviar mi stock a Tienda Nube
                     </button>
                     <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-b border-slate-700/50">
                       <RefreshCw size={18} className="text-blue-400" />
                       Enviar a ambas (TN + ML)
+                    </button>
+                    <div className="px-3 py-1.5 pt-2">
+                      <p className="text-[10px] text-slate-500">Opcional: traer desde ML</p>
+                    </div>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg">
+                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
+                      Importar stock desde Mercado Libre
                     </button>
                   </>
                 )}
@@ -2052,7 +2055,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <RefreshCw size={18} />
               )}
               <span className="text-sm font-semibold hidden sm:inline">
-                {syncLoading === 'fromML' ? 'Traendo desde ML…' : syncLoading === 'both' ? 'Sincronizando TN + ML…' : syncLoading === 'tn' ? 'Sincronizando TN…' : syncLoading === 'ml' ? 'Sincronizando ML…' : 'Stock desde ML'}
+                {syncLoading === 'fromML' ? 'Importando desde ML…' : syncLoading === 'both' ? 'Enviando a TN + ML…' : syncLoading === 'tn' ? 'Enviando a TN…' : syncLoading === 'ml' ? 'Enviando a ML…' : 'Enviar mi stock'}
               </span>
               <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -2069,15 +2072,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 }}
               >
                 <div className="px-3 py-2 border-b border-slate-700">
-                  <p className="text-[10px] font-bold text-amber-400 uppercase">Fuente de verdad: Mercado Libre</p>
+                  <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
                 </div>
                 <button
                   type="button"
-                  onClick={handleSyncFromMercadoLibre}
+                  onClick={handleSyncToMercadoLibre}
                   className="w-full flex items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50"
                 >
                   <Zap size={18} className="text-amber-400 shrink-0" />
-                  Traer stock desde Mercado Libre
+                  Enviar mi stock a Mercado Libre
                 </button>
                 <div className="px-3 py-1.5">
                   <p className="text-[10px] text-slate-500">Enviar stock local a:</p>
@@ -2092,19 +2095,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </button>
                 <button
                   type="button"
-                  onClick={handleSyncToMercadoLibre}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
-                >
-                  <Zap size={18} className="text-amber-400" />
-                  Enviar a Mercado Libre
-                </button>
-                <button
-                  type="button"
                   onClick={handleSyncStock}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
                 >
                   <RefreshCw size={18} className="text-blue-400" />
                   Enviar a ambas (TN + ML)
+                </button>
+                <div className="px-3 py-1.5 pt-2">
+                  <p className="text-[10px] text-slate-500">Opcional: importar desde ML</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncFromMercadoLibre}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg"
+                >
+                  <RefreshCw size={18} className="text-amber-400 shrink-0" />
+                  Traer stock desde Mercado Libre
                 </button>
               </div>,
               document.body
@@ -3683,7 +3689,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <div className="py-6 flex flex-col items-center gap-3">
                   <Loader2 className="animate-spin text-blue-500" size={32} />
                   <p className="text-sm text-slate-300 font-medium">
-                    {syncLoading === 'fromML' ? 'Traendo stock desde Mercado Libre (ML → LupoHub → TN)…' : syncLoading === 'both' ? 'Enviando a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
+                    {syncLoading === 'fromML' ? 'Importando stock desde Mercado Libre…' : syncLoading === 'both' ? 'Enviando tu stock a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
                   </p>
                   <p className="text-xs text-slate-500">Puede tardar unos minutos</p>
                 </div>
@@ -3708,11 +3714,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           <span>Mercado Libre → LupoHub:</span><span>{syncResult.fromML.imported} OK, {syncResult.fromML.errorsFromML} errores</span>
                           <span>LupoHub → Tienda Nube:</span><span>{syncResult.fromML.sentToTN} OK, {syncResult.fromML.errorsToTN} errores</span>
                         </div>
-                        <p className="text-slate-500 pt-1">LupoHub = esta app (tu base de datos). Tienda Nube = tu tienda online conectada.</p>
+                        <p className="text-slate-500 pt-1">Tu stock en LupoHub es la fuente de verdad. Este flujo es opcional: solo usalo si quisiste traer una vez el stock desde ML.</p>
                       </div>
                       <div className="bg-blue-900/30 border border-blue-700/50 p-3 rounded-xl text-xs text-blue-200/90">
                         <p className="font-semibold text-blue-300 mb-1">¿Por qué el resto sigue en 0?</p>
-                        <p className="text-slate-400">Solo se actualiza el stock de las <strong className="text-slate-300">variantes que ya vinculaste</strong> a una publicación de Mercado Libre. Las que no están vinculadas no se tocan. Para que tengan stock desde ML: abrí cada artículo en Mi inventario, expandilo y usá <strong className="text-slate-300">Vincular</strong> (o <strong className="text-slate-300">Vincular grupo con ML / TN</strong>) y completá el ID de la publicación de Mercado Libre. Después volvé a ejecutar &quot;Traer stock desde Mercado Libre&quot;.</p>
+                        <p className="text-slate-400">Solo se actualiza el stock de las <strong className="text-slate-300">variantes que ya vinculaste</strong> a una publicación de Mercado Libre. Las que no están vinculadas no se tocan. Para enviar tu stock a ML: usá <strong className="text-slate-300">Enviar mi stock a Mercado Libre</strong> en el menú de sincronización.</p>
                       </div>
                     </div>
                   )}

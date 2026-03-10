@@ -1734,7 +1734,7 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
   }
 };
 
-/** Sincronizar los 3 stocks con Mercado Libre como fuente de verdad: ML → LupoHub → Tienda Nube */
+/** Opcional: sincronizar con Mercado Libre como fuente (ML → LupoHub → Tienda Nube). Para el flujo normal, LupoHub es la fuente de verdad y se envía a ML con syncAllStockToMercadoLibre. */
 export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -1751,7 +1751,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
     const limit = 50;
     let offset = 0;
 
-    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
+    logs.push('[1/2] Importando stock desde Mercado Libre (opcional; por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
@@ -1902,7 +1902,7 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
     const limit = 50;
     let offset = 0;
 
-    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
+    logs.push('[1/2] Importando stock desde Mercado Libre (opcional; por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,

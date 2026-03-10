@@ -586,7 +586,7 @@ export const api = {
     }, { stocks: {} }, 'getVariantExternalStocks');
   },
 
-  /** ML = fuente de verdad: importa stock desde ML a LupoHub y luego envía a Tienda Nube */
+  /** Opcional: ML como fuente — importa stock desde ML a LupoHub y envía a TN. Para flujo normal usar syncAllStockToMercadoLibre (LupoHub → ML). */
   syncAllStockFromMercadoLibre: async (): Promise<{
     message: string;
     importedFromML: number;
