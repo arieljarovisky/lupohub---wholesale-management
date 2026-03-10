@@ -1989,6 +1989,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm box-border"
             />
           </div>
+          <div className="flex flex-shrink-0 flex-col min-w-0 sm:min-w-[160px]">
+            <label className="text-[10px] font-black text-slate-500 uppercase ml-1 mb-1 hidden sm:block">Talle</label>
+            <div className="relative">
+              <select
+                value={filterSize}
+                onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
+                className="w-full min-h-[48px] pl-3 pr-8 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
+              >
+                <option value="ALL">Todos los talles</option>
+                {sizeOptions.map(s => (
+                  <option key={s.code} value={s.code}>{s.label}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+            </div>
+          </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
             className={`flex-shrink-0 min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
