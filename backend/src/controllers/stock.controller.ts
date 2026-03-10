@@ -3,6 +3,25 @@ import { query, execute, get } from '../database/db';
 import axios from 'axios';
 import { updateMercadoLibreStock } from './integrations.controller';
 
+const SYNC_DEBOUNCE_MS = 2800;
+const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+async function withRetry429409<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  try {
+    return await fn();
+  } catch (e: any) {
+    const status = e.response?.status;
+    if (retries > 0 && (status === 429 || status === 409)) {
+      const delayMs = status === 429 ? 2500 : 1200;
+      await sleep(delayMs);
+      return withRetry429409(fn, retries - 1);
+    }
+    throw e;
+  }
+}
+
 // Tipos de movimiento de stock
 export type StockMovementType = 
   | 'PEDIDO_MAYORISTA'
@@ -66,7 +85,7 @@ export const updateVariantStock = async (
     await logStockMovement(variantId, previousStock, newStock, movementType, reference);
 
     if (syncExternal) {
-      await syncStockToExternalPlatforms(variantId, newStock);
+      scheduleSyncToExternalPlatforms(variantId, newStock);
     }
 
     return true;
@@ -156,6 +175,23 @@ function stockForPlatform(localStock: number, packSize: number | null | undefine
   return n <= 0 ? localStock : Math.floor(localStock / n);
 }
 
+// Programar sincronización con debounce para evitar demasiadas llamadas a ML/TN (429 / conflict).
+function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): void {
+  const prev = pendingSyncByVariant[variantId];
+  if (prev) clearTimeout(prev.timeout);
+  pendingSyncByVariant[variantId] = {
+    stock: newStock,
+    timeout: setTimeout(() => {
+      const entry = pendingSyncByVariant[variantId];
+      const stockToSync = entry?.stock ?? newStock;
+      delete pendingSyncByVariant[variantId];
+      syncStockToExternalPlatforms(variantId, stockToSync).catch(err =>
+        console.error('[Sync debounced] Error:', err?.message || err)
+      );
+    }, SYNC_DEBOUNCE_MS)
+  };
+}
+
 // Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
@@ -221,16 +257,18 @@ export const updateTiendaNubeStock = async (
       return false;
     }
 
-    const response = await axios.put(
-      `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-      { stock },
-      {
-        headers: {
-          'Authentication': `bearer ${integration.access_token}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'LupoHub (lupohub@example.com)'
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
+        { stock },
+        {
+          headers: {
+            'Authentication': `bearer ${integration.access_token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'LupoHub (lupohub@example.com)'
+          }
         }
-      }
+      )
     );
 
     console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
@@ -255,23 +293,23 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
     'Content-Type': 'application/json'
   };
   try {
-    const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
     const item = getRes.data;
     const variations: any[] = item.variations || [];
     if (variations.length === 0) {
-      await axios.put(
-        `https://api.mercadolibre.com/items/${itemId}`,
-        { available_quantity: stock },
-        { headers }
+      await withRetry429409(() =>
+        axios.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: stock }, { headers })
       );
       console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
       return true;
     }
     if (variations.length === 1) {
-      await axios.put(
-        `https://api.mercadolibre.com/items/${itemId}`,
-        { variations: [{ id: variations[0].id, available_quantity: stock }] },
-        { headers }
+      await withRetry429409(() =>
+        axios.put(
+          `https://api.mercadolibre.com/items/${itemId}`,
+          { variations: [{ id: variations[0].id, available_quantity: stock }] },
+          { headers }
+        )
       );
       console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
       return true;
@@ -307,10 +345,12 @@ export const updateMercadoLibreStockByVariant = async (
 
   // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
   try {
-    await axios.put(
-      `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
-      { available_quantity: stock },
-      { headers }
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
+        { available_quantity: stock },
+        { headers }
+      )
     );
     console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
     return true;
@@ -343,16 +383,17 @@ async function updateMercadoLibreStockByItemUpdate(
     'Content-Type': 'application/json'
   };
 
-  const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+  const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
   const item = getRes.data;
   const variations: any[] = item.variations || [];
 
   if (variations.length === 0) {
-    // Ítem sin variaciones: ML usa available_quantity a nivel ítem
-    await axios.put(
-      `https://api.mercadolibre.com/items/${itemId}`,
-      { available_quantity: newStock },
-      { headers }
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.mercadolibre.com/items/${itemId}`,
+        { available_quantity: newStock },
+        { headers }
+      )
     );
     console.log(`[ML Stock] Actualizado item ${itemId} (sin variaciones) a ${newStock} unidades`);
     return true;
@@ -364,10 +405,12 @@ async function updateMercadoLibreStockByItemUpdate(
     return { id: v.id, available_quantity: Math.max(0, qty) };
   });
 
-  await axios.put(
-    `https://api.mercadolibre.com/items/${itemId}`,
-    { variations: variationsPayload },
-    { headers }
+  await withRetry429409(() =>
+    axios.put(
+      `https://api.mercadolibre.com/items/${itemId}`,
+      { variations: variationsPayload },
+      { headers }
+    )
   );
   console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${newStock} unidades (vía PUT item)`);
   return true;
