@@ -119,7 +119,6 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     if (existing) {
       updateQuantity(existing.id, existing.quantity + 1);
       setSearchTerm('');
-      setIsSearching(false);
       return;
     }
     // Si el producto ya es una variante de la lista (tiene id = variant id), agregar directo sin abrir selector
@@ -135,7 +134,6 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         isBackorder: product.stock <= 0
       }]);
       setSearchTerm('');
-      setIsSearching(false);
       return;
     }
     const variants = await api.getVariantsBySku(baseSku || product.sku);
@@ -154,10 +152,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       }]);
     } else {
       setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, variants });
-      setIsSearching(false);
     }
     setSearchTerm('');
-    if (variants.length <= 1) setIsSearching(false);
   };
 
   const removeRow = (id: string) => {

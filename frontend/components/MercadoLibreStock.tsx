@@ -392,7 +392,19 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                               </tr>
                             </thead>
                             <tbody>
-                              {item.variations.map((v, i) => (
+                              {[...item.variations]
+                                .sort((a, b) => {
+                                  const sizeOrder = ['U','P','S','M','G','GG','XG','XXG','XXXG'];
+                                  const sa = (a.size || '').toString().toUpperCase();
+                                  const sb = (b.size || '').toString().toUpperCase();
+                                  const ia = sizeOrder.indexOf(sa);
+                                  const ib = sizeOrder.indexOf(sb);
+                                  const ra = ia === -1 ? 999 : ia;
+                                  const rb = ib === -1 ? 999 : ib;
+                                  if (ra !== rb) return ra - rb;
+                                  return sa.localeCompare(sb);
+                                })
+                                .map((v, i) => (
                                 <tr key={i} className="border-b border-slate-700/20 last:border-0">
                                   <td className="p-3 text-amber-300/90 text-xs font-mono flex items-center gap-1">
                                     {v.variationId}
