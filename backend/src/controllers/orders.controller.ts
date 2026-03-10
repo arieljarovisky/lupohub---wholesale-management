@@ -25,10 +25,17 @@ export const getOrders = async (req: any, res: any) => {
     const placeholders = orderIds.map(() => '?').join(',');
     const itemsRows = await query(`
       SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-             pc.product_id AS productId
+             pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku,
+             p.name AS productName,
+             s.size_code AS sizeCode,
+             c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE i.order_id IN (${placeholders})
     `, orderIds);
 
@@ -44,7 +51,11 @@ export const getOrders = async (req: any, res: any) => {
           productId: row.productId,
           quantity: row.quantity,
           picked: row.picked ?? 0,
-          priceAtMoment: Number(row.priceAtMoment)
+          priceAtMoment: Number(row.priceAtMoment),
+          sku: row.sku ?? undefined,
+          productName: row.productName ?? undefined,
+          sizeCode: row.sizeCode ?? undefined,
+          colorName: row.colorName ?? undefined
         });
       }
     }

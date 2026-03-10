@@ -41,12 +41,15 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       setSelectedCustomerId(initialOrder.customerId);
       setOrderDate(initialOrder.date);
       const mappedRows = initialOrder.items.map(item => {
-        const p = products.find(prod => prod.id === item.productId) || products.find(prod => prod.sku === (item as any).sku);
+        const p = products.find(prod => prod.id === item.productId) || products.find(prod => (prod as any).product_id === item.productId) || products.find(prod => prod.sku === (item as any).sku);
+        const name = (item as any).productName ?? p?.name ?? 'Variante';
+        const sku = (item as any).sku ?? p?.sku ?? 'N/A';
+        const desc = [name, (item as any).sizeCode, (item as any).colorName].filter(Boolean).join(' · ') || name;
         return {
           id: `row-${Math.random()}`,
           variantId: (item as any).variantId,
-          sku: p?.sku || 'N/A',
-          description: p ? `${p.name}` : 'Variante',
+          sku,
+          description: desc,
           price: item.priceAtMoment,
           quantity: item.quantity,
           isBackorder: !!(item as any).isBackorder
@@ -102,31 +105,36 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
   const addItem = async (product: Product) => {
     if (isReadOnly) return;
-    const existing = rows.find(r => r.sku === product.sku);
+    const baseSku = (product as any).base_sku ?? (product.sku || '').replace(/-[^-]+-[^-]+$/, '').trim() || product.sku;
+    const existing = rows.find(r => r.sku === product.sku || r.sku === baseSku);
     const isBackorder = product.stock <= 0;
 
     if (existing) {
       updateQuantity(existing.id, existing.quantity + 1);
+      setSearchTerm('');
+      setIsSearching(false);
+      return;
+    }
+    const variants = await api.getVariantsBySku(baseSku || product.sku);
+    if (variants.length <= 1) {
+      const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', colorCode: '', stock: product.stock };
+      const fullCode = [product.sku, v.sizeCode, v.colorCode].filter(Boolean).join('-');
+      const desc = [product.name, v.colorName || null, fullCode].filter(Boolean).join(' · ');
+      setRows(prev => [...prev, {
+        id: Date.now().toString(),
+        variantId: v.variantId != null ? String(v.variantId) : undefined,
+        sku: product.sku,
+        description: desc || `${product.name} (${labelTalle(v.sizeCode || '')}) - ${v.colorName}`,
+        price: product.price,
+        quantity: 1,
+        isBackorder: (v.stock ?? 0) <= 0
+      }]);
     } else {
-      const variants = await api.getVariantsBySku(product.sku);
-      if (variants.length <= 1) {
-        const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', colorCode: '', stock: product.stock };
-        const fullCode = [product.sku, v.sizeCode, v.colorCode].filter(Boolean).join('-');
-        const desc = [product.name, v.colorName || null, fullCode].filter(Boolean).join(' · ');
-        setRows(prev => [...prev, {
-          id: Date.now().toString(),
-          variantId: v.variantId || undefined,
-          sku: product.sku,
-          description: desc || `${product.name} (${labelTalle(v.sizeCode || '')}) - ${v.colorName}`,
-          price: product.price,
-          quantity: 1,
-          isBackorder: (v.stock ?? 0) <= 0
-        }]);
-      } else {
-        setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, variants });
-      }
+      setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, variants });
+      setIsSearching(false);
     }
     setSearchTerm('');
+    if (variants.length <= 1) setIsSearching(false);
   };
 
   const removeRow = (id: string) => {
@@ -423,7 +431,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                   const desc = [variantSelect.productName, v.colorName, fullCode].filter(Boolean).join(' · ');
                   setRows(prev => [...prev, {
                     id: Date.now().toString(),
-                    variantId: v.variantId,
+                    variantId: v.variantId != null ? String(v.variantId) : undefined,
                     sku: variantSelect.sku,
                     description: desc || `${variantSelect.productName} (${labelTalle(v.sizeCode)}) - ${v.colorName}`,
                     price: variantSelect.price,

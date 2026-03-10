@@ -117,7 +117,11 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
       {/* Picking List */}
       <div className="p-3 md:p-6 space-y-3 pb-24 md:pb-6 overflow-y-auto">
         {items.map((item) => {
-          const product = products.find(p => p.id === item.productId);
+          const product = products.find(p => p.id === item.productId) ?? products.find(p => (p as any).product_id === item.productId);
+          const displaySku = (item as any).sku ?? product?.sku ?? 'Variante';
+          const displayName = (item as any).productName ?? product?.name ?? `Ítem (${item.quantity} un.)`;
+          const displaySize = (item as any).sizeCode ?? product?.size ?? '';
+          const displayColor = (item as any).colorName ?? product?.color ?? '';
           const key = itemKey(item);
           const isFullyPicked = item.picked === item.quantity;
           const isPartial = item.picked > 0 && item.picked < item.quantity;
@@ -150,17 +154,17 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
                    <div className="min-w-0">
                       <div className="flex flex-wrap gap-2 mb-1">
                         <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                           {product?.sku ?? 'Variante'}
+                           {displaySku}
                         </span>
                       </div>
                       <h3 className={`font-bold text-white text-base leading-snug ${isFullyPicked ? 'line-through text-slate-500' : ''}`}>
-                         {product?.name ?? `Ítem (${item.quantity} un.)`}
+                         {displayName}
                       </h3>
                       <div className="flex items-center gap-2 mt-1 text-xs font-medium text-slate-400 uppercase">
-                         {product && (
+                         {(displaySize || displayColor) && (
                            <>
-                             <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product.size}</span>
-                             <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{product.color}</span>
+                             {displaySize && <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{displaySize}</span>}
+                             {displayColor && <span className="bg-slate-700/50 px-2 py-0.5 rounded text-slate-300">{displayColor}</span>}
                            </>
                          )}
                       </div>

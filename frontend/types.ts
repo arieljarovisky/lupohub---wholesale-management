@@ -81,6 +81,11 @@ export interface OrderItem {
   picked?: number;      // Quantity prepared by warehouse
   priceAtMoment: number;
   isBackorder?: boolean;
+  /** Datos de display desde el backend (getOrders) */
+  sku?: string;
+  productName?: string;
+  sizeCode?: string;
+  colorName?: string;
 }
 
 export interface Order {
