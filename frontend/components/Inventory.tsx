@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
-import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
@@ -274,6 +274,25 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return '';
   }
 
+  /** Conjunto de códigos equivalentes para comparar talle (ej: "M" y "140" son el mismo talle). */
+  function getSizeCanonicalSet(sizeStr: string): Set<string> {
+    const s = (sizeStr || '').toString().trim().toUpperCase();
+    if (!s) return new Set();
+    const fromTango = nombreTalleDesdeCodigo(s); // "140" -> "M"
+    const toTango = codigoTalleParaSku(s);       // "M" -> "140"
+    const set = new Set<string>([s]);
+    if (fromTango) set.add(fromTango);
+    if (toTango) set.add(toTango);
+    return set;
+  }
+
+  function matchesSizeFilter(productSizeCode: string, selectedFilterSize: string): boolean {
+    if (selectedFilterSize === 'ALL') return true;
+    const productSet = getSizeCanonicalSet(productSizeCode);
+    const filterSet = getSizeCanonicalSet(selectedFilterSize);
+    return [...filterSet].some(fc => productSet.has(fc));
+  }
+
   useEffect(() => {
     if (import.meta.env.DEV && products.length > 0) {
       try {
@@ -451,7 +470,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
     const sizeCode = getProductSizeCode(p);
-    const matchesSize = filterSize === 'ALL' || sizeCode === filterSize;
+    const matchesSize = matchesSizeFilter(sizeCode, filterSize);
     
     const isParent = sku.split('-').length <= 1;
     const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
@@ -477,7 +496,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
       const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
       const sizeCode = getProductSizeCode(p);
-      const matchesSize = filterSize === 'ALL' || sizeCode === filterSize;
+      const matchesSize = matchesSizeFilter(sizeCode, filterSize);
       let matchesStock = true;
       const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
       if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
