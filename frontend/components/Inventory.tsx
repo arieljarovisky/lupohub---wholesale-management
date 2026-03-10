@@ -89,23 +89,43 @@ async function parseStockExcel(file: File): Promise<Array<Record<string, unknown
   return out;
 }
 
-function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean } {
+function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string } {
   try {
     const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
     if (!raw) return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
-    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean };
+    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string };
     const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
     const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
     const hideZeroStock = parsed.hideZeroStock === true;
-    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView, hideZeroStock };
+    return {
+      search: typeof parsed.search === 'string' ? parsed.search : '',
+      page,
+      subView,
+      hideZeroStock,
+      filterSize: typeof parsed.filterSize === 'string' ? parsed.filterSize : undefined,
+      filterCategory: typeof parsed.filterCategory === 'string' ? parsed.filterCategory : undefined,
+      filterColor: typeof parsed.filterColor === 'string' ? parsed.filterColor : undefined
+    };
   } catch {
     return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
   }
 }
 
-function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn', hideZeroStock?: boolean) {
+function setStoredInventoryState(
+  search: string,
+  page: number,
+  subView: 'mine' | 'ml' | 'tn',
+  hideZeroStock?: boolean,
+  filters?: { filterSize?: string; filterCategory?: string; filterColor?: string }
+) {
   try {
-    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView, hideZeroStock: hideZeroStock === true }));
+    const obj: Record<string, unknown> = { search, page, subView, hideZeroStock: hideZeroStock === true };
+    if (filters) {
+      obj.filterSize = filters.filterSize ?? 'ALL';
+      obj.filterCategory = filters.filterCategory ?? 'ALL';
+      obj.filterColor = filters.filterColor ?? 'ALL';
+    }
+    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(obj));
   } catch {}
 }
 
@@ -207,12 +227,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
   const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filter States
-  const [filterCategory, setFilterCategory] = useState('ALL');
-  const [filterSize, setFilterSize] = useState('ALL');
+  // Filter States (inicializar desde sesión para que no se pierdan al re-renderizar)
+  const [filterCategory, setFilterCategory] = useState(stored.filterCategory ?? 'ALL');
+  const [filterSize, setFilterSize] = useState(stored.filterSize ?? 'ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
   const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'>('ALL');
-  const [filterColor, setFilterColor] = useState('ALL');
+  const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
   const [sortKey, setSortKey] = useState<'SKU' | 'STOCK' | 'VARIANTS'>('SKU');
@@ -225,10 +245,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
-  // Persistir búsqueda, página y pestaña para que al actualizar la página se mantengan
+  // Persistir búsqueda, página, pestaña y filtros para que al actualizar o volver no se pierdan
   useEffect(() => {
-    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock);
-  }, [searchTerm, currentPage, inventorySubView, hideZeroStock]);
+    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock, {
+      filterSize,
+      filterCategory,
+      filterColor
+    });
+  }, [searchTerm, currentPage, inventorySubView, hideZeroStock, filterSize, filterCategory, filterColor]);
 
   const availableSizes = attributes.filter(a => a.type === 'size');
   
@@ -2117,22 +2141,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm box-border"
             />
-          </div>
-          <div className="flex flex-shrink-0 flex-col min-w-0 sm:min-w-[160px]">
-            <label className="text-[10px] font-black text-slate-500 uppercase ml-1 mb-1 hidden sm:block">Talle</label>
-            <div className="relative">
-              <select
-                value={filterSize}
-                onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
-                className="w-full min-h-[48px] pl-3 pr-8 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
-              >
-                <option value="ALL">Todos los talles</option>
-                {sizeOptions.map(s => (
-                  <option key={s.code} value={s.code}>{s.label}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
-            </div>
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
