@@ -339,7 +339,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
         const normalized = normalizeSku(sku);
         if (normalized) {
           const byBaseNorm = await get(
-            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) = ?`,
+            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', ''), '/', ''), CHAR(32), '') = ?`,
             [normalized]
           );
           if (byBaseNorm?.id) productId = byBaseNorm.id;
@@ -351,7 +351,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
           const byVarNorm = await get(
             `SELECT pc.product_id AS id FROM product_variants pv
              JOIN product_colors pc ON pc.id = pv.product_color_id
-             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) = ?
+             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', ''), '/', ''), CHAR(32), '') = ?
              LIMIT 1`,
             [normalized]
           );
@@ -363,7 +363,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
         if (normalized) {
           const pattern = escapeLike(normalized) + '%';
           const byBaseStarts = await get(
-            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) LIKE ? LIMIT 1`,
+            `SELECT id FROM products WHERE REPLACE(REPLACE(REPLACE(sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? LIMIT 1`,
             [pattern]
           );
           if (byBaseStarts?.id) productId = byBaseStarts.id;
@@ -376,7 +376,7 @@ export const setPriceListItemsBySku = async (req: Request, res: Response) => {
           const byVarStarts = await get(
             `SELECT pc.product_id AS id FROM product_variants pv
              JOIN product_colors pc ON pc.id = pv.product_color_id
-             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) LIKE ?
+             WHERE REPLACE(REPLACE(REPLACE(pv.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ?
              LIMIT 1`,
             [pattern]
           );

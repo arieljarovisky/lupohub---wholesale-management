@@ -763,7 +763,7 @@ async function getVariantIdByCodigoColorSize(
      JOIN colors c ON c.id = pc.color_id
      JOIN product_variants pv ON pv.product_color_id = pc.id
      JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) = ? AND c.code = ? AND s.size_code = ?`,
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND c.code = ? AND s.size_code = ?`,
     [normalized, colorStr, sizeStr]
   );
   if (row?.variant_id) return row.variant_id;
@@ -776,7 +776,7 @@ async function getVariantIdByCodigoColorSize(
      JOIN colors c ON c.id = pc.color_id
      JOIN product_variants pv ON pv.product_color_id = pc.id
      JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', CONCAT()), '/', CONCAT()), CHAR(32), CONCAT()) LIKE ? AND c.code = ? AND s.size_code = ?
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND c.code = ? AND s.size_code = ?
      LIMIT 1`,
     [pattern, colorStr, sizeStr]
   );
