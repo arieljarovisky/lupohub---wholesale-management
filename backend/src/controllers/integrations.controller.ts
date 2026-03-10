@@ -28,7 +28,8 @@ async function putTnVariantWithRetry(
       return;
     } catch (e: any) {
       const is429 = e.response?.status === 429;
-      if (is429 && attempt < maxRetries) {
+      const isNetwork = e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED';
+      if ((is429 || isNetwork) && attempt < maxRetries) {
         const waitMs = 2000 + attempt * 1500;
         await sleep(waitMs);
         continue;
@@ -1240,7 +1241,13 @@ Equipo Lupo`;
     }
     
     // Log del error pero no fallar el proceso principal
-    console.error(`[ML Message] Error enviando mensaje para orden ${orderId}:`, error.response?.data || error.message);
+    const errData = error.response?.data || {};
+    const isNotFound = error.response?.status === 404 || (errData.error === 'resource not found');
+    if (isNotFound) {
+      console.warn(`[ML Message] Mensaje automático no disponible para orden ${orderId} (API ML: recurso no encontrado). El pedido y el stock se procesaron correctamente.`);
+    } else {
+      console.error(`[ML Message] Error enviando mensaje para orden ${orderId}:`, errData.error ? { error: errData.error, message: errData.message } : error.message);
+    }
   }
 };
 
@@ -1525,14 +1532,14 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
-      } else {
+      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
+      } else if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
       }
       if (ok) {
         updated++;
@@ -1589,14 +1596,14 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
-      } else {
+      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
+      } else if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
       }
       if (ok) {
         updated++;

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { Customer, Role, Order, OrderStatus, Product } from '../types';
 
 interface CustomersProps {
@@ -8,13 +8,15 @@ interface CustomersProps {
   sellerId: string;
   onCreateCustomer: (customer: Customer) => void;
   onUpdateCustomer?: (customerId: string, data: Partial<Customer>) => void | Promise<void>;
+  onDeleteCustomer?: (customerId: string) => void | Promise<void>;
   orders: Order[];
   products: Product[];
   priceLists?: { id: string; name: string }[];
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, orders, products, priceLists = [] }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, orders, products, priceLists = [] }) => {
   const [isCreating, setIsCreating] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,6 +47,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const handleSave = () => {
     if (!newBusinessName || !newEmail) return;
 
+    if (editingCustomer && onUpdateCustomer) {
+      const data: Partial<Customer> = {
+        businessName: newBusinessName,
+        name: newContactName,
+        email: newEmail,
+        address: newAddress || undefined,
+        city: newCity || undefined
+      };
+      Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
+        setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data } : prev);
+        setEditingCustomer(null);
+        setNewBusinessName('');
+        setNewContactName('');
+        setNewEmail('');
+        setNewAddress('');
+        setNewCity('');
+      }).catch(() => {});
+      return;
+    }
+
     const newCustomer: Customer = {
       id: `c${Date.now()}`,
       sellerId: sellerId,
@@ -57,7 +79,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
     onCreateCustomer(newCustomer);
     setIsCreating(false);
-    // Reset form
     setNewBusinessName('');
     setNewContactName('');
     setNewEmail('');
@@ -197,9 +218,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
              </div>
            </div>
-           <button className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition">
-              Editar Datos
-           </button>
+           <div className="flex items-center gap-2">
+             <button
+               onClick={() => {
+                 setNewBusinessName(selectedCustomer.businessName);
+                 setNewContactName(selectedCustomer.name);
+                 setNewEmail(selectedCustomer.email);
+                 setNewAddress(selectedCustomer.address || '');
+                 setNewCity(selectedCustomer.city || '');
+                 setEditingCustomer(selectedCustomer);
+               }}
+               className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
+             >
+               <Pencil size={16} />
+               Editar Datos
+             </button>
+             {onDeleteCustomer && (
+               <button
+                 onClick={() => {
+                   if (window.confirm(`¿Eliminar el cliente "${selectedCustomer.businessName}"? Esta acción no se puede deshacer.`)) {
+                     Promise.resolve(onDeleteCustomer(selectedCustomer.id)).then(() => setSelectedCustomer(null)).catch(() => {});
+                   }
+                 }}
+                 className="px-4 py-2 bg-red-900/50 border border-red-800 rounded-xl text-sm font-bold text-red-300 hover:bg-red-900 hover:text-white transition flex items-center gap-2"
+               >
+                 <Trash2 size={16} />
+                 Eliminar
+               </button>
+             )}
+           </div>
         </div>
 
         {role === Role.ADMIN && priceLists.length > 0 && onUpdateCustomer && (
@@ -375,9 +422,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <div className="bg-slate-800 p-3 rounded-xl text-slate-400 group-hover:text-white group-hover:bg-blue-600 transition-colors shadow-sm">
                    <Building2 size={24} />
                 </div>
-                {role === Role.ADMIN && (
-                   <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded font-mono">ID: {customer.sellerId}</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {onDeleteCustomer && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`¿Eliminar a "${customer.businessName}"?`)) {
+                          Promise.resolve(onDeleteCustomer(customer.id)).catch(() => {});
+                        }
+                      }}
+                      className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition"
+                      title="Eliminar cliente"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                  {role === Role.ADMIN && (
+                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded font-mono">ID: {customer.sellerId}</span>
+                  )}
+                </div>
               </div>
               
               <div className="relative z-10">
@@ -410,13 +474,16 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         </div>
       </div>
 
-      {/* Modal Crear Cliente */}
-      {isCreating && (
+      {/* Modal Crear / Editar Cliente */}
+      {(isCreating || editingCustomer) && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-slate-900 rounded-3xl w-full max-w-lg border border-slate-700 shadow-2xl flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
-              <h3 className="text-xl font-bold text-white">Alta de Cliente</h3>
-              <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition">
+              <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
+              <button
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); }}
+                className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -478,7 +545,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => setIsCreating(false)}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar
@@ -489,7 +556,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all"
               >
                 <Save size={18} />
-                Guardar Cliente
+                {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
               </button>
             </div>
           </div>

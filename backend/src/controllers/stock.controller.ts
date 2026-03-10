@@ -3,6 +3,25 @@ import { query, execute, get } from '../database/db';
 import axios from 'axios';
 import { updateMercadoLibreStock } from './integrations.controller';
 
+const SYNC_DEBOUNCE_MS = 2800;
+const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+async function withRetry429409<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  try {
+    return await fn();
+  } catch (e: any) {
+    const status = e.response?.status;
+    if (retries > 0 && (status === 429 || status === 409)) {
+      const delayMs = status === 429 ? 2500 : 1200;
+      await sleep(delayMs);
+      return withRetry429409(fn, retries - 1);
+    }
+    throw e;
+  }
+}
+
 // Tipos de movimiento de stock
 export type StockMovementType = 
   | 'PEDIDO_MAYORISTA'
@@ -12,6 +31,7 @@ export type StockMovementType =
   | 'DEVOLUCION'
   | 'IMPORTACION_TN'
   | 'IMPORTACION_ML'
+  | 'IMPORTACION_EXCEL'
   | 'SNAPSHOT_INICIAL';
 
 interface StockMovement {
@@ -65,7 +85,7 @@ export const updateVariantStock = async (
     await logStockMovement(variantId, previousStock, newStock, movementType, reference);
 
     if (syncExternal) {
-      await syncStockToExternalPlatforms(variantId, newStock);
+      scheduleSyncToExternalPlatforms(variantId, newStock);
     }
 
     return true;
@@ -155,6 +175,23 @@ function stockForPlatform(localStock: number, packSize: number | null | undefine
   return n <= 0 ? localStock : Math.floor(localStock / n);
 }
 
+// Programar sincronización con debounce para evitar demasiadas llamadas a ML/TN (429 / conflict).
+function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): void {
+  const prev = pendingSyncByVariant[variantId];
+  if (prev) clearTimeout(prev.timeout);
+  pendingSyncByVariant[variantId] = {
+    stock: newStock,
+    timeout: setTimeout(() => {
+      const entry = pendingSyncByVariant[variantId];
+      const stockToSync = entry?.stock ?? newStock;
+      delete pendingSyncByVariant[variantId];
+      syncStockToExternalPlatforms(variantId, stockToSync).catch(err =>
+        console.error('[Sync debounced] Error:', err?.message || err)
+      );
+    }, SYNC_DEBOUNCE_MS)
+  };
+}
+
 // Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
@@ -185,17 +222,15 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       );
     }
 
-    // Sincronizar con Mercado Libre
-    if (variant.mercado_libre_item_id) {
-      // Publicación única por variante (una publicación ML = esta variante)
-      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
-    } else if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-      // Publicación con variaciones (una publicación ML con varias variantes)
+    // Sincronizar con Mercado Libre: priorizar variación cuando exista (publicación con varias tallas/colores)
+    if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
       await updateMercadoLibreStockByVariant(
         variant.mercado_libre_id,
         variant.mercado_libre_variant_id,
         stockML
       );
+    } else if (variant.mercado_libre_item_id) {
+      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
     } else if (skuMLTN) {
       await updateMercadoLibreStock(skuMLTN, stockML);
     }
@@ -220,16 +255,18 @@ export const updateTiendaNubeStock = async (
       return false;
     }
 
-    const response = await axios.put(
-      `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-      { stock },
-      {
-        headers: {
-          'Authentication': `bearer ${integration.access_token}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'LupoHub (lupohub@example.com)'
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
+        { stock },
+        {
+          headers: {
+            'Authentication': `bearer ${integration.access_token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'LupoHub (lupohub@example.com)'
+          }
         }
-      }
+      )
     );
 
     console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
@@ -254,23 +291,23 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
     'Content-Type': 'application/json'
   };
   try {
-    const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
     const item = getRes.data;
     const variations: any[] = item.variations || [];
     if (variations.length === 0) {
-      await axios.put(
-        `https://api.mercadolibre.com/items/${itemId}`,
-        { available_quantity: stock },
-        { headers }
+      await withRetry429409(() =>
+        axios.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: stock }, { headers })
       );
       console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
       return true;
     }
     if (variations.length === 1) {
-      await axios.put(
-        `https://api.mercadolibre.com/items/${itemId}`,
-        { variations: [{ id: variations[0].id, available_quantity: stock }] },
-        { headers }
+      await withRetry429409(() =>
+        axios.put(
+          `https://api.mercadolibre.com/items/${itemId}`,
+          { variations: [{ id: variations[0].id, available_quantity: stock }] },
+          { headers }
+        )
       );
       console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
       return true;
@@ -306,10 +343,12 @@ export const updateMercadoLibreStockByVariant = async (
 
   // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
   try {
-    await axios.put(
-      `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
-      { available_quantity: stock },
-      { headers }
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
+        { available_quantity: stock },
+        { headers }
+      )
     );
     console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
     return true;
@@ -342,16 +381,17 @@ async function updateMercadoLibreStockByItemUpdate(
     'Content-Type': 'application/json'
   };
 
-  const getRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+  const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
   const item = getRes.data;
   const variations: any[] = item.variations || [];
 
   if (variations.length === 0) {
-    // Ítem sin variaciones: ML usa available_quantity a nivel ítem
-    await axios.put(
-      `https://api.mercadolibre.com/items/${itemId}`,
-      { available_quantity: newStock },
-      { headers }
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.mercadolibre.com/items/${itemId}`,
+        { available_quantity: newStock },
+        { headers }
+      )
     );
     console.log(`[ML Stock] Actualizado item ${itemId} (sin variaciones) a ${newStock} unidades`);
     return true;
@@ -363,10 +403,12 @@ async function updateMercadoLibreStockByItemUpdate(
     return { id: v.id, available_quantity: Math.max(0, qty) };
   });
 
-  await axios.put(
-    `https://api.mercadolibre.com/items/${itemId}`,
-    { variations: variationsPayload },
-    { headers }
+  await withRetry429409(() =>
+    axios.put(
+      `https://api.mercadolibre.com/items/${itemId}`,
+      { variations: variationsPayload },
+      { headers }
+    )
   );
   console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${newStock} unidades (vía PUT item)`);
   return true;
@@ -458,6 +500,23 @@ export const updateVariantStockEndpoint = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('Error updating variant stock:', error);
     res.status(500).json({ message: 'Error actualizando stock' });
+  }
+};
+
+// Endpoint: Eliminar el snapshot inicial (todos los movimientos SNAPSHOT_INICIAL) para poder crear uno nuevo
+export const deleteStockSnapshot = async (req: Request, res: Response) => {
+  try {
+    const result = await execute(
+      `DELETE FROM stock_movements WHERE movement_type = 'SNAPSHOT_INICIAL'`
+    );
+    const deleted = Number((result as any)?.affectedRows) || 0;
+    res.json({
+      message: deleted > 0 ? `Snapshot inicial eliminado (${deleted} registros).` : 'No había snapshot inicial para eliminar.',
+      deleted
+    });
+  } catch (error: any) {
+    console.error('Error deleting stock snapshot:', error);
+    res.status(500).json({ message: 'Error eliminando snapshot', error: error.message });
   }
 };
 
@@ -674,5 +733,157 @@ export const importSalesHistory = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error importing sales history:', error);
     res.status(500).json({ message: 'Error importando historial', error: error.message });
+  }
+};
+
+/** Normaliza código/SKU para búsqueda: quitar guiones, barras y espacios. */
+function normalizeCodigo(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .replace(/[-/\s]/g, '')
+    .toUpperCase();
+}
+
+/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
+function padArticleCodeTo7(s: string): string {
+  const digits = String(s ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+
+/** Escapa % y _ para uso en LIKE. */
+function escapeLike(s: string): string {
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/** Resuelve variant_id por código de producto (base SKU), código de color y código de talle. Prueba exacto, normalizado y "empieza con". */
+async function getVariantIdByCodigoColorSize(
+  codigo: string,
+  colorCode: string,
+  sizeCode: string
+): Promise<string | null> {
+  const codigoTrim = (codigo ?? '').toString().trim();
+  const colorStr = (colorCode ?? '').toString().trim();
+  const sizeStr = (sizeCode ?? '').toString().trim();
+  if (!codigoTrim || !colorStr || !sizeStr) return null;
+
+  let row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`,
+    [codigoTrim, colorStr, sizeStr]
+  );
+  if (row?.variant_id) return row.variant_id;
+
+  const padded = padArticleCodeTo7(codigoTrim);
+  if (padded && padded !== codigoTrim) {
+    row = await get(
+      `SELECT pv.id AS variant_id
+       FROM products p
+       JOIN product_colors pc ON pc.product_id = p.id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       JOIN sizes s ON s.id = pv.size_id
+       WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`,
+      [padded, colorStr, sizeStr]
+    );
+    if (row?.variant_id) return row.variant_id;
+  }
+
+  const normalized = normalizeCodigo(codigoTrim);
+  if (!normalized) return null;
+
+  row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND c.code = ? AND s.size_code = ?`,
+    [normalized, colorStr, sizeStr]
+  );
+  if (row?.variant_id) return row.variant_id;
+
+  const pattern = escapeLike(normalized) + '%';
+  row = await get(
+    `SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND c.code = ? AND s.size_code = ?
+     LIMIT 1`,
+    [pattern, colorStr, sizeStr]
+  );
+  return row?.variant_id || null;
+}
+
+const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+
+function parseStockValue(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number' && !Number.isNaN(v)) return Math.max(0, Math.floor(v));
+  const s = String(v).trim().toUpperCase();
+  if (s === 'X' || s === '-' || s === 'N/A') return 0;
+  const n = parseFloat(s.replace(/[^\d.,-]/g, '').replace(',', '.'));
+  return Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n));
+}
+
+export const importStockFromExcel = async (req: Request, res: Response) => {
+  try {
+    const { rows: rawRows } = req.body as { rows?: Array<Record<string, unknown>> };
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      return res.status(400).json({
+        message: 'Se requiere un array "rows" con las filas del Excel (columnas CODIGO, COLOR y tallas P, M, G, etc.).'
+      });
+    }
+
+    const notFound: string[] = [];
+    const errors: string[] = [];
+    let updated = 0;
+
+    for (const row of rawRows) {
+      const codigo = (row.codigo ?? row.CODIGO ?? row.Codigo ?? '').toString().trim();
+      const colorRaw = row.color ?? row.COLOR ?? row.Color;
+      const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      if (!codigo || !colorStr) continue;
+
+      for (const sizeCode of EXCEL_SIZE_COLUMNS) {
+        const rawVal = row[sizeCode] ?? row[sizeCode.toLowerCase()];
+        const stock = parseStockValue(rawVal);
+        const variantId = await getVariantIdByCodigoColorSize(codigo, colorStr, sizeCode);
+        if (!variantId) {
+          const key = `${codigo}-${colorStr}-${sizeCode}`;
+          if (!notFound.includes(key)) notFound.push(key);
+          continue;
+        }
+        const ok = await updateVariantStock(
+          variantId,
+          stock,
+          'IMPORTACION_EXCEL',
+          'Importación Excel',
+          true
+        );
+        if (ok) updated++;
+        else errors.push(`Error actualizando ${codigo} color ${colorStr} talle ${sizeCode}`);
+      }
+    }
+
+    res.json({
+      message: 'Importación de stock completada',
+      updated,
+      notFound: notFound.slice(0, 200),
+      notFoundCount: notFound.length,
+      errors: errors.length > 0 ? errors.slice(0, 50) : undefined
+    });
+  } catch (error: any) {
+    console.error('Error importing stock from Excel:', error);
+    res.status(500).json({ message: 'Error importando stock desde Excel', error: error.message });
   }
 };

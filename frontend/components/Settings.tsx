@@ -1,10 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
+import * as XLSX from 'xlsx';
+
+/** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
+async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
+  if (rows.length === 0) return [];
+  const first = rows[0].map(c => String(c ?? '').trim());
+  const firstLower = first.map(h => h.toLowerCase());
+  // Nombres típicos en listas de precios (es-AR): artículo/código y precio
+  const skuKw = ['sku', 'código', 'codigo', 'articulo', 'artículo', 'art', 'cod', 'article', 'descripción', 'producto', 'item'];
+  const priceKw = ['precio', 'price', 'importe', 'precio unitario', 'p. unit', 'p.unit', 'unitario', 'lista', 'precio lista', 'valor', 'pvp'];
+  let skuCol = firstLower.findIndex(h => skuKw.some(k => (h || '').includes(k)));
+  let priceCol = firstLower.findIndex(h => priceKw.some(k => (h || '').includes(k)));
+  if (skuCol < 0) skuCol = 0;
+  if (priceCol < 0) priceCol = 1;
+  if (priceCol === skuCol) priceCol = skuCol + 1;
+  const looksLikeHeader = (val: string) => !/^\d+$/.test(String(val).trim()) && (firstLower[skuCol] && skuKw.some(k => firstLower[skuCol].includes(k)) || firstLower[priceCol] && priceKw.some(k => firstLower[priceCol].includes(k)));
+  const start = looksLikeHeader(firstLower[skuCol] + firstLower[priceCol]) ? 1 : 0;
+  const items: { sku: string; price: number }[] = [];
+  for (let i = start; i < rows.length; i++) {
+    const rawSku = rows[i][skuCol];
+    const p = rows[i][priceCol];
+    let sku = rawSku == null ? '' : typeof rawSku === 'number' ? String(rawSku) : String(rawSku).trim();
+    if (sku && typeof rawSku === 'number' && sku.length <= 8) sku = sku.padStart(Math.max(sku.length, 7), '0');
+    const price = typeof p === 'number' ? p : parseFloat(String(p ?? '0').replace(/[^\d.,-]/g, '').replace(',', '.'));
+    if (sku && !isNaN(price) && price >= 0) items.push({ sku, price });
+  }
+  return items;
+}
 
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
   if (!isOpen) return null;
@@ -752,6 +785,23 @@ const Settings: React.FC<SettingsProps> = ({
                       </button>
                       <button
                         onClick={async () => {
+                          const name = window.prompt(`Duplicar "${pl.name}". Nombre de la nueva lista:`, `${pl.name} (copia)`);
+                          if (!name?.trim()) return;
+                          try {
+                            const created = await api.duplicatePriceList(pl.id, name.trim());
+                            setPriceLists(prev => [...prev, created]);
+                            showToast('success', 'Lista duplicada');
+                          } catch (err: any) {
+                            showToast('error', err?.message || 'Error duplicando');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-xs font-bold flex items-center gap-1"
+                        title="Duplicar lista"
+                      >
+                        <Copy size={14} /> Duplicar
+                      </button>
+                      <button
+                        onClick={async () => {
                           if (!confirm(`¿Eliminar la lista "${pl.name}"?`)) return;
                           try {
                             await api.deletePriceList(pl.id);
@@ -769,43 +819,80 @@ const Settings: React.FC<SettingsProps> = ({
                     </div>
                   </div>
                 ))}
-                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6">
-                  <input
-                    type="text"
-                    placeholder="Nombre de la nueva lista (ej: Mayorista 10%)"
-                    id="new-price-list-name"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm mb-2"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const name = (e.target as HTMLInputElement).value?.trim();
-                        if (name) {
-                          api.createPriceList({ name }).then(created => {
+                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nueva lista (una)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nombre (ej: Mayorista 10%)"
+                        id="new-price-list-name"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const name = (e.target as HTMLInputElement).value?.trim();
+                            if (name) {
+                              api.createPriceList({ name }).then(created => {
+                                setPriceLists(prev => [...prev, created]);
+                                (e.target as HTMLInputElement).value = '';
+                                showToast('success', 'Lista creada');
+                              }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          const input = document.getElementById('new-price-list-name') as HTMLInputElement;
+                          const name = input?.value?.trim();
+                          if (!name) return;
+                          try {
+                            const created = await api.createPriceList({ name });
                             setPriceLists(prev => [...prev, created]);
-                            (e.target as HTMLInputElement).value = '';
+                            input.value = '';
                             showToast('success', 'Lista creada');
-                          }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
+                          } catch (err: any) {
+                            showToast('error', (err as any)?.message || 'Error creando');
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shrink-0"
+                      >
+                        <Plus size={18} /> Crear lista
+                      </button>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-700 pt-4">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Creación masiva (varias listas)</label>
+                    <p className="text-slate-400 text-xs mb-2">Un nombre por línea. Se crean todas de una vez.</p>
+                    <textarea
+                      id="bulk-price-list-names"
+                      placeholder="Mayorista 10%&#10;Mayorista 20%&#10;Retail&#10;Promo Verano"
+                      rows={4}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-y"
+                    />
+                    <button
+                      onClick={async () => {
+                        const ta = document.getElementById('bulk-price-list-names') as HTMLTextAreaElement;
+                        const text = ta?.value?.trim() || '';
+                        const names = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                        if (names.length === 0) {
+                          showToast('error', 'Escribí al menos un nombre (uno por línea)');
+                          return;
                         }
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={async () => {
-                      const input = document.getElementById('new-price-list-name') as HTMLInputElement;
-                      const name = input?.value?.trim();
-                      if (!name) return;
-                      try {
-                        const created = await api.createPriceList({ name });
-                        setPriceLists(prev => [...prev, created]);
-                        input.value = '';
-                        showToast('success', 'Lista creada');
-                      } catch (err: any) {
-                        showToast('error', (err as any)?.message || 'Error creando');
-                      }
-                    }}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
-                  >
-                    <Plus size={18} /> Crear lista
-                  </button>
+                        try {
+                          const { created, count } = await api.createPriceListsBulk(names);
+                          setPriceLists(prev => [...prev, ...created]);
+                          ta.value = '';
+                          showToast('success', `Se crearon ${count} listas`);
+                        } catch (err: any) {
+                          showToast('error', (err as any)?.message || 'Error creando listas');
+                        }
+                      }}
+                      className="mt-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                    >
+                      <Plus size={18} /> Crear listas
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -842,6 +929,110 @@ const Settings: React.FC<SettingsProps> = ({
         >
           <div className="space-y-4 max-h-[60vh] overflow-y-auto">
             <p className="text-slate-400 text-xs">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
+            {/* Acciones masivas */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Rellenar desde catálogo</p>
+                <p className="text-slate-500 text-xs mb-2">Todos los productos con precio base. Opcional: multiplicador (ej. 0.9 = 10% descuento).</p>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="1"
+                    id="fill-multiplier"
+                    className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const input = document.getElementById('fill-multiplier') as HTMLInputElement;
+                      const mult = input?.value ? parseFloat(input.value) : 1;
+                      if (!editingPriceList) return;
+                      try {
+                        const { items, count } = await api.fillPriceListFromBase(editingPriceList.id, mult);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Se cargaron ${count} productos`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error');
+                      }
+                    }}
+                    className="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                  >
+                    Rellenar
+                  </button>
+                </div>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar por CSV</p>
+                <p className="text-slate-500 text-xs mb-2">Archivo con líneas: SKU;precio o SKU,precio. Reemplaza los precios de esos SKU.</p>
+                <label className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                  <FileUp size={14} /> Elegir archivo
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !editingPriceList) return;
+                      e.target.value = '';
+                      try {
+                        const text = await file.text();
+                        const lines = text.split(/\r?\n/).filter(Boolean);
+                        const items: { sku: string; price: number }[] = [];
+                        for (const line of lines) {
+                          const [sku, priceStr] = line.includes(';') ? line.split(';') : line.split(',');
+                          const skuTrim = (sku || '').trim();
+                          const price = parseFloat((priceStr || '0').trim().replace(/[^\d.,-]/g, '').replace(',', '.'));
+                          if (skuTrim && !isNaN(price)) items.push({ sku: skuTrim, price });
+                        }
+                        if (items.length === 0) {
+                          showToast('error', 'No se encontraron líneas válidas (SKU;precio o SKU,precio)');
+                          return;
+                        }
+                        const res = await api.setPriceListItemsBySku(editingPriceList.id, items);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Importados ${res.imported} precios${res.notFound?.length ? `. No encontrados: ${res.notFound.length}` : ''}`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error importando');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar desde Excel</p>
+                <p className="text-slate-500 text-xs mb-2">.xlsx o .xls con columnas SKU y Precio (o cabeceras &quot;código&quot;, &quot;precio&quot;).</p>
+                <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                  <FileSpreadsheet size={14} /> Elegir Excel
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !editingPriceList) return;
+                      e.target.value = '';
+                      try {
+                        const items = await parsePriceListExcel(file);
+                        if (items.length === 0) {
+                          showToast('error', 'No se encontraron filas válidas (SKU + precio). Revisá las columnas.');
+                          return;
+                        }
+                        const res = await api.setPriceListItemsBySku(editingPriceList.id, items);
+                        const fullItems = await api.getPriceListItems(editingPriceList.id);
+                        setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
+                        showToast('success', `Importados ${res.imported} precios desde Excel${res.notFound?.length ? `. No encontrados: ${res.notFound.length}` : ''}`);
+                      } catch (err: any) {
+                        showToast('error', (err as any)?.message || 'Error importando Excel');
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
             {priceListItems.map((item, idx) => (
               <div key={item.productId} className="flex items-center gap-3 bg-slate-800 rounded-xl p-3 border border-slate-700">
                 <span className="text-xs font-mono text-slate-500 flex-1 truncate">{item.sku || item.productId}</span>

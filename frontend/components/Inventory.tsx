@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
@@ -40,22 +40,72 @@ interface InventoryProps {
 
 const INVENTORY_STORAGE_KEY = 'lupo_inventory';
 
-function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn' } {
+/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
+function padArticleCodeTo7(s: string): string {
+  const digits = String(s ?? '').replace(/\D/g, '');
+  if (!digits) return s;
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+
+/** Parsea Excel de stock: columna CODIGO (puede estar fusionada), COLOR, y columnas P, M, G, GG, XG, XXG, XXXG. */
+async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
+  if (rows.length < 2) return [];
+  const headers = (rows[0] || []).map(h => String(h ?? '').trim().toUpperCase());
+  const codigoCol = headers.findIndex(h => h === 'CODIGO' || h === 'CÓDIGO' || h === 'COD');
+  const colorCol = headers.findIndex(h => h === 'COLOR' || h === 'COL');
+  const sizeCols: { key: string; index: number }[] = [];
+  const sizeNames = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+  for (const name of sizeNames) {
+    const idx = headers.findIndex(h => h === name);
+    if (idx >= 0) sizeCols.push({ key: name, index: idx });
+  }
+  if (codigoCol < 0 || colorCol < 0 || sizeCols.length === 0) return [];
+  let lastCodigo = '';
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const rawCodigo = row[codigoCol];
+    const codigo = rawCodigo != null && String(rawCodigo).trim() !== '' ? String(rawCodigo).trim() : lastCodigo;
+    if (codigo) lastCodigo = codigo;
+    const rawColor = row[colorCol];
+    const color = rawColor != null ? String(rawColor).trim() : '';
+    if (!codigo || !color) continue;
+    const obj: Record<string, unknown> = { codigo: padArticleCodeTo7(codigo), color };
+    for (const { key, index } of sizeCols) {
+      const v = row[index];
+      if (v === null || v === undefined || v === '') obj[key] = 0;
+      else if (typeof v === 'number') obj[key] = v;
+      else if (String(v).trim().toUpperCase() === 'X') obj[key] = 0;
+      else obj[key] = parseInt(String(v).replace(/\D/g, ''), 10) || 0;
+    }
+    out.push(obj);
+  }
+  return out;
+}
+
+function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean } {
   try {
     const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
-    if (!raw) return { search: '', page: 1, subView: 'mine' };
-    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string };
+    if (!raw) return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
+    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean };
     const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
     const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
-    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView };
+    const hideZeroStock = parsed.hideZeroStock === true;
+    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView, hideZeroStock };
   } catch {
-    return { search: '', page: 1, subView: 'mine' };
+    return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
   }
 }
 
-function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn') {
+function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn', hideZeroStock?: boolean) {
   try {
-    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView }));
+    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView, hideZeroStock: hideZeroStock === true }));
   } catch {}
 }
 
@@ -63,6 +113,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
+  const [hideZeroStock, setHideZeroStock] = useState(stored.hideZeroStock ?? false);
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
@@ -145,6 +196,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
+  const [importingStockExcel, setImportingStockExcel] = useState(false);
+  const [stockExcelResult, setStockExcelResult] = useState<{ updated: number; notFoundCount: number; notFound?: string[]; errors?: string[] } | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
@@ -152,6 +205,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
+  const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter States
   const [filterCategory, setFilterCategory] = useState('ALL');
@@ -173,8 +227,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Persistir búsqueda, página y pestaña para que al actualizar la página se mantengan
   useEffect(() => {
-    setStoredInventoryState(searchTerm, currentPage, inventorySubView);
-  }, [searchTerm, currentPage, inventorySubView]);
+    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock);
+  }, [searchTerm, currentPage, inventorySubView, hideZeroStock]);
 
   const availableSizes = attributes.filter(a => a.type === 'size');
   
@@ -598,6 +652,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     reader.readAsBinaryString(file);
   };
 
+  const handleImportStockExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingStockExcel(true);
+    setStockExcelResult(null);
+    try {
+      const rows = await parseStockExcel(file);
+      if (rows.length === 0) {
+        showToast('warning', 'El Excel no tiene filas válidas. Necesitá columnas CODIGO, COLOR y tallas (P, M, G, GG, XG, XXG, XXXG).');
+        return;
+      }
+      const res = await api.importStockFromExcel(rows);
+      setStockExcelResult({
+        updated: res.updated ?? 0,
+        notFoundCount: res.notFoundCount ?? (res.notFound?.length ?? 0),
+        notFound: res.notFound,
+        errors: res.errors
+      });
+      setServerListRefreshKey(k => k + 1);
+      onImportComplete?.();
+      if ((res.notFoundCount ?? 0) > 0) {
+        showToast('success', `Stock actualizado: ${res.updated} variantes. No encontradas: ${res.notFoundCount}.`);
+      } else {
+        showToast('success', `Stock importado: ${res.updated} variantes actualizadas.`);
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando stock desde Excel.');
+    } finally {
+      setImportingStockExcel(false);
+      e.target.value = '';
+    }
+  };
+
   /** Mercado Libre = fuente de verdad: trae stock de ML a LupoHub y lo envía a Tienda Nube */
   const handleSyncFromMercadoLibre = async () => {
     setSyncMenuOpen(false);
@@ -983,6 +1070,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const category = groupVariants[0]?.category || 'General';
       return { groupKey, groupVariants, totalStock, category };
     });
+    if (hideZeroStock) {
+      groups = groups.filter(g => g.totalStock > 0);
+    }
     if (filterColor !== 'ALL') {
       groups = groups.filter(g => {
         const variants = getGroupFilteredVariants(g.groupKey, g.groupVariants);
@@ -1004,7 +1094,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
     const safePage = Math.min(currentPage, totalPages);
     return { displayGroups: groups, totalPages, safePage };
-  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants]);
+  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
 
   // Si tras filtrar la página actual supera el total, volver a la última página válida
   React.useEffect(() => {
@@ -1847,6 +1937,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   {importingTango ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <Upload size={18} className="text-amber-400" />}
                   Importar Tango
                 </button>
+                <button type="button" onClick={() => { setTopDotsOpen(false); stockExcelFileInputRef.current?.click(); }} disabled={importingStockExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
+                  {importingStockExcel ? <Loader2 size={18} className="animate-spin text-cyan-400" /> : <Package size={18} className="text-cyan-400" />}
+                  Importar stock desde Excel
+                </button>
                 <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
                   {exportingExcel ? <Loader2 size={18} className="animate-spin text-green-400" /> : <Download size={18} className="text-green-400" />}
                   Exportar Excel
@@ -1946,6 +2040,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           className="hidden"
           onChange={handleImportTangoFile}
         />
+        <input
+          ref={stockExcelFileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportStockExcel}
+        />
         <button
           type="button"
           onClick={() => tangoFileInputRef.current?.click()}
@@ -1954,6 +2055,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         >
           {importingTango ? <RefreshCw size={18} className="animate-spin" /> : <Upload size={18} />}
           <span className="text-sm font-semibold hidden sm:inline">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => stockExcelFileInputRef.current?.click()}
+          disabled={importingStockExcel}
+          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-cyan-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
+        >
+          {importingStockExcel ? <Loader2 size={18} className="animate-spin" /> : <Package size={18} />}
+          <span className="text-sm font-semibold hidden sm:inline">{importingStockExcel ? 'Importando stock…' : 'Importar stock Excel'}</span>
         </button>
         <button 
           onClick={exportProductsToExcel}
@@ -2011,7 +2121,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
-            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL') && (
+            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL' || hideZeroStock) && (
               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             )}
           </button>
@@ -2103,6 +2213,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
              </div>
+
+             <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => { setHideZeroStock(prev => !prev); setCurrentPage(1); }}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm font-bold transition-colors touch-manipulation min-h-[42px] ${hideZeroStock ? 'bg-slate-700 border-cyan-500 text-cyan-300' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                  title={hideZeroStock ? 'Mostrar todas las variantes' : 'Ocultar variantes con 0 stock'}
+                >
+                  <EyeOff size={16} />
+                  Ocultar sin stock
+                </button>
+             </div>
           </div>
         )}
       </div>
@@ -2184,12 +2306,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const pageGroups = displayGroups.slice(start, end);
           return pageGroups.map(({ groupKey, groupVariants, totalStock, category }) => {
           const variantsToRender = getGroupFilteredVariants(groupKey, groupVariants);
+          const variantsToShow = hideZeroStock
+            ? variantsToRender.filter(p => Number((p as any).stock ?? (p as any).stock_total ?? 0) > 0)
+            : variantsToRender;
 
           const isExpanded = expandedGroups.includes(groupKey);
           const skuLabel = groupKey;
           const rawName = (groupVariants[0]?.name || '').toString().trim();
-          const hasRealName = rawName.length > 0 && rawName !== skuLabel;
-          const displayName = hasRealName ? rawName : `Artículo ${skuLabel}`;
+          const displayName = rawName ? `${skuLabel} - ${rawName}` : skuLabel;
           const codigoLabel = `Código: ${skuLabel}`;
           
           const displayTotalStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
@@ -2358,7 +2482,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {isExpanded && (
                 <div className="border-t border-slate-700 bg-slate-900/30 animate-fade-in">
                   <div className="p-2 sm:p-4 space-y-2">
-                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToRender.length > 0 && (
+                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
                       <div className="flex justify-end">
                         <button
                           type="button"
@@ -2375,12 +2499,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         Cargando variantes...
                       </div>
                     )}
-                    {!loadingVariantsByGroup[groupKey] && variantsToRender.length === 0 && filterColor !== 'ALL' && (
+                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock) && (
                       <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
-                        No hay variantes para el color seleccionado.
+                        {hideZeroStock ? 'No hay variantes con stock para mostrar.' : 'No hay variantes para el color seleccionado.'}
                       </div>
                     )}
-                    {[...variantsToRender]
+                    {[...variantsToShow]
                       .sort((a, b) => {
                         const partsA = (a.sku || '').toString().split('-');
                         const partsB = (b.sku || '').toString().split('-');

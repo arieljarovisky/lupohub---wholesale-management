@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request } from './httpClient';
+import httpClient, { request, requestFormData, getBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -15,6 +15,23 @@ const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorM
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
+  },
+
+  /** Refresca el token y devuelve el usuario actualizado (incl. priceListId). Usar al cargar la app con sesión guardada. */
+  refreshUser: async (): Promise<{ user: User; token: string | null }> => {
+    const res = await request<{ user: any; token: string | null }>(`/auth/refresh`, 'POST', {});
+    const u = res?.user;
+    return {
+      user: u ? {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        commissionPercentage: u.commissionPercentage != null ? Number(u.commissionPercentage) : undefined,
+        priceListId: u.priceListId ?? undefined
+      } : (res as any).user,
+      token: res?.token ?? null
+    };
   },
 
   // --- USERS (solo ADMIN, requiere token) ---
@@ -84,6 +101,18 @@ export const api = {
   setPriceListItems: async (id: string, items: { productId: string; price: number }[]): Promise<{ items: { productId: string; price: number }[] }> => {
     return request<any>(`/price-lists/${id}/items`, 'PUT', items);
   },
+  createPriceListsBulk: async (names: string[]): Promise<{ created: import('../types').PriceList[]; count: number }> => {
+    return request<any>('/price-lists/bulk', 'POST', { names });
+  },
+  duplicatePriceList: async (id: string, newName: string): Promise<import('../types').PriceList> => {
+    return request<any>(`/price-lists/${id}/duplicate`, 'POST', { name: newName });
+  },
+  fillPriceListFromBase: async (id: string, multiplier?: number): Promise<{ items: { productId: string; price: number }[]; count: number }> => {
+    return request<any>(`/price-lists/${id}/fill-from-base`, 'POST', multiplier != null ? { multiplier } : {});
+  },
+  setPriceListItemsBySku: async (id: string, items: { sku: string; price: number }[]): Promise<{ items: { productId: string; price: number }[]; imported: number; notFound?: string[] }> => {
+    return request<any>(`/price-lists/${id}/items/by-sku`, 'PUT', { items });
+  },
 
   // --- PRODUCTS ---
   getProducts: async (options?: { priceListId?: string | null; perPage?: number }): Promise<Product[]> => {
@@ -95,8 +124,8 @@ export const api = {
       const rows = Array.isArray(res) ? res : res.items;
       return rows.map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
-        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
         return {
           id: r.id,
           sku: r.sku,
@@ -104,8 +133,8 @@ export const api = {
           product_id: r.product_id,
           name: r.name,
           category: r.category,
-          size,
-          color,
+          size: r.size_name ?? r.size_code ?? sizeDerived,
+          color: r.color_name ?? colorDerived,
           stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
@@ -124,8 +153,8 @@ export const api = {
     const rows = Array.isArray(res) ? res : (res && res.items) || [];
     return rows.map((r: any) => {
       const parts = (r.sku || '').toString().split('-');
-      const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-      const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+      const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+      const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
       return {
         id: r.id,
         sku: r.sku,
@@ -133,8 +162,8 @@ export const api = {
         product_id: r.product_id,
         name: r.name,
         category: r.category,
-        size,
-        color,
+        size: r.size_name ?? r.size_code ?? sizeDerived,
+        color: r.color_name ?? colorDerived,
         stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
         price: Number((r as any).base_price ?? (r as any).price ?? 0),
         description: r.description ?? '',
@@ -162,8 +191,8 @@ export const api = {
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const items = (res.items || []).map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
-        const size = parts.length >= 2 ? parts[parts.length - 2] : '';
-        const color = parts.length >= 1 ? parts[parts.length - 1] : '';
+        const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+        const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
         return {
           id: r.id,
           sku: r.sku,
@@ -171,8 +200,8 @@ export const api = {
           product_id: r.product_id,
           name: r.name,
           category: r.category,
-          size,
-          color,
+          size: r.size_name ?? r.size_code ?? sizeDerived,
+          color: r.color_name ?? colorDerived,
           stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
@@ -464,11 +493,18 @@ export const api = {
     } as Customer;
   },
 
-  // Ajuste manual de stock por variante (Admin o Depósito)
+  deleteCustomer: async (id: string): Promise<void> => {
+    await request<void>(`/customers/${id}`, 'DELETE');
+  },
   updateVariantStock: async (variantId: string, stock: number): Promise<void> => {
     return handleRequest(async () => {
       await request<void>(`/stock/variant/${variantId}`, 'PUT', { stock });
     }, undefined, 'updateVariantStock');
+  },
+
+  /** Importar stock desde Excel (filas con codigo, color, y columnas P, M, G, GG, XG, XXG, XXXG). */
+  importStockFromExcel: async (rows: Array<Record<string, unknown>>): Promise<{ message: string; updated: number; notFound?: string[]; notFoundCount?: number; errors?: string[] }> => {
+    return request<any>('/stock/import-excel', 'POST', { rows });
   },
 
   // --- INTEGRATIONS ---
@@ -706,6 +742,13 @@ export const api = {
     }, { message: 'Error' }, 'createStockSnapshot');
   },
 
+  // Eliminar snapshot inicial para poder crear uno nuevo
+  deleteStockSnapshot: async (): Promise<{ message: string; deleted: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; deleted: number }>('/stock/snapshot', 'DELETE');
+    }, { message: 'Error', deleted: 0 }, 'deleteStockSnapshot');
+  },
+
   // Importar historial de ventas
   importSalesHistory: async (days: number = 60): Promise<{ message: string; totalImported: number; logs: string[] }> => {
     return handleRequest(async () => {
@@ -774,5 +817,26 @@ export const api = {
     return handleRequest(async () => {
       return await request<any[]>('/despachos/productos-sin-despacho', 'GET');
     }, [], 'getProductosSinDespacho');
+  },
+
+  // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
+  getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
+    const rows = await request<any[]>('/catalogs', 'GET');
+    return Array.isArray(rows) ? rows : [];
+  },
+  uploadCatalog: async (file: File, name?: string): Promise<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (name && name.trim()) formData.append('name', name.trim());
+    return requestFormData('/catalogs/upload', formData);
+  },
+  createCatalogUrl: async (name: string, url: string): Promise<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string }> => {
+    return request<any>('/catalogs', 'POST', { name: name.trim(), url: url.trim() });
+  },
+  deleteCatalog: async (id: string): Promise<void> => {
+    await request<void>(`/catalogs/${id}`, 'DELETE');
+  },
+  getCatalogFileBlob: async (id: string): Promise<Blob> => {
+    return getBlob(`/catalogs/${id}/file`);
   }
 };
