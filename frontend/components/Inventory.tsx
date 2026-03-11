@@ -2185,19 +2185,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               className="w-full min-w-0 pl-10 pr-4 py-3 h-12 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500/50 outline-none text-white text-sm placeholder-slate-500 box-border"
             />
           </div>
-          <div className="relative flex-shrink-0 w-full sm:w-[180px]">
-            <select
-              value={filterSize}
-              onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
-              className="w-full h-12 pl-3 pr-9 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500/50 appearance-none cursor-pointer"
-            >
-              <option value="ALL">Todos los talles</option>
-              {sizeOptions.map(s => (
-                <option key={s.code} value={s.code}>{s.label}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-          </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
             className={`flex-shrink-0 h-12 px-4 rounded-xl border flex items-center justify-center gap-2 font-semibold text-sm transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'}`}
@@ -2210,7 +2197,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           </button>
         </div>
 
-        {/* Filters Panel (sin Talle: ya está en la barra) */}
+        {/* Panel de filtros */}
         {showFilters && (
           <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in">
              <div className="space-y-1.5">
@@ -2223,6 +2210,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    >
                      <option value="ALL">Todas</option>
                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                   </select>
+                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
+                </div>
+             </div>
+
+             <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Talle</label>
+                <div className="relative">
+                   <select 
+                     value={filterSize}
+                     onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
+                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                   >
+                     <option value="ALL">Todos los talles</option>
+                     {sizeOptions.map(s => (
+                       <option key={s.code} value={s.code}>{s.label}</option>
+                     ))}
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
