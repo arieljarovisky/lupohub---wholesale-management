@@ -1711,15 +1711,29 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       }
       for (const [productId, variantIdsInProduct] of tnProductIds) {
         try {
-          const varRes = await axios.get(
-            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
-            { headers: tnHeaders }
-          );
-          const tnVariants: any[] = varRes.data || [];
+          const perPage = 200;
+          let page = 1;
+          let tnVariants: any[] = [];
+          let hasMore = true;
+          while (hasMore) {
+            const varRes = await axios.get(
+              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
+              { headers: tnHeaders, params: { page, per_page: perPage }, validateStatus: () => true }
+            );
+            if (varRes.status !== 200) break;
+            const chunk = Array.isArray(varRes.data) ? varRes.data : [];
+            tnVariants = tnVariants.concat(chunk);
+            if (chunk.length < perPage) hasMore = false;
+            else page++;
+            if (page > 10) hasMore = false;
+          }
           for (const variantId of variantIdsInProduct) {
             const tnVid = variantToTnVariant.get(variantId);
             const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
-            if (tv != null && typeof tv.stock === 'number') stocks[variantId].stockTN = tv.stock;
+            if (tv != null) {
+              const stockVal = typeof tv.stock === 'number' ? tv.stock : (typeof tv.stock === 'string' ? parseInt(tv.stock, 10) : undefined);
+              if (typeof stockVal === 'number' && !isNaN(stockVal)) stocks[variantId].stockTN = stockVal;
+            }
           }
         } catch {
           // ignore per-product errors
