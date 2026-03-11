@@ -457,7 +457,10 @@ const StockHistory: React.FC = () => {
                     icon: <Package size={16} />
                   };
                   const isPositive = movement.quantity_change > 0;
-                  const canRevert = movement.movement_type === 'AJUSTE_MANUAL';
+                  const wasReverted = filteredMovements.some(
+                    m => m.reference && m.reference.includes(`Reversión de movimiento ${movement.id}`)
+                  );
+                  const canRevert = movement.movement_type === 'AJUSTE_MANUAL' && !wasReverted;
 
                   return (
                     <tr key={movement.id} className="border-b border-slate-700/20 hover:bg-slate-700/10 transition-colors">
@@ -513,6 +516,11 @@ const StockHistory: React.FC = () => {
                             )}
                             Revertir
                           </button>
+                        ) : movement.movement_type === 'AJUSTE_MANUAL' && wasReverted ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 bg-slate-700/50 border border-slate-600" title="Este movimiento ya fue revertido">
+                            <CheckCircle size={12} />
+                            Revertido
+                          </span>
                         ) : (
                           <span className="text-slate-600 text-[10px]">—</span>
                         )}
