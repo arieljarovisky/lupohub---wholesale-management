@@ -167,10 +167,24 @@ export const createProduct = async (req: any, res: any) => {
       let productId: string | null = (await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]))?.id || null;
       if (!productId) {
         productId = uuidv4();
-        await execute(
-          `INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`,
-          [productId, baseSku, name, category ?? 'General', basePrice, description]
-        );
+        try {
+          await execute(
+            `INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`,
+            [productId, baseSku, name, category ?? 'General', basePrice, description]
+          );
+        } catch (insertErr: any) {
+          // Varias requests en paralelo pueden intentar crear el mismo producto; si ya existe, usar ese id
+          if (insertErr.code === 'ER_DUP_ENTRY' && insertErr.sqlMessage && String(insertErr.sqlMessage).includes("'products.sku'")) {
+            const existing = await get(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
+            if (existing?.id) {
+              productId = existing.id;
+            } else {
+              throw insertErr;
+            }
+          } else {
+            throw insertErr;
+          }
+        }
       }
 
       let sizeId = (await get(`SELECT id FROM sizes WHERE size_code = ?`, [sizeCode]))?.id;
