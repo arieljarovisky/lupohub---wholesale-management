@@ -468,8 +468,8 @@ const Settings: React.FC<SettingsProps> = ({
     }
     const list = Array.from(byCanonical.values());
     list.sort((a, b) => {
-      const ca = (nombreTalleDesdeCodigo((a as any).code ?? a.name) || (a as any).code ?? a.name ?? '').toString().toUpperCase();
-      const cb = (nombreTalleDesdeCodigo((b as any).code ?? b.name) || (b as any).code ?? b.name ?? '').toString().toUpperCase();
+      const ca = (nombreTalleDesdeCodigo((a as any).code ?? a.name) || ((a as any).code ?? a.name ?? '')).toString().toUpperCase();
+      const cb = (nombreTalleDesdeCodigo((b as any).code ?? b.name) || ((b as any).code ?? b.name ?? '')).toString().toUpperCase();
       const ia = SIZE_ORDER.indexOf(ca);
       const ib = SIZE_ORDER.indexOf(cb);
       if (ia !== -1 && ib !== -1) return ia - ib;
