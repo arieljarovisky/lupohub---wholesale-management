@@ -16,11 +16,11 @@ function ensureUploadDir() {
 ensureUploadDir();
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
+  destination: (_req: Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
     ensureUploadDir();
     cb(null, UPLOAD_DIR);
   },
-  filename: (_req, file, cb) => {
+  filename: (_req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
     const ext = path.extname(file.originalname) || '.pdf';
     cb(null, `${uuidv4()}${ext}`);
   }

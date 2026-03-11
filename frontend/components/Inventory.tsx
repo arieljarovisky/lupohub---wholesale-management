@@ -4,29 +4,29 @@ import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Mi
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
+import {
+  getStoredInventoryState,
+  setStoredInventoryState,
+  runWithConcurrency,
+  parseStockExcel,
+  getProductColorCode,
+  getProductSizeCode,
+  getSizeCanonicalSet,
+  matchesSizeFilter,
+  SIZE_ORDER_MODAL,
+  SIZE_ORDER,
+} from '../utils/inventoryUtils';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 
-const CONCURRENT_VARIANT_REQUESTS = 4;
-async function runWithConcurrency<T>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<void>
-): Promise<void> {
-  let index = 0;
-  async function run(): Promise<void> {
-    while (index < items.length) {
-      const i = index++;
-      try {
-        await fn(items[i]);
-      } catch {
-        // ignore per-item errors
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => run()));
+function InventoryViewSwitch(
+  props: { view: 'mine' | 'ml' | 'tn'; ml: React.ReactNode; tn: React.ReactNode; mine: React.ReactNode }
+) {
+  if (props.view === 'ml') return props.ml;
+  if (props.view === 'tn') return props.tn;
+  return props.mine;
 }
 
 interface InventoryProps {
@@ -36,97 +36,6 @@ interface InventoryProps {
   onCreateProducts?: (products: Product[]) => void;
   onUpdateStock?: (productId: string, newStock: number) => void;
   onImportComplete?: () => void;
-}
-
-const INVENTORY_STORAGE_KEY = 'lupo_inventory';
-
-/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
-function padArticleCodeTo7(s: string): string {
-  const digits = String(s ?? '').replace(/\D/g, '');
-  if (!digits) return s;
-  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
-}
-
-/** Parsea Excel de stock: columna CODIGO (puede estar fusionada), COLOR, y columnas P, M, G, GG, XG, XXG, XXXG. */
-async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
-  const data = new Uint8Array(await file.arrayBuffer());
-  const workbook = XLSX.read(data, { type: 'array' });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return [];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
-  if (rows.length < 2) return [];
-  const headers = (rows[0] || []).map(h => String(h ?? '').trim().toUpperCase());
-  const codigoCol = headers.findIndex(h => h === 'CODIGO' || h === 'CÓDIGO' || h === 'COD');
-  const colorCol = headers.findIndex(h => h === 'COLOR' || h === 'COL');
-  const sizeCols: { key: string; index: number }[] = [];
-  const sizeNames = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
-  for (const name of sizeNames) {
-    const idx = headers.findIndex(h => h === name);
-    if (idx >= 0) sizeCols.push({ key: name, index: idx });
-  }
-  if (codigoCol < 0 || colorCol < 0 || sizeCols.length === 0) return [];
-  let lastCodigo = '';
-  const out: Array<Record<string, unknown>> = [];
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i] || [];
-    const rawCodigo = row[codigoCol];
-    const codigo = rawCodigo != null && String(rawCodigo).trim() !== '' ? String(rawCodigo).trim() : lastCodigo;
-    if (codigo) lastCodigo = codigo;
-    const rawColor = row[colorCol];
-    const color = rawColor != null ? String(rawColor).trim() : '';
-    if (!codigo || !color) continue;
-    const obj: Record<string, unknown> = { codigo: padArticleCodeTo7(codigo), color };
-    for (const { key, index } of sizeCols) {
-      const v = row[index];
-      if (v === null || v === undefined || v === '') obj[key] = 0;
-      else if (typeof v === 'number') obj[key] = v;
-      else if (String(v).trim().toUpperCase() === 'X') obj[key] = 0;
-      else obj[key] = parseInt(String(v).replace(/\D/g, ''), 10) || 0;
-    }
-    out.push(obj);
-  }
-  return out;
-}
-
-function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string } {
-  try {
-    const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
-    if (!raw) return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
-    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string };
-    const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
-    const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
-    const hideZeroStock = parsed.hideZeroStock === true;
-    return {
-      search: typeof parsed.search === 'string' ? parsed.search : '',
-      page,
-      subView,
-      hideZeroStock,
-      filterSize: typeof parsed.filterSize === 'string' ? parsed.filterSize : undefined,
-      filterCategory: typeof parsed.filterCategory === 'string' ? parsed.filterCategory : undefined,
-      filterColor: typeof parsed.filterColor === 'string' ? parsed.filterColor : undefined
-    };
-  } catch {
-    return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
-  }
-}
-
-function setStoredInventoryState(
-  search: string,
-  page: number,
-  subView: 'mine' | 'ml' | 'tn',
-  hideZeroStock?: boolean,
-  filters?: { filterSize?: string; filterCategory?: string; filterColor?: string }
-) {
-  try {
-    const obj: Record<string, unknown> = { search, page, subView, hideZeroStock: hideZeroStock === true };
-    if (filters) {
-      obj.filterSize = filters.filterSize ?? 'ALL';
-      obj.filterCategory = filters.filterCategory ?? 'ALL';
-      obj.filterColor = filters.filterColor ?? 'ALL';
-    }
-    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(obj));
-  } catch {}
 }
 
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
@@ -295,52 +204,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     });
     return list;
   }, [availableSizes]);
-    const val = ((p as any).color || '').toString().trim().toLowerCase();
-    if (val) return val;
-    
-    const sku = (p.sku || '').toString().trim();
-    // Try to find color code pattern (digits at the end or as last segment)
-    // 1. Try split by '-'
-    const parts = sku.split('-');
-    if (parts.length > 1) {
-      // Check if last part looks like a color code (digits, possibly with some letters but usually digits for colors like 111, 800)
-      // Or if it's a known color format.
-      // Assuming last part is color if >= 2 segments.
-      return parts[parts.length - 1].trim().toLowerCase();
-    }
-    
-    return '';
-  }
-  
-  function getProductSizeCode(p: Product) {
-    const val = ((p as any).size || '').toString().trim().toUpperCase();
-    if (val) return val;
-    const sku = (p.sku || '').toString().trim();
-    const parts = sku.split('-');
-    if (parts.length >= 3) {
-      return (parts[parts.length - 2] || '').toString().trim().toUpperCase();
-    }
-    return '';
-  }
-
-  /** Conjunto de códigos equivalentes para comparar talle (ej: "M" y "140" son el mismo talle). */
-  function getSizeCanonicalSet(sizeStr: string): Set<string> {
-    const s = (sizeStr || '').toString().trim().toUpperCase();
-    if (!s) return new Set();
-    const fromTango = nombreTalleDesdeCodigo(s); // "140" -> "M"
-    const toTango = codigoTalleParaSku(s);       // "M" -> "140"
-    const set = new Set<string>([s]);
-    if (fromTango) set.add(fromTango);
-    if (toTango) set.add(toTango);
-    return set;
-  }
-
-  function matchesSizeFilter(productSizeCode: string, selectedFilterSize: string): boolean {
-    if (selectedFilterSize === 'ALL') return true;
-    const productSet = getSizeCanonicalSet(productSizeCode);
-    const filterSet = getSizeCanonicalSet(selectedFilterSize);
-    return [...filterSet].some(fc => productSet.has(fc));
-  }
 
   useEffect(() => {
     if (import.meta.env.DEV && products.length > 0) {
@@ -1495,7 +1358,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('error', errors.join(' '));
     } else {
       const nextAssignments = runBulkAutoMatch(bulkLinkVariants, mlList, tnList);
-      const linkedCount = Object.values(nextAssignments).filter(a => (a.ml?.trim() || a.tn?.trim())).length;
+      const linkedCount = Object.values(nextAssignments).filter((a: { ml?: string; tn?: string }) => (a.ml?.trim() || a.tn?.trim())).length;
       if (linkedCount === 0) {
         showToast('info', 'Se cargaron las listas pero no se emparejó ninguna variante por SKU ni por talle/color. Revisá que coincidan o asigná manualmente en la tabla.');
       } else {
@@ -1909,11 +1772,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }).catch(() => {});
   };
 
-  return (
+  const result = (
     <div className="space-y-4 relative min-w-0 overflow-hidden">
       {/* Navegación de vistas: Mi inventario | ML | TN — sin scroll horizontal */}
       <div className="flex flex-col md:flex-row gap-2 md:gap-0 min-w-0">
-        {/* Móvil y tablet: dropdown para evitar scroll y texto cortado */}
         <div className="md:hidden relative w-full min-w-0">
           <select
             value={inventorySubView}
@@ -1929,7 +1791,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             <ChevronDown size={18} />
           </div>
         </div>
-        {/* Solo desktop (md+): pestañas, con ancho controlado para que no hagan scroll */}
         <div className="hidden md:flex rounded-xl bg-slate-800/60 border border-slate-700/80 p-1 gap-0.5 min-w-0 w-full max-w-full">
           <button
             type="button"
@@ -1958,13 +1819,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       </div>
 
-      {inventorySubView === 'ml' ? (
-        <MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />
-      ) : inventorySubView === 'tn' ? (
-        <TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />
-      ) : (
+      <InventoryViewSwitch
+        view={inventorySubView}
+        ml={<MercadoLibreStock searchTerm={mlSearchTerm} onSearchChange={setMlSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />}
+        tn={<TiendaNubeStock searchTerm={tnSearchTerm} onSearchChange={setTnSearchTerm} showToast={showToast} onProductImported={(baseSku) => { setServerListRefreshKey(k => k + 1); if (baseSku) { setInventorySubView('mine'); setSearchTerm(baseSku); } onImportComplete?.(); }} />}
+        mine={(
         <>
-      {/* Ayuda: unificación código / nombre */}
       <div className="bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2 flex items-center gap-2 text-slate-400 text-xs">
         <Info size={16} className="shrink-0 text-blue-400" />
         <span>
@@ -2954,7 +2814,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-500'
                                  }`}
                                >
-                                 {labelTalle((size as any).code ?? size.name) || size.name}
+                                 {(labelTalle((size as any).code ?? size.name) || (size.name))}
                                </button>
                              );
                           })}
@@ -3769,11 +3629,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             )}
           </div>
         </div>
-      )}
-        </>
-      )}
+        )}
+          </>
+        )}
+      />
     </div>
   );
+  return result;
 };
 
 export default Inventory;
