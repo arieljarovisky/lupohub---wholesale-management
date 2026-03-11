@@ -162,7 +162,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [newPrice, setNewPrice] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [selectedColorIds, setSelectedColorIds] = useState<string[]>([]);
   const [initialStock, setInitialStock] = useState('0');
 
   // Linking Modal State
@@ -262,15 +262,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
    const availableColors = attributes.filter(a => a.type === 'color').sort((a, b) => {
       const valA = ((a as any).code || a.name || '').toString();
       const valB = ((b as any).code || b.name || '').toString();
-      // Try numeric sort
       const na = parseInt(valA);
       const nb = parseInt(valB);
       if (!isNaN(na) && !isNaN(nb)) return na - nb;
       return valA.localeCompare(valB);
    });
 
-
-  function getProductColorCode(p: Product) {
+  // Talles sin duplicados para el modal "Generar Inventario" (P y 130 - P son el mismo talle)
+  const SIZE_ORDER_MODAL = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG', 'S', 'L', 'XL', 'XXL', 'XXXL', 'XS'];
+  const uniqueSizesForModal = React.useMemo(() => {
+    const byCanonical = new Map<string, Attribute>();
+    for (const a of availableSizes) {
+      const raw = ((a as any).code ?? a.name ?? '').toString().trim().toUpperCase();
+      const code = codigoTalleParaSku(raw) || raw;
+      const canonical = (nombreTalleDesdeCodigo(code) || code).toUpperCase();
+      const existing = byCanonical.get(canonical);
+      const isNumeric = /^\d{2,3}$/.test(code);
+      if (!existing || (isNumeric && !/^\d{2,3}$/.test((existing as any).code ?? ''))) {
+        byCanonical.set(canonical, { ...a, name: a.name, ...(code ? { code } : {}) } as Attribute);
+      }
+    }
+    const list = Array.from(byCanonical.values());
+    list.sort((a, b) => {
+      const ca = (nombreTalleDesdeCodigo((a as any).code ?? a.name) || ((a as any).code ?? a.name ?? '')).toString().toUpperCase();
+      const cb = (nombreTalleDesdeCodigo((b as any).code ?? b.name) || ((b as any).code ?? b.name ?? '')).toString().toUpperCase();
+      const ia = SIZE_ORDER_MODAL.indexOf(ca);
+      const ib = SIZE_ORDER_MODAL.indexOf(cb);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return ca.localeCompare(cb);
+    });
+    return list;
+  }, [availableSizes]);
     const val = ((p as any).color || '').toString().trim().toLowerCase();
     if (val) return val;
     
@@ -1719,7 +1743,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setNewDescription('');
     }
     setSelectedSizes([]);
-    setSelectedColors([]);
+    setSelectedColorIds([]);
     setInitialStock('0');
     setIsCreating(true);
   };
@@ -1836,14 +1860,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     );
   };
 
-  const toggleColorSelection = (colorName: string) => {
-    setSelectedColors(prev => 
-      prev.includes(colorName) ? prev.filter(c => c !== colorName) : [...prev, colorName]
+  const toggleColorSelection = (colorId: string) => {
+    setSelectedColorIds(prev =>
+      prev.includes(colorId) ? prev.filter(id => id !== colorId) : [...prev, colorId]
     );
   };
 
   const handleCreateBatch = () => {
-    if (!newProductName || !newBaseSku || !newPrice || selectedSizes.length === 0 || selectedColors.length === 0) return;
+    if (!newProductName || !newBaseSku || !newPrice || selectedSizes.length === 0 || selectedColorIds.length === 0) return;
     if (!onCreateProducts) return;
 
     const baseSku = newBaseSku.trim();
@@ -1851,16 +1875,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     let index = 0;
 
     selectedSizes.forEach(sizeName => {
-      selectedColors.forEach(colorName => {
+      selectedColorIds.forEach(colorId => {
         index++;
         const sizeAttr = availableSizes.find((s: any) => (s.name || '').toString() === sizeName || ((s as any).code || '').toString() === sizeName);
-        const colorAttr = availableColors.find((c: any) => (c.name || '').toString() === colorName || ((c as any).code || '').toString() === colorName);
+        const colorAttr = availableColors.find((c: any) => c.id === colorId);
+        if (!colorAttr) return;
+        const colorName = (colorAttr.name || (colorAttr as any).code || '').toString();
         const rawSizeCode = (sizeAttr && (sizeAttr as any).code != null) ? String((sizeAttr as any).code).trim() : sizeName;
         const rawColorCode = (colorAttr && (colorAttr as any).code != null) ? String((colorAttr as any).code).trim() : colorName.toUpperCase().replace(/\s+/g, '').substring(0, 3);
         const sizeCode = codigoTalleParaSku(rawSizeCode) || rawSizeCode.replace(/\s+/g, '');
         const colorCode = /^\d+$/.test(rawColorCode) ? rawColorCode : rawColorCode;
         const finalSku = `${baseSku}-${sizeCode}-${colorCode}`;
-        
+
         newProducts.push({
           id: `p-${Date.now()}-${index}`,
           sku: finalSku,
@@ -2918,23 +2944,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-800">
                        <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Ruler size={16} className="text-blue-400"/> Selección de Talles</h4>
                        <div className="flex flex-wrap gap-2">
-                          {availableSizes.map(size => {
-                             const isSelected = selectedSizes.includes(size.name);
+                          {uniqueSizesForModal.map(size => {
+                             const sizeKey = (size as any).code ?? size.name ?? '';
+                             const isSelected = selectedSizes.includes(sizeKey);
                              return (
                                <button 
                                  key={size.id}
-                                 onClick={() => toggleSizeSelection(size.name)}
+                                 onClick={() => toggleSizeSelection(sizeKey)}
                                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${
                                    isSelected 
                                    ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/40' 
                                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:border-slate-500'
                                  }`}
                                >
-                                 {size.name}
+                                 {labelTalle((size as any).code ?? size.name) || size.name}
                                </button>
                              );
                           })}
-                          {availableSizes.length === 0 && <p className="text-xs text-slate-500">No hay talles configurados.</p>}
+                          {uniqueSizesForModal.length === 0 && <p className="text-xs text-slate-500">No hay talles configurados.</p>}
                        </div>
                     </div>
 
@@ -2945,11 +2972,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           {availableColors.map(color => {
                              const code = (color as any).code != null ? String((color as any).code).trim() : '';
                              const label = code ? `${code} - ${color.name || ''}` : (color.name || '');
-                             const isSelected = selectedColors.includes(color.name);
+                             const isSelected = selectedColorIds.includes(color.id);
                              return (
                                <button 
                                  key={color.id}
-                                 onClick={() => toggleColorSelection(color.name)}
+                                 onClick={() => toggleColorSelection(color.id)}
                                  className={`pl-3 pr-4 py-2 rounded-lg text-sm font-bold transition-all border flex items-center gap-2 ${
                                    isSelected 
                                    ? 'bg-pink-600 text-white border-pink-500 shadow-lg shadow-pink-900/40' 
@@ -2988,7 +3015,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {/* Modal Footer */}
               <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-between items-center">
                  <div className="text-xs text-slate-400">
-                    Resumen: <strong className="text-white text-lg ml-1">{selectedSizes.length * selectedColors.length}</strong> variantes serán creadas.
+                    Resumen: <strong className="text-white text-lg ml-1">{selectedSizes.length * selectedColorIds.length}</strong> variantes serán creadas.
                  </div>
                  <div className="flex gap-3">
                     <button 
@@ -2999,7 +3026,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </button>
                     <button 
                       onClick={handleCreateBatch}
-                      disabled={!newProductName || !newBaseSku || selectedSizes.length === 0 || selectedColors.length === 0}
+                      disabled={!newProductName || !newBaseSku || selectedSizes.length === 0 || selectedColorIds.length === 0}
                       className="px-8 py-3 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-900/40 active:scale-95 transition-all flex items-center gap-2"
                     >
                       <CheckCircle2 size={20} />

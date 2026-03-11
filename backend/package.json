@@ -8,6 +8,8 @@
     "dev": "cross-env PORT=3010 nodemon src/index.ts",
     "build": "tsc",
     "init-db": "ts-node src/database/init.ts",
+    "merge-trifil": "ts-node scripts/merge-trifil-products.ts",
+    "merge-trifil:prod": "cross-env NODE_ENV=production ts-node scripts/merge-trifil-products.ts",
     "parse-tango": "node scripts/parse-tango-articulos.js"
   },
   "dependencies": {

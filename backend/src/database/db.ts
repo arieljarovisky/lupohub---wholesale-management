@@ -1,6 +1,11 @@
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
+import path from 'path';
 
+// En producción, cargar primero .env.production (conexión a base de producción)
+if (process.env.NODE_ENV === 'production') {
+  dotenv.config({ path: path.join(process.cwd(), '.env.production') });
+}
 dotenv.config();
 
 function getPoolConfig(): mysql.PoolOptions {
