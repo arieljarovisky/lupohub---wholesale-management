@@ -28,6 +28,7 @@ import {
   getMercadoLibreStock,
   getMercadoLibreStockTotals,
   getMercadoLibreItemVariations,
+  getVariantExternalStocks,
   getMLAutoMessageConfig,
   saveMLAutoMessageConfig,
   importProductFromMercadoLibre,
@@ -47,6 +48,7 @@ router.get('/mercadolibre/orders', getMercadoLibreOrders);
 router.get('/mercadolibre/stock', getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', getMercadoLibreStockTotals);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
+router.post('/variant-external-stocks', getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);

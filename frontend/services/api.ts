@@ -579,7 +579,14 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, total: 0, logs: [] }, 'syncSelectedStockToMercadoLibre');
   },
 
-  /** ML = fuente de verdad: importa stock desde ML a LupoHub y luego envía a Tienda Nube */
+  /** Stock en ML y TN por variante (para mostrar en inventario). */
+  getVariantExternalStocks: async (variantIds: string[]): Promise<{ stocks: Record<string, { stockML?: number; stockTN?: number }> }> => {
+    return handleRequest(async () => {
+      return await request<{ stocks: Record<string, { stockML?: number; stockTN?: number }> }>('/integrations/variant-external-stocks', 'POST', { variantIds }, undefined, 30000);
+    }, { stocks: {} }, 'getVariantExternalStocks');
+  },
+
+  /** Opcional: ML como fuente — importa stock desde ML a LupoHub y envía a TN. Para flujo normal usar syncAllStockToMercadoLibre (LupoHub → ML). */
   syncAllStockFromMercadoLibre: async (): Promise<{
     message: string;
     importedFromML: number;

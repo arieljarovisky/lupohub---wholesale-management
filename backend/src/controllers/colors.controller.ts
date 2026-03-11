@@ -12,7 +12,7 @@ export const getColors = async (req: Request, res: Response) => {
     const hasColorsTable = Number(tblCheck?.[0]?.cnt || 0) > 0;
 
     if (hasColorsTable) {
-      // 2) Detectar si existe la columna 'hex'
+    
       const hexColCheck = await query(`
         SELECT COUNT(*) AS cnt 
         FROM information_schema.columns 

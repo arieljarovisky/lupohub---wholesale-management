@@ -1630,7 +1630,111 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
   }
 };
 
-/** Sincronizar los 3 stocks con Mercado Libre como fuente de verdad: ML → LupoHub → Tienda Nube */
+/** Obtener stock en ML y TN por variantes (para mostrar en inventario). */
+export const getVariantExternalStocks = async (req: Request, res: Response) => {
+  try {
+    const variantIds = Array.isArray(req.body?.variantIds) ? req.body.variantIds.filter((id: unknown) => typeof id === 'string' && id.length > 0).slice(0, 100) : [];
+    if (variantIds.length === 0) {
+      return res.json({ stocks: {} });
+    }
+
+    const placeholders = variantIds.map(() => '?').join(',');
+    const rows = await query(
+      `SELECT pv.id AS variant_id,
+              p.mercado_libre_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
+              p.tienda_nube_id, pv.tienda_nube_variant_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.id IN (${placeholders})`,
+      variantIds
+    );
+
+    const stocks: Record<string, { stockML?: number; stockTN?: number }> = {};
+    for (const id of variantIds) stocks[id] = {};
+
+    const mlToken = await getValidMLToken();
+    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+
+    if (mlToken?.access_token) {
+      const mlHeaders = { 'Authorization': `Bearer ${mlToken.access_token}` };
+      const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
+      for (const r of rows || []) {
+        const variantId = (r as any).variant_id;
+        const mlItemId = (r as any).mercado_libre_item_id || (r as any).mercado_libre_id;
+        const variationId = (r as any).mercado_libre_variant_id ? String((r as any).mercado_libre_variant_id) : null;
+        if (!mlItemId) continue;
+        if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
+        mlItemIds.get(mlItemId)!.push({ variantId, variationId });
+      }
+      for (const [itemId, variants] of mlItemIds) {
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers: mlHeaders });
+          const item = itemRes.data;
+          const variations: any[] = item.variations || [];
+          for (const { variantId, variationId } of variants) {
+            if (variations.length === 0) {
+              stocks[variantId].stockML = item.available_quantity ?? 0;
+            } else if (variationId) {
+              const v = variations.find((x: any) => String(x.id) === String(variationId));
+              stocks[variantId].stockML = v ? (v.available_quantity ?? 0) : undefined;
+            } else if (variations.length === 1) {
+              stocks[variantId].stockML = variations[0].available_quantity ?? 0;
+            }
+          }
+        } catch {
+          // ignore per-item errors
+        }
+      }
+    }
+
+    if (tnIntegration?.access_token && tnIntegration?.store_id) {
+      const tnHeaders = {
+        'Authentication': `bearer ${tnIntegration.access_token}`,
+        'Content-Type': 'application/json',
+        'User-Agent': TN_USER_AGENT
+      };
+      const tnProductIds = new Map<string, string[]>();
+      for (const r of rows || []) {
+        const variantId = (r as any).variant_id;
+        const tnProductId = (r as any).tienda_nube_id;
+        const tnVariantId = (r as any).tienda_nube_variant_id;
+        if (!tnProductId || !tnVariantId) continue;
+        if (!tnProductIds.has(tnProductId)) tnProductIds.set(tnProductId, []);
+        tnProductIds.get(tnProductId)!.push(variantId);
+      }
+      const variantToTnVariant = new Map<string, string>();
+      for (const r of rows || []) {
+        const variantId = (r as any).variant_id;
+        const tnVariantId = (r as any).tienda_nube_variant_id;
+        if (tnVariantId) variantToTnVariant.set(variantId, String(tnVariantId));
+      }
+      for (const [productId, variantIdsInProduct] of tnProductIds) {
+        try {
+          const varRes = await axios.get(
+            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
+            { headers: tnHeaders }
+          );
+          const tnVariants: any[] = varRes.data || [];
+          for (const variantId of variantIdsInProduct) {
+            const tnVid = variantToTnVariant.get(variantId);
+            const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
+            if (tv != null && typeof tv.stock === 'number') stocks[variantId].stockTN = tv.stock;
+          }
+        } catch {
+          // ignore per-product errors
+        }
+      }
+    }
+
+    res.json({ stocks });
+  } catch (error: any) {
+    console.error('Error getting variant external stocks:', error);
+    res.status(500).json({ message: 'Error obteniendo stock externo', error: error.message });
+  }
+};
+
+/** Opcional: sincronizar con Mercado Libre como fuente (ML → LupoHub → Tienda Nube). Para el flujo normal, LupoHub es la fuente de verdad y se envía a ML con syncAllStockToMercadoLibre. */
 export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -1647,7 +1751,7 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
     const limit = 50;
     let offset = 0;
 
-    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
+    logs.push('[1/2] Importando stock desde Mercado Libre (opcional; por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,
@@ -1798,7 +1902,7 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
     const limit = 50;
     let offset = 0;
 
-    logs.push('[1/2] Importando stock desde Mercado Libre (solo por SKU local)...');
+    logs.push('[1/2] Importando stock desde Mercado Libre (opcional; por SKU local)...');
     while (true) {
       const itemsRes = await axios.get(
         `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=active&offset=${offset}&limit=${limit}`,

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
-import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
@@ -89,23 +89,43 @@ async function parseStockExcel(file: File): Promise<Array<Record<string, unknown
   return out;
 }
 
-function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean } {
+function getStoredInventoryState(): { search: string; page: number; subView: 'mine' | 'ml' | 'tn'; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string } {
   try {
     const raw = sessionStorage.getItem(INVENTORY_STORAGE_KEY);
     if (!raw) return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
-    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean };
+    const parsed = JSON.parse(raw) as { search?: string; page?: number; subView?: string; hideZeroStock?: boolean; filterSize?: string; filterCategory?: string; filterColor?: string };
     const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
     const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
     const hideZeroStock = parsed.hideZeroStock === true;
-    return { search: typeof parsed.search === 'string' ? parsed.search : '', page, subView, hideZeroStock };
+    return {
+      search: typeof parsed.search === 'string' ? parsed.search : '',
+      page,
+      subView,
+      hideZeroStock,
+      filterSize: typeof parsed.filterSize === 'string' ? parsed.filterSize : undefined,
+      filterCategory: typeof parsed.filterCategory === 'string' ? parsed.filterCategory : undefined,
+      filterColor: typeof parsed.filterColor === 'string' ? parsed.filterColor : undefined
+    };
   } catch {
     return { search: '', page: 1, subView: 'mine', hideZeroStock: false };
   }
 }
 
-function setStoredInventoryState(search: string, page: number, subView: 'mine' | 'ml' | 'tn', hideZeroStock?: boolean) {
+function setStoredInventoryState(
+  search: string,
+  page: number,
+  subView: 'mine' | 'ml' | 'tn',
+  hideZeroStock?: boolean,
+  filters?: { filterSize?: string; filterCategory?: string; filterColor?: string }
+) {
   try {
-    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify({ search, page, subView, hideZeroStock: hideZeroStock === true }));
+    const obj: Record<string, unknown> = { search, page, subView, hideZeroStock: hideZeroStock === true };
+    if (filters) {
+      obj.filterSize = filters.filterSize ?? 'ALL';
+      obj.filterCategory = filters.filterCategory ?? 'ALL';
+      obj.filterColor = filters.filterColor ?? 'ALL';
+    }
+    sessionStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(obj));
   } catch {}
 }
 
@@ -207,12 +227,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
   const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filter States
-  const [filterCategory, setFilterCategory] = useState('ALL');
-  const [filterSize, setFilterSize] = useState('ALL');
+  // Filter States (inicializar desde sesión para que no se pierdan al re-renderizar)
+  const [filterCategory, setFilterCategory] = useState(stored.filterCategory ?? 'ALL');
+  const [filterSize, setFilterSize] = useState(stored.filterSize ?? 'ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
   const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'>('ALL');
-  const [filterColor, setFilterColor] = useState('ALL');
+  const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
   const [sortKey, setSortKey] = useState<'SKU' | 'STOCK' | 'VARIANTS'>('SKU');
@@ -222,13 +242,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverMode, setServerMode] = useState(true);
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
+  const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number }>>({});
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
-  // Persistir búsqueda, página y pestaña para que al actualizar la página se mantengan
+  // Persistir búsqueda, página, pestaña y filtros para que al actualizar o volver no se pierdan
   useEffect(() => {
-    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock);
-  }, [searchTerm, currentPage, inventorySubView, hideZeroStock]);
+    setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock, {
+      filterSize,
+      filterCategory,
+      filterColor
+    });
+  }, [searchTerm, currentPage, inventorySubView, hideZeroStock, filterSize, filterCategory, filterColor]);
 
   const availableSizes = attributes.filter(a => a.type === 'size');
   
@@ -274,12 +299,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return '';
   }
 
-  /** Normaliza talle a código para comparación (ej. "M" y "140" → mismo valor). */
-  function normalizeSizeForFilter(size: string): string {
-    if (!size || size === 'ALL') return '';
-    const s = size.trim().toUpperCase();
-    const code = codigoTalleParaSku(s);
-    return code || s;
+  /** Conjunto de códigos equivalentes para comparar talle (ej: "M" y "140" son el mismo talle). */
+  function getSizeCanonicalSet(sizeStr: string): Set<string> {
+    const s = (sizeStr || '').toString().trim().toUpperCase();
+    if (!s) return new Set();
+    const fromTango = nombreTalleDesdeCodigo(s); // "140" -> "M"
+    const toTango = codigoTalleParaSku(s);       // "M" -> "140"
+    const set = new Set<string>([s]);
+    if (fromTango) set.add(fromTango);
+    if (toTango) set.add(toTango);
+    return set;
+  }
+
+  function matchesSizeFilter(productSizeCode: string, selectedFilterSize: string): boolean {
+    if (selectedFilterSize === 'ALL') return true;
+    const productSet = getSizeCanonicalSet(productSizeCode);
+    const filterSet = getSizeCanonicalSet(selectedFilterSize);
+    return [...filterSet].some(fc => productSet.has(fc));
   }
 
   useEffect(() => {
@@ -459,9 +495,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
     const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
     const sizeCode = getProductSizeCode(p);
-    const normProduct = normalizeSizeForFilter(sizeCode);
-    const normFilter = normalizeSizeForFilter(filterSize);
-    const matchesSize = filterSize === 'ALL' || normProduct === normFilter || sizeCode.toUpperCase() === filterSize.trim().toUpperCase();
+    const matchesSize = matchesSizeFilter(sizeCode, filterSize);
     
     const isParent = sku.split('-').length <= 1;
     const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
@@ -487,9 +521,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
       const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
       const sizeCode = getProductSizeCode(p);
-      const normProduct = normalizeSizeForFilter(sizeCode);
-      const normFilter = normalizeSizeForFilter(filterSize);
-      const matchesSize = filterSize === 'ALL' || normProduct === normFilter || sizeCode.toUpperCase() === filterSize.trim().toUpperCase();
+      const matchesSize = matchesSizeFilter(sizeCode, filterSize);
       let matchesStock = true;
       const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
       if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
@@ -520,25 +552,43 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const categories = React.useMemo(() => Array.from(new Set(products.map(p => p.category))), [products]);
   const sizes = React.useMemo(() => Array.from(new Set(products.map(p => (p as any).size).filter(Boolean))), [products]);
-  
+
+  // Opciones de talle sin duplicados: 130 y P son el mismo talle, mostramos uno solo (preferimos código numérico para que coincida con SKU)
+  const SIZE_ORDER = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG', 'S', 'L', 'XL', 'XXL', 'XXXL', 'XS'];
   const sizeOptions = React.useMemo(() => {
     const attrSizes = attributes.filter(a => a.type === 'size');
     const opts = attrSizes.map(a => {
       const raw = (((a as any).code || a.name || '') as string).toString().toUpperCase();
-      const code = normalizeSizeForFilter(raw) || raw;
+      const code = (codigoTalleParaSku(raw) || raw);
       const label = labelTalle(code) || (a.name || raw);
       return { code, label };
     }).filter(s => s.code);
-    if (opts.length > 0) {
-      const uniqueByCode = Array.from(new Map(opts.map(o => [o.code, o])).values());
-      return uniqueByCode.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+    if (opts.length === 0) {
+      const derived = Array.from(new Set(products.map(p => getProductSizeCode(p)).filter(Boolean)));
+      return derived.map(code => ({ code, label: labelTalle(code) || code }));
     }
-    const source = serverMode ? serverItems : products;
-    const derived = Array.from(new Set(
-      source.map(p => normalizeSizeForFilter(getProductSizeCode(p)) || getProductSizeCode(p)).filter(Boolean)
-    ));
-    return derived.map(code => ({ code, label: labelTalle(code) || code })).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-  }, [attributes, products, serverMode, serverItems]);
+    const byCanonical = new Map<string, { code: string; label: string }>();
+    for (const o of opts) {
+      const canonical = (nombreTalleDesdeCodigo(o.code) || o.code).toUpperCase();
+      const existing = byCanonical.get(canonical);
+      const oIsNumeric = /^\d{2,3}$/.test(o.code);
+      if (!existing || (oIsNumeric && !/^\d{2,3}$/.test(existing.code))) {
+        byCanonical.set(canonical, o);
+      }
+    }
+    const list = Array.from(byCanonical.values());
+    list.sort((a, b) => {
+      const ca = (nombreTalleDesdeCodigo(a.code) || a.code).toUpperCase();
+      const cb = (nombreTalleDesdeCodigo(b.code) || b.code).toUpperCase();
+      const ia = SIZE_ORDER.indexOf(ca);
+      const ib = SIZE_ORDER.indexOf(cb);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return ca.localeCompare(cb);
+    });
+    return list;
+  }, [attributes, products]);
 
   const selectedColorItem = filterColor !== 'ALL' ? availableColors.find(c => (c as any).name === filterColor || (c as any).code === filterColor) : null;
   const selectedColorLabel = selectedColorItem ? `${(selectedColorItem as any).name || ''}` : colorQuery;
@@ -557,6 +607,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return sku;
     })));
   }, [serverMode, serverItems, products]);
+
+  // Si el filtro de talle guardado (ej. "P") ya no está en las opciones pero hay una opción equivalente (ej. "130 - P"), usar ese value
+  useEffect(() => {
+    if (filterSize === 'ALL' || sizeOptions.some(o => o.code === filterSize)) return;
+    const canonicalFilter = (nombreTalleDesdeCodigo(filterSize) || filterSize).toUpperCase();
+    const match = sizeOptions.find(o => (nombreTalleDesdeCodigo(o.code) || o.code).toUpperCase() === canonicalFilter);
+    if (match) setFilterSize(match.code);
+  }, [sizeOptions, filterSize]);
 
   // Solo al elegir un color: cargar variantes de pocos grupos para filtrar (máx 8, 2 en paralelo)
   useEffect(() => {
@@ -593,6 +651,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+          if (!cancelled && res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+        }).catch(() => {});
       } catch {
         // ignore
       } finally {
@@ -701,7 +762,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
-  /** Mercado Libre = fuente de verdad: trae stock de ML a LupoHub y lo envía a Tienda Nube */
+  /** Opcional: importar stock desde ML a LupoHub y enviar a TN (ML como fuente en ese flujo). */
   const handleSyncFromMercadoLibre = async () => {
     setSyncMenuOpen(false);
     setSyncLoading('fromML');
@@ -1146,6 +1207,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           externalIds: v.externalIds
         }));
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
+        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+          if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+        }).catch(() => {});
       }).catch(() => {
         // keep fallback group items
       }).finally(() => {
@@ -1929,23 +1993,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 {isAdminOrWarehouse && (
                   <>
                     <div className="px-3 py-2 border-b border-slate-700">
-                      <p className="text-[10px] font-bold text-amber-400 uppercase">Stock desde ML</p>
+                      <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
                     </div>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
-                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
-                      Traer stock desde Mercado Libre
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50">
+                      <Zap size={18} className="text-amber-400 shrink-0" />
+                      Enviar mi stock a Mercado Libre
                     </button>
                     <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToTiendaNube(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
                       <Cloud size={18} className="text-cyan-400" />
-                      Enviar a Tienda Nube
-                    </button>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
-                      <Zap size={18} className="text-amber-400" />
-                      Enviar a Mercado Libre
+                      Enviar mi stock a Tienda Nube
                     </button>
                     <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-b border-slate-700/50">
                       <RefreshCw size={18} className="text-blue-400" />
                       Enviar a ambas (TN + ML)
+                    </button>
+                    <div className="px-3 py-1.5 pt-2">
+                      <p className="text-[10px] text-slate-500">Opcional: traer desde ML</p>
+                    </div>
+                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg">
+                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
+                      Importar stock desde Mercado Libre
                     </button>
                   </>
                 )}
@@ -1989,7 +2056,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <RefreshCw size={18} />
               )}
               <span className="text-sm font-semibold hidden sm:inline">
-                {syncLoading === 'fromML' ? 'Traendo desde ML…' : syncLoading === 'both' ? 'Sincronizando TN + ML…' : syncLoading === 'tn' ? 'Sincronizando TN…' : syncLoading === 'ml' ? 'Sincronizando ML…' : 'Stock desde ML'}
+                {syncLoading === 'fromML' ? 'Importando desde ML…' : syncLoading === 'both' ? 'Enviando a TN + ML…' : syncLoading === 'tn' ? 'Enviando a TN…' : syncLoading === 'ml' ? 'Enviando a ML…' : 'Enviar mi stock'}
               </span>
               <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -2006,15 +2073,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 }}
               >
                 <div className="px-3 py-2 border-b border-slate-700">
-                  <p className="text-[10px] font-bold text-amber-400 uppercase">Fuente de verdad: Mercado Libre</p>
+                  <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
                 </div>
                 <button
                   type="button"
-                  onClick={handleSyncFromMercadoLibre}
+                  onClick={handleSyncToMercadoLibre}
                   className="w-full flex items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50"
                 >
                   <Zap size={18} className="text-amber-400 shrink-0" />
-                  Traer stock desde Mercado Libre
+                  Enviar mi stock a Mercado Libre
                 </button>
                 <div className="px-3 py-1.5">
                   <p className="text-[10px] text-slate-500">Enviar stock local a:</p>
@@ -2029,19 +2096,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </button>
                 <button
                   type="button"
-                  onClick={handleSyncToMercadoLibre}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
-                >
-                  <Zap size={18} className="text-amber-400" />
-                  Enviar a Mercado Libre
-                </button>
-                <button
-                  type="button"
                   onClick={handleSyncStock}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
                 >
                   <RefreshCw size={18} className="text-blue-400" />
                   Enviar a ambas (TN + ML)
+                </button>
+                <div className="px-3 py-1.5 pt-2">
+                  <p className="text-[10px] text-slate-500">Opcional: importar desde ML</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncFromMercadoLibre}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg"
+                >
+                  <RefreshCw size={18} className="text-amber-400 shrink-0" />
+                  Traer stock desde Mercado Libre
                 </button>
               </div>,
               document.body
@@ -2606,6 +2676,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                            {product.stock}
                                          </span>
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
+                                       </div>
+                                       <div className="flex flex-col gap-0.5 text-xs">
+                                         <div className="flex items-center gap-1.5">
+                                           <Zap size={10} className="text-amber-500 shrink-0" />
+                                           <span className="text-slate-400">ML:</span>
+                                           <span className={product.integrations?.mercadoLibre ? 'text-white font-medium' : 'text-amber-500/90'}>
+                                             {product.integrations?.mercadoLibre
+                                               ? (variantExternalStocks[product.id]?.stockML !== undefined
+                                                 ? String(variantExternalStocks[product.id].stockML)
+                                                 : '—')
+                                               : 'Falta sincronizar'}
+                                           </span>
+                                         </div>
+                                         <div className="flex items-center gap-1.5">
+                                           <Cloud size={10} className="text-blue-400 shrink-0" />
+                                           <span className="text-slate-400">TN:</span>
+                                           <span className={product.integrations?.tiendaNube ? 'text-white font-medium' : 'text-amber-500/90'}>
+                                             {product.integrations?.tiendaNube
+                                               ? (variantExternalStocks[product.id]?.stockTN !== undefined
+                                                 ? String(variantExternalStocks[product.id].stockTN)
+                                                 : '—')
+                                               : 'Falta sincronizar'}
+                                           </span>
+                                         </div>
                                        </div>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}
@@ -3594,7 +3688,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <div className="py-6 flex flex-col items-center gap-3">
                   <Loader2 className="animate-spin text-blue-500" size={32} />
                   <p className="text-sm text-slate-300 font-medium">
-                    {syncLoading === 'fromML' ? 'Traendo stock desde Mercado Libre (ML → LupoHub → TN)…' : syncLoading === 'both' ? 'Enviando a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
+                    {syncLoading === 'fromML' ? 'Importando stock desde Mercado Libre…' : syncLoading === 'both' ? 'Enviando tu stock a Tienda Nube y Mercado Libre…' : syncLoading === 'tn' ? 'Enviando a Tienda Nube…' : 'Enviando a Mercado Libre…'}
                   </p>
                   <p className="text-xs text-slate-500">Puede tardar unos minutos</p>
                 </div>
@@ -3619,11 +3713,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           <span>Mercado Libre → LupoHub:</span><span>{syncResult.fromML.imported} OK, {syncResult.fromML.errorsFromML} errores</span>
                           <span>LupoHub → Tienda Nube:</span><span>{syncResult.fromML.sentToTN} OK, {syncResult.fromML.errorsToTN} errores</span>
                         </div>
-                        <p className="text-slate-500 pt-1">LupoHub = esta app (tu base de datos). Tienda Nube = tu tienda online conectada.</p>
+                        <p className="text-slate-500 pt-1">Tu stock en LupoHub es la fuente de verdad. Este flujo es opcional: solo usalo si quisiste traer una vez el stock desde ML.</p>
                       </div>
                       <div className="bg-blue-900/30 border border-blue-700/50 p-3 rounded-xl text-xs text-blue-200/90">
                         <p className="font-semibold text-blue-300 mb-1">¿Por qué el resto sigue en 0?</p>
-                        <p className="text-slate-400">Solo se actualiza el stock de las <strong className="text-slate-300">variantes que ya vinculaste</strong> a una publicación de Mercado Libre. Las que no están vinculadas no se tocan. Para que tengan stock desde ML: abrí cada artículo en Mi inventario, expandilo y usá <strong className="text-slate-300">Vincular</strong> (o <strong className="text-slate-300">Vincular grupo con ML / TN</strong>) y completá el ID de la publicación de Mercado Libre. Después volvé a ejecutar &quot;Traer stock desde Mercado Libre&quot;.</p>
+                        <p className="text-slate-400">Solo se actualiza el stock de las <strong className="text-slate-300">variantes que ya vinculaste</strong> a una publicación de Mercado Libre. Las que no están vinculadas no se tocan. Para enviar tu stock a ML: usá <strong className="text-slate-300">Enviar mi stock a Mercado Libre</strong> en el menú de sincronización.</p>
                       </div>
                     </div>
                   )}
