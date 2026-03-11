@@ -464,6 +464,63 @@ export const getStockMovements = async (req: Request, res: Response) => {
   }
 };
 
+// Endpoint: Revertir un movimiento de stock (solo último movimiento de la variante)
+export const revertStockMovement = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ message: 'ID de movimiento inválido' });
+    }
+
+    const movement = await get(
+      `SELECT * FROM stock_movements WHERE id = ?`,
+      [id]
+    );
+
+    if (!movement) {
+      return res.status(404).json({ message: 'Movimiento no encontrado' });
+    }
+
+    // No tiene sentido revertir el snapshot inicial
+    if (movement.movement_type === 'SNAPSHOT_INICIAL') {
+      return res.status(400).json({ message: 'No se puede revertir un snapshot inicial.' });
+    }
+
+    // Por seguridad, solo permitir revertir si este movimiento es el último de esa variante
+    const later = await get(
+      `SELECT id FROM stock_movements WHERE variant_id = ? AND created_at > ? LIMIT 1`,
+      [movement.variant_id, movement.created_at]
+    );
+    if (later?.id) {
+      return res.status(400).json({ message: 'No se puede revertir porque hay movimientos posteriores para esta variante.' });
+    }
+
+    const targetStock = Number(movement.previous_stock ?? 0);
+    const ok = await updateVariantStock(
+      movement.variant_id,
+      targetStock,
+      'AJUSTE_MANUAL',
+      `Reversión de movimiento ${movement.id} (${movement.movement_type})`,
+      true
+    );
+
+    if (!ok) {
+      return res.status(500).json({ message: 'No se pudo revertir el movimiento' });
+    }
+
+    res.json({
+      message: 'Movimiento revertido',
+      movementId: movement.id,
+      variantId: movement.variant_id,
+      previousStock: movement.new_stock,
+      restoredStock: targetStock
+    });
+  } catch (error: any) {
+    console.error('Error reverting stock movement:', error);
+    res.status(500).json({ message: 'Error revirtiendo movimiento de stock', error: error.message });
+  }
+};
+
 // Endpoint: Forzar sincronización de stock a plataformas externas
 export const forceSyncStock = async (req: Request, res: Response) => {
   try {

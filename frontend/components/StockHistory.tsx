@@ -81,6 +81,7 @@ const StockHistory: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [limit, setLimit] = useState(50);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   const fetchMovements = React.useCallback(async (abort?: { current: boolean }) => {
     setLoading(true);
@@ -208,6 +209,26 @@ const StockHistory: React.FC = () => {
     setFilterType('');
     setDateFrom('');
     setDateTo('');
+  };
+
+  const handleRevertMovement = (movement: StockMovement) => {
+    showConfirm({
+      title: 'Revertir movimiento de stock',
+      message: `¿Volver el stock de ${movement.sku || movement.product_name} a ${movement.previous_stock} unidades?\n\nSolo se puede revertir si este es el último movimiento de esa variante.`,
+      confirmLabel: 'Revertir',
+      onConfirm: async () => {
+        try {
+          setRevertingId(movement.id);
+          const res = await api.revertStockMovement(movement.id);
+          showToast('success', res.message || 'Movimiento revertido. El stock fue ajustado.');
+          fetchMovements();
+        } catch (error: any) {
+          showToast('error', error?.message || 'No se pudo revertir el movimiento');
+        } finally {
+          setRevertingId(null);
+        }
+      }
+    });
   };
 
   return (
@@ -424,6 +445,7 @@ const StockHistory: React.FC = () => {
                   <th className="text-center text-[10px] text-slate-500 font-bold uppercase p-4">Cambio</th>
                   <th className="text-center text-[10px] text-slate-500 font-bold uppercase p-4">Nuevo</th>
                   <th className="text-left text-[10px] text-slate-500 font-bold uppercase p-4">Referencia</th>
+                  <th className="text-center text-[10px] text-slate-500 font-bold uppercase p-4">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -435,6 +457,7 @@ const StockHistory: React.FC = () => {
                     icon: <Package size={16} />
                   };
                   const isPositive = movement.quantity_change > 0;
+                  const canRevert = movement.movement_type === 'AJUSTE_MANUAL';
 
                   return (
                     <tr key={movement.id} className="border-b border-slate-700/20 hover:bg-slate-700/10 transition-colors">
@@ -473,6 +496,26 @@ const StockHistory: React.FC = () => {
                         <span className="text-slate-500 text-xs truncate max-w-[150px] block" title={movement.reference || ''}>
                           {movement.reference || '-'}
                         </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        {canRevert ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRevertMovement(movement)}
+                            disabled={revertingId === movement.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border border-slate-600 text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+                            title="Volver el stock a como estaba antes de este movimiento (solo si es el último de la variante)"
+                          >
+                            {revertingId === movement.id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <RotateCcw size={14} />
+                            )}
+                            Revertir
+                          </button>
+                        ) : (
+                          <span className="text-slate-600 text-[10px]">—</span>
+                        )}
                       </td>
                     </tr>
                   );

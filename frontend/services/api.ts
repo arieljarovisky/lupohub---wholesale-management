@@ -742,6 +742,13 @@ export const api = {
     }, [], 'getStockMovements');
   },
 
+  // Revertir un movimiento de stock (último de la variante)
+  revertStockMovement: async (movementId: string): Promise<{ message: string; movementId: string; variantId: string; restoredStock: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; movementId: string; variantId: string; restoredStock: number }>(`/stock/movements/${encodeURIComponent(movementId)}/revert`, 'POST');
+    }, { message: 'Error revirtiendo movimiento', movementId, variantId: '', restoredStock: 0 }, 'revertStockMovement');
+  },
+
   // Crear snapshot inicial del stock
   createStockSnapshot: async (): Promise<{ message: string; variantsProcessed?: number }> => {
     return handleRequest(async () => {

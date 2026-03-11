@@ -1,11 +1,13 @@
 import { Router } from 'express';
-import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel } from '../controllers/stock.controller';
+import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel, revertStockMovement } from '../controllers/stock.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
 // Historial de movimientos de stock
 router.get('/movements', getStockMovements);
+// Revertir un movimiento de stock (requiere auth porque ajusta stock)
+router.post('/movements/:id/revert', authMiddleware, revertStockMovement);
 
 // Ajuste manual de stock (Admin o Depósito) — requiere auth
 router.put('/variant/:variantId', authMiddleware, updateVariantStockEndpoint);
