@@ -582,14 +582,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const sizeOptions = React.useMemo(() => {
     const attrSizes = attributes.filter(a => a.type === 'size');
     const opts = attrSizes.map(a => {
-      const raw = (((a as any).code || a.name || '') as string).toString().toUpperCase();
-      const code = (codigoTalleParaSku(raw) || raw);
-      const label = labelTalle(code) || (a.name || raw);
+      const code = (((a as any).code || a.name || '') as string).toString().toUpperCase();
+      const label = (a as any).code ? `${((a as any).code || '').toString().toUpperCase()} - ${(a.name || '').toString()}` : (a.name || '').toString();
       return { code, label };
     }).filter(s => s.code);
     if (opts.length === 0) {
       const derived = Array.from(new Set(products.map(p => getProductSizeCode(p)).filter(Boolean)));
-      return derived.map(code => ({ code, label: labelTalle(code) || code }));
+      return derived.map(code => ({ code, label: code }));
     }
     const byCanonical = new Map<string, { code: string; label: string }>();
     for (const o of opts) {
@@ -2200,39 +2199,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Search Bar & Filters */}
       <div className="space-y-4 w-full">
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full min-w-0 items-stretch sm:items-center">
+        <div className="flex flex-col sm:flex-row gap-2 w-full min-w-0">
           <div className="relative flex-1 w-full min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
             <input 
               type="text" 
-              placeholder="Buscar por código o nombre..." 
+              placeholder="Buscar Código de Producto..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full min-w-0 pl-10 pr-4 py-3 h-12 bg-slate-900 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500/50 outline-none text-white text-sm placeholder-slate-500 box-border"
+              className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm box-border"
             />
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
-            className={`flex-shrink-0 h-12 px-4 rounded-xl border flex items-center justify-center gap-2 font-semibold text-sm transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'}`}
+            className={`flex-shrink-0 min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
             {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL' || hideZeroStock) && (
-              <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             )}
           </button>
         </div>
 
-        {/* Panel de filtros */}
+        {/* Filters Panel */}
         {showFilters && (
-          <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in">
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Categoría</label>
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 sm:p-4 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 animate-fade-in">
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Categoría</label>
                 <div className="relative">
                    <select 
                      value={filterCategory}
                      onChange={(e) => { setFilterCategory(e.target.value); setCurrentPage(1); }}
-                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
                      <option value="ALL">Todas</option>
                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -2240,31 +2239,29 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
              </div>
-
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Talle</label>
+             
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Talle</label>
                 <div className="relative">
                    <select 
                      value={filterSize}
                      onChange={(e) => { setFilterSize(e.target.value); setCurrentPage(1); }}
-                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
-                     <option value="ALL">Todos los talles</option>
-                     {sizeOptions.map(s => (
-                       <option key={s.code} value={s.code}>{s.label}</option>
-                     ))}
+                     <option value="ALL">Todos</option>
+                     {sizeOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
                 </div>
              </div>
 
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Color</label>
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Color</label>
                 <div className="relative">
                    <select 
                      value={filterColor}
                      onChange={(e) => { setFilterColor(e.target.value); setCurrentPage(1); }}
-                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
                      <option value="ALL">Todos</option>
                      {availableColors.map(c => {
@@ -2278,13 +2275,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </div>
              </div>
 
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estado</label>
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Estado</label>
                 <div className="relative">
                    <select 
                      value={filterStockLevel}
                      onChange={(e) => { setFilterStockLevel(e.target.value as any); setCurrentPage(1); }}
-                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
                      <option value="ALL">Todos</option>
                      <option value="LOW">Poco Stock</option>
@@ -2294,13 +2291,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </div>
              </div>
 
-             <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sincronización</label>
+             <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Sincronización</label>
                 <div className="relative">
                    <select 
                      value={filterSync}
                      onChange={(e) => { setFilterSync(e.target.value as any); setCurrentPage(1); }}
-                     className="w-full h-10 bg-slate-900 border border-slate-700 rounded-lg pl-3 pr-8 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none"
+                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none"
                    >
                      <option value="ALL">Todos</option>
                      <option value="ML">Mercado Libre</option>

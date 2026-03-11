@@ -385,11 +385,6 @@ export const api = {
     return request<{ updated: number; synced?: number; productId?: string }>('/products/variants/bulk-link', 'POST', payload);
   },
 
-  /** Copia vínculos ML/TN desde el producto con fromSku al producto con toSku (variantes emparejadas por talle y color). Útil tras cambiar SKU en la base. */
-  copyExternalLinksFromSku: async (fromSku: string, toSku: string): Promise<{ message: string; productId: string; variantsUpdated: number }> => {
-    return request<{ message: string; productId: string; variantsUpdated: number }>('/products/copy-external-links', 'POST', { fromSku, toSku });
-  },
-
   // --- ORDERS ---
   getOrders: async (): Promise<Order[]> => {
     return handleRequest(async () => {

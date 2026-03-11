@@ -347,42 +347,64 @@ const App: React.FC = () => {
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
   };
 
+  /** SKU base para agrupar variantes (ej. "4050001-130-111" -> "4050001"). */
+  const getBaseSku = (p: Product): string => {
+    const s = (p.base_sku || p.sku || '').trim();
+    const parts = s.split('-');
+    return parts.length >= 3 ? parts.slice(0, -2).join('-') : s;
+  };
+
   const handleCreateProducts = async (newProducts: Product[]) => {
     if (!newProducts.length) return;
     try {
       setIsLoading(true);
-      const settled = await Promise.allSettled(newProducts.map(p => api.createProductStrict(p)));
+      // Agrupar por SKU base y crear variantes en secuencia dentro de cada grupo para evitar duplicate entry del producto padre
+      const byBase = new Map<string, Product[]>();
+      for (const p of newProducts) {
+        const base = getBaseSku(p);
+        if (!byBase.has(base)) byBase.set(base, []);
+        byBase.get(base)!.push(p);
+      }
       const created: Product[] = [];
       let duplicates = 0;
-      for (let i = 0; i < settled.length; i++) {
-        const r = settled[i];
-        if (r.status === 'fulfilled') {
-          const raw = r.value as any;
-          const parts = (raw?.sku || '').toString().split('-');
-          const sizeCode = parts.length >= 2 ? parts[parts.length - 2] : '';
-          const colorCode = parts.length >= 1 ? parts[parts.length - 1] : '';
-          created.push({
-            id: raw.id,
-            sku: raw.sku,
-            name: raw.name,
-            category: raw.category ?? 'General',
-            price: Number(raw.base_price ?? raw.price ?? 0),
-            description: raw.description ?? '',
-            size: sizeCode,
-            color: colorCode,
-            stock: 0,
-            stock_total: 0,
-            integrations: { local: true, mercadoLibre: false, tiendaNube: false },
-            externalIds: raw.externalIds,
-          } as Product);
-        } else {
-          const msg = (r.reason?.message || '').toLowerCase();
-          if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409')) {
-            duplicates++;
-          } else {
-            console.error('Error creando producto:', newProducts[i]?.sku, r.reason);
+      const runGroup = async (group: Product[]) => {
+        const groupCreated: Product[] = [];
+        let groupDupes = 0;
+        for (const p of group) {
+          try {
+            const raw = await api.createProductStrict(p);
+            const parts = (raw?.sku || '').toString().split('-');
+            const sizeCode = parts.length >= 2 ? parts[parts.length - 2] : '';
+            const colorCode = parts.length >= 1 ? parts[parts.length - 1] : '';
+            groupCreated.push({
+              id: raw.id,
+              sku: raw.sku,
+              name: raw.name,
+              category: raw.category ?? 'General',
+              price: Number(raw.base_price ?? raw.price ?? 0),
+              description: raw.description ?? '',
+              size: sizeCode,
+              color: colorCode,
+              stock: 0,
+              stock_total: 0,
+              integrations: { local: true, mercadoLibre: false, tiendaNube: false },
+              externalIds: raw.externalIds,
+            } as Product);
+          } catch (err: any) {
+            const msg = (err?.message || '').toLowerCase();
+            if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409')) {
+              groupDupes++;
+            } else {
+              console.error('Error creando producto:', p?.sku, err);
+            }
           }
         }
+        return { groupCreated, groupDupes };
+      };
+      const results = await Promise.all([...byBase.values()].map(runGroup));
+      for (const { groupCreated, groupDupes } of results) {
+        created.push(...groupCreated);
+        duplicates += groupDupes;
       }
       if (created.length > 0) {
         setProducts(prev => [...prev, ...created]);
