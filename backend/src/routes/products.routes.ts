@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, copyExternalLinksFromSku } from '../controllers/products.controller';
 
 const router = Router();
 
 // Rutas específicas primero (evitar que /:sku o /:id capturen)
 router.post('/variants/bulk-link', bulkLinkVariants);
+router.post('/copy-external-links', copyExternalLinksFromSku);
 router.get('/variants/:variantId', getVariantById);
 router.put('/variants/:variantId', updateVariant);
 router.put('/variants/:variantId/external-ids', updateVariantExternalIds);

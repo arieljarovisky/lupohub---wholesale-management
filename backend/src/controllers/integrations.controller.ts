@@ -1711,15 +1711,29 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       }
       for (const [productId, variantIdsInProduct] of tnProductIds) {
         try {
-          const varRes = await axios.get(
-            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
-            { headers: tnHeaders }
-          );
-          const tnVariants: any[] = varRes.data || [];
+          const perPage = 200;
+          let page = 1;
+          let tnVariants: any[] = [];
+          let hasMore = true;
+          while (hasMore) {
+            const varRes = await axios.get(
+              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
+              { headers: tnHeaders, params: { page, per_page: perPage }, validateStatus: () => true }
+            );
+            if (varRes.status !== 200) break;
+            const chunk = Array.isArray(varRes.data) ? varRes.data : [];
+            tnVariants = tnVariants.concat(chunk);
+            if (chunk.length < perPage) hasMore = false;
+            else page++;
+            if (page > 10) hasMore = false;
+          }
           for (const variantId of variantIdsInProduct) {
             const tnVid = variantToTnVariant.get(variantId);
             const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
-            if (tv != null && typeof tv.stock === 'number') stocks[variantId].stockTN = tv.stock;
+            if (tv != null) {
+              const stockVal = typeof tv.stock === 'number' ? tv.stock : (typeof tv.stock === 'string' ? parseInt(tv.stock, 10) : undefined);
+              if (typeof stockVal === 'number' && !isNaN(stockVal)) stocks[variantId].stockTN = stockVal;
+            }
           }
         } catch {
           // ignore per-product errors
@@ -2820,6 +2834,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
 };
 
 // Obtener variantes de un producto de Tienda Nube por ID (para vincular por ID padre)
+// La API de Tienda Nube devuelve variantes paginadas (por defecto ~30). Paginamos para traer todas (hasta 1000 por producto).
 export const getTiendaNubeProductVariants = async (req: Request, res: Response) => {
   try {
     const { productId } = req.params;
@@ -2839,10 +2854,7 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       'User-Agent': TN_USER_AGENT
     };
 
-    const [productRes, variantsRes] = await Promise.all([
-      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true }),
-      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, { headers, validateStatus: () => true })
-    ]);
+    const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true });
     if (productRes.status !== 200) {
       const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
       return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
@@ -2859,10 +2871,23 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       if (isColorAttr(n)) colorIdx = i;
     });
 
+    const perPage = 200;
+    let page = 1;
     let variantsList: any[] = [];
-    if (variantsRes.status === 200 && Array.isArray(variantsRes.data)) {
-      variantsList = variantsRes.data;
-    } else if (Array.isArray(p?.variants)) {
+    let hasMore = true;
+    while (hasMore) {
+      const variantsRes = await axios.get(
+        `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`,
+        { headers, params: { page, per_page: perPage }, validateStatus: () => true }
+      );
+      if (variantsRes.status !== 200) break;
+      const chunk = Array.isArray(variantsRes.data) ? variantsRes.data : [];
+      variantsList = variantsList.concat(chunk);
+      if (chunk.length < perPage) hasMore = false;
+      else page++;
+      if (page > 10) hasMore = false;
+    }
+    if (variantsList.length === 0 && Array.isArray(p?.variants)) {
       variantsList = p.variants;
     }
 

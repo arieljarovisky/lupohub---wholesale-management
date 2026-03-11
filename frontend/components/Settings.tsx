@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
+import { nombreTalleDesdeCodigo, codigoTalleParaSku, labelTalle } from '../utils/tallesTango';
 import * as XLSX from 'xlsx';
 
 /** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
@@ -118,6 +119,12 @@ const Settings: React.FC<SettingsProps> = ({
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
   const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
+
+  const [copyLinksFromSku, setCopyLinksFromSku] = useState('');
+  const [copyLinksToSku, setCopyLinksToSku] = useState('');
+  const [copyLinksLoading, setCopyLinksLoading] = useState(false);
+  const [copyLinksResult, setCopyLinksResult] = useState<{ message: string; productId?: string; variantsUpdated?: number } | null>(null);
+
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
     let current: { product: string; variants: string[]; errors: string[] } | null = null;
@@ -444,6 +451,34 @@ const Settings: React.FC<SettingsProps> = ({
 
   const sizes = attributes.filter(a => a.type === 'size');
   const colors = attributes.filter(a => a.type === 'color');
+
+  // Talles sin duplicados: 130 y P son el mismo talle, mostramos uno solo (preferimos código numérico para coincidir con SKU)
+  const SIZE_ORDER = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG', 'S', 'L', 'XL', 'XXL', 'XXXL', 'XS'];
+  const uniqueSizes = React.useMemo(() => {
+    const byCanonical = new Map<string, Attribute>();
+    for (const a of sizes) {
+      const raw = ((a as any).code ?? a.name ?? '').toString().trim().toUpperCase();
+      const code = codigoTalleParaSku(raw) || raw;
+      const canonical = (nombreTalleDesdeCodigo(code) || code).toUpperCase();
+      const existing = byCanonical.get(canonical);
+      const isNumeric = /^\d{2,3}$/.test(code);
+      if (!existing || (isNumeric && !/^\d{2,3}$/.test((existing as any).code ?? ''))) {
+        byCanonical.set(canonical, { ...a, name: a.name, ...(code ? { code } : {}) } as Attribute);
+      }
+    }
+    const list = Array.from(byCanonical.values());
+    list.sort((a, b) => {
+      const ca = (nombreTalleDesdeCodigo((a as any).code ?? a.name) || ((a as any).code ?? a.name ?? '')).toString().toUpperCase();
+      const cb = (nombreTalleDesdeCodigo((b as any).code ?? b.name) || ((b as any).code ?? b.name ?? '')).toString().toUpperCase();
+      const ia = SIZE_ORDER.indexOf(ca);
+      const ib = SIZE_ORDER.indexOf(cb);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return ca.localeCompare(cb);
+    });
+    return list;
+  }, [sizes]);
   const sellers = users.filter(u => u.role === Role.SELLER);
 
   const handleCreateAttribute = () => {
@@ -1445,8 +1480,73 @@ const Settings: React.FC<SettingsProps> = ({
                  <button onClick={handleSaveConfig} className="p-2.5 bg-indigo-600 rounded-xl text-white shadow-lg active:scale-95 transition-all hover:bg-indigo-500"><Save size={20}/></button>
                </div>
              </div>
-             <div className="p-6 space-y-5">
-               <div className="bg-red-900/20 p-4 rounded-xl border border-red-800/50 flex justify-between items-center">
+            <div className="p-6 space-y-5">
+              <div className="bg-amber-900/20 p-4 rounded-xl border border-amber-800/50">
+                <p className="text-[10px] text-amber-400 font-bold uppercase mb-2">Restaurar vínculos ML / TN</p>
+                <p className="text-xs text-slate-400 mb-3">
+                  Si cambiaste el SKU de un artículo en la base y se desvincularon las publicaciones de Mercado Libre y Tienda Nube, podés copiar los vínculos desde el producto con el SKU anterior al producto con el SKU nuevo. Las variantes se emparejan por talle y color. Necesitás tener ambos productos (origen con vínculos y destino).
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="text-[10px] text-slate-500 uppercase block mb-1">SKU origen (con vínculos)</label>
+                    <input
+                      type="text"
+                      value={copyLinksFromSku}
+                      onChange={(e) => { setCopyLinksFromSku(e.target.value); setCopyLinksResult(null); }}
+                      placeholder="ej. 0067102140999"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 uppercase block mb-1">SKU destino</label>
+                    <input
+                      type="text"
+                      value={copyLinksToSku}
+                      onChange={(e) => { setCopyLinksToSku(e.target.value); setCopyLinksResult(null); }}
+                      placeholder="ej. 0067102"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={async () => {
+                      const from = copyLinksFromSku.trim();
+                      const to = copyLinksToSku.trim();
+                      if (!from || !to) {
+                        showToast('info', 'Completá SKU origen y SKU destino');
+                        return;
+                      }
+                      setCopyLinksLoading(true);
+                      setCopyLinksResult(null);
+                      try {
+                        const res = await api.copyExternalLinksFromSku(from, to);
+                        setCopyLinksResult({ message: res.message, productId: res.productId, variantsUpdated: res.variantsUpdated });
+                        showToast('success', res.message + (res.variantsUpdated != null ? ` (${res.variantsUpdated} variantes)` : ''));
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.message || e?.message || 'Error';
+                        setCopyLinksResult({ message: msg });
+                        showToast('error', msg);
+                      } finally {
+                        setCopyLinksLoading(false);
+                      }
+                    }}
+                    disabled={copyLinksLoading}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {copyLinksLoading ? <Loader2 size={14} className="animate-spin" /> : <Link size={14} />}
+                    Copiar vínculos
+                  </button>
+                  {copyLinksResult && (
+                    <span className="text-xs text-slate-400">
+                      {copyLinksResult.message}
+                      {copyLinksResult.variantsUpdated != null && ` — ${copyLinksResult.variantsUpdated} variantes actualizadas.`}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-red-900/20 p-4 rounded-xl border border-red-800/50 flex justify-between items-center">
                  <div>
                    <p className="text-xs text-red-400 font-bold uppercase mb-1">Zona de Peligro</p>
                    <p className="text-xs text-slate-400">Eliminar todo el inventario y stock.</p>
@@ -1518,7 +1618,7 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-             {(activeTab === 'sizes' ? sizes : colors).map(attr => {
+             {(activeTab === 'sizes' ? uniqueSizes : colors).map(attr => {
                const code = (attr as any).code != null ? String((attr as any).code).trim() : '';
                const name = attr.name || 'Sin nombre';
                const displayLabel = code ? `${code} - ${name}` : name;
