@@ -1280,13 +1280,25 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setBulkLinkProductId(p.id);
       setBulkLinkMlId(p.externalIds?.mercadoLibre || '');
       setBulkLinkTnId(p.externalIds?.tiendaNube || '');
-      const variants = (p.variants || []).map((v: any) => ({
-        variantId: v.variant_id,
-        sku: v.variant_sku || `${bulkLinkGroupKey}-${v.size_code}-${v.color_code}`,
-        size: v.size_code,
-        color: v.color_name,
-        externalIds: v.externalIds
-      }));
+      const variants = (p.variants || []).map((v: any) => {
+        const variantId = v.variant_id;
+        const rawSku = (v.variant_sku ?? '').toString().trim();
+        const extSku = (v.external_sku ?? '').toString().trim();
+        const fallbackSku = `${bulkLinkGroupKey}-${v.size_code}-${v.color_code}`;
+        const sku =
+          rawSku && rawSku !== String(variantId)
+            ? rawSku
+            : extSku
+              ? extSku
+              : fallbackSku;
+        return {
+          variantId,
+          sku,
+          size: v.size_code,
+          color: v.color_name,
+          externalIds: v.externalIds
+        };
+      });
       setBulkLinkVariants(variants);
       const assignments: Record<string, { ml: string; tn: string }> = {};
       variants.forEach((v: any) => {
