@@ -44,7 +44,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     {
       title: 'Sistema',
       items: [
-        { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN] },
+        { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN, Role.WAREHOUSE] },
       ]
     }
   ];

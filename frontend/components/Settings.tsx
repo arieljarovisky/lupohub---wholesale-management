@@ -81,7 +81,7 @@ const Settings: React.FC<SettingsProps> = ({
   users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser
 }) => {
   const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists'>('users');
+  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists'>(role === Role.WAREHOUSE ? 'sizes' : 'users');
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
 
@@ -434,10 +434,10 @@ const Settings: React.FC<SettingsProps> = ({
     }
   }, [activeTab]);
 
-  if (role !== Role.ADMIN) {
+  if (role !== Role.ADMIN && role !== Role.WAREHOUSE) {
     return (
       <div className="p-12 text-center text-slate-400">
-        No tienes permisos para acceder a esta sección.
+        No tenés permisos para acceder a esta sección.
       </div>
     );
   }

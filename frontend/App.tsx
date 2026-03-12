@@ -614,7 +614,7 @@ const App: React.FC = () => {
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
-      { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN] },
+      { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
   ];
 
@@ -660,7 +660,7 @@ const App: React.FC = () => {
                  {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
                </p>
              </div>
-             {currentUser.role === Role.ADMIN && baseView !== 'settings' && (
+            {(currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) && baseView !== 'settings' && (
                <button onClick={() => setCurrentView('settings')} className="md:hidden p-2 text-slate-400">
                   <SettingsIcon size={20} />
                </button>
