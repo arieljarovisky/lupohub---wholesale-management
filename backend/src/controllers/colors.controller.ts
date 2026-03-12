@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { query } from '../database/db';
+import { query, execute } from '../database/db';
+import { v4 as uuidv4 } from 'uuid';
 
 export const getColors = async (req: Request, res: Response) => {
   try {
@@ -55,5 +56,28 @@ export const getColors = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error fetching colors' });
+  }
+};
+
+export const createColor = async (req: Request, res: Response) => {
+  try {
+    const { code, name, hex } = req.body as { code?: string; name?: string; hex?: string };
+    const colorCode = (code || name || '').toString().trim();
+    const colorName = (name || code || '').toString().trim();
+    const hexValue = (hex || '').toString().trim() || null;
+
+    if (!colorCode) {
+      return res.status(400).json({ message: 'Debe indicar al menos el código o nombre del color' });
+    }
+
+    const id = uuidv4();
+    await execute(
+      `INSERT INTO colors (id, code, name, hex) VALUES (?, ?, ?, ?)`,
+      [id, colorCode, colorName || colorCode, hexValue]
+    );
+    res.status(201).json({ id, code: colorCode, name: colorName || colorCode, hex: hexValue });
+  } catch (error: any) {
+    console.error('Error creando color:', error);
+    res.status(500).json({ message: 'Error creando color', detail: error?.message });
   }
 };

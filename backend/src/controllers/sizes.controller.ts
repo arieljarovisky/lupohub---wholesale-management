@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute } from '../database/db';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { v4 as uuidv4 } from 'uuid';
 
 // Talles válidos conocidos
 const VALID_SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
@@ -50,6 +51,29 @@ export const getSizes = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching sizes:', error);
     res.status(500).json({ message: 'Error fetching sizes' });
+  }
+};
+
+export const createSize = async (req: Request, res: Response) => {
+  try {
+    const { code, name } = req.body as { code?: string; name?: string };
+    const rawCode = (code || '').toString().trim();
+    if (!rawCode) {
+      return res.status(400).json({ message: 'Debe indicar el código del talle' });
+    }
+    if (!isValidSize(rawCode)) {
+      return res.status(400).json({ message: `Código de talle inválido: "${rawCode}"` });
+    }
+    const displayName = nombreTalleDesdeCodigo(rawCode) || name || rawCode;
+    const id = uuidv4();
+    await execute(
+      `INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`,
+      [id, rawCode, displayName]
+    );
+    res.status(201).json({ id, code: rawCode, name: displayName });
+  } catch (error: any) {
+    console.error('Error creando talle:', error);
+    res.status(500).json({ message: 'Error creando talle', detail: error?.message });
   }
 };
 

@@ -1,25 +1,27 @@
 import { Router } from 'express';
 import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory } from '../controllers/products.controller';
+import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
 
 // Rutas específicas primero (evitar que /:sku o /:id capturen)
-router.post('/variants/bulk-link', bulkLinkVariants);
-router.get('/variants/:variantId', getVariantById);
-router.put('/variants/:variantId', updateVariant);
-router.put('/variants/:variantId/external-ids', updateVariantExternalIds);
-router.delete('/variants/:variantId', deleteVariant);
+router.post('/variants/bulk-link', authMiddleware, adminOrDepositoMiddleware, bulkLinkVariants);
+router.get('/variants/:variantId', authMiddleware, getVariantById);
+// Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
+router.put('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, updateVariant);
+router.put('/variants/:variantId/external-ids', authMiddleware, adminOrDepositoMiddleware, updateVariantExternalIds);
+router.delete('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, deleteVariant);
 
-router.delete('/all', deleteAllProducts);
-router.post('/import-tango', importTangoArticles);
-router.get('/export-inventory', exportInventory);
-router.get('/', getProducts);
-router.get('/by-id/:id', getProductById);
-router.get('/:sku', getProductBySku);
-router.post('/', createProduct);
-router.patch('/stock', patchStock);
-router.put('/:id', updateProduct);
-router.put('/:id/external-ids', updateProductExternalIds);
-router.delete('/:id', deleteProduct);
+router.delete('/all', authMiddleware, adminOrDepositoMiddleware, deleteAllProducts);
+router.post('/import-tango', authMiddleware, adminOrDepositoMiddleware, importTangoArticles);
+router.get('/export-inventory', authMiddleware, exportInventory);
+router.get('/', authMiddleware, getProducts);
+router.get('/by-id/:id', authMiddleware, getProductById);
+router.get('/:sku', authMiddleware, getProductBySku);
+router.post('/', authMiddleware, adminOrDepositoMiddleware, createProduct);
+router.patch('/stock', authMiddleware, patchStock);
+router.put('/:id', authMiddleware, adminOrDepositoMiddleware, updateProduct);
+router.put('/:id/external-ids', authMiddleware, adminOrDepositoMiddleware, updateProductExternalIds);
+router.delete('/:id', authMiddleware, adminOrDepositoMiddleware, deleteProduct);
 
 export default router;
