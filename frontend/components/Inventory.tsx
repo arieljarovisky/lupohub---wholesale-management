@@ -906,6 +906,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     };
   }, [cardDotsOpenKey]);
 
+  // Refrescar stocks ML/TN en la UI después de que el backend sincronice (debounce ~2.8s)
+  const refreshExternalStocksAfterSync = (variantId: string) => {
+    setTimeout(() => {
+      api.getVariantExternalStocks([variantId]).then(res => {
+        if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+      }).catch(() => {});
+    }, 3500);
+  };
+
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
     const newStock = Math.max(0, currentStock + delta);
@@ -924,6 +933,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     onUpdateStock(productId, newStock);
     setServerListRefreshKey(k => k + 1);
     onImportComplete?.();
+    refreshExternalStocksAfterSync(productId);
   };
 
   const handleManualStockChange = (productId: string, value: string) => {
@@ -946,6 +956,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     onUpdateStock(productId, newStock);
     setServerListRefreshKey(k => k + 1);
     onImportComplete?.();
+    refreshExternalStocksAfterSync(productId);
   };
 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
