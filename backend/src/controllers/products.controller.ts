@@ -4,6 +4,7 @@ import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { syncStockToExternalPlatforms } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -474,10 +475,8 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, mercadoLibreItemId ?? null, externalSku !== undefined ? externalSku : null, variantId]
     );
 
-    let stockFromML: number | null = null;
+    // Si se vinculó con una publicación de Mercado Libre, asegurarse de que el producto padre tenga el item_id guardado
     const mlItemId = mercadoLibreItemId ?? null;
-    const mlVariantId = mercadoLibreVariantId ?? null;
-
     if (mlItemId) {
       const productRow = await get(
         `SELECT p.id AS product_id FROM products p
@@ -492,34 +491,15 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
           [mlItemId, productRow.product_id]
         );
       }
+    }
 
-      const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
-      if (integration?.access_token) {
-        try {
-          const itemRes = await axios.get(
-            `https://api.mercadolibre.com/items/${mlItemId}?include_attributes=all`,
-            { headers: { Authorization: `Bearer ${integration.access_token}` } }
-          );
-          const item = itemRes.data;
-          const variations = item?.variations || [];
-          let qty = 0;
-          if (variations.length > 0) {
-            const v = mlVariantId
-              ? variations.find((x: any) => String(x.id) === String(mlVariantId))
-              : variations[0];
-            qty = v ? (v.available_quantity ?? 0) : 0;
-          } else {
-            qty = item.available_quantity ?? 0;
-          }
-          await execute(
-            `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
-            [variantId, qty]
-          );
-          stockFromML = qty;
-        } catch (mlErr: any) {
-          console.error('[updateVariantExternalIds] Error trayendo stock de ML:', mlErr?.response?.data || mlErr?.message);
-        }
-      }
+    // Después de vincular, usar el stock local como fuente de verdad y enviarlo a ML/TN
+    try {
+      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+      const currentStock = Number(stockRow?.stock ?? 0);
+      await syncStockToExternalPlatforms(variantId, currentStock);
+    } catch (syncErr: any) {
+      console.error('[updateVariantExternalIds] Error enviando stock local a plataformas externas:', syncErr?.message || syncErr);
     }
 
     res.json({
@@ -528,7 +508,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       mercadoLibreVariantId,
       mercadoLibreItemId: mercadoLibreItemId ?? undefined,
       externalSku: externalSku ?? undefined,
-      stockFromML: stockFromML ?? undefined
+      // Ya no se trae stock desde ML al vincular; el stock local es la fuente de verdad
     });
   } catch (error) {
     console.error(error);
@@ -536,7 +516,9 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   }
 };
 
-/** Vinculaci?n en lote: actualiza IDs externos de varias variantes y opcionalmente el producto padre. No trae stock de ML. */
+/** Vinculación en lote: actualiza IDs externos de varias variantes y opcionalmente el producto padre.
+ *  Usa el stock local como fuente de verdad y lo envía a ML/TN (no importa stock desde ML).
+ */
 export const bulkLinkVariants = async (req: Request, res: Response) => {
   const body = req.body || {};
   const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = body as {
@@ -607,65 +589,17 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       );
     }
 
-    // Traer stock de Mercado Libre al inventario local (ML = fuente de verdad)
+    // Enviar stock local a plataformas externas para todas las variantes vinculadas
     let synced = 0;
-    const parentMlItemId = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
-    const integration = await get(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
-    if (integration?.access_token) {
-      // Caso 1: variantes con publicación propia (cada una tiene mercadoLibreItemId en el link)
-      for (const link of links) {
-        const perItemId = (link as any).mercadoLibreItemId != null && String((link as any).mercadoLibreItemId).trim() !== '' ? String((link as any).mercadoLibreItemId).trim() : null;
-        if (!link.variantId || !perItemId) continue;
-        try {
-          const itemRes = await axios.get(
-            `https://api.mercadolibre.com/items/${perItemId}?include_attributes=all`,
-            { headers: { Authorization: `Bearer ${integration.access_token}` } }
-          );
-          const item = itemRes.data;
-          const qty = item?.available_quantity ?? (item?.variations?.[0]?.available_quantity ?? 0);
-          await execute(
-            `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
-            [link.variantId, qty]
-          );
-          synced++;
-        } catch (err: any) {
-          console.warn('[bulkLinkVariants] Error trayendo ítem ML (publicación propia)', link.variantId, perItemId, err?.message);
-        }
-      }
-      // Caso 2: publicación padre con variaciones (mismo ID para todas)
-      if (parentMlItemId && links.some(l => l.mercadoLibreVariantId != null && String(l.mercadoLibreVariantId) !== '')) {
-        try {
-          const itemRes = await axios.get(
-            `https://api.mercadolibre.com/items/${parentMlItemId}?include_attributes=all`,
-            { headers: { Authorization: `Bearer ${integration.access_token}` } }
-          );
-          const item = itemRes.data;
-          const variations = item?.variations || [];
-          const hasVariations = variations.length > 0;
-          for (const link of links) {
-            const hasMl = link.mercadoLibreVariantId != null && String(link.mercadoLibreVariantId) !== '';
-            const hasPerItem = (link as any).mercadoLibreItemId != null && String((link as any).mercadoLibreItemId).trim() !== '';
-            if (!link.variantId || !hasMl || hasPerItem) continue;
-            try {
-              let qty = 0;
-              if (hasVariations) {
-                const v = variations.find((x: any) => String(x.id) === String(link.mercadoLibreVariantId));
-                qty = v ? (v.available_quantity ?? 0) : 0;
-              } else {
-                qty = item.available_quantity ?? 0;
-              }
-              await execute(
-                `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
-                [link.variantId, qty]
-              );
-              synced++;
-            } catch (err: any) {
-              console.warn('[bulkLinkVariants] Error actualizando stock local desde ML para variante', link.variantId, ':', err?.message);
-            }
-          }
-        } catch (mlErr: any) {
-          console.warn('[bulkLinkVariants] Error trayendo ítem de ML:', mlErr?.response?.data || mlErr?.message);
-        }
+    for (const link of links) {
+      if (!link.variantId) continue;
+      try {
+        const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
+        const currentStock = Number(stockRow?.stock ?? 0);
+        await syncStockToExternalPlatforms(link.variantId, currentStock);
+        synced++;
+      } catch (err: any) {
+        console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', err?.message || err);
       }
     }
 
