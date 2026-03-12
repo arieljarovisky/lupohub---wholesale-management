@@ -178,10 +178,9 @@ export const getTiendaNubeAuthUrl = (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Tienda Nube App ID not configured' });
   }
 
-  // https://www.tiendanube.com/apps/<app_id>/authorize?response_type=code&scope=write_products,read_products
-  
+  // Scope read_orders es necesario para poder obtener el detalle de la orden cuando llega el webhook order/paid y descontar stock
   const redirectUri = process.env.TIENDA_NUBE_REDIRECT_URI || 'http://localhost:3010/api/integrations/tiendanube/callback';
-  const url = `https://www.tiendanube.com/apps/${appId}/authorize?response_type=code&scope=write_products,read_products&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const url = `https://www.tiendanube.com/apps/${appId}/authorize?response_type=code&scope=write_products,read_products,read_orders&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.json({ url });
 };
 
@@ -887,10 +886,16 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
       return res.status(200).json({ received: true, ignored: true });
     }
 
-    // Procesar solo cuando la orden se paga (descontar stock una sola vez)
+    // Procesar solo cuando la orden se paga (descontar stock). Responder 200 enseguida: TN tiene timeout de 3s y reintentos si no hay 2XX.
     if (event === 'order/paid') {
       const orderId = req.body.id ?? req.body.order_id ?? req.body.order?.id ?? req.body.data?.id ?? req.body.data?.order_id;
-      if (orderId) await processTiendaNubeOrder(String(orderId));
+      if (orderId) {
+        processTiendaNubeOrder(String(orderId)).catch((err: any) =>
+          console.error('[TN Order] Error procesando orden en background:', err?.message || err)
+        );
+      } else {
+        console.warn('[TN Webhook] order/paid sin id de orden en body:', JSON.stringify(req.body));
+      }
     }
 
     res.status(200).json({ received: true });
@@ -949,12 +954,14 @@ const processTiendaNubeOrder = async (orderId: string) => {
     }
 
     if (orderRes.status !== 200) {
-      console.error(`[TN Order] Error al obtener orden ${orderId}: ${orderRes.status}`, orderRes.data);
+      const errBody = orderRes.data && typeof orderRes.data === 'object' ? JSON.stringify(orderRes.data) : orderRes.data;
+      console.error(`[TN Order] Error al obtener orden ${orderId}: HTTP ${orderRes.status}. Si es 403, reconectá Tienda Nube (falta scope read_orders). Respuesta:`, errBody);
       return;
     }
 
     const order = orderRes.data;
-    console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}`);
+    const productCount = Array.isArray(order.products) ? order.products.length : 0;
+    console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}, productos: ${productCount}`);
 
     // Solo descontar cuando la venta está pagada
     if (order.payment_status !== 'paid') {
@@ -964,6 +971,7 @@ const processTiendaNubeOrder = async (orderId: string) => {
 
     const { updateVariantStock } = await import('./stock.controller');
 
+    let discountedCount = 0;
     for (const item of order.products || []) {
       const tnVariantIdRaw = item.variant_id ?? item.variantId;
       const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
@@ -1013,13 +1021,19 @@ const processTiendaNubeOrder = async (orderId: string) => {
           true
         );
         if (ok) {
+          discountedCount++;
           console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
         } else {
           console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
         }
       } else {
-        console.log(`[TN Order] Variante no encontrada para TN variant_id=${tnVariantId} sku=${itemSku}`);
+        console.warn(`[TN Order] Variante no encontrada: variant_id=${tnVariantId} sku=${itemSku}. Vinculá la variante en Inventario (IDs de Tienda Nube) para que el stock se descuente.`);
       }
+    }
+    if (discountedCount === 0 && productCount > 0) {
+      console.warn(`[TN Order] Orden ${orderId}: no se descontó stock de ningún ítem (variantes no vinculadas o no encontradas).`);
+    } else if (discountedCount > 0) {
+      console.log(`[TN Order] Orden ${orderId}: descontado stock de ${discountedCount} ítem(s).`);
     }
   } catch (error: any) {
     console.error('[TN Order] Error procesando orden:', error.message);
