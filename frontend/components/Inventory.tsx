@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -112,8 +112,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string }>({ sku: '', externalSku: '' });
+  const [editVariantLinkIds, setEditVariantLinkIds] = useState<{ mlItemId: string | null; mlVariantId: string | null; tnProductId: string | null; tnVariantId: string | null }>({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
   const [loadingEditVariant, setLoadingEditVariant] = useState(false);
   const [savingEditVariant, setSavingEditVariant] = useState(false);
+  const [fetchingExternalSku, setFetchingExternalSku] = useState<'ml' | 'tn' | null>(null);
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -1668,11 +1670,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   useEffect(() => {
     if (!editingVariantId) return;
     setLoadingEditVariant(true);
-    api.getVariantById(editingVariantId).then((v) => {
+    setEditVariantLinkIds({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
+    api.getVariantById(editingVariantId).then((v: any) => {
       if (v) {
         setEditVariantForm({
           sku: v.sku ?? '',
           externalSku: v.external_sku ?? ''
+        });
+        setEditVariantLinkIds({
+          mlItemId: v.mercado_libre_item_id ?? null,
+          mlVariantId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+          tnProductId: v.tienda_nube_id != null ? String(v.tienda_nube_id) : null,
+          tnVariantId: v.tienda_nube_variant_id != null ? String(v.tienda_nube_variant_id) : null
         });
       }
     }).finally(() => setLoadingEditVariant(false));
@@ -1739,6 +1748,42 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('error', e?.message || 'Error al guardar');
     } finally {
       setSavingEditProduct(false);
+    }
+  };
+
+  const handleFetchExternalSkuFromMl = async () => {
+    const { mlItemId, mlVariantId } = editVariantLinkIds;
+    if (!mlItemId) return;
+    setFetchingExternalSku('ml');
+    try {
+      const res = await api.getMercadoLibreItemVariations(mlItemId);
+      const variations = res?.variations || [];
+      const match = variations.find((v: any) => String(v.variationId) === String(mlVariantId));
+      const sku = match?.sku ?? (variations[0]?.sku ?? '');
+      if (sku) setEditVariantForm(f => ({ ...f, externalSku: sku }));
+      else showToast('info', 'No se encontró el SKU en Mercado Libre para esta variante.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al traer SKU de Mercado Libre');
+    } finally {
+      setFetchingExternalSku(null);
+    }
+  };
+
+  const handleFetchExternalSkuFromTn = async () => {
+    const { tnProductId, tnVariantId } = editVariantLinkIds;
+    if (!tnProductId) return;
+    setFetchingExternalSku('tn');
+    try {
+      const res = await api.getTiendaNubeProductVariants(tnProductId);
+      const variants = res?.variants || [];
+      const match = variants.find((v: any) => String(v.variantId) === String(tnVariantId));
+      const sku = match?.sku ?? (variants[0]?.sku ?? '');
+      if (sku) setEditVariantForm(f => ({ ...f, externalSku: sku }));
+      else showToast('info', 'No se encontró el SKU en Tienda Nube para esta variante.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al traer SKU de Tienda Nube');
+    } finally {
+      setFetchingExternalSku(null);
     }
   };
 
@@ -3103,14 +3148,47 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">SKU externo (ML / TN, opcional)</label>
-                    <input
-                      type="text"
-                      value={editVariantForm.externalSku}
-                      onChange={(e) => setEditVariantForm(f => ({ ...f, externalSku: e.target.value }))}
-                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
-                      placeholder="Mismo código o el de la tienda"
-                    />
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">SKU externo (debe coincidir con ML / TN)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editVariantForm.externalSku}
+                        onChange={(e) => setEditVariantForm(f => ({ ...f, externalSku: e.target.value }))}
+                        className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
+                        placeholder="Mismo que interno o el que tiene en ML/TN"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditVariantForm(f => ({ ...f, externalSku: f.sku }))}
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white border border-slate-600 transition-colors font-medium text-xs whitespace-nowrap"
+                        title="Usar el mismo código que el interno"
+                      >
+                        <Copy size={16} />
+                        Copiar interno
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={handleFetchExternalSkuFromMl}
+                        disabled={!editVariantLinkIds.mlItemId || fetchingExternalSku !== null}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-900/40 hover:bg-amber-800/50 text-amber-200 border border-amber-700/50 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Rellenar con el SKU que tiene en Mercado Libre"
+                      >
+                        {fetchingExternalSku === 'ml' ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        Traer de Mercado Libre
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleFetchExternalSkuFromTn}
+                        disabled={!editVariantLinkIds.tnProductId || fetchingExternalSku !== null}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-900/40 hover:bg-blue-800/50 text-blue-200 border border-blue-700/50 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Rellenar con el SKU que tiene en Tienda Nube"
+                      >
+                        {fetchingExternalSku === 'tn' ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+                        Traer de Tienda Nube
+                      </button>
+                    </div>
                   </div>
                 </>
               )}

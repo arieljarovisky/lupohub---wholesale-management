@@ -668,7 +668,7 @@ export const getVariantById = async (req: Request, res: Response) => {
   try {
     const row = await get(
       `SELECT pv.id, pv.sku, pv.external_sku, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
-              p.name AS product_name, p.sku AS base_sku,
+              p.name AS product_name, p.sku AS base_sku, p.tienda_nube_id,
               s.size_code, c.code AS color_code, c.name AS color_name,
               COALESCE(st.stock, 0) AS stock
        FROM product_variants pv
