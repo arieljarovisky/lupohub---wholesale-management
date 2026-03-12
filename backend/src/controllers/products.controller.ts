@@ -4,7 +4,7 @@ import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
-import { syncStockToExternalPlatforms } from './stock.controller';
+import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -688,7 +688,7 @@ export const getVariantById = async (req: Request, res: Response) => {
   }
 };
 
-/** Actualizar variante (SKU y/o external_sku) */
+/** Actualizar variante (SKU y/o external_sku). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;
   const { sku, externalSku } = req.body as { sku?: string; externalSku?: string };
@@ -713,11 +713,30 @@ export const updateVariant = async (req: Request, res: Response) => {
       values
     );
     const updated = await get(
-      `SELECT pv.id, pv.sku, pv.external_sku FROM product_variants pv WHERE pv.id = ?`,
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.id = ?`,
       [variantId]
     );
     if (!updated) return res.status(404).json({ message: 'Variante no encontrada' });
-    res.json(updated);
+
+    const skuToSend = (updated.external_sku || updated.sku || '').toString().trim();
+    if (skuToSend) {
+      if (updated.mercado_libre_item_id && updated.mercado_libre_variant_id) {
+        updateMercadoLibreSku(updated.mercado_libre_item_id, updated.mercado_libre_variant_id, skuToSend).catch(err =>
+          console.error('[updateVariant] Error enviando SKU a ML:', err)
+        );
+      }
+      if (updated.tienda_nube_id && updated.tienda_nube_variant_id) {
+        updateTiendaNubeSku(updated.tienda_nube_id, updated.tienda_nube_variant_id, skuToSend).catch(err =>
+          console.error('[updateVariant] Error enviando SKU a TN:', err)
+        );
+      }
+    }
+
+    res.json({ id: updated.id, sku: updated.sku, external_sku: updated.external_sku });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando variante' });

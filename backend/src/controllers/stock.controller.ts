@@ -415,6 +415,92 @@ async function updateMercadoLibreStockByItemUpdate(
   return true;
 }
 
+/** Obtener el seller_sku actual de una variación (desde attributes o campos directos). */
+function getMlVariationSku(v: any): string {
+  const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+  const fromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+  return fromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim() || '';
+}
+
+/** Enviar el SKU de tu inventario a Mercado Libre (actualiza seller_sku de la variación). */
+export const updateMercadoLibreSku = async (
+  itemId: string,
+  variationId: string,
+  newSku: string
+): Promise<boolean> => {
+  const integration = await get(
+    `SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`
+  );
+  if (!integration?.access_token) {
+    console.log('[ML SKU] No hay integración configurada');
+    return false;
+  }
+  const headers = {
+    'Authorization': `Bearer ${integration.access_token}`,
+    'Content-Type': 'application/json'
+  };
+  try {
+    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
+    const item = getRes.data;
+    const variations: any[] = item.variations || [];
+    if (variations.length === 0) {
+      await withRetry429409(() =>
+        axios.put(`https://api.mercadolibre.com/items/${itemId}`, { seller_custom_field: newSku }, { headers })
+      );
+      console.log(`[ML SKU] Actualizado ítem ${itemId} seller_custom_field a "${newSku}"`);
+      return true;
+    }
+    const variationsPayload = variations.map((v: any) => {
+      const isTarget = String(v.id) === String(variationId);
+      const sku = isTarget ? newSku : getMlVariationSku(v);
+      return { id: v.id, available_quantity: Math.max(0, v.available_quantity ?? 0), seller_sku: sku || undefined };
+    });
+    await withRetry429409(() =>
+      axios.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: variationsPayload }, { headers })
+    );
+    console.log(`[ML SKU] Actualizado ítem ${itemId} variación ${variationId} seller_sku a "${newSku}"`);
+    return true;
+  } catch (e: any) {
+    console.error('[ML SKU] Error:', e.response?.data || e.message);
+    return false;
+  }
+};
+
+/** Enviar el SKU de tu inventario a Tienda Nube (actualiza sku de la variante). */
+export const updateTiendaNubeSku = async (
+  productId: string,
+  variantId: string,
+  newSku: string
+): Promise<boolean> => {
+  const integration = await get(
+    `SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`
+  );
+  if (!integration?.access_token || !integration?.store_id) {
+    console.log('[TN SKU] No hay integración configurada');
+    return false;
+  }
+  try {
+    await withRetry429409(() =>
+      axios.put(
+        `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
+        { sku: newSku },
+        {
+          headers: {
+            'Authentication': `bearer ${integration.access_token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'LupoHub (lupohub@example.com)'
+          }
+        }
+      )
+    );
+    console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
+    return true;
+  } catch (e: any) {
+    console.error('[TN SKU] Error:', e.response?.data || e.message);
+    return false;
+  }
+};
+
 // Endpoint: Obtener historial de movimientos de stock
 export const getStockMovements = async (req: Request, res: Response) => {
   try {
