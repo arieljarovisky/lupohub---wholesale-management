@@ -723,6 +723,7 @@ const App: React.FC = () => {
                 attributes={attributes} 
                 onCreateAttribute={handleCreateAttribute} 
                 onDeleteAttribute={handleDeleteAttribute} 
+                onRefreshData={loadData}
                 role={currentUser.role} 
                 users={users}
                 onUpdateUser={handleUpdateUser}

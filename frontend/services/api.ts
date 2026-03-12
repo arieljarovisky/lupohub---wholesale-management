@@ -302,6 +302,14 @@ export const api = {
     }, [], 'getSizes');
   },
 
+  createSize: async (payload: { code: string; name?: string }): Promise<{ id: string; code: string; name: string }> => {
+    return request<any>('/sizes', 'POST', payload);
+  },
+
+  createColor: async (payload: { code: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
+    return request<any>('/colors', 'POST', payload);
+  },
+
   createProduct: async (product: Product): Promise<Product> => {
     return handleRequest(async () => {
       return await request<Product>('/products', 'POST', product);

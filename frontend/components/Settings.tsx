@@ -67,6 +67,7 @@ interface SettingsProps {
   attributes: Attribute[];
   onCreateAttribute: (attr: Attribute) => void;
   onDeleteAttribute: (id: string) => void;
+  onRefreshData?: () => void;
   role: Role;
   users?: User[];
   onUpdateUser?: (user: User) => void;
@@ -77,7 +78,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({
-  attributes, onCreateAttribute, onDeleteAttribute, role,
+  attributes, onCreateAttribute, onDeleteAttribute, onRefreshData, role,
   users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser
 }) => {
   const { showToast } = useNotification();
@@ -446,17 +447,28 @@ const Settings: React.FC<SettingsProps> = ({
   const colors = attributes.filter(a => a.type === 'color');
   const sellers = users.filter(u => u.role === Role.SELLER);
 
-  const handleCreateAttribute = () => {
+  const handleCreateAttribute = async () => {
     if (!newName) return;
+    const nameTrim = newName.trim();
     const newAttr: Attribute = {
       id: `attr-${Date.now()}`,
       type: activeTab === 'sizes' ? 'size' : 'color',
-      name: newName,
+      name: nameTrim,
       value: activeTab === 'colors' ? newColorValue : undefined
     };
-    onCreateAttribute(newAttr);
-    setNewName('');
-    setNewColorValue('#000000');
+    try {
+      if (activeTab === 'sizes') {
+        await api.createSize({ code: nameTrim, name: nameTrim });
+      } else {
+        await api.createColor({ code: nameTrim, name: nameTrim, hex: newColorValue || null });
+      }
+      onCreateAttribute(newAttr);
+      setNewName('');
+      setNewColorValue('#000000');
+      onRefreshData?.();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al crear. ¿El código ya existe?');
+    }
   };
 
   const handleSaveConfig = () => {

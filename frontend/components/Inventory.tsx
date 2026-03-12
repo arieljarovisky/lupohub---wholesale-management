@@ -105,6 +105,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingProductGroupKey, setEditingProductGroupKey] = useState<string | null>(null);
   const [editProductForm, setEditProductForm] = useState<{ name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string }>({ name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1' });
   const [loadingEditProduct, setLoadingEditProduct] = useState(false);
   const [savingEditProduct, setSavingEditProduct] = useState(false);
@@ -921,6 +922,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return next;
     });
     onUpdateStock(productId, newStock);
+    setServerListRefreshKey(k => k + 1);
+    onImportComplete?.();
   };
 
   const handleManualStockChange = (productId: string, value: string) => {
@@ -941,6 +944,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       return next;
     });
     onUpdateStock(productId, newStock);
+    setServerListRefreshKey(k => k + 1);
+    onImportComplete?.();
   };
 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
@@ -1420,6 +1425,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setShowBulkLinkModal(false);
       setBulkLinkGroupKey(null);
       if (updated > 0) {
+        setServerListRefreshKey(k => k + 1);
+        onImportComplete?.();
         const msg = synced > 0
           ? `Se guardaron ${updated} vinculación(es) y se trajo el stock de Mercado Libre a tu inventario (${synced} variante(s) actualizadas).`
           : `Se guardaron ${updated} vinculación(es).`;
@@ -1578,6 +1585,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
       }).catch(() => {});
 
+      setServerListRefreshKey(k => k + 1);
+      onImportComplete?.();
       setLinkingVariant(null);
     } catch (error) {
       console.error(error);
@@ -1684,9 +1693,37 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         tiendaNubePackSize: isNaN(tnPack) || tnPack < 1 ? undefined : tnPack
       } as Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number });
       showToast('success', 'Producto actualizado');
+      const groupKeyToRefetch = editingProductGroupKey;
       setEditingProductId(null);
+      setEditingProductGroupKey(null);
       setServerListRefreshKey(k => k + 1);
       onImportComplete?.();
+      if (groupKeyToRefetch) {
+        api.getVariantsBySku(groupKeyToRefetch).then(variants => {
+          const mapped: Product[] = variants.map((v) => ({
+            id: v.variantId,
+            sku: `${groupKeyToRefetch}-${v.sizeCode}-${v.colorCode}`,
+            name,
+            category: editProductForm.category || 'General',
+            price: base_price,
+            description: editProductForm.description || '',
+            size: v.sizeCode,
+            color: v.colorName,
+            colorCode: v.colorCode,
+            stock: v.stock,
+            integrations: {
+              local: true,
+              tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+              mercadoLibre: !!v.externalIds?.mercadoLibre
+            },
+            externalIds: v.externalIds
+          }));
+          setLoadedVariants(prev => ({ ...prev, [groupKeyToRefetch]: mapped }));
+          api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+            if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+          }).catch(() => {});
+        }).catch(() => {});
+      }
     } catch (e: any) {
       showToast('error', e?.message || 'Error al guardar');
     } finally {
@@ -1697,6 +1734,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const handleSaveEditVariant = async () => {
     if (!editingVariantId) return;
     const variantId = editingVariantId;
+    const groupKey = Object.keys(loadedVariants).find(sku => loadedVariants[sku]?.some((v: any) => v.id === variantId));
     setSavingEditVariant(true);
     try {
       await api.updateVariant(variantId, {
@@ -1706,9 +1744,32 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('success', 'Variante actualizada');
       setEditingVariantId(null);
       setServerListRefreshKey(k => k + 1);
-      const groupKey = Object.keys(loadedVariants).find(sku => loadedVariants[sku]?.some((v: any) => v.id === variantId));
-      if (groupKey) setLoadedVariants(prev => ({ ...prev, [groupKey]: undefined }));
       onImportComplete?.();
+      if (groupKey) {
+        const variants = await api.getVariantsBySku(groupKey);
+        const mapped: Product[] = variants.map((v) => ({
+          id: v.variantId,
+          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+          name: groupedProducts[groupKey]?.[0]?.name || '',
+          category: groupedProducts[groupKey]?.[0]?.category || 'General',
+          price: groupedProducts[groupKey]?.[0]?.price || 0,
+          description: '',
+          size: v.sizeCode,
+          color: v.colorName,
+          colorCode: v.colorCode,
+          stock: v.stock,
+          integrations: {
+            local: true,
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre
+          },
+          externalIds: v.externalIds
+        }));
+        setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
+        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
+          if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
+        }).catch(() => {});
+      }
     } catch (e: any) {
       showToast('error', e?.message || 'Error al guardar variante');
     } finally {
@@ -2360,7 +2421,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                              <>
                                <button
                                  type="button"
-                                 onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); setEditingProductId((groupVariants[0] as any).product_id); }}
+                                 onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
                                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
                                >
                                  <Edit2 size={18} className="text-amber-400 shrink-0" />
@@ -2395,7 +2456,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
                      <>
                        <button
-                         onClick={(e) => { e.stopPropagation(); setEditingProductId((groupVariants[0] as any).product_id); }}
+                         onClick={(e) => { e.stopPropagation(); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
                          className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
                          title="Editar artículo"
                        >
@@ -2904,7 +2965,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <Edit2 size={20} className="text-amber-400" />
                 Editar artículo
               </h3>
-              <button onClick={() => setEditingProductId(null)} className="p-2.5 min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition touch-manipulation shrink-0" aria-label="Cerrar">
+              <button onClick={() => { setEditingProductId(null); setEditingProductGroupKey(null); }} className="p-2.5 min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-700 transition touch-manipulation shrink-0" aria-label="Cerrar">
                 <X size={20} />
               </button>
             </div>
@@ -2987,7 +3048,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             </div>
             {!loadingEditProduct && (
               <div className="shrink-0 p-4 border-t border-slate-700 flex gap-3 justify-end">
-                <button onClick={() => setEditingProductId(null)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium">
+                <button onClick={() => { setEditingProductId(null); setEditingProductGroupKey(null); }} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium">
                   Cancelar
                 </button>
                 <button onClick={handleSaveEditProduct} disabled={savingEditProduct} className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 flex items-center gap-2">
