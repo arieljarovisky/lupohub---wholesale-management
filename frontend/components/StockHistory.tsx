@@ -29,6 +29,12 @@ const movementTypeConfig: Record<string, { label: string; color: string; bgColor
     bgColor: 'bg-cyan-500/10',
     icon: <Store size={16} />
   },
+  'CANCEL_VENTA_TIENDA_NUBE': { 
+    label: 'Cancelación venta TN', 
+    color: 'text-amber-400', 
+    bgColor: 'bg-amber-500/10',
+    icon: <RotateCcw size={16} />
+  },
   'VENTA_MERCADO_LIBRE': { 
     label: 'Venta Mercado Libre', 
     color: 'text-yellow-400', 
@@ -373,6 +379,7 @@ const StockHistory: React.FC = () => {
           >
             <option value="">Todos los tipos</option>
             <option value="VENTA_TIENDA_NUBE">Ventas Tienda Nube</option>
+            <option value="CANCEL_VENTA_TIENDA_NUBE">Cancelación venta TN</option>
             <option value="VENTA_MERCADO_LIBRE">Ventas Mercado Libre</option>
             <option value="PEDIDO_MAYORISTA">Pedidos Mayoristas</option>
             <option value="AJUSTE_MANUAL">Ajustes Manuales</option>

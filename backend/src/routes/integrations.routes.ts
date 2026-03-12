@@ -33,7 +33,8 @@ import {
   saveMLAutoMessageConfig,
   importProductFromMercadoLibre,
   importProductFromTiendaNube,
-  testTiendaNubeOrder
+  testTiendaNubeOrder,
+  syncTiendaNubeOrdersFromDate
 } from '../controllers/integrations.controller';
 import { authMiddleware } from '../middleware/auth';
 
@@ -78,6 +79,9 @@ router.post('/tiendanube/webhook', handleTiendaNubeWebhook);
 /** Probar descuento de stock por una orden TN: POST { "orderId": "123" } o GET ?orderId=123 (requiere login) */
 router.post('/tiendanube/test-order', authMiddleware, testTiendaNubeOrder);
 router.get('/tiendanube/test-order', authMiddleware, testTiendaNubeOrder);
+/** Descontar stock de ventas TN desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
+router.post('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeOrdersFromDate);
+router.get('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeOrdersFromDate);
 
 router.delete('/:platform/disconnect', disconnectIntegration);
 

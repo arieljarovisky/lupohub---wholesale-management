@@ -224,20 +224,23 @@ export const handleTiendaNubeCallback = async (req: Request, res: Response) => {
       updated_at = CURRENT_TIMESTAMP
     `, [access_token, response.data.refresh_token || null, expiresAt, user_id, user_id]);
 
-    // Registrar webhook para order/paid y descontar stock automáticamente al vender
+    // Registrar webhooks: order/paid (descontar stock) y order/cancelled (restaurar stock)
     const backendUrl = (process.env.BACKEND_URL || process.env.API_URL || '').replace(/\/$/, '');
     if (backendUrl && backendUrl.startsWith('https://')) {
       const webhookUrl = `${backendUrl}/api/integrations/tiendanube/webhook`;
-      try {
-        await axios.post(
-          `https://api.tiendanube.com/v1/${user_id}/webhooks`,
-          { event: 'order/paid', url: webhookUrl },
-          { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
-        );
-        console.log('[TN] Webhook order/paid registrado:', webhookUrl);
-      } catch (whErr: any) {
-        const msg = whErr.response?.data?.url?.[0] || whErr.response?.data?.event?.[0] || whErr.message;
-        console.warn('[TN] No se pudo registrar webhook (puede existir ya):', msg);
+      const webhookEvents = ['order/paid', 'order/cancelled'] as const;
+      for (const ev of webhookEvents) {
+        try {
+          await axios.post(
+            `https://api.tiendanube.com/v1/${user_id}/webhooks`,
+            { event: ev, url: webhookUrl },
+            { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
+          );
+          console.log(`[TN] Webhook ${ev} registrado:`, webhookUrl);
+        } catch (whErr: any) {
+          const msg = whErr.response?.data?.url?.[0] || whErr.response?.data?.event?.[0] || whErr.message;
+          console.warn(`[TN] No se pudo registrar webhook ${ev} (puede existir ya):`, msg);
+        }
       }
     } else {
       console.warn('[TN] Configure BACKEND_URL (HTTPS) en .env para activar descuento de stock automático por ventas.');
@@ -898,6 +901,18 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
       }
     }
 
+    // Al cancelar una orden, restaurar el stock que se había descontado
+    if (event === 'order/cancelled') {
+      const orderId = req.body.id ?? req.body.order_id ?? req.body.order?.id ?? req.body.data?.id ?? req.body.data?.order_id;
+      if (orderId) {
+        processTiendaNubeOrderCancelled(String(orderId)).catch((err: any) =>
+          console.error('[TN Order] Error restaurando stock por cancelación:', err?.message || err)
+        );
+      } else {
+        console.warn('[TN Webhook] order/cancelled sin id de orden en body:', JSON.stringify(req.body));
+      }
+    }
+
     res.status(200).json({ received: true });
   } catch (error: any) {
     console.error('[TN Webhook] Error:', error.message);
@@ -1040,6 +1055,62 @@ const processTiendaNubeOrder = async (orderId: string) => {
   }
 };
 
+/** Restaurar stock cuando se cancela una orden de Tienda Nube (revierte los movimientos VENTA_TIENDA_NUBE de esa orden). */
+const processTiendaNubeOrderCancelled = async (orderId: string) => {
+  try {
+    const ref = `Orden TN: ${orderId}`;
+    const cancelRef = `Cancelación orden TN: ${orderId}`;
+
+    const alreadyRestored = await get(
+      `SELECT id FROM stock_movements WHERE movement_type = 'CANCEL_VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`,
+      [cancelRef]
+    );
+    if (alreadyRestored) {
+      console.log(`[TN Order] Cancelación orden ${orderId} ya procesada, omitiendo`);
+      return;
+    }
+
+    const movements = await query(
+      `SELECT variant_id, quantity_change FROM stock_movements
+       WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ?
+       ORDER BY created_at`,
+      [ref]
+    );
+    if (!movements?.length) {
+      console.log(`[TN Order] No hay movimientos de venta para orden ${orderId} (no se había descontado o orden distinta)`);
+      return;
+    }
+
+    const { updateVariantStock } = await import('./stock.controller');
+    let restoredCount = 0;
+    for (const m of movements) {
+      const amountToRestore = Math.abs(Number(m.quantity_change) || 0);
+      if (amountToRestore <= 0) continue;
+
+      const row = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [m.variant_id]);
+      const currentStock = Number(row?.stock ?? 0);
+      const newStock = currentStock + amountToRestore;
+
+      const ok = await updateVariantStock(
+        m.variant_id,
+        newStock,
+        'CANCEL_VENTA_TIENDA_NUBE',
+        cancelRef,
+        true
+      );
+      if (ok) {
+        restoredCount++;
+        console.log(`[TN Order] Restaurado ${amountToRestore} para variante ${m.variant_id}, stock: ${currentStock} -> ${newStock}`);
+      }
+    }
+    if (restoredCount > 0) {
+      console.log(`[TN Order] Orden ${orderId} cancelada: restaurado stock de ${restoredCount} ítem(s).`);
+    }
+  } catch (error: any) {
+    console.error('[TN Order] Error restaurando stock por cancelación:', error.message);
+  }
+};
+
 /** Prueba manual: procesar una orden de Tienda Nube por ID (mismo flujo que el webhook). Útil para verificar que el stock se descuenta. */
 export const testTiendaNubeOrder = async (req: Request, res: Response) => {
   try {
@@ -1058,6 +1129,81 @@ export const testTiendaNubeOrder = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[TN Test Order]', error?.message);
     res.status(500).json({ message: error?.message || 'Error al procesar orden de prueba' });
+  }
+};
+
+/** Descontar stock de todas las ventas pagadas de Tienda Nube desde una fecha (ej. para sincronizar ventas que no se descontaron). Idempotente: órdenes ya procesadas se omiten. */
+export const syncTiendaNubeOrdersFromDate = async (req: Request, res: Response) => {
+  try {
+    const fromParam = (req.body?.fromDate ?? req.query?.fromDate ?? '2026-03-09').toString().trim();
+    const fromDate = fromParam.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+      return res.status(400).json({ message: 'fromDate debe ser YYYY-MM-DD (ej. 2026-03-09)' });
+    }
+
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      return res.status(400).json({ message: 'Falta store_id en la integración de Tienda Nube' });
+    }
+
+    const headers = {
+      'Authentication': `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT
+    };
+
+    let totalOrders = 0;
+    let page = 1;
+    const perPage = 50;
+    let hasMore = true;
+
+    while (hasMore && page <= 20) {
+      const listRes = await axios.get(
+        `https://api.tiendanube.com/v1/${storeId}/orders`,
+        {
+          params: {
+            page,
+            per_page: perPage,
+            payment_status: 'paid',
+            created_at_min: `${fromDate}T00:00:00`
+          },
+          headers,
+          validateStatus: () => true
+        }
+      );
+
+      if (listRes.status !== 200) {
+        const errMsg = listRes.data?.message || listRes.data?.error || JSON.stringify(listRes.data);
+        return res.status(listRes.status === 403 ? 403 : 500).json({
+          message: `Error al listar órdenes de Tienda Nube: ${errMsg}`,
+          hint: listRes.status === 403 ? 'Reconectá Tienda Nube (scope read_orders).' : undefined
+        });
+      }
+
+      const orders = Array.isArray(listRes.data) ? listRes.data : [];
+      for (const order of orders) {
+        const orderId = order.id != null ? String(order.id) : '';
+        if (orderId) {
+          await processTiendaNubeOrder(orderId);
+          totalOrders++;
+        }
+      }
+
+      if (orders.length < perPage) hasMore = false;
+      else page++;
+    }
+
+    res.json({
+      message: `Se procesaron las órdenes pagadas de Tienda Nube desde el ${fromDate}. Las que ya tenían stock descontado se omitieron.`,
+      fromDate,
+      totalOrders,
+    });
+  } catch (error: any) {
+    console.error('[TN Sync From Date]', error?.message);
+    res.status(500).json({ message: error?.message || 'Error al sincronizar órdenes desde fecha' });
   }
 };
 
