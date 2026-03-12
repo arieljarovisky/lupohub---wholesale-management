@@ -1040,6 +1040,27 @@ const processTiendaNubeOrder = async (orderId: string) => {
   }
 };
 
+/** Prueba manual: procesar una orden de Tienda Nube por ID (mismo flujo que el webhook). Útil para verificar que el stock se descuenta. */
+export const testTiendaNubeOrder = async (req: Request, res: Response) => {
+  try {
+    const orderId = (req.body?.orderId ?? req.query?.orderId ?? '').toString().trim();
+    if (!orderId) {
+      return res.status(400).json({
+        message: 'Falta orderId. Ejemplo: POST con body { "orderId": "12345" } o GET ?orderId=12345',
+        hint: 'El ID es el de la orden en Tienda Nube (no el número de orden). Lo ves en la URL al abrir la orden en el panel de TN.',
+      });
+    }
+    await processTiendaNubeOrder(orderId);
+    res.json({
+      message: 'Procesamiento finalizado. Revisá los logs del backend y el Historial de stock para ver si se descontó.',
+      orderId,
+    });
+  } catch (error: any) {
+    console.error('[TN Test Order]', error?.message);
+    res.status(500).json({ message: error?.message || 'Error al procesar orden de prueba' });
+  }
+};
+
 // Webhook de Mercado Libre para órdenes/ventas
 export const handleMercadoLibreWebhook = async (req: Request, res: Response) => {
   try {

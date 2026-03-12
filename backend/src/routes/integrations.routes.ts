@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { 
-  getIntegrationStatus, 
-  getMercadoLibreAuthUrl, 
+import {
+  getIntegrationStatus,
+  getMercadoLibreAuthUrl,
   handleMercadoLibreCallback,
   getTiendaNubeAuthUrl,
   handleTiendaNubeCallback,
@@ -32,8 +32,10 @@ import {
   getMLAutoMessageConfig,
   saveMLAutoMessageConfig,
   importProductFromMercadoLibre,
-  importProductFromTiendaNube
+  importProductFromTiendaNube,
+  testTiendaNubeOrder
 } from '../controllers/integrations.controller';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
@@ -73,6 +75,9 @@ router.post('/tiendanube/sync-stock-selected', syncSelectedStockToTiendaNube);
 router.post('/tiendanube/import-product', importProductFromTiendaNube);
 router.post('/tiendanube/normalize-sizes', normalizeSizesInTiendaNube);
 router.post('/tiendanube/webhook', handleTiendaNubeWebhook);
+/** Probar descuento de stock por una orden TN: POST { "orderId": "123" } o GET ?orderId=123 (requiere login) */
+router.post('/tiendanube/test-order', authMiddleware, testTiendaNubeOrder);
+router.get('/tiendanube/test-order', authMiddleware, testTiendaNubeOrder);
 
 router.delete('/:platform/disconnect', disconnectIntegration);
 
