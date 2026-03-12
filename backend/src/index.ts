@@ -35,8 +35,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors() as any);
+// CORS: con credentials (cookies) no se puede usar '*'; hay que devolver el origen concreto
+const allowedOrigins: string[] = [
+  'https://lupohub-wholesale-management.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000'
+];
+const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '');
+if (frontendUrl && !allowedOrigins.includes(frontendUrl)) allowedOrigins.push(frontendUrl);
+
+const corsOpts: cors.CorsOptions = {
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(null, false);
+  },
+  credentials: true
+};
+app.use(cors(corsOpts) as RequestHandler);
 app.use(express.json() as any);
 app.use((req, res, next) => {
   console.log('[backend]', req.method, req.path);
