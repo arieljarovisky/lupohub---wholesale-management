@@ -532,38 +532,42 @@ const Settings: React.FC<SettingsProps> = ({
       </div>
 
       <div className="flex space-x-2 border-b border-slate-700 overflow-x-auto touch-scroll scrollbar-hide pb-px -mx-1 px-1 sm:mx-0 sm:px-0">
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
-            activeTab === 'users' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
-          }`}
-        >
-          USUARIOS DEL SISTEMA
-        </button>
-        <button
-          onClick={() => setActiveTab('sellers')}
-          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
-            activeTab === 'sellers' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
-          }`}
-        >
-          COMISIONES
-        </button>
-        <button
-          onClick={() => setActiveTab('pricelists')}
-          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
-            activeTab === 'pricelists' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
-          }`}
-        >
-          LISTAS DE PRECIOS
-        </button>
-        <button
-          onClick={() => setActiveTab('integrations')}
-          className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
-            activeTab === 'integrations' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
-          }`}
-        >
-          CONECTIVIDAD APIs
-        </button>
+        {role === Role.ADMIN && (
+          <>
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'users' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              USUARIOS DEL SISTEMA
+            </button>
+            <button
+              onClick={() => setActiveTab('sellers')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'sellers' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              COMISIONES
+            </button>
+            <button
+              onClick={() => setActiveTab('pricelists')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'pricelists' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              LISTAS DE PRECIOS
+            </button>
+            <button
+              onClick={() => setActiveTab('integrations')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'integrations' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              CONECTIVIDAD APIs
+            </button>
+          </>
+        )}
         <button
           onClick={() => setActiveTab('sizes')}
           className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
@@ -583,7 +587,7 @@ const Settings: React.FC<SettingsProps> = ({
       </div>
 
       {/* USER MANAGEMENT TAB */}
-      {activeTab === 'users' && (
+      {role === Role.ADMIN && activeTab === 'users' && (
         <div className="space-y-8">
            {/* CREATE USER FORM */}
            <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
@@ -734,7 +738,7 @@ const Settings: React.FC<SettingsProps> = ({
       )}
 
       {/* PRICE LISTS TAB */}
-      {activeTab === 'pricelists' && (
+      {role === Role.ADMIN && activeTab === 'pricelists' && (
         <div className="space-y-6">
           <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
@@ -1100,7 +1104,7 @@ const Settings: React.FC<SettingsProps> = ({
         </Modal>
       )}
 
-      {activeTab === 'sellers' && (
+      {role === Role.ADMIN && activeTab === 'sellers' && (
         <div className="space-y-4">
            {sellers.map(seller => {
              const sellerSales = orders
@@ -1160,7 +1164,7 @@ const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
 
-      {activeTab === 'integrations' && (
+      {role === Role.ADMIN && activeTab === 'integrations' && (
         <div className="space-y-6">
           {/* Instalar app en tablet / móvil */}
           <div className="bg-indigo-900/20 rounded-2xl border border-indigo-700/50 p-5">
