@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
 import { useNotification } from '../context/NotificationContext';
 
@@ -49,19 +50,69 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const canEditOrder = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
+  const exportOrdersToExcel = () => {
+    const list = filteredOrders.length > 0 ? filteredOrders : orders;
+    const getCustomerName = (customerId: string) => customers.find(c => c.id === customerId)?.businessName || customers.find(c => c.id === customerId)?.name || customerId;
+    const resumenRows = list.map(o => ({
+      'ID Pedido': o.id,
+      'Fecha': o.date,
+      'Cliente': getCustomerName(o.customerId),
+      'Estado': o.status,
+      'Total': o.total,
+      'Cant. ítems': o.items.reduce((acc, i) => acc + i.quantity, 0),
+    }));
+    const lineasRows: Record<string, string | number>[] = [];
+    for (const o of list) {
+      const cliente = getCustomerName(o.customerId);
+      for (const item of o.items) {
+        const subtotal = item.quantity * (item.priceAtMoment ?? 0);
+        lineasRows.push({
+          'ID Pedido': o.id,
+          'Fecha': o.date,
+          'Cliente': cliente,
+          'Estado': o.status,
+          'SKU': item.sku ?? '',
+          'Producto': item.productName ?? '',
+          'Talle': item.sizeCode ?? '',
+          'Color': item.colorName ?? '',
+          'Cantidad': item.quantity,
+          'Precio unit.': item.priceAtMoment ?? 0,
+          'Subtotal': subtotal,
+        });
+      }
+    }
+    const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+    const wsLineas = XLSX.utils.json_to_sheet(lineasRows.length ? lineasRows : [{ 'ID Pedido': '', 'Fecha': '', 'Cliente': '', 'Estado': '', 'SKU': '', 'Producto': '', 'Talle': '', 'Color': '', 'Cantidad': '', 'Precio unit.': '', 'Subtotal': '' }]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, wsResumen, 'Resumen pedidos');
+    XLSX.utils.book_append_sheet(workbook, wsLineas, 'Líneas');
+    const filename = `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+  };
+
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
-        {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
-          <button 
-            onClick={() => onNavigate('create_order')}
-            className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={exportOrdersToExcel}
+            className="w-full sm:w-auto bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl transition flex items-center justify-center gap-2 border border-slate-600 font-semibold active:scale-95"
           >
-            <Plus size={20} />
-            <span>Nuevo Pedido</span>
+            <FileSpreadsheet size={20} />
+            <span>Exportar a Excel</span>
           </button>
-        )}
+          {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
+            <button 
+              onClick={() => onNavigate('create_order')}
+              className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
+            >
+              <Plus size={20} />
+              <span>Nuevo Pedido</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="space-y-4">
