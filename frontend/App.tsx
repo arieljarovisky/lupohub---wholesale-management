@@ -169,7 +169,7 @@ const App: React.FC = () => {
       if (currentUser?.role === Role.CUSTOMER) {
         const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders()]);
         setMyCustomer(myC || null);
-        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined, perPage: 400 });
+        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined, perPage: 2000 });
         setProducts(fetchedProducts);
         setOrders(fetchedOrders);
         setCustomers(myC ? [myC] : []);
@@ -177,7 +177,7 @@ const App: React.FC = () => {
       } else {
       const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
-        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId, perPage: 400 } : { perPage: 400 }),
+        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId, perPage: 2000 } : { perPage: 2000 }),
         api.getOrders(),
         api.getColors(),
         api.getSizes(),

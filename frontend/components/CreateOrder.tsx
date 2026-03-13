@@ -77,7 +77,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
   const filteredSearchProducts = React.useMemo(() => {
     if (searchWords.length === 0) {
-      return products.slice(0, 30);
+      return products;
     }
     return products.filter(p => {
       const sku = (p.sku || '').toLowerCase();
@@ -86,7 +86,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       const color = (p.color || '').toLowerCase();
       const allText = `${sku} ${name} ${category} ${color}`;
       return searchWords.every(word => allText.includes(word));
-    }).slice(0, 50);
+    });
   }, [products, searchTrimmed]);
 
   /** Agrupar por producto (base_sku o product_id) para mostrar variantes bajo el mismo nombre. */
