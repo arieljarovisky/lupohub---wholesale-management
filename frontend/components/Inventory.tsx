@@ -3582,11 +3582,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       <option value="">Rellenar desde publicación cargada</option>
                                       {bulkLinkMlVariations.map(m => (
                                         <option key={String(m.variationId)} value={String(m.variationId)}>
-                                          {m.sku || '(sin SKU)'} — {[m.size, m.color].filter(Boolean).join(' ') || '—'}
+                                          {m.sku || '(sin SKU)'} — {[m.size, m.color].filter(Boolean).join(' / ') || '—'}
                                         </option>
                                       ))}
                                     </select>
                                   )}
+                                  {(() => {
+                                    const mlVal = bulkLinkAssignments[v.variantId]?.ml ?? '';
+                                    const mlMatch = mlVal && bulkLinkMlVariations.find(m => String(m.variationId) === String(mlVal));
+                                    if (!mlMatch) return null;
+                                    return (
+                                      <span className="text-xs text-slate-400 mt-0.5">
+                                        <span className="font-mono text-amber-200/90">{mlMatch.sku || '—'}</span>
+                                        <span className="ml-1.5">— {[mlMatch.size, mlMatch.color].filter(Boolean).join(' / ') || '—'}</span>
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                               </td>
                               <td className="p-3">
@@ -3609,7 +3620,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                   <option value="">—</option>
                                   {bulkLinkTnVariants.map(t => (
                                     <option key={String(t.variantId)} value={String(t.variantId)}>
-                                      {t.sku || '(sin SKU)'} — {[t.size, t.color].filter(Boolean).join(' ') || '—'}
+                                      {t.sku || '(sin SKU)'} — {[t.size, t.color].filter(Boolean).join(' / ') || '—'}
                                     </option>
                                   ))}
                                 </select>
