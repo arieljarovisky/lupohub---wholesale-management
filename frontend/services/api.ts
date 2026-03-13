@@ -289,13 +289,14 @@ export const api = {
     }, data, 'updateVariant');
   },
   
-  getColors: async (): Promise<Array<{ code: string; name: string; hex?: string }>> => {
+  getColors: async (): Promise<Array<{ id: string; code: string; name: string; hex?: string | null }>> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/colors', 'GET');
       return rows.map(r => ({
+        id: r.id,
         code: r.code != null ? String(r.code).trim() : '',
         name: r.name != null ? String(r.name).trim() : '',
-        hex: r.hex
+        hex: r.hex ?? null
       }));
     }, [], 'getColors');
   },
@@ -313,6 +314,10 @@ export const api = {
 
   createColor: async (payload: { code: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
     return request<any>('/colors', 'POST', payload);
+  },
+
+  updateColor: async (id: string, payload: { code?: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
+    return request<any>(`/colors/${encodeURIComponent(id)}`, 'PUT', payload);
   },
 
   createProduct: async (product: Product): Promise<Product> => {

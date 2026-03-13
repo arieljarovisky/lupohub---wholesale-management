@@ -186,12 +186,12 @@ const App: React.FC = () => {
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
       setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
-      const colorAttrs = fetchedColors.map((c, idx) => ({ 
-        id: c.code ? `color-${c.code}` : `color-idx-${idx}-${Date.now()}`, 
+      const colorAttrs = fetchedColors.map((c: { id: string; code?: string; name?: string; hex?: string | null }) => ({ 
+        id: c.id, 
         type: 'color', 
-        name: c.name, 
-        value: c.hex, 
-        code: c.code 
+        name: c.name ?? c.code ?? '', 
+        value: c.hex ?? undefined, 
+        code: c.code ?? '' 
       })) as any;
        const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
         id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
