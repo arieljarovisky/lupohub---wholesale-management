@@ -385,8 +385,8 @@ const App: React.FC = () => {
               description: raw.description ?? '',
               size: sizeCode,
               color: colorCode,
-              stock: 0,
-              stock_total: 0,
+              stock: Number((raw as any).stock_total ?? (raw as any).stock ?? 0),
+              stock_total: Number((raw as any).stock_total ?? (raw as any).stock ?? 0),
               integrations: { local: true, mercadoLibre: false, tiendaNube: false },
               externalIds: raw.externalIds,
             } as Product);

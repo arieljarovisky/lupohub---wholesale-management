@@ -212,11 +212,26 @@ export const createProduct = async (req: any, res: any) => {
       }
 
       const existingVariant = await get(
-        `SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`,
+        `SELECT id, sku FROM product_variants WHERE product_color_id = ? AND size_id = ?`,
         [productColorId, sizeId]
       );
       if (existingVariant) {
-        return res.status(409).json({ message: "La variante ya existe para este artículo, talle y color." });
+        const productRow = await get(`SELECT name, category, base_price, tienda_nube_id, mercado_libre_id FROM products WHERE id = ?`, [productId]);
+        const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [existingVariant.id]);
+        return res.status(200).json({
+          id: existingVariant.id,
+          sku: existingVariant.sku ?? sku,
+          name: productRow?.name ?? name,
+          category: productRow?.category ?? category ?? 'General',
+          base_price: Number(productRow?.base_price ?? basePrice),
+          description: productRow?.description ?? description ?? undefined,
+          stock_total: Number(stockRow?.stock ?? 0),
+          externalIds: {
+            tiendaNube: productRow?.tienda_nube_id ?? undefined,
+            mercadoLibre: productRow?.mercado_libre_id ?? undefined,
+          },
+          existing: true,
+        });
       }
 
       const variantId = uuidv4();
