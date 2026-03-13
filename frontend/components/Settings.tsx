@@ -487,7 +487,6 @@ const Settings: React.FC<SettingsProps> = ({
     setSavingColor(true);
     try {
       await api.updateColor(editingColorId, {
-        code: editingColorName.trim(),
         name: editingColorName.trim(),
         hex: editingColorHex || null
       });
