@@ -38,6 +38,15 @@ interface InventoryProps {
   onImportComplete?: () => void;
 }
 
+/** Formato de talle para dropdowns de vinculación: muestra código numérico y nombre (ej. "160 - GG") para que coincida con la columna local. */
+function formatSizeForLink(size: string | undefined | null): string {
+  if (size == null || String(size).trim() === '') return '';
+  const s = String(size).trim();
+  if (/^\d{2,3}$/.test(s)) return labelTalle(s) || s;
+  const code = codigoTalleParaSku(s);
+  return code && code !== s ? `${code} - ${s}` : s;
+}
+
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
@@ -3316,7 +3325,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                <option value="">Seleccionar...</option>
                                {linkTnVariants.map((v) => (
                                  <option key={String(v.variantId)} value={String(v.variantId)}>
-                                   {v.sku || '(sin SKU)'} — {[v.color, v.size].filter(Boolean).join(' ') || '—'}
+                                   {v.sku || '(sin SKU)'} — {[formatSizeForLink(v.size), v.color].filter(Boolean).join(' / ') || '—'}
                                  </option>
                                ))}
                              </select>
@@ -3376,7 +3385,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                <option value="">Seleccionar...</option>
                                {linkMlVariations.map((v) => (
                                  <option key={v.variationId} value={String(v.variationId)}>
-                                   {v.sku || '(sin SKU)'} — {[v.color, v.size].filter(Boolean).join(' ') || '—'}
+                                   {v.sku || '(sin SKU)'} — {[formatSizeForLink(v.size), v.color].filter(Boolean).join(' / ') || '—'}
                                  </option>
                                ))}
                              </select>
@@ -3582,7 +3591,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       <option value="">Rellenar desde publicación cargada</option>
                                       {bulkLinkMlVariations.map(m => (
                                         <option key={String(m.variationId)} value={String(m.variationId)}>
-                                          {m.sku || '(sin SKU)'} — {[m.size, m.color].filter(Boolean).join(' / ') || '—'}
+                                          {m.sku || '(sin SKU)'} — {[formatSizeForLink(m.size), m.color].filter(Boolean).join(' / ') || '—'}
                                         </option>
                                       ))}
                                     </select>
@@ -3594,7 +3603,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                     return (
                                       <span className="text-xs text-slate-400 mt-0.5">
                                         <span className="font-mono text-amber-200/90">{mlMatch.sku || '—'}</span>
-                                        <span className="ml-1.5">— {[mlMatch.size, mlMatch.color].filter(Boolean).join(' / ') || '—'}</span>
+                                        <span className="ml-1.5">— {[formatSizeForLink(mlMatch.size), mlMatch.color].filter(Boolean).join(' / ') || '—'}</span>
                                       </span>
                                     );
                                   })()}
@@ -3620,7 +3629,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                   <option value="">—</option>
                                   {bulkLinkTnVariants.map(t => (
                                     <option key={String(t.variantId)} value={String(t.variantId)}>
-                                      {t.sku || '(sin SKU)'} — {[t.size, t.color].filter(Boolean).join(' / ') || '—'}
+                                      {t.sku || '(sin SKU)'} — {[formatSizeForLink(t.size), t.color].filter(Boolean).join(' / ') || '—'}
                                     </option>
                                   ))}
                                 </select>
