@@ -5,10 +5,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import multer from 'multer';
 
-const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'catalogs');
+/** Raíz de archivos subidos. En Railway/usar volumen: setear UPLOADS_ROOT al path del volumen (ej. /data) para que los archivos persistan entre deploys. */
+const UPLOADS_ROOT = process.env.UPLOADS_ROOT || process.cwd();
+const UPLOAD_DIR = path.join(UPLOADS_ROOT, 'uploads', 'catalogs');
 
 function ensureUploadDir() {
-  const dir = path.join(process.cwd(), 'uploads');
+  const dir = path.join(UPLOADS_ROOT, 'uploads');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
@@ -79,7 +81,7 @@ export const uploadCatalog = async (req: Request, res: Response) => {
     }
     const name = (req.body && (req as any).body.name) ? String((req as any).body.name).trim() : file.originalname || 'Catálogo';
     const id = path.basename(file.path, path.extname(file.path));
-    const relativePath = path.relative(process.cwd(), file.path).replace(/\\/g, '/');
+    const relativePath = path.relative(UPLOADS_ROOT, file.path).replace(/\\/g, '/');
     await execute(
       `INSERT INTO catalogs (id, name, file_path, file_name, mime_type) VALUES (?, ?, ?, ?, ?)`,
       [id, name, relativePath, file.originalname || file.filename || 'catalog', file.mimetype || 'application/pdf']
@@ -145,8 +147,13 @@ export const getCatalogFile = async (req: Request, res: Response) => {
       const url = filePath.slice(4);
       return res.redirect(302, url);
     }
-    const fullPath = path.join(process.cwd(), filePath);
-    if (!fs.existsSync(fullPath)) return res.status(404).json({ message: 'Archivo no encontrado' });
+    const fullPath = path.join(UPLOADS_ROOT, filePath);
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({
+        message: 'El archivo no está disponible en el servidor. Puede que el catálogo se haya subido en otro entorno o el archivo ya no exista (p. ej. tras un redespliegue).',
+        code: 'FILE_NOT_FOUND'
+      });
+    }
     const mime = row.mime_type || 'application/pdf';
     res.setHeader('Content-Type', mime);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(row.file_name || 'catalog')}"`);
@@ -169,7 +176,7 @@ export const deleteCatalog = async (req: Request, res: Response) => {
     if (!row) return res.status(404).json({ message: 'Catálogo no encontrado' });
     const filePath = (row.file_path as string) || '';
     if (!filePath.startsWith('url:') && filePath) {
-      const fullPath = path.join(process.cwd(), filePath);
+      const fullPath = path.join(UPLOADS_ROOT, filePath);
       if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
     }
     await execute('DELETE FROM catalogs WHERE id = ?', [id]);
