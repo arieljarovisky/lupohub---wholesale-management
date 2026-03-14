@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
@@ -330,16 +330,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return sum;
   }, [rows]);
 
-  const handleSave = () => {
-    if (!selectedCustomerId || rows.length === 0) return;
+  const buildOrderPayload = (asDraft: boolean): Order | null => {
+    if (!selectedCustomerId || rows.length === 0) return null;
     const items: Array<{ variantId: string; quantity: number; priceAtMoment: number }> = [];
     for (const r of rows) {
       for (const [sizeCode, qty] of Object.entries(r.quantitiesBySize)) {
         if (qty <= 0 || !r.variantBySize[sizeCode]) continue;
-        const stock = r.stockBySize?.[sizeCode];
-        if (stock != null && qty > stock) {
-          showToast('error', `Sin stock suficiente en ${r.productCode} ${r.colorName} talle ${labelTalle(sizeCode) || sizeCode}. Máx: ${stock}`);
-          return;
+        if (!asDraft) {
+          const stock = r.stockBySize?.[sizeCode];
+          if (stock != null && qty > stock) return null; // validación de stock solo al confirmar
         }
         items.push({
           variantId: r.variantBySize[sizeCode],
@@ -348,19 +347,47 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
       }
     }
-    if (items.length === 0) {
-      showToast('error', 'Agregá al menos una cantidad en algún talle.');
-      return;
-    }
-    onSave({
+    if (items.length === 0) return null;
+    return {
       id: `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
       sellerId: sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined, isBackorder: false })),
       total,
-      status: OrderStatus.CONFIRMED,
+      status: asDraft ? OrderStatus.DRAFT : OrderStatus.CONFIRMED,
       date: orderDate
-    });
+    };
+  };
+
+  const handleSave = () => {
+    const order = buildOrderPayload(false);
+    if (!order) {
+      const firstOver = rows.find(r =>
+        Object.entries(r.quantitiesBySize).some(([sizeCode, qty]) => {
+          const stock = r.stockBySize?.[sizeCode];
+          return qty > 0 && stock != null && qty > stock;
+        })
+      );
+      if (firstOver) {
+        const [sizeCode, qty] = Object.entries(firstOver.quantitiesBySize).find(([, q]) => q > 0) || [];
+        const stock = sizeCode ? firstOver.stockBySize?.[sizeCode] : null;
+        showToast('error', `Sin stock suficiente en ${firstOver.productCode} ${firstOver.colorName}${sizeCode ? ` talle ${labelTalle(sizeCode) || sizeCode}. Máx: ${stock}` : ''}`);
+      } else {
+        showToast('error', 'Agregá al menos una cantidad en algún talle.');
+      }
+      return;
+    }
+    onSave(order);
+  };
+
+  const handleSaveDraft = () => {
+    const order = buildOrderPayload(true);
+    if (!order) {
+      showToast('error', 'Agregá al menos una cantidad en algún talle para guardar el borrador.');
+      return;
+    }
+    onSave(order);
+    showToast('success', 'Borrador guardado. Aparecerá en Pedidos → Borrador.');
   };
 
   const totalUnits = useMemo(() => {
@@ -709,13 +736,23 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           {hasExceededStock && (
             <p className="text-xs text-amber-400 mb-3">Alguna cantidad supera el stock. Reducí cantidades para confirmar.</p>
           )}
-          <button
-            disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || hasExceededStock}
-            onClick={handleSave}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
-          >
-            <Save size={20} /> Confirmar pedido
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0}
+              onClick={handleSaveDraft}
+              className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 border border-slate-600 disabled:opacity-60 transition-all touch-manipulation"
+            >
+              <FileEdit size={20} /> Guardar borrador
+            </button>
+            <button
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || hasExceededStock}
+              onClick={handleSave}
+              className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+            >
+              <Save size={20} /> Confirmar pedido
+            </button>
+          </div>
         </div>
       </footer>
 

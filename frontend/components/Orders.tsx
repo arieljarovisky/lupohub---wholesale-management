@@ -60,30 +60,59 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     return sheetName || `Pedido_${order.id.slice(-8)}`;
   };
 
-  /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems. */
+  /** Formatea fecha para Excel (igual que en la web: DD/MM/YYYY). */
+  const formatOrderDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  /** Enriquecer ítem con datos de producto cuando falten (p. ej. pedidos en caché o respuesta antigua). */
+  const enrichItem = (item: OrderItem): OrderItem => {
+    if (item.sku != null && item.productName != null) return item;
+    const variantId = item.variantId ?? item.productId;
+    if (!variantId) return item;
+    const p = products.find((x: Product) => x.id === variantId);
+    if (!p) return item;
+    return {
+      ...item,
+      sku: item.sku ?? p.sku,
+      productName: item.productName ?? p.name,
+      sizeCode: item.sizeCode ?? p.size,
+      colorName: item.colorName ?? p.color,
+    };
+  };
+
+  /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems, igual que la plantilla en la web. */
   const buildOrderSheet = (order: Order) => {
     const customerName = getCustomerName(order.customerId);
-    const header = [
-      ['Pedido', order.id],
-      ['Fecha', order.date],
-      ['Cliente', customerName],
-      ['Estado', order.status],
-      ['Total', order.total],
-    ];
     const itemHeaders = ['SKU', 'Producto', 'Talle', 'Color', 'Cantidad', 'Precio unit.', 'Subtotal'];
-    const itemRows = order.items.map(item => {
-      const subtotal = item.quantity * (item.priceAtMoment ?? 0);
+    const enrichedItems = order.items.map(enrichItem);
+    const itemRows = enrichedItems.map(item => {
+      const price = item.priceAtMoment ?? 0;
+      const subtotal = item.quantity * price;
       return [
         item.sku ?? '',
         item.productName ?? '',
         item.sizeCode ?? '',
         item.colorName ?? '',
         item.quantity,
-        item.priceAtMoment ?? 0,
+        price,
         subtotal,
       ];
     });
-    const totalRow = ['', '', '', '', order.items.reduce((s, i) => s + i.quantity, 0), '', order.total];
+    const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
+    const totalFromItems = itemRows.reduce((sum, row) => sum + (Number(row[6]) || 0), 0);
+    const displayTotal = order.total != null && order.total > 0 ? order.total : totalFromItems;
+    const header = [
+      ['Pedido', order.id],
+      ['Fecha', formatOrderDate(order.date)],
+      ['Cliente', customerName],
+      ['Estado', order.status],
+      ['Total', displayTotal],
+    ];
+    const totalRow = ['', '', '', '', totalUnits, '', displayTotal];
     const data = [
       ...header,
       [],
@@ -118,7 +147,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const ws = buildOrderSheet(order);
     const sheetName = safeSheetName(order).slice(0, 31);
     XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-    XLSX.writeFile(workbook, `pedido_${order.id}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const clientNameForFile = getCustomerName(order.customerId).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`);
   };
 
   return (

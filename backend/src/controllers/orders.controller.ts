@@ -148,10 +148,14 @@ export const createOrder = async (req: any, res: any) => {
     const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [orderId]);
     if (!created) return res.status(201).json({ ...newOrder, id: orderId });
     const items = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE i.order_id = ?
     `, [orderId]);
     const itemsMapped = (items as any[]).map((row: any) => ({
@@ -159,7 +163,11 @@ export const createOrder = async (req: any, res: any) => {
       productId: row.productId,
       quantity: row.quantity,
       picked: row.picked ?? 0,
-      priceAtMoment: Number(row.priceAtMoment)
+      priceAtMoment: Number(row.priceAtMoment),
+      sku: row.sku ?? undefined,
+      productName: row.productName ?? undefined,
+      sizeCode: row.sizeCode ?? undefined,
+      colorName: row.colorName ?? undefined
     }));
     const orderResponse = {
       id: created.id,
@@ -275,10 +283,14 @@ export const updateOrder = async (req: any, res: any) => {
     const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
     if (!created) return res.json({ ...updated, id });
     const itemsRows = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE i.order_id = ?
     `, [id]);
     const itemsMapped = (itemsRows as any[]).map((row: any) => ({
@@ -286,7 +298,11 @@ export const updateOrder = async (req: any, res: any) => {
       productId: row.productId,
       quantity: row.quantity,
       picked: row.picked ?? 0,
-      priceAtMoment: Number(row.priceAtMoment)
+      priceAtMoment: Number(row.priceAtMoment),
+      sku: row.sku ?? undefined,
+      productName: row.productName ?? undefined,
+      sizeCode: row.sizeCode ?? undefined,
+      colorName: row.colorName ?? undefined
     }));
     res.json({
       id: created.id,
