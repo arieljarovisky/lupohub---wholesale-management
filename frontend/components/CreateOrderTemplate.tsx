@@ -113,7 +113,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   useEffect(() => {
     api.getSizes().then(list => {
-      const sorted = [...list].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
+      const withCode = list.filter(s => {
+        const code = String(s?.code ?? '').trim();
+        return code !== '' && /^\d{2,3}$/.test(code);
+      });
+      const sorted = [...withCode].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
       setSizes(sorted);
     });
   }, []);
