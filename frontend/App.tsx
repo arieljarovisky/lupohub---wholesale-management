@@ -195,11 +195,11 @@ const App: React.FC = () => {
         value: c.hex ?? undefined, 
         code: c.code ?? '' 
       })) as any;
-       const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
-        id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
-        type: 'size', 
-         name: s.name || s.code || 'Sin nombre',
-         code: s.code 
+      const sizeAttrs = fetchedSizes.map((s: { id: string; code: string; name: string }) => ({
+        id: s.id,
+        type: 'size',
+        name: s.name || s.code || 'Sin nombre',
+        code: s.code,
       })) as any;
       setAttributes([...sizeAttrs, ...colorAttrs]);
       if (currentUser?.role === Role.ADMIN) {
@@ -444,7 +444,20 @@ const App: React.FC = () => {
     setAttributes(prev => [...prev, newAttr]);
   };
 
-  const handleDeleteAttribute = (id: string) => {
+  const handleDeleteAttribute = async (id: string) => {
+    const attr = attributes.find(a => a.id === id);
+    if (!attr) return;
+    if (attr.type === 'size') {
+      try {
+        await api.deleteSize(id);
+        setAttributes(prev => prev.filter(a => a.id !== id));
+        showToast('success', 'Talle eliminado');
+      } catch (e: any) {
+        const msg = e?.response?.data?.message ?? e?.message ?? 'No se pudo eliminar el talle';
+        showToast('error', msg);
+      }
+      return;
+    }
     setAttributes(prev => prev.filter(a => a.id !== id));
   };
 

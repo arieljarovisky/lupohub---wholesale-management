@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { query, execute } from '../database/db';
+import { query, execute, get } from '../database/db';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -74,6 +74,44 @@ export const createSize = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error creando talle:', error);
     res.status(500).json({ message: 'Error creando talle', detail: error?.message });
+  }
+};
+
+/** Eliminar un talle por id. No permite eliminar si hay variantes que lo usan. */
+export const deleteSize = async (req: Request, res: Response) => {
+  try {
+    const sizeId = (req.params as any).id;
+    if (!sizeId) return res.status(400).json({ message: 'Falta el id del talle' });
+
+    const tblCheck = await query(`
+      SELECT COUNT(*) AS cnt FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'sizes'
+    `);
+    const hasSizesTable = Number(tblCheck?.[0]?.cnt || 0) > 0;
+
+    if (hasSizesTable) {
+      const existing = await get(`SELECT id FROM sizes WHERE id = ?`, [sizeId]);
+      if (!existing) return res.status(404).json({ message: 'Talle no encontrado' });
+      const inUse = await get(
+        `SELECT 1 FROM product_variants WHERE size_id = ? LIMIT 1`,
+        [sizeId]
+      );
+      if (inUse) {
+        return res.status(409).json({
+          message: 'No se puede eliminar el talle porque hay variantes de productos que lo usan.',
+        });
+      }
+      await execute(`DELETE FROM sizes WHERE id = ?`, [sizeId]);
+      return res.status(204).send();
+    }
+
+    const existingAttr = await get(`SELECT id FROM attributes WHERE id = ? AND type = 'size'`, [sizeId]);
+    if (!existingAttr) return res.status(404).json({ message: 'Talle no encontrado' });
+    await execute(`DELETE FROM attributes WHERE id = ? AND type = 'size'`, [sizeId]);
+    return res.status(204).send();
+  } catch (error: any) {
+    console.error('Error eliminando talle:', error);
+    res.status(500).json({ message: 'Error eliminando talle', detail: error?.message });
   }
 };
 

@@ -301,15 +301,19 @@ export const api = {
     }, [], 'getColors');
   },
 
-  getSizes: async (): Promise<Array<{ code: string; name: string }>> => {
+  getSizes: async (): Promise<Array<{ id: string; code: string; name: string }>> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/sizes', 'GET');
-      return rows.map(r => ({ code: r.code, name: r.name }));
+      return rows.map(r => ({ id: r.id, code: r.code, name: r.name }));
     }, [], 'getSizes');
   },
 
   createSize: async (payload: { code: string; name?: string }): Promise<{ id: string; code: string; name: string }> => {
     return request<any>('/sizes', 'POST', payload);
+  },
+
+  deleteSize: async (id: string): Promise<void> => {
+    await request<void>(`/sizes/${encodeURIComponent(id)}`, 'DELETE');
   },
 
   createColor: async (payload: { code: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
