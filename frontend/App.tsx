@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList } from './types';
 import { api } from './services/api';
@@ -33,6 +33,7 @@ const Orders = lazyWithReload(() => import('./components/Orders'));
 const Visits = lazyWithReload(() => import('./components/Visits'));
 const Settings = lazyWithReload(() => import('./components/Settings'));
 const CreateOrder = lazyWithReload(() => import('./components/CreateOrder'));
+const CreateOrderTemplate = lazyWithReload(() => import('./components/CreateOrderTemplate'));
 const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
 const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
@@ -134,6 +135,7 @@ const App: React.FC = () => {
         inventory: [Role.ADMIN, Role.WAREHOUSE],
         orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
+        create_order_template: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
         mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
         stock_history: [Role.ADMIN, Role.WAREHOUSE],
@@ -143,7 +145,7 @@ const App: React.FC = () => {
         catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
         settings: [Role.ADMIN]
       };
-      const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
+      const isSpecial = savedView === 'create_order' || savedView === 'create_order_template' || savedView === 'order_picking';
       if (!isSpecial && allowedByRole[savedView]?.includes(role)) {
         setCurrentView(savedView);
       }
@@ -293,6 +295,11 @@ const App: React.FC = () => {
       });
       setEditingOrder(null);
       setCurrentView('orders');
+      try {
+        localStorage.removeItem('lupo_order_template_draft');
+      } catch {
+        /* ignore */
+      }
     } catch (error) {
       console.error(error);
       showToast('error', editingOrder ? 'Error actualizando el pedido' : 'Error creando el pedido');
@@ -607,6 +614,7 @@ const App: React.FC = () => {
     { title: 'Pedidos y canales', items: [
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+      { id: 'create_order_template', label: 'Pedido (plantilla)', icon: FileText, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -653,7 +661,8 @@ const App: React.FC = () => {
                  {baseView === 'catalogs' && 'Catálogos'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
-                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido')}
+                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido (Plantilla)')}
+                 {baseView === 'create_order_template' && 'Nuevo Pedido (Plantilla)'}
                  {baseView === 'order_picking' && 'Preparando Pedido'}
                </h1>
                <p className="text-xs md:text-sm text-slate-400 mt-0.5">
@@ -734,7 +743,7 @@ const App: React.FC = () => {
               />
             </Suspense>
           )}
-          {baseView === 'create_order' && (
+          {baseView === 'create_order' && editingOrder && (
             <Suspense fallback={<ViewFallback />}>
               <CreateOrder
                 products={products}
@@ -747,6 +756,18 @@ const App: React.FC = () => {
               />
             </Suspense>
           )}
+          {(baseView === 'create_order' && !editingOrder) || baseView === 'create_order_template' ? (
+            <Suspense fallback={<ViewFallback />}>
+              <CreateOrderTemplate
+                products={products}
+                customers={getVisibleCustomers}
+                onSave={handleCreateOrder}
+                onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+                sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
+                role={currentUser.role}
+              />
+            </Suspense>
+          ) : null}
           {baseView === 'order_picking' && activePickingOrder && (
             <Suspense fallback={<ViewFallback />}>
               <OrderPicking order={activePickingOrder} products={products} currentUserId={currentUser.id} users={users} onFinishPicking={handleFinishPicking} onCancel={() => setCurrentView('orders')} />

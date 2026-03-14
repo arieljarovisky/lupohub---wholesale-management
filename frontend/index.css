@@ -69,6 +69,17 @@ body {
   display: none;
 }
 
+/* Ocultar flechas (spinners) en inputs type="number" */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Modales en móvil: usar altura segura */
 @supports (height: 100dvh) {
   @media (max-width: 640px) {

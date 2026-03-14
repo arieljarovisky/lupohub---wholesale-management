@@ -1513,7 +1513,7 @@ const Settings: React.FC<SettingsProps> = ({
 
       {(activeTab === 'sizes' || activeTab === 'colors') && (
         <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 shadow-xl">
-          <div className="flex flex-col md:flex-row gap-4 mb-8 items-end">
+          <div className="flex flex-col md:flex-row gap-4 mb-4 items-end">
             <div className="flex-1 w-full">
               <label className="block text-xs font-black text-slate-500 uppercase mb-2">Nombre del {activeTab === 'sizes' ? 'Talle' : 'Color'}</label>
               <input
@@ -1532,6 +1532,9 @@ const Settings: React.FC<SettingsProps> = ({
             )}
             <button onClick={handleCreateAttribute} className="bg-blue-600 text-white h-14 px-8 rounded-xl font-black flex items-center gap-2 active:scale-95 transition-all shadow-lg shadow-blue-900/40 uppercase text-xs tracking-widest"><Plus size={20}/> Agregar</button>
           </div>
+          {activeTab === 'colors' && (
+            <p className="text-xs text-slate-500 mb-6">Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá <strong>Agregar</strong> para crearlo de nuevo.</p>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
              {(activeTab === 'sizes' ? sizes : colors).map(attr => {

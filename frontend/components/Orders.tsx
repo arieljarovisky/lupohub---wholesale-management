@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, LayoutList } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
 import { useNotification } from '../context/NotificationContext';
 
@@ -54,13 +54,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
         {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
-          <button 
-            onClick={() => onNavigate('create_order')}
-            className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
-          >
-            <Plus size={20} />
-            <span>Nuevo Pedido</span>
-          </button>
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+            <button 
+              onClick={() => onNavigate('create_order')}
+              className="flex-1 sm:flex-none bg-blue-600 text-white px-5 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95 min-h-[44px]"
+            >
+              <Plus size={20} />
+              <span>Nuevo Pedido</span>
+            </button>
+            <button 
+              onClick={() => onNavigate('create_order_template')}
+              className="flex-1 sm:flex-none bg-slate-700 text-white px-5 py-3 rounded-2xl hover:bg-slate-600 border border-slate-600 transition flex items-center justify-center gap-2 font-bold active:scale-95 min-h-[44px]"
+            >
+              <LayoutList size={20} />
+              <span>Pedido (plantilla)</span>
+            </button>
+          </div>
         )}
       </div>
 
