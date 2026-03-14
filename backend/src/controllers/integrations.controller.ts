@@ -3023,10 +3023,7 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       'User-Agent': TN_USER_AGENT
     };
 
-    const [productRes, variantsRes] = await Promise.all([
-      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true }),
-      axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, { headers, validateStatus: () => true })
-    ]);
+    const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true });
     if (productRes.status !== 200) {
       const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
       return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
@@ -3043,10 +3040,23 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       if (isColorAttr(n)) colorIdx = i;
     });
 
+    // Paginar variantes: la API devuelve por defecto una cantidad limitada por página
     let variantsList: any[] = [];
-    if (variantsRes.status === 200 && Array.isArray(variantsRes.data)) {
-      variantsList = variantsRes.data;
-    } else if (Array.isArray(p?.variants)) {
+    const perPage = 200;
+    let vPage = 1;
+    let hasMoreVariants = true;
+    while (hasMoreVariants) {
+      const variantsRes = await axios.get(
+        `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`,
+        { headers, params: { page: vPage, per_page: perPage }, validateStatus: () => true }
+      );
+      const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
+      variantsList = variantsList.concat(chunk);
+      if (chunk.length < perPage) hasMoreVariants = false;
+      else vPage++;
+      if (vPage > 50) hasMoreVariants = false; // seguridad: máx 50 páginas = 10.000 variantes
+    }
+    if (variantsList.length === 0 && Array.isArray(p?.variants)) {
       variantsList = p.variants;
     }
 
