@@ -52,20 +52,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const getCustomerName = (customerId: string) => customers.find(c => c.id === customerId)?.businessName || customers.find(c => c.id === customerId)?.name || customerId;
 
+  /** Fecha legible en la lista de pedidos (DD/MM/YYYY). */
+  const formatOrderDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
   /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
   const safeSheetName = (order: Order) => {
     const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
     const name = getCustomerName(order.customerId).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
     const sheetName = `${base} ${name}`.trim().slice(0, 31);
     return sheetName || `Pedido_${order.id.slice(-8)}`;
-  };
-
-  /** Formatea fecha para Excel (igual que en la web: DD/MM/YYYY). */
-  const formatOrderDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
   };
 
   /** Enriquecer ítem con datos de producto cuando falten (p. ej. pedidos en caché o respuesta antigua). */
@@ -230,9 +230,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation`}
             >
               <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-black text-white">#{order.id}</span>
+                <div className="space-y-1 min-w-0 flex-1">
+                  <h3 className="text-xl font-black text-white truncate">{customer?.businessName || 'Cliente desconocido'}</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>
                       {order.status}
                     </span>
@@ -242,7 +243,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                        </span>
                     )}
                   </div>
-                  <div className="text-md font-bold text-slate-200">{customer?.businessName || 'Cliente desconocido'}</div>
                   {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
                     <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                       <Truck size={12} />
@@ -285,7 +285,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700/50">
                 <div className="text-xs text-slate-500">
-                  {totalItemsCount} unidades • {order.date}
+                  {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
                 </div>
                 <div className="flex items-center gap-4">
                    {role === Role.WAREHOUSE && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
