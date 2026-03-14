@@ -1895,11 +1895,22 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       }
       for (const [productId, variantIdsInProduct] of tnProductIds) {
         try {
-          const varRes = await axios.get(
-            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
-            { headers: tnHeaders }
-          );
-          const tnVariants: any[] = varRes.data || [];
+          // Paginar variantes de TN para traer todas (la API devuelve por defecto una cantidad limitada por página)
+          let tnVariants: any[] = [];
+          const tnPerPage = 200;
+          let tnPage = 1;
+          let hasMoreTn = true;
+          while (hasMoreTn) {
+            const varRes = await axios.get(
+              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
+              { headers: tnHeaders, params: { page: tnPage, per_page: tnPerPage } }
+            );
+            const chunk = Array.isArray(varRes.data) ? varRes.data : [];
+            tnVariants = tnVariants.concat(chunk);
+            if (chunk.length < tnPerPage) hasMoreTn = false;
+            else tnPage++;
+            if (tnPage > 50) hasMoreTn = false;
+          }
           for (const variantId of variantIdsInProduct) {
             const tnVid = variantToTnVariant.get(variantId);
             const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
