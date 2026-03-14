@@ -13,6 +13,8 @@ const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lu
 
 /** Pausa entre requests a Tienda Nube para no superar el límite de solicitudes (configurable con TN_RATE_LIMIT_DELAY_MS, default 800ms). */
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
+/** Máximo de publicaciones a traer al sincronizar con Mercado Libre (evitar timeout). Configurable con ML_SYNC_MAX_ITEMS (default 5000). */
+const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
@@ -515,7 +517,7 @@ export const normalizeSizesInTiendaNube = async (req: Request, res: Response) =>
         }
       }
       page++;
-      if (page > 100) hasMore = false;
+      if (page > 300) hasMore = false; // hasta 300 páginas × 50 = 15.000 productos
     }
 
     res.json({
@@ -675,10 +677,11 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
         logs.push(`[ML] Página ${Math.floor(offset/limit) + 1}: ${results.length} items (total acumulado: ${allItems.length})`);
         offset += limit;
         
-        // Continuar si hay más items
+        // Continuar si hay más items (respetar total de la API y límite configurable)
         const total = searchRes.data.paging?.total || 0;
         if (offset >= total || results.length === 0) break;
-      } while (offset < 500); // Máximo 500 items para evitar timeout
+        if (allItems.length >= ML_SYNC_MAX_ITEMS) break;
+      } while (true);
       
     } catch (searchError: any) {
       logs.push(`[ML ERROR] Error buscando items: ${searchError.response?.data?.message || searchError.message}`);
