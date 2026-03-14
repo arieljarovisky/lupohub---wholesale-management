@@ -1867,7 +1867,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleCreateBatch = () => {
-    if (!newProductName || !newBaseSku || !newPrice || selectedSizes.length === 0 || selectedColorIds.length === 0) return;
+    if (!newProductName?.trim() || !newBaseSku?.trim() || selectedSizes.length === 0 || selectedColorIds.length === 0) return;
     if (!onCreateProducts) return;
 
     const baseSku = newBaseSku.trim();
@@ -3019,9 +3019,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     >
                       Cancelar
                     </button>
-                    <button 
-                      onClick={handleCreateBatch}
-                      disabled={!newProductName || !newBaseSku || selectedSizes.length === 0 || selectedColorIds.length === 0}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); handleCreateBatch(); }}
+                      disabled={!newProductName?.trim() || !newBaseSku?.trim() || selectedSizes.length === 0 || selectedColorIds.length === 0}
                       className="px-8 py-3 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-blue-900/40 active:scale-95 transition-all flex items-center gap-2"
                     >
                       <CheckCircle2 size={20} />
