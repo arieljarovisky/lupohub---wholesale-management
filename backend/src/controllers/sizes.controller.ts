@@ -1,7 +1,16 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
-import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import { v4 as uuidv4 } from 'uuid';
+
+// Mapeo letra → código canónico (numérico) para unificar talles duplicados
+const LETTER_TO_CANONICAL_CODE: Record<string, string> = {};
+for (const [code, letter] of Object.entries(TALLE_CODIGO_A_NOMBRE)) {
+  const key = String(letter).toUpperCase();
+  if (!LETTER_TO_CANONICAL_CODE[key] || code === '200') LETTER_TO_CANONICAL_CODE[key] = code;
+}
+// Preferir 200 sobre 240 para XXG
+LETTER_TO_CANONICAL_CODE['XXG'] = '200';
 
 // Talles válidos conocidos
 const VALID_SIZE_PATTERNS = /^(U|P|M|G|GG|XG|XXG|XXXG|S|L|XL|XXL|XXXL|XS|ÚNICO|\d+)$/i;
@@ -112,6 +121,71 @@ export const deleteSize = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error eliminando talle:', error);
     res.status(500).json({ message: 'Error eliminando talle', detail: error?.message });
+  }
+};
+
+/** Unifica talles por letra (G, GG, M, P, etc.) al talle canónico con código numérico (150, 160, 140, 130...). Reasigna variantes y elimina los talles duplicados. */
+export const unifySizes = async (req: Request, res: Response) => {
+  try {
+    const tblCheck = await query(`
+      SELECT COUNT(*) AS cnt FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'sizes'
+    `);
+    const hasSizesTable = Number(tblCheck?.[0]?.cnt || 0) > 0;
+    if (!hasSizesTable) {
+      return res.status(400).json({ message: 'La unificación de talles solo está disponible con la tabla sizes.' });
+    }
+
+    const allSizes = (await query(`SELECT id, size_code AS code FROM sizes`)) as { id: string; code: string }[];
+    const byCode = new Map<string, string>();
+    for (const s of allSizes || []) {
+      const c = String(s.code || '').trim();
+      if (c) byCode.set(c, s.id);
+    }
+
+    let totalUpdated = 0;
+    let totalDeleted = 0;
+    const mappings: { from: string; to: string; variantsUpdated: number }[] = [];
+    const skipped: { code: string; reason: string }[] = [];
+
+    for (const size of allSizes || []) {
+      const code = String(size.code || '').trim();
+      const canonicalCode = LETTER_TO_CANONICAL_CODE[code] || LETTER_TO_CANONICAL_CODE[code.toUpperCase()];
+      if (!canonicalCode) continue;
+      if (canonicalCode === code) continue;
+      const canonicalId = byCode.get(canonicalCode);
+      if (!canonicalId) {
+        skipped.push({ code, reason: `No existe el talle canónico ${canonicalCode} en la base de datos` });
+        continue;
+      }
+      if (canonicalId === size.id) continue;
+
+      const countResult = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM product_variants WHERE size_id = ?`, [size.id]);
+      const variantCount = Number(countResult?.[0]?.n ?? 0);
+      if (variantCount > 0) {
+        await execute(`UPDATE product_variants SET size_id = ? WHERE size_id = ?`, [canonicalId, size.id]);
+        totalUpdated += variantCount;
+        mappings.push({ from: code, to: canonicalCode, variantsUpdated: variantCount });
+      }
+      await execute(`DELETE FROM sizes WHERE id = ?`, [size.id]);
+      totalDeleted += 1;
+      byCode.delete(code);
+    }
+
+    return res.json({
+      message: totalDeleted > 0 || totalUpdated > 0
+        ? `Unificación completada: ${totalUpdated} variantes actualizadas, ${totalDeleted} talles duplicados eliminados.`
+        : skipped.length > 0
+          ? 'No se unificó ningún talle. Revisá que existan talles con código numérico (130, 140, 150, etc.).'
+          : 'No había talles duplicados para unificar.',
+      variantsUpdated: totalUpdated,
+      sizesDeleted: totalDeleted,
+      mappings,
+      skipped,
+    });
+  } catch (error: any) {
+    console.error('Error unificando talles:', error);
+    res.status(500).json({ message: 'Error unificando talles', detail: error?.message });
   }
 };
 

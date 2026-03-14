@@ -316,6 +316,10 @@ export const api = {
     await request<void>(`/sizes/${encodeURIComponent(id)}`, 'DELETE');
   },
 
+  unifySizes: async (): Promise<{ message: string; variantsUpdated: number; sizesDeleted: number; mappings: { from: string; to: string; variantsUpdated: number }[]; skipped: { code: string; reason: string }[] }> => {
+    return request<any>('/sizes/unify', 'POST');
+  },
+
   createColor: async (payload: { code: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
     return request<any>('/colors', 'POST', payload);
   },

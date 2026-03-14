@@ -122,6 +122,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0, productCount: 0, variantCount: 0 });
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
+  const [loadingUnifySizes, setLoadingUnifySizes] = useState(false);
   const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
@@ -467,6 +468,25 @@ const Settings: React.FC<SettingsProps> = ({
       onRefreshData?.();
     } catch (e: any) {
       showToast('error', e?.message || 'Error al crear. ¿El código ya existe?');
+    }
+  };
+
+  const handleUnifySizes = async () => {
+    setLoadingUnifySizes(true);
+    try {
+      const res = await api.unifySizes();
+      onRefreshData?.();
+      if (res.variantsUpdated > 0 || res.sizesDeleted > 0) {
+        showToast('success', res.message);
+      } else if (res.skipped?.length > 0) {
+        showToast('info', res.message || 'No se unificó ningún talle.');
+      } else {
+        showToast('success', res.message || 'No había talles duplicados para unificar.');
+      }
+    } catch (e: any) {
+      showToast('error', e?.response?.data?.message || e?.message || 'Error al unificar talles.');
+    } finally {
+      setLoadingUnifySizes(false);
     }
   };
 
@@ -1561,6 +1581,21 @@ const Settings: React.FC<SettingsProps> = ({
             )}
             <button onClick={handleCreateAttribute} className="bg-blue-600 text-white h-14 px-8 rounded-xl font-black flex items-center gap-2 active:scale-95 transition-all shadow-lg shadow-blue-900/40 uppercase text-xs tracking-widest"><Plus size={20}/> Agregar</button>
           </div>
+          {activeTab === 'sizes' && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
+              <button
+                type="button"
+                onClick={handleUnifySizes}
+                disabled={loadingUnifySizes}
+                className="self-start px-5 py-3 rounded-xl font-bold text-sm bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 disabled:opacity-50 transition flex items-center gap-2"
+              >
+                {loadingUnifySizes ? 'Unificando...' : 'Unificar talles'}
+              </button>
+              <p className="text-xs text-slate-500">
+                Reemplaza talles por letra (G, GG, M, P, U, XG…) por el talle canónico con código numérico (150, 160, 140, 130…) y elimina los duplicados.
+              </p>
+            </div>
+          )}
           {activeTab === 'colors' && (
             <p className="text-xs text-slate-500 mb-6">Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá <strong>Agregar</strong> para crearlo de nuevo.</p>
           )}
