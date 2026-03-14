@@ -50,44 +50,75 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const canEditOrder = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
+  const getCustomerName = (customerId: string) => customers.find(c => c.id === customerId)?.businessName || customers.find(c => c.id === customerId)?.name || customerId;
+
+  /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
+  const safeSheetName = (order: Order) => {
+    const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
+    const name = getCustomerName(order.customerId).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
+    const sheetName = `${base} ${name}`.trim().slice(0, 31);
+    return sheetName || `Pedido_${order.id.slice(-8)}`;
+  };
+
+  /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems. */
+  const buildOrderSheet = (order: Order) => {
+    const customerName = getCustomerName(order.customerId);
+    const header = [
+      ['Pedido', order.id],
+      ['Fecha', order.date],
+      ['Cliente', customerName],
+      ['Estado', order.status],
+      ['Total', order.total],
+    ];
+    const itemHeaders = ['SKU', 'Producto', 'Talle', 'Color', 'Cantidad', 'Precio unit.', 'Subtotal'];
+    const itemRows = order.items.map(item => {
+      const subtotal = item.quantity * (item.priceAtMoment ?? 0);
+      return [
+        item.sku ?? '',
+        item.productName ?? '',
+        item.sizeCode ?? '',
+        item.colorName ?? '',
+        item.quantity,
+        item.priceAtMoment ?? 0,
+        subtotal,
+      ];
+    });
+    const totalRow = ['', '', '', '', order.items.reduce((s, i) => s + i.quantity, 0), '', order.total];
+    const data = [
+      ...header,
+      [],
+      itemHeaders,
+      ...itemRows,
+      totalRow,
+    ];
+    return XLSX.utils.aoa_to_sheet(data);
+  };
+
+  /** Exportar todos los pedidos (filtrados o todos): un archivo Excel con una hoja por pedido, cada una como planilla. */
   const exportOrdersToExcel = () => {
     const list = filteredOrders.length > 0 ? filteredOrders : orders;
-    const getCustomerName = (customerId: string) => customers.find(c => c.id === customerId)?.businessName || customers.find(c => c.id === customerId)?.name || customerId;
-    const resumenRows = list.map(o => ({
-      'ID Pedido': o.id,
-      'Fecha': o.date,
-      'Cliente': getCustomerName(o.customerId),
-      'Estado': o.status,
-      'Total': o.total,
-      'Cant. ítems': o.items.reduce((acc, i) => acc + i.quantity, 0),
-    }));
-    const lineasRows: Record<string, string | number>[] = [];
-    for (const o of list) {
-      const cliente = getCustomerName(o.customerId);
-      for (const item of o.items) {
-        const subtotal = item.quantity * (item.priceAtMoment ?? 0);
-        lineasRows.push({
-          'ID Pedido': o.id,
-          'Fecha': o.date,
-          'Cliente': cliente,
-          'Estado': o.status,
-          'SKU': item.sku ?? '',
-          'Producto': item.productName ?? '',
-          'Talle': item.sizeCode ?? '',
-          'Color': item.colorName ?? '',
-          'Cantidad': item.quantity,
-          'Precio unit.': item.priceAtMoment ?? 0,
-          'Subtotal': subtotal,
-        });
-      }
-    }
-    const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
-    const wsLineas = XLSX.utils.json_to_sheet(lineasRows.length ? lineasRows : [{ 'ID Pedido': '', 'Fecha': '', 'Cliente': '', 'Estado': '', 'SKU': '', 'Producto': '', 'Talle': '', 'Color': '', 'Cantidad': '', 'Precio unit.': '', 'Subtotal': '' }]);
+    if (list.length === 0) return;
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, wsResumen, 'Resumen pedidos');
-    XLSX.utils.book_append_sheet(workbook, wsLineas, 'Líneas');
+    const usedNames = new Set<string>();
+    list.forEach((order, index) => {
+      let sheetName = safeSheetName(order);
+      if (usedNames.has(sheetName)) sheetName = `${sheetName.slice(0, 28)}_${index}`.slice(0, 31);
+      usedNames.add(sheetName);
+      const ws = buildOrderSheet(order);
+      XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+    });
     const filename = `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(workbook, filename);
+  };
+
+  /** Exportar un solo pedido a Excel (una hoja en formato planilla). */
+  const exportOneOrderToExcel = (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const workbook = XLSX.utils.book_new();
+    const ws = buildOrderSheet(order);
+    const sheetName = safeSheetName(order).slice(0, 31);
+    XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+    XLSX.writeFile(workbook, `pedido_${order.id}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
@@ -192,6 +223,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => exportOneOrderToExcel(order, e)}
+                    className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
+                    title="Exportar este pedido a Excel"
+                  >
+                    <FileSpreadsheet size={16} />
+                  </button>
                   {canCancelOrder(order) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Cancelar pedido', message: '¿Cancelar este pedido? Se restaurará el stock.', confirmLabel: 'Cancelar pedido', onConfirm: () => onUpdateStatus(order.id, OrderStatus.CANCELLED) }); }}
