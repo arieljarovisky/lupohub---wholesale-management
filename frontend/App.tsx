@@ -171,7 +171,7 @@ const App: React.FC = () => {
       if (currentUser?.role === Role.CUSTOMER) {
         const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders()]);
         setMyCustomer(myC || null);
-        const fetchedProducts = await api.getProducts({ priceListId: myC?.priceListId ?? undefined, perPage: 400 });
+        const fetchedProducts = await api.getProductsAll({ priceListId: myC?.priceListId ?? undefined });
         setProducts(fetchedProducts);
         setOrders(fetchedOrders);
         setCustomers(myC ? [myC] : []);
@@ -179,7 +179,7 @@ const App: React.FC = () => {
       } else {
       const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
-        api.getProducts(effectivePriceListId ? { priceListId: effectivePriceListId, perPage: 400 } : { perPage: 400 }),
+        api.getProductsAll(effectivePriceListId ? { priceListId: effectivePriceListId } : {}),
         api.getOrders(),
         api.getColors(),
         api.getSizes(),
@@ -188,12 +188,12 @@ const App: React.FC = () => {
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
       setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
-      const colorAttrs = fetchedColors.map((c, idx) => ({ 
-        id: c.code ? `color-${c.code}` : `color-idx-${idx}-${Date.now()}`, 
+      const colorAttrs = fetchedColors.map((c: { id: string; code?: string; name?: string; hex?: string | null }) => ({ 
+        id: c.id, 
         type: 'color', 
-        name: c.name, 
-        value: c.hex, 
-        code: c.code 
+        name: c.name ?? c.code ?? '', 
+        value: c.hex ?? undefined, 
+        code: c.code ?? '' 
       })) as any;
        const sizeAttrs = fetchedSizes.map((s, idx) => ({ 
         id: s.code ? `size-${s.code}` : `size-idx-${idx}-${Date.now()}`, 
@@ -392,8 +392,8 @@ const App: React.FC = () => {
               description: raw.description ?? '',
               size: sizeCode,
               color: colorCode,
-              stock: 0,
-              stock_total: 0,
+              stock: Number((raw as any).stock_total ?? (raw as any).stock ?? 0),
+              stock_total: Number((raw as any).stock_total ?? (raw as any).stock ?? 0),
               integrations: { local: true, mercadoLibre: false, tiendaNube: false },
               externalIds: raw.externalIds,
             } as Product);

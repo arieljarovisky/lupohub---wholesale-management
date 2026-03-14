@@ -30,9 +30,9 @@ export const optionalAuthMiddleware = (req: Request, _res: Response, next: NextF
   next();
 };
 
-/** Solo permite usuarios con rol ADMIN o DEPOSITO. Requiere authMiddleware antes. */
+/** Solo permite usuarios con rol ADMIN o DEPOSITO (en BD el rol se guarda como WAREHOUSE). Requiere authMiddleware antes. */
 export const adminOrDepositoMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const role = (req as any).user?.role;
-  if (role === 'ADMIN' || role === 'DEPOSITO') return next();
+  if (role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE') return next();
   return res.status(403).json({ message: 'Solo para usuarios con rol ADMIN o DEPOSITO' });
 };

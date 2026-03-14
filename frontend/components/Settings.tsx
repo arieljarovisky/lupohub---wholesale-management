@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
@@ -85,6 +85,10 @@ const Settings: React.FC<SettingsProps> = ({
   const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists'>(role === Role.WAREHOUSE ? 'sizes' : 'users');
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
+  const [editingColorId, setEditingColorId] = useState<string | null>(null);
+  const [editingColorName, setEditingColorName] = useState('');
+  const [editingColorHex, setEditingColorHex] = useState('#000000');
+  const [savingColor, setSavingColor] = useState(false);
 
   // Integration State
   const [apiConfig, setApiConfig] = useState<ApiConfig>({
@@ -450,24 +454,49 @@ const Settings: React.FC<SettingsProps> = ({
   const handleCreateAttribute = async () => {
     if (!newName) return;
     const nameTrim = newName.trim();
-    const newAttr: Attribute = {
-      id: `attr-${Date.now()}`,
-      type: activeTab === 'sizes' ? 'size' : 'color',
-      name: nameTrim,
-      value: activeTab === 'colors' ? newColorValue : undefined
-    };
     try {
       if (activeTab === 'sizes') {
-        await api.createSize({ code: nameTrim, name: nameTrim });
+        const created = await api.createSize({ code: nameTrim, name: nameTrim });
+        onCreateAttribute({ id: created.id, type: 'size', name: created.name ?? nameTrim, code: created.code });
       } else {
-        await api.createColor({ code: nameTrim, name: nameTrim, hex: newColorValue || null });
+        const created = await api.createColor({ code: nameTrim, name: nameTrim, hex: newColorValue || null });
+        onCreateAttribute({ id: created.id, type: 'color', name: created.name ?? nameTrim, value: created.hex ?? undefined, code: created.code });
       }
-      onCreateAttribute(newAttr);
       setNewName('');
       setNewColorValue('#000000');
       onRefreshData?.();
     } catch (e: any) {
       showToast('error', e?.message || 'Error al crear. ¿El código ya existe?');
+    }
+  };
+
+  const handleStartEditColor = (attr: Attribute) => {
+    setEditingColorId(attr.id);
+    setEditingColorName(attr.name || (attr as any).code || '');
+    setEditingColorHex((attr.value as string) || '#000000');
+  };
+
+  const handleCancelEditColor = () => {
+    setEditingColorId(null);
+    setEditingColorName('');
+    setEditingColorHex('#000000');
+  };
+
+  const handleSaveEditColor = async () => {
+    if (!editingColorId || !editingColorName.trim()) return;
+    setSavingColor(true);
+    try {
+      await api.updateColor(editingColorId, {
+        name: editingColorName.trim(),
+        hex: editingColorHex || null
+      });
+      showToast('success', 'Color actualizado.');
+      handleCancelEditColor();
+      onRefreshData?.();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al actualizar el color.');
+    } finally {
+      setSavingColor(false);
     }
   };
 
@@ -1541,6 +1570,36 @@ const Settings: React.FC<SettingsProps> = ({
                const code = (attr as any).code != null ? String((attr as any).code).trim() : '';
                const name = attr.name || 'Sin nombre';
                const displayLabel = code ? `${code} - ${name}` : name;
+               const isEditingColor = activeTab === 'colors' && editingColorId === attr.id;
+               if (isEditingColor) {
+                 return (
+                   <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-600 flex flex-col gap-3 col-span-full sm:col-span-2">
+                     <div className="flex flex-wrap items-center gap-2">
+                       <input
+                         type="text"
+                         value={editingColorName}
+                         onChange={(e) => setEditingColorName(e.target.value)}
+                         placeholder="Nombre del color"
+                         className="flex-1 min-w-[120px] bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                       />
+                       <input
+                         type="color"
+                         value={editingColorHex}
+                         onChange={(e) => setEditingColorHex(e.target.value)}
+                         className="h-10 w-14 bg-slate-800 border border-slate-600 rounded-lg p-1 cursor-pointer"
+                       />
+                     </div>
+                     <div className="flex gap-2">
+                       <button onClick={handleSaveEditColor} disabled={savingColor || !editingColorName.trim()} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold disabled:opacity-50">
+                         {savingColor ? '...' : 'Guardar'}
+                       </button>
+                       <button onClick={handleCancelEditColor} disabled={savingColor} className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm">
+                         Cancelar
+                       </button>
+                     </div>
+                   </div>
+                 );
+               }
                return (
                  <div key={attr.id} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-slate-600 transition-colors">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1549,7 +1608,14 @@ const Settings: React.FC<SettingsProps> = ({
                         {displayLabel}
                       </span>
                     </div>
-                    <button onClick={() => onDeleteAttribute(attr.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1 shrink-0"><Trash2 size={16}/></button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {attr.type === 'color' && (
+                        <button onClick={() => handleStartEditColor(attr)} className="text-slate-500 hover:text-blue-400 transition-colors p-1" title="Editar color" aria-label="Editar color">
+                          <Pencil size={16}/>
+                        </button>
+                      )}
+                      <button onClick={() => onDeleteAttribute(attr.id)} className="text-slate-600 hover:text-red-400 transition-colors p-1"><Trash2 size={16}/></button>
+                    </div>
                  </div>
                );
              })}

@@ -115,6 +115,27 @@ export const api = {
   },
 
   // --- PRODUCTS ---
+  /** Convierte una fila de la API a Product (uso interno). */
+  mapProductRow: (r: any): Product => {
+    const parts = (r.sku || '').toString().split('-');
+    const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
+    const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
+    return {
+      id: r.id,
+      sku: r.sku,
+      base_sku: r.base_sku,
+      product_id: r.product_id,
+      name: r.name,
+      category: r.category,
+      size: r.size_name ?? r.size_code ?? sizeDerived,
+      color: r.color_name ?? colorDerived,
+      stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
+      price: Number((r as any).base_price ?? (r as any).price ?? 0),
+      description: r.description ?? '',
+      externalIds: r.externalIds
+    } as Product;
+  },
+
   getProducts: async (options?: { priceListId?: string | null; perPage?: number }): Promise<Product[]> => {
     return handleRequest(async () => {
       const perPage = options?.perPage ?? 5000;
@@ -122,26 +143,28 @@ export const api = {
       if (options?.priceListId) params.set('price_list_id', options.priceListId);
       const res = await request<any>(`/products?${params.toString()}`, 'GET');
       const rows = Array.isArray(res) ? res : res.items;
-      return rows.map((r: any) => {
-        const parts = (r.sku || '').toString().split('-');
-        const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
-        const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
-        return {
-          id: r.id,
-          sku: r.sku,
-          base_sku: r.base_sku,
-          product_id: r.product_id,
-          name: r.name,
-          category: r.category,
-          size: r.size_name ?? r.size_code ?? sizeDerived,
-          color: r.color_name ?? colorDerived,
-          stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
-          price: Number((r as any).base_price ?? (r as any).price ?? 0),
-          description: r.description ?? '',
-          externalIds: r.externalIds
-        };
-      }) as Product[];
+      return rows.map((r: any) => api.mapProductRow(r));
     }, MOCK_PRODUCTS, 'getProducts');
+  },
+
+  /** Trae todos los productos sin límite: pide página por página hasta completar. */
+  getProductsAll: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
+    const PER_PAGE = 1000;
+    const params = new URLSearchParams({ per_page: String(PER_PAGE), page: '1' });
+    if (options?.priceListId) params.set('price_list_id', options.priceListId);
+    const res = await request<any>(`/products?${params.toString()}`, 'GET');
+    const items = Array.isArray(res) ? res : (res?.items ?? []);
+    const total = typeof res?.total === 'number' ? res.total : items.length;
+    const all: Product[] = items.map((r: any) => api.mapProductRow(r));
+    const totalPages = Math.ceil(total / PER_PAGE) || 1;
+    for (let page = 2; page <= totalPages; page++) {
+      const nextParams = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
+      if (options?.priceListId) nextParams.set('price_list_id', options.priceListId);
+      const nextRes = await request<any>(`/products?${nextParams.toString()}`, 'GET');
+      const nextItems = Array.isArray(nextRes) ? nextRes : (nextRes?.items ?? []);
+      all.push(...nextItems.map((r: any) => api.mapProductRow(r)));
+    }
+    return all;
   },
 
   /** Igual que getProducts pero sin fallback: lanza si falla. Usar al refrescar después de crear para no pisar con MOCK. */
@@ -151,25 +174,7 @@ export const api = {
     if (options?.priceListId) params.set('price_list_id', options.priceListId);
     const res = await request<any>(`/products?${params.toString()}`, 'GET');
     const rows = Array.isArray(res) ? res : (res && res.items) || [];
-    return rows.map((r: any) => {
-      const parts = (r.sku || '').toString().split('-');
-      const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
-      const colorDerived = parts.length >= 1 ? parts[parts.length - 1] : '';
-      return {
-        id: r.id,
-        sku: r.sku,
-        base_sku: r.base_sku,
-        product_id: r.product_id,
-        name: r.name,
-        category: r.category,
-        size: r.size_name ?? r.size_code ?? sizeDerived,
-        color: r.color_name ?? colorDerived,
-        stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
-        price: Number((r as any).base_price ?? (r as any).price ?? 0),
-        description: r.description ?? '',
-        externalIds: r.externalIds
-      };
-    }) as Product[];
+    return rows.map((r: any) => api.mapProductRow(r));
   },
 
   getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
@@ -284,13 +289,14 @@ export const api = {
     }, data, 'updateVariant');
   },
   
-  getColors: async (): Promise<Array<{ code: string; name: string; hex?: string }>> => {
+  getColors: async (): Promise<Array<{ id: string; code: string; name: string; hex?: string | null }>> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/colors', 'GET');
       return rows.map(r => ({
+        id: r.id,
         code: r.code != null ? String(r.code).trim() : '',
         name: r.name != null ? String(r.name).trim() : '',
-        hex: r.hex
+        hex: r.hex ?? null
       }));
     }, [], 'getColors');
   },
@@ -308,6 +314,10 @@ export const api = {
 
   createColor: async (payload: { code: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
     return request<any>('/colors', 'POST', payload);
+  },
+
+  updateColor: async (id: string, payload: { code?: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
+    return request<any>(`/colors/${encodeURIComponent(id)}`, 'PUT', payload);
   },
 
   createProduct: async (product: Product): Promise<Product> => {
