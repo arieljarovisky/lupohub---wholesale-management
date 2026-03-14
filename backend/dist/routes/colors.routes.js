@@ -2,6 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const colors_controller_1 = require("../controllers/colors.controller");
+const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/', colors_controller_1.getColors);
+router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.createColor);
+router.put('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.updateColor);
 exports.default = router;

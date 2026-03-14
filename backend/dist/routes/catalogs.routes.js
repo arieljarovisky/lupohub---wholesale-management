@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
+const catalogs_controller_1 = require("../controllers/catalogs.controller");
+const router = (0, express_1.Router)();
+router.use(auth_1.authMiddleware);
+router.get('/', catalogs_controller_1.listCatalogs);
+router.get('/:id/file', catalogs_controller_1.getCatalogFile);
+router.post('/upload', catalogs_controller_1.uploadCatalogMiddleware, catalogs_controller_1.uploadCatalog);
+router.post('/', catalogs_controller_1.createCatalogWithUrl);
+router.delete('/:id', catalogs_controller_1.deleteCatalog);
+exports.default = router;

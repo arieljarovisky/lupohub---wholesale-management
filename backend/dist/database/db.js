@@ -15,6 +15,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.testConnection = exports.get = exports.execute = exports.query = void 0;
 const promise_1 = __importDefault(require("mysql2/promise"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const path_1 = __importDefault(require("path"));
+// En producción, cargar primero .env.production (conexión a base de producción)
+if (process.env.NODE_ENV === 'production') {
+    dotenv_1.default.config({ path: path_1.default.join(process.cwd(), '.env.production') });
+}
 dotenv_1.default.config();
 function getPoolConfig() {
     const url = process.env.MYSQL_URL || process.env.DATABASE_URL;

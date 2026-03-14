@@ -7,5 +7,6 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authMiddleware);
 router.get('/', users_controller_1.listUsers);
 router.post('/', users_controller_1.createUser);
+router.patch('/:id', users_controller_1.updateUser);
 router.delete('/:id', users_controller_1.deleteUser);
 exports.default = router;

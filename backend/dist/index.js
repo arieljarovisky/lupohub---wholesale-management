@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -25,12 +26,18 @@ const stock_routes_1 = __importDefault(require("./routes/stock.routes"));
 const despachos_routes_1 = __importDefault(require("./routes/despachos.routes"));
 const users_routes_1 = __importDefault(require("./routes/users.routes"));
 const customers_routes_1 = __importDefault(require("./routes/customers.routes"));
+const price_lists_routes_1 = __importDefault(require("./routes/price_lists.routes"));
+const catalogs_routes_1 = __importDefault(require("./routes/catalogs.routes"));
 const add_stock_movements_table_1 = require("./database/add_stock_movements_table");
 const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
 const add_pack_size_products_1 = require("./database/add_pack_size_products");
 const add_external_sku_1 = require("./database/add_external_sku");
+const add_mercado_libre_item_id_1 = require("./database/add_mercado_libre_item_id");
+const add_customer_direct_1 = require("./database/add_customer_direct");
+const add_price_lists_1 = require("./database/add_price_lists");
+const add_catalogs_table_1 = require("./database/add_catalogs_table");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -38,8 +45,26 @@ const integrations_controller_1 = require("./controllers/integrations.controller
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
-// Middleware
-app.use((0, cors_1.default)());
+// CORS: con credentials (cookies) no se puede usar '*'; hay que devolver el origen concreto
+const allowedOrigins = [
+    'https://lupohub-wholesale-management.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000'
+];
+const frontendUrl = (_a = process.env.FRONTEND_URL) === null || _a === void 0 ? void 0 : _a.replace(/\/$/, '');
+if (frontendUrl && !allowedOrigins.includes(frontendUrl))
+    allowedOrigins.push(frontendUrl);
+const corsOpts = {
+    origin: (origin, cb) => {
+        if (!origin || allowedOrigins.includes(origin))
+            return cb(null, true);
+        cb(null, false);
+    },
+    credentials: true
+};
+app.use((0, cors_1.default)(corsOpts));
 app.use(express_1.default.json());
 app.use((req, res, next) => {
     console.log('[backend]', req.method, req.path);
@@ -56,6 +81,8 @@ app.use('/api/stock', stock_routes_1.default);
 app.use('/api/despachos', despachos_routes_1.default);
 app.use('/api/users', users_routes_1.default);
 app.use('/api/customers', customers_routes_1.default);
+app.use('/api/price-lists', price_lists_routes_1.default);
+app.use('/api/catalogs', catalogs_routes_1.default);
 // Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'OK', service: 'LupoHub Backend', db: 'MySQL' });
@@ -78,6 +105,10 @@ function initDatabase() {
                 yield (0, add_despachos_table_1.addDespachosTable)();
                 yield (0, add_pack_size_products_1.addPackSizeToProducts)();
                 yield (0, add_external_sku_1.addExternalSkuToVariants)();
+                yield (0, add_mercado_libre_item_id_1.addMercadoLibreItemIdToVariants)();
+                yield (0, add_customer_direct_1.addCustomerDirect)();
+                yield (0, add_price_lists_1.addPriceLists)();
+                yield (0, add_catalogs_table_1.addCatalogsTable)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

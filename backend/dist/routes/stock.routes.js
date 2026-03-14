@@ -12,6 +12,10 @@ router.put('/variant/:variantId', auth_1.authMiddleware, stock_controller_1.upda
 router.post('/sync/:variantId', stock_controller_1.forceSyncStock);
 // Crear snapshot inicial del stock actual
 router.post('/snapshot', stock_controller_1.createStockSnapshot);
+// Eliminar snapshot inicial para poder crear uno nuevo
+router.delete('/snapshot', stock_controller_1.deleteStockSnapshot);
 // Importar historial de ventas de TN y ML
 router.post('/import-history', stock_controller_1.importSalesHistory);
+// Importar stock desde Excel (CODIGO, COLOR, columnas P, M, G, GG, XG, XXG, XXXG)
+router.post('/import-excel', auth_1.authMiddleware, stock_controller_1.importStockFromExcel);
 exports.default = router;

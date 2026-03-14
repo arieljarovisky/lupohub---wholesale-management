@@ -45,10 +45,30 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importSalesHistory = exports.createStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateMercadoLibreStockByVariant = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
 const integrations_controller_1 = require("./integrations.controller");
+const SYNC_DEBOUNCE_MS = 2800;
+const pendingSyncByVariant = {};
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function withRetry429409(fn_1) {
+    return __awaiter(this, arguments, void 0, function* (fn, retries = 2) {
+        var _a;
+        try {
+            return yield fn();
+        }
+        catch (e) {
+            const status = (_a = e.response) === null || _a === void 0 ? void 0 : _a.status;
+            if (retries > 0 && (status === 429 || status === 409)) {
+                const delayMs = status === 429 ? 2500 : 1200;
+                yield sleep(delayMs);
+                return withRetry429409(fn, retries - 1);
+            }
+            throw e;
+        }
+    });
+}
 // Registrar movimiento de stock en historial
 const logStockMovement = (variantId, previousStock, newStock, movementType, reference) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -57,6 +77,7 @@ const logStockMovement = (variantId, previousStock, newStock, movementType, refe
     }
     catch (error) {
         console.error('Error logging stock movement:', error);
+        throw error;
     }
 });
 exports.logStockMovement = logStockMovement;
@@ -69,7 +90,7 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
        ON DUPLICATE KEY UPDATE stock = ?`, [variantId, newStock, newStock]);
         yield (0, exports.logStockMovement)(variantId, previousStock, newStock, movementType, reference);
         if (syncExternal) {
-            yield (0, exports.syncStockToExternalPlatforms)(variantId, newStock);
+            scheduleSyncToExternalPlatforms(variantId, newStock);
         }
         return true;
     }
@@ -134,10 +155,26 @@ function stockForPlatform(localStock, packSize) {
     const n = Math.max(0, Number(packSize) || 1);
     return n <= 0 ? localStock : Math.floor(localStock / n);
 }
+// Programar sincronización con debounce para evitar demasiadas llamadas a ML/TN (429 / conflict).
+function scheduleSyncToExternalPlatforms(variantId, newStock) {
+    const prev = pendingSyncByVariant[variantId];
+    if (prev)
+        clearTimeout(prev.timeout);
+    pendingSyncByVariant[variantId] = {
+        stock: newStock,
+        timeout: setTimeout(() => {
+            var _a;
+            const entry = pendingSyncByVariant[variantId];
+            const stockToSync = (_a = entry === null || entry === void 0 ? void 0 : entry.stock) !== null && _a !== void 0 ? _a : newStock;
+            delete pendingSyncByVariant[variantId];
+            (0, exports.syncStockToExternalPlatforms)(variantId, stockToSync).catch(err => console.error('[Sync debounced] Error:', (err === null || err === void 0 ? void 0 : err.message) || err));
+        }, SYNC_DEBOUNCE_MS)
+    };
+}
 // Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
 const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const variant = yield (0, db_1.get)(`SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, 
+        const variant = yield (0, db_1.get)(`SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
               COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
@@ -154,9 +191,12 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
         if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
             yield (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
         }
-        // Sincronizar con Mercado Libre (SKU externo = mismo que TN)
+        // Sincronizar con Mercado Libre: priorizar variación cuando exista (publicación con varias tallas/colores)
         if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
             yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
+        }
+        else if (variant.mercado_libre_item_id) {
+            yield (0, exports.updateMercadoLibreStockByItem)(variant.mercado_libre_item_id, stockML);
         }
         else if (skuMLTN) {
             yield (0, integrations_controller_1.updateMercadoLibreStock)(skuMLTN, stockML);
@@ -176,13 +216,13 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
             console.log('[TN Stock] No hay integración configurada');
             return false;
         }
-        const response = yield axios_1.default.put(`https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { stock }, {
+        yield withRetry429409(() => axios_1.default.put(`https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { stock }, {
             headers: {
                 'Authentication': `bearer ${integration.access_token}`,
                 'Content-Type': 'application/json',
                 'User-Agent': 'LupoHub (lupohub@example.com)'
             }
-        });
+        }));
         console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
         return true;
     }
@@ -192,6 +232,41 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
     }
 });
 exports.updateTiendaNubeStock = updateTiendaNubeStock;
+// Actualizar stock en Mercado Libre cuando la variante tiene su propia publicación (ítem sin variaciones o con una sola).
+const updateMercadoLibreStockByItem = (itemId, stock) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+    if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+        console.log('[ML Stock] No hay integración configurada');
+        return false;
+    }
+    const headers = {
+        'Authorization': `Bearer ${integration.access_token}`,
+        'Content-Type': 'application/json'
+    };
+    try {
+        const getRes = yield withRetry429409(() => axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
+        const item = getRes.data;
+        const variations = item.variations || [];
+        if (variations.length === 0) {
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: stock }, { headers }));
+            console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
+            return true;
+        }
+        if (variations.length === 1) {
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: [{ id: variations[0].id, available_quantity: stock }] }, { headers }));
+            console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
+            return true;
+        }
+        console.log(`[ML Stock] Item ${itemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
+        return false;
+    }
+    catch (e) {
+        console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        return false;
+    }
+});
+exports.updateMercadoLibreStockByItem = updateMercadoLibreStockByItem;
 // Actualizar stock en Mercado Libre por variante.
 // Prueba primero PUT a la subrecurso; si ML devuelve error, usa GET item + PUT item con array variations (formato que exige la API en muchos casos).
 const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __awaiter(void 0, void 0, void 0, function* () {
@@ -207,7 +282,7 @@ const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __await
     };
     // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
     try {
-        yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`, { available_quantity: stock }, { headers });
+        yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`, { available_quantity: stock }, { headers }));
         console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
         return true;
     }
@@ -236,12 +311,11 @@ function updateMercadoLibreStockByItemUpdate(itemId, variationId, newStock, acce
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
         };
-        const getRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers });
+        const getRes = yield withRetry429409(() => axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
         const item = getRes.data;
         const variations = item.variations || [];
         if (variations.length === 0) {
-            // Ítem sin variaciones: ML usa available_quantity a nivel ítem
-            yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: newStock }, { headers });
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: newStock }, { headers }));
             console.log(`[ML Stock] Actualizado item ${itemId} (sin variaciones) a ${newStock} unidades`);
             return true;
         }
@@ -251,11 +325,80 @@ function updateMercadoLibreStockByItemUpdate(itemId, variationId, newStock, acce
             const qty = isTarget ? newStock : ((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0);
             return { id: v.id, available_quantity: Math.max(0, qty) };
         });
-        yield axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: variationsPayload }, { headers });
+        yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: variationsPayload }, { headers }));
         console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${newStock} unidades (vía PUT item)`);
         return true;
     });
 }
+/** Obtener el seller_sku actual de una variación (desde attributes o campos directos). */
+function getMlVariationSku(v) {
+    var _a, _b, _c, _d;
+    const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+    const fromAttr = skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '').toString().trim() : '';
+    return fromAttr || ((_d = (_c = v.seller_sku) !== null && _c !== void 0 ? _c : v.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim() || '';
+}
+/** Enviar el SKU de tu inventario a Mercado Libre (actualiza seller_sku de la variación). */
+const updateMercadoLibreSku = (itemId, variationId, newSku) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
+    if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+        console.log('[ML SKU] No hay integración configurada');
+        return false;
+    }
+    const headers = {
+        'Authorization': `Bearer ${integration.access_token}`,
+        'Content-Type': 'application/json'
+    };
+    try {
+        const getRes = yield withRetry429409(() => axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
+        const item = getRes.data;
+        const variations = item.variations || [];
+        if (variations.length === 0) {
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { seller_custom_field: newSku }, { headers }));
+            console.log(`[ML SKU] Actualizado ítem ${itemId} seller_custom_field a "${newSku}"`);
+            return true;
+        }
+        const variationsPayload = variations.map((v) => {
+            var _a;
+            const isTarget = String(v.id) === String(variationId);
+            const sku = isTarget ? newSku : getMlVariationSku(v);
+            return { id: v.id, available_quantity: Math.max(0, (_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0), seller_sku: sku || undefined };
+        });
+        yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: variationsPayload }, { headers }));
+        console.log(`[ML SKU] Actualizado ítem ${itemId} variación ${variationId} seller_sku a "${newSku}"`);
+        return true;
+    }
+    catch (e) {
+        console.error('[ML SKU] Error:', ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        return false;
+    }
+});
+exports.updateMercadoLibreSku = updateMercadoLibreSku;
+/** Enviar el SKU de tu inventario a Tienda Nube (actualiza sku de la variante). */
+const updateTiendaNubeSku = (productId, variantId, newSku) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const integration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!(integration === null || integration === void 0 ? void 0 : integration.access_token) || !(integration === null || integration === void 0 ? void 0 : integration.store_id)) {
+        console.log('[TN SKU] No hay integración configurada');
+        return false;
+    }
+    try {
+        yield withRetry429409(() => axios_1.default.put(`https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { sku: newSku }, {
+            headers: {
+                'Authentication': `bearer ${integration.access_token}`,
+                'Content-Type': 'application/json',
+                'User-Agent': 'LupoHub (lupohub@example.com)'
+            }
+        }));
+        console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
+        return true;
+    }
+    catch (e) {
+        console.error('[TN SKU] Error:', ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        return false;
+    }
+});
+exports.updateTiendaNubeSku = updateTiendaNubeSku;
 // Endpoint: Obtener historial de movimientos de stock
 const getStockMovements = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -333,6 +476,22 @@ const updateVariantStockEndpoint = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.updateVariantStockEndpoint = updateVariantStockEndpoint;
+// Endpoint: Eliminar el snapshot inicial (todos los movimientos SNAPSHOT_INICIAL) para poder crear uno nuevo
+const deleteStockSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const result = yield (0, db_1.execute)(`DELETE FROM stock_movements WHERE movement_type = 'SNAPSHOT_INICIAL'`);
+        const deleted = Number(result === null || result === void 0 ? void 0 : result.affectedRows) || 0;
+        res.json({
+            message: deleted > 0 ? `Snapshot inicial eliminado (${deleted} registros).` : 'No había snapshot inicial para eliminar.',
+            deleted
+        });
+    }
+    catch (error) {
+        console.error('Error deleting stock snapshot:', error);
+        res.status(500).json({ message: 'Error eliminando snapshot', error: error.message });
+    }
+});
+exports.deleteStockSnapshot = deleteStockSnapshot;
 // Endpoint: Crear snapshot inicial de todo el stock actual
 const createStockSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -507,3 +666,135 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.importSalesHistory = importSalesHistory;
+/** Normaliza código/SKU para búsqueda: quitar guiones, barras y espacios. */
+function normalizeCodigo(s) {
+    return String(s !== null && s !== void 0 ? s : '')
+        .trim()
+        .replace(/[-/\s]/g, '')
+        .toUpperCase();
+}
+/** Código de artículo a 7 dígitos con ceros adelante (ej. 52302 → 0052302). */
+function padArticleCodeTo7(s) {
+    const digits = String(s !== null && s !== void 0 ? s : '').replace(/\D/g, '');
+    if (!digits)
+        return '';
+    return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+/** Escapa % y _ para uso en LIKE. */
+function escapeLike(s) {
+    return String(s !== null && s !== void 0 ? s : '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+/** Resuelve variant_id por código de producto (base SKU), código de color y código de talle. Prueba exacto, normalizado y "empieza con". */
+function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const codigoTrim = (codigo !== null && codigo !== void 0 ? codigo : '').toString().trim();
+        const colorStr = (colorCode !== null && colorCode !== void 0 ? colorCode : '').toString().trim();
+        const sizeStr = (sizeCode !== null && sizeCode !== void 0 ? sizeCode : '').toString().trim();
+        if (!codigoTrim || !colorStr || !sizeStr)
+            return null;
+        let row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [codigoTrim, colorStr, sizeStr]);
+        if (row === null || row === void 0 ? void 0 : row.variant_id)
+            return row.variant_id;
+        const padded = padArticleCodeTo7(codigoTrim);
+        if (padded && padded !== codigoTrim) {
+            row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
+       FROM products p
+       JOIN product_colors pc ON pc.product_id = p.id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       JOIN sizes s ON s.id = pv.size_id
+       WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [padded, colorStr, sizeStr]);
+            if (row === null || row === void 0 ? void 0 : row.variant_id)
+                return row.variant_id;
+        }
+        const normalized = normalizeCodigo(codigoTrim);
+        if (!normalized)
+            return null;
+        row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND c.code = ? AND s.size_code = ?`, [normalized, colorStr, sizeStr]);
+        if (row === null || row === void 0 ? void 0 : row.variant_id)
+            return row.variant_id;
+        const pattern = escapeLike(normalized) + '%';
+        row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
+     FROM products p
+     JOIN product_colors pc ON pc.product_id = p.id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND c.code = ? AND s.size_code = ?
+     LIMIT 1`, [pattern, colorStr, sizeStr]);
+        return (row === null || row === void 0 ? void 0 : row.variant_id) || null;
+    });
+}
+const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+function parseStockValue(v) {
+    if (v === null || v === undefined || v === '')
+        return 0;
+    if (typeof v === 'number' && !Number.isNaN(v))
+        return Math.max(0, Math.floor(v));
+    const s = String(v).trim().toUpperCase();
+    if (s === 'X' || s === '-' || s === 'N/A')
+        return 0;
+    const n = parseFloat(s.replace(/[^\d.,-]/g, '').replace(',', '.'));
+    return Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n));
+}
+const importStockFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        const { rows: rawRows } = req.body;
+        if (!Array.isArray(rawRows) || rawRows.length === 0) {
+            return res.status(400).json({
+                message: 'Se requiere un array "rows" con las filas del Excel (columnas CODIGO, COLOR y tallas P, M, G, etc.).'
+            });
+        }
+        const notFound = [];
+        const errors = [];
+        let updated = 0;
+        for (const row of rawRows) {
+            const codigo = ((_c = (_b = (_a = row.codigo) !== null && _a !== void 0 ? _a : row.CODIGO) !== null && _b !== void 0 ? _b : row.Codigo) !== null && _c !== void 0 ? _c : '').toString().trim();
+            const colorRaw = (_e = (_d = row.color) !== null && _d !== void 0 ? _d : row.COLOR) !== null && _e !== void 0 ? _e : row.Color;
+            const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+            if (!codigo || !colorStr)
+                continue;
+            for (const sizeCode of EXCEL_SIZE_COLUMNS) {
+                const rawVal = (_f = row[sizeCode]) !== null && _f !== void 0 ? _f : row[sizeCode.toLowerCase()];
+                const stock = parseStockValue(rawVal);
+                const variantId = yield getVariantIdByCodigoColorSize(codigo, colorStr, sizeCode);
+                if (!variantId) {
+                    const key = `${codigo}-${colorStr}-${sizeCode}`;
+                    if (!notFound.includes(key))
+                        notFound.push(key);
+                    continue;
+                }
+                const ok = yield (0, exports.updateVariantStock)(variantId, stock, 'IMPORTACION_EXCEL', 'Importación Excel', true);
+                if (ok)
+                    updated++;
+                else
+                    errors.push(`Error actualizando ${codigo} color ${colorStr} talle ${sizeCode}`);
+            }
+        }
+        res.json({
+            message: 'Importación de stock completada',
+            updated,
+            notFound: notFound.slice(0, 200),
+            notFoundCount: notFound.length,
+            errors: errors.length > 0 ? errors.slice(0, 50) : undefined
+        });
+    }
+    catch (error) {
+        console.error('Error importing stock from Excel:', error);
+        res.status(500).json({ message: 'Error importando stock desde Excel', error: error.message });
+    }
+});
+exports.importStockFromExcel = importStockFromExcel;

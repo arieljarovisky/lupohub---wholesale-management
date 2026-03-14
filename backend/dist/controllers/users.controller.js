@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteUser = exports.createUser = exports.listUsers = void 0;
+exports.updateUser = exports.deleteUser = exports.createUser = exports.listUsers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 /** Listar usuarios (sin password). Solo ADMIN. */
@@ -19,7 +19,7 @@ const listUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden listar usuarios' });
         }
-        const rows = yield (0, db_1.query)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage 
+        const rows = yield (0, db_1.query)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId
        FROM users ORDER BY name`);
         res.json(rows);
     }
@@ -40,10 +40,10 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!(name === null || name === void 0 ? void 0 : name.trim()) || !(email === null || email === void 0 ? void 0 : email.trim()) || !password) {
             return res.status(400).json({ message: 'Nombre, email y contraseña son requeridos' });
         }
-        const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE'];
+        const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER'];
         const roleVal = (role || 'SELLER').toString().toUpperCase();
         if (!validRoles.includes(roleVal)) {
-            return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER o WAREHOUSE' });
+            return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE o CUSTOMER' });
         }
         const existing = yield (0, db_1.get)('SELECT id FROM users WHERE email = ?', [email.trim()]);
         if (existing) {
@@ -52,6 +52,10 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const id = (0, uuid_1.v4)();
         const commission = commissionPercentage != null ? Number(commissionPercentage) : 0;
         yield (0, db_1.execute)(`INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, ?, ?)`, [id, name.trim(), email.trim(), password, roleVal, commission]);
+        if (roleVal === 'CUSTOMER') {
+            const customerId = (0, uuid_1.v4)();
+            yield (0, db_1.execute)(`INSERT INTO customers (id, user_id, seller_id, name, business_name, email, address, city) VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL)`, [customerId, id, name.trim(), name.trim(), email.trim()]);
+        }
         const created = yield (0, db_1.get)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage FROM users WHERE id = ?`, [id]);
         res.status(201).json(created);
     }
@@ -83,6 +87,7 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
         yield (0, db_1.execute)('DELETE FROM users WHERE id = ?', [id]);
+        yield (0, db_1.execute)('UPDATE customers SET user_id = NULL WHERE user_id = ?', [id]);
         res.json({ message: 'Usuario eliminado', id });
     }
     catch (error) {
@@ -91,3 +96,28 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.deleteUser = deleteUser;
+/** Actualizar usuario (ej. price_list_id para vendedores). Solo ADMIN. */
+const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+            return res.status(403).json({ message: 'Solo administradores pueden actualizar usuarios' });
+        }
+        const { id } = req.params;
+        const body = req.body;
+        const existing = yield (0, db_1.get)('SELECT id FROM users WHERE id = ?', [id]);
+        if (!existing)
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        if (body.priceListId !== undefined) {
+            const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
+            yield (0, db_1.execute)('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+        }
+        const updated = yield (0, db_1.get)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?`, [id]);
+        res.json(updated);
+    }
+    catch (error) {
+        console.error('updateUser:', error);
+        res.status(500).json({ message: 'Error actualizando usuario' });
+    }
+});
+exports.updateUser = updateUser;

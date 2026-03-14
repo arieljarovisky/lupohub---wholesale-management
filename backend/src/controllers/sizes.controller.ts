@@ -160,7 +160,7 @@ export const unifySizes = async (req: Request, res: Response) => {
       }
       if (canonicalId === size.id) continue;
 
-      const countResult = await query<{ n: number }>(`SELECT COUNT(*) AS n FROM product_variants WHERE size_id = ?`, [size.id]);
+      const countResult = await query(`SELECT COUNT(*) AS n FROM product_variants WHERE size_id = ?`, [size.id]);
       const variantCount = Number(countResult?.[0]?.n ?? 0);
       if (variantCount > 0) {
         await execute(`UPDATE product_variants SET size_id = ? WHERE size_id = ?`, [canonicalId, size.id]);

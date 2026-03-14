@@ -2,19 +2,24 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const products_controller_1 = require("../controllers/products.controller");
+const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 // Rutas específicas primero (evitar que /:sku o /:id capturen)
-router.post('/variants/bulk-link', products_controller_1.bulkLinkVariants);
-router.put('/variants/:variantId/external-ids', products_controller_1.updateVariantExternalIds);
-router.delete('/variants/:variantId', products_controller_1.deleteVariant);
-router.delete('/all', products_controller_1.deleteAllProducts);
-router.post('/import-tango', products_controller_1.importTangoArticles);
-router.get('/export-inventory', products_controller_1.exportInventory);
-router.get('/', products_controller_1.getProducts);
-router.get('/:sku', products_controller_1.getProductBySku);
-router.post('/', products_controller_1.createProduct);
-router.patch('/stock', products_controller_1.patchStock);
-router.put('/:id', products_controller_1.updateProduct);
-router.put('/:id/external-ids', products_controller_1.updateProductExternalIds);
-router.delete('/:id', products_controller_1.deleteProduct);
+router.post('/variants/bulk-link', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.bulkLinkVariants);
+router.get('/variants/:variantId', auth_1.authMiddleware, products_controller_1.getVariantById);
+// Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
+router.put('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateVariant);
+router.put('/variants/:variantId/external-ids', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateVariantExternalIds);
+router.delete('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteVariant);
+router.delete('/all', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteAllProducts);
+router.post('/import-tango', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.importTangoArticles);
+router.get('/export-inventory', auth_1.authMiddleware, products_controller_1.exportInventory);
+router.get('/', auth_1.authMiddleware, products_controller_1.getProducts);
+router.get('/by-id/:id', auth_1.authMiddleware, products_controller_1.getProductById);
+router.get('/:sku', auth_1.authMiddleware, products_controller_1.getProductBySku);
+router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.createProduct);
+router.patch('/stock', auth_1.authMiddleware, products_controller_1.patchStock);
+router.put('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateProduct);
+router.put('/:id/external-ids', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateProductExternalIds);
+router.delete('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteProduct);
 exports.default = router;

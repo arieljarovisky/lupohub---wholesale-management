@@ -2,7 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const sizes_controller_1 = require("../controllers/sizes.controller");
+const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/', sizes_controller_1.getSizes);
+router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, sizes_controller_1.createSize);
+router.post('/unify', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, sizes_controller_1.unifySizes);
+router.delete('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, sizes_controller_1.deleteSize);
 router.get('/clean-check', sizes_controller_1.cleanInvalidSizes);
 exports.default = router;

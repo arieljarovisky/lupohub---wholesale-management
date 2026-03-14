@@ -46,31 +46,63 @@ exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
     try {
-        // 1. Get Orders
-        const ordersRow = yield (0, db_1.query)("SELECT * FROM orders ORDER BY date DESC");
-        // 2. Get Items for each order with productId (variant -> product_color -> product)
-        const ordersFull = yield Promise.all(ordersRow.map((order) => __awaiter(void 0, void 0, void 0, function* () {
-            var _a;
-            const items = yield (0, db_1.query)(`
-        SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-               pc.product_id AS productId
-        FROM order_items i
-        JOIN product_variants pv ON pv.id = i.variant_id
-        JOIN product_colors pc ON pc.id = pv.product_color_id
-        WHERE i.order_id = ?
-      `, [order.id]);
-            const itemsMapped = items.map((row) => {
-                var _a;
-                return ({
+        let ordersRow = yield (0, db_1.query)("SELECT * FROM orders ORDER BY date DESC");
+        const user = req.user;
+        if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
+            const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
+            const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+            if (customer === null || customer === void 0 ? void 0 : customer.id) {
+                ordersRow = ordersRow.filter((o) => o.customer_id === customer.id);
+            }
+            else {
+                ordersRow = [];
+            }
+        }
+        if (ordersRow.length === 0) {
+            return res.json([]);
+        }
+        const orderIds = ordersRow.map((o) => o.id);
+        const placeholders = orderIds.map(() => '?').join(',');
+        const itemsRows = yield (0, db_1.query)(`
+      SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku,
+             p.name AS productName,
+             s.size_code AS sizeCode,
+             c.name AS colorName
+      FROM order_items i
+      JOIN product_variants pv ON pv.id = i.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      WHERE i.order_id IN (${placeholders})
+    `, orderIds);
+        const itemsByOrderId = {};
+        for (const o of ordersRow) {
+            itemsByOrderId[o.id] = [];
+        }
+        for (const row of itemsRows) {
+            const items = itemsByOrderId[row.order_id];
+            if (items) {
+                items.push({
                     variantId: row.variantId,
                     productId: row.productId,
                     quantity: row.quantity,
                     picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
-                    priceAtMoment: Number(row.priceAtMoment)
+                    priceAtMoment: Number(row.priceAtMoment),
+                    sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
+                    productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
+                    sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
+                    colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
                 });
-            });
-            return {
+            }
+        }
+        const ordersFull = ordersRow.map((order) => {
+            var _a;
+            return ({
                 id: order.id,
                 customerId: order.customer_id,
                 sellerId: order.seller_id,
@@ -79,9 +111,9 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 total: Number(order.total),
                 pickedBy: (_a = order.picked_by) !== null && _a !== void 0 ? _a : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
-                items: itemsMapped
-            };
-        })));
+                items: itemsByOrderId[order.id] || []
+            });
+        });
         res.json(ordersFull);
     }
     catch (error) {
@@ -91,10 +123,20 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getOrders = getOrders;
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     const newOrder = req.body;
     if (!newOrder.customerId || !newOrder.items.length) {
         return res.status(400).json({ message: "Datos de pedido inválidos" });
+    }
+    const user = req.user;
+    let sellerId = (_a = newOrder.sellerId) !== null && _a !== void 0 ? _a : null;
+    if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
+        const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
+        const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+        if (!customer || customer.id !== newOrder.customerId) {
+            return res.status(403).json({ message: 'Como cliente directo solo podés crear pedidos para tu propio perfil' });
+        }
+        sellerId = null;
     }
     const orderId = newOrder.id || (0, uuid_1.v4)();
     try {
@@ -110,7 +152,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         };
         const sqlDate = toSqlDate(newOrder.date);
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total) VALUES (?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, newOrder.sellerId, sqlDate, newOrder.status, newOrder.total]);
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total) VALUES (?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -126,7 +168,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!variantId) {
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_a = item.priceAtMoment) !== null && _a !== void 0 ? _a : 0]);
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0]);
         }
         if (newOrder.status === 'Confirmado') {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -161,7 +203,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_b = created.picked_by) !== null && _b !== void 0 ? _b : undefined,
+            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped
         };
@@ -215,7 +257,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     const { id } = req.params;
     const updated = req.body;
     if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
@@ -234,7 +276,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         };
         const sqlDate = toSqlDate(updated.date);
-        yield (0, db_1.execute)("UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ? WHERE id = ?", [updated.customerId, updated.sellerId, sqlDate, updated.status, updated.total, id]);
+        const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
+        yield (0, db_1.execute)("UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ? WHERE id = ?", [updated.customerId, sellerId, sqlDate, updated.status, updated.total, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         for (const item of updated.items) {
             let variantId = item.variantId;
@@ -280,7 +323,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_b = created.picked_by) !== null && _b !== void 0 ? _b : undefined,
+            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped
         });
