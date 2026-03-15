@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
@@ -79,15 +79,21 @@ interface SettingsProps {
   onCreateTransporte?: (name: string) => void | Promise<void>;
   onUpdateTransporte?: (id: string, name: string) => void | Promise<void>;
   onDeleteTransporte?: (id: string) => void | Promise<void>;
+  /** Si se pasa, al montar se selecciona esta pestaña (ej. desde el menú "Facturación"). */
+  initialTab?: 'facturacion';
 }
 
 const Settings: React.FC<SettingsProps> = ({
   attributes, onCreateAttribute, onDeleteAttribute, onRefreshData, role,
   users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser,
-  transportes = [], onCreateTransporte, onUpdateTransporte, onDeleteTransporte
+  transportes = [], onCreateTransporte, onUpdateTransporte, onDeleteTransporte,
+  initialTab
 }) => {
   const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists' | 'transportes'>(role === Role.WAREHOUSE ? 'sizes' : 'users');
+  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists' | 'transportes' | 'facturacion'>(initialTab ?? (role === Role.WAREHOUSE ? 'sizes' : 'users'));
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
   const [editingColorId, setEditingColorId] = useState<string | null>(null);
@@ -656,6 +662,14 @@ const Settings: React.FC<SettingsProps> = ({
               }`}
             >
               TRANSPORTES
+            </button>
+            <button
+              onClick={() => setActiveTab('facturacion')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'facturacion' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              FACTURACIÓN
             </button>
           </>
         )}
@@ -1731,6 +1745,36 @@ const Settings: React.FC<SettingsProps> = ({
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {(role === Role.ADMIN || role === Role.WAREHOUSE) && activeTab === 'facturacion' && (
+        <div className="space-y-6">
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <DollarSign size={20} className="text-emerald-400" />
+              Dónde facturar desde LupoHub
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">El sistema no emite facturas electrónicas con CAE (AFIP). Para facturar tenés estas opciones:</p>
+            <ul className="space-y-3 text-sm">
+              <li className="flex items-start gap-3 text-slate-300">
+                <FileText size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <span><strong className="text-white">Remito:</strong> en <strong>Pedidos</strong>, en cada pedido tocá el ícono de hoja «Generar remito» para imprimir o guardar como PDF (remitente, destinatario, ítems, transporte).</span>
+              </li>
+              <li className="flex items-start gap-3 text-slate-300">
+                <FileSpreadsheet size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                <span><strong className="text-white">Exportar a Excel:</strong> desde Pedidos podés exportar un pedido o todos para llevarlos a tu contador o cargarlos en otro sistema.</span>
+              </li>
+              <li className="flex items-start gap-3 text-slate-300">
+                <Shield size={18} className="text-blue-400 shrink-0 mt-0.5" />
+                <span><strong className="text-white">CUIT en clientes:</strong> en <strong>Clientes</strong> cargá el CUIT/CUIL de cada cliente (y en esta Configuración, pestaña <strong>Transportes</strong>, los datos del remitente para los remitos).</span>
+              </li>
+              <li className="flex items-start gap-3 text-slate-300">
+                <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <span><strong className="text-white">Factura electrónica (AFIP):</strong> para emitir facturas con validez fiscal hay que usar un proveedor (Nubefact, Billpad, etc.) o tu contador. En el proyecto está la guía en <code className="bg-slate-700 px-1 rounded text-xs">docs/FACTURACION.md</code>.</span>
+              </li>
+            </ul>
           </div>
         </div>
       )}

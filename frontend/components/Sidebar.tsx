@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign } from 'lucide-react';
 import { Role } from '../types';
 
 interface SidebarProps {
@@ -44,6 +44,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     {
       title: 'Sistema',
       items: [
+        { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN], color: 'emerald' },
         { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN, Role.WAREHOUSE] },
       ]
     }

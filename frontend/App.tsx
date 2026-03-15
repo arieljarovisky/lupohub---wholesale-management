@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
 import { api } from './services/api';
@@ -639,6 +639,7 @@ const App: React.FC = () => {
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
+      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
   ];
@@ -678,6 +679,7 @@ const App: React.FC = () => {
                  {baseView === 'catalogs' && 'Catálogos'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
+                 {baseView === 'facturacion' && 'Facturación'}
                  {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido (Plantilla)')}
                  {baseView === 'create_order_template' && 'Nuevo Pedido (Plantilla)'}
                  {baseView === 'order_picking' && 'Preparando Pedido'}
@@ -742,6 +744,37 @@ const App: React.FC = () => {
           {baseView === 'visits' && (
             <Suspense fallback={<ViewFallback />}>
               <Visits visits={MOCK_VISITS} role={currentUser.role} />
+            </Suspense>
+          )}
+          {baseView === 'facturacion' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Settings
+                attributes={attributes}
+                onCreateAttribute={handleCreateAttribute}
+                onDeleteAttribute={handleDeleteAttribute}
+                onRefreshData={loadData}
+                role={currentUser.role}
+                users={users}
+                onUpdateUser={handleUpdateUser}
+                onCreateUser={handleCreateUser}
+                onDeleteUser={handleDeleteUser}
+                orders={orders}
+                currentUser={currentUser}
+                transportes={transportes}
+                onCreateTransporte={async (name) => {
+                  const t = await api.createTransporte(name);
+                  setTransportes(prev => [...prev, t]);
+                }}
+                onUpdateTransporte={async (id, name) => {
+                  const t = await api.updateTransporte(id, name);
+                  setTransportes(prev => prev.map(x => x.id === id ? t : x));
+                }}
+                onDeleteTransporte={async (id) => {
+                  await api.deleteTransporte(id);
+                  setTransportes(prev => prev.filter(x => x.id !== id));
+                }}
+                initialTab="facturacion"
+              />
             </Suspense>
           )}
           {baseView === 'settings' && (
