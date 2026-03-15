@@ -443,6 +443,17 @@ export const api = {
     }, undefined, 'updateOrderStatus');
   },
 
+  /** Indica si AFIP está configurado en el servidor (para mostrar botón Emitir factura). */
+  getAfipStatus: async (): Promise<{ configured: boolean }> => {
+    const res = await request<{ configured: boolean }>('/afip/status', 'GET');
+    return res ?? { configured: false };
+  },
+
+  /** Emite factura electrónica AFIP para un pedido. Requiere token y rol ADMIN o Depósito. */
+  emitirFactura: async (orderId: string): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number }> => {
+    return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST');
+  },
+
   // --- CUSTOMERS ---
   getCustomers: async (): Promise<Customer[]> => {
     return handleRequest(async () => {
@@ -456,6 +467,8 @@ export const api = {
         email: r.email ?? '',
         address: r.address ?? '',
         city: r.city ?? '',
+        cuit: r.cuit ?? undefined,
+        transportes: r.transportes ?? [],
         priceListId: r.priceListId ?? r.price_list_id ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');

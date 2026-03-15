@@ -1,3 +1,7 @@
 node_modules
 .env
 .DS_Store
+# Certificados y claves AFIP (no subir a Git; la carpeta y su README sí se versionan)
+backend/afip-certs/*.crt
+backend/afip-certs/*.key
+backend/afip-certs/*.pem

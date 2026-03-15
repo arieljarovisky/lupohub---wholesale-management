@@ -1,0 +1,206 @@
+/**
+ * Servicio de facturación electrónica AFIP usando Afip SDK (app.afipsdk.com).
+ * Configuración por variables de entorno:
+ * - AFIP_CUIT (obligatorio): TU CUIT 11 dígitos.
+ * - Opción A: AFIP_ACCESS_TOKEN (token de app.afipsdk.com).
+ * - Opción B: AFIP_CERT_PATH y AFIP_KEY_PATH (rutas a archivos .crt y .key en formato PEM).
+ * - AFIP_PTO_VTA (opcional, default 1).
+ * - AFIP_PRODUCTION (opcional): "true" para producción, si no es homologación.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+
+const PTO_VTA_DEFAULT = 1;
+/** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
+const TIPO_CBTE_A = 1;
+const TIPO_CBTE_B = 6;
+/** DocTipo: 80 = CUIT, 99 = Consumidor final */
+const DOC_TIPO_CUIT = 80;
+const DOC_TIPO_CF = 99;
+/** Concepto: 1 = Productos */
+const CONCEPTO_PRODUCTOS = 1;
+/** Condición IVA: 1 = IVA Responsable Inscripto, 5 = Consumidor Final */
+const IVA_RESPONSABLE_INSCRIPTO = 1;
+const CONSUMIDOR_FINAL = 5;
+/** Alícuota IVA 21% = Id 5 */
+const ID_IVA_21 = 5;
+
+export interface OrderForAfip {
+  id: string;
+  date: string;
+  total: number;
+  customerId: string;
+}
+
+export interface CustomerForAfip {
+  id: string;
+  businessName: string;
+  cuit?: string | null;
+}
+
+export interface InvoiceResult {
+  cae: string;
+  caeFchVto: string;
+  puntoVta: number;
+  cbteTipo: number;
+  cbteDesde: number;
+  cbteHasta: number;
+}
+
+export type AfipConfig = {
+  cuit: number;
+  puntoVta: number;
+  accessToken?: string;
+  cert?: string;
+  key?: string;
+  production: boolean;
+};
+
+function readCertOrKey(envVar: string, value: string, description: string): string {
+  let p = value.trim();
+  if (!p) throw new Error(`${envVar} está vacío.`);
+  // Para plataformas como Railway: PEM en una sola línea con \n literal
+  if (p.includes('\\n')) p = p.replace(/\\n/g, '\n');
+  // Si el valor es el PEM directo (contiene -----BEGIN)
+  if (p.includes('-----BEGIN')) return p;
+  // Si no, es ruta a archivo
+  const resolved = path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`${description}: archivo no encontrado (${resolved}). Revisá ${envVar}.`);
+  }
+  return fs.readFileSync(resolved, 'utf8').trim();
+}
+
+function getConfig(): AfipConfig {
+  const cuit = process.env.AFIP_CUIT;
+  if (!cuit) {
+    throw new Error('AFIP no configurado. Definí AFIP_CUIT en el servidor (Configuración → Facturación).');
+  }
+  const cuitNum = parseInt(String(cuit).replace(/\D/g, ''), 10);
+  if (isNaN(cuitNum) || String(cuitNum).length !== 11) {
+    throw new Error('AFIP_CUIT debe ser un CUIT de 11 dígitos.');
+  }
+  const puntoVta = parseInt(process.env.AFIP_PTO_VTA || String(PTO_VTA_DEFAULT), 10) || PTO_VTA_DEFAULT;
+  const production = process.env.AFIP_PRODUCTION === 'true' || process.env.AFIP_PRODUCTION === '1';
+
+  const accessToken = process.env.AFIP_ACCESS_TOKEN?.trim();
+  const certPath = process.env.AFIP_CERT_PATH?.trim();
+  const keyPath = process.env.AFIP_KEY_PATH?.trim();
+
+  if (accessToken) {
+    return { cuit: cuitNum, puntoVta, accessToken, production };
+  }
+  if (certPath && keyPath) {
+    const cert = readCertOrKey('AFIP_CERT_PATH', certPath, 'Certificado');
+    const key = readCertOrKey('AFIP_KEY_PATH', keyPath, 'Clave privada');
+    return { cuit: cuitNum, puntoVta, cert, key, production };
+  }
+  throw new Error(
+    'AFIP: definí AFIP_ACCESS_TOKEN (token de app.afipsdk.com) O bien AFIP_CERT_PATH y AFIP_KEY_PATH (rutas a tu .crt y .key en PEM). Ver docs/FACTURACION.md.'
+  );
+}
+
+/** Verifica si AFIP está configurado (para mostrar u ocultar botón en el front). */
+export function isAfipConfigured(): boolean {
+  if (!process.env.AFIP_CUIT) return false;
+  if (process.env.AFIP_ACCESS_TOKEN?.trim()) return true;
+  if (process.env.AFIP_CERT_PATH?.trim() && process.env.AFIP_KEY_PATH?.trim()) return true;
+  return false;
+}
+
+/**
+ * Emite una factura electrónica en AFIP por el pedido dado.
+ * Si el cliente tiene CUIT se emite Factura A; si no, Factura B (consumidor final).
+ */
+export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip): Promise<InvoiceResult> {
+  const config = getConfig();
+  const { cuit, puntoVta } = config;
+
+  const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
+  const tieneCuit = cuitCliente.length >= 10; // CUIT 11 dígitos, CUIL 10–11
+
+  const tipoCbte = tieneCuit ? TIPO_CBTE_A : TIPO_CBTE_B;
+  const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+  const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+  const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+
+  const total = Number(order.total) || 0;
+  if (total <= 0) throw new Error('El total del pedido debe ser mayor a 0.');
+
+  // IVA 21%: neto = total / 1.21, iva = total - neto
+  const impNeto = Math.round((total / 1.21) * 100) / 100;
+  const impIva = Math.round((total - impNeto) * 100) / 100;
+
+  const fecha = (order.date || new Date().toISOString().split('T')[0]).replace(/-/g, '');
+  const cbteFch = parseInt(fecha, 10);
+  if (isNaN(cbteFch) || fecha.length !== 8) {
+    throw new Error('Fecha del pedido inválida para AFIP.');
+  }
+
+  let Afip: any;
+  try {
+    Afip = (await import('@afipsdk/afip.js')).default;
+  } catch {
+    throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+  }
+
+  const afipOptions: Record<string, unknown> = {
+    CUIT: cuit,
+    production: config.production
+  };
+  if (config.accessToken) {
+    afipOptions.access_token = config.accessToken;
+  } else if (config.cert && config.key) {
+    afipOptions.cert = config.cert;
+    afipOptions.key = config.key;
+  }
+  const afip = new Afip(afipOptions);
+
+  const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+  const numeroFactura = lastVoucher + 1;
+
+  const data: Record<string, unknown> = {
+    CantReg: 1,
+    PtoVta: puntoVta,
+    CbteTipo: tipoCbte,
+    Concepto: CONCEPTO_PRODUCTOS,
+    DocTipo: docTipo,
+    DocNro: docNro,
+    CbteDesde: numeroFactura,
+    CbteHasta: numeroFactura,
+    CbteFch: cbteFch,
+    FchServDesde: null,
+    FchServHasta: null,
+    FchVtoPago: null,
+    ImpTotal: total,
+    ImpTotConc: 0,
+    ImpNeto: impNeto,
+    ImpOpEx: 0,
+    ImpIVA: impIva,
+    ImpTrib: 0,
+    MonId: 'PES',
+    MonCotiz: 1,
+    CondicionIVAReceptorId: condicionIva,
+    Iva: [
+      { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
+    ]
+  };
+
+  const res = await afip.ElectronicBilling.createVoucher(data);
+  const cae = res?.CAE ?? res?.cae;
+  const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
+
+  if (!cae) {
+    throw new Error('AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.');
+  }
+
+  return {
+    cae: String(cae),
+    caeFchVto: String(caeFchVto),
+    puntoVta,
+    cbteTipo: tipoCbte,
+    cbteDesde: numeroFactura,
+    cbteHasta: numeroFactura
+  };
+}

@@ -714,13 +714,14 @@ const App: React.FC = () => {
           )}
           {baseView === 'orders' && (
             <Suspense fallback={<ViewFallback />}>
-              <Orders 
-                orders={orders} products={products} customers={getVisibleCustomers} 
-                users={users} role={currentUser.role} currentUserId={currentUser.id} 
+              <Orders
+                orders={orders} products={products} customers={getVisibleCustomers}
+                users={users} role={currentUser.role} currentUserId={currentUser.id}
                 onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
                 onNavigate={setCurrentView} onStartPicking={handleStartPicking}
                 onEditOrder={handleEditOrder}
                 onDeleteOrder={handleDeleteOrder}
+                onFacturaEmitida={(orderId, invoice) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, invoice } : o))}
               />
             </Suspense>
           )}

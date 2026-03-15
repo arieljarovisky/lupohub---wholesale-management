@@ -106,6 +106,15 @@ export interface OrderItem {
   colorName?: string;
 }
 
+/** Factura AFIP asociada a un pedido (viene en getOrders). */
+export interface OrderInvoice {
+  cae: string;
+  caeFchVto?: string;
+  cbteDesde: number;
+  cbteHasta: number;
+  cbteTipo: number;
+}
+
 export interface Order {
   id: string;
   customerId: string;
@@ -116,6 +125,8 @@ export interface Order {
   total: number;
   status: OrderStatus;
   date: string;
+  /** Factura electrónica AFIP emitida para este pedido */
+  invoice?: OrderInvoice;
 }
 
 export interface Visit {

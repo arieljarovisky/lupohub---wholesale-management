@@ -15,6 +15,7 @@ import customersRoutes from './routes/customers.routes';
 import transportesRoutes from './routes/transportes.routes';
 import priceListsRoutes from './routes/price_lists.routes';
 import catalogsRoutes from './routes/catalogs.routes';
+import afipRoutes from './routes/afip.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
@@ -26,6 +27,7 @@ import { addMercadoLibreItemIdToVariants } from './database/add_mercado_libre_it
 import { addCustomerDirect } from './database/add_customer_direct';
 import { addCustomerCuit } from './database/add_customer_cuit';
 import { addTransportesTables } from './database/add_transportes_tables';
+import { addInvoicesTable } from './database/add_invoices_table';
 import { addPriceLists } from './database/add_price_lists';
 import { addCatalogsTable } from './database/add_catalogs_table';
 import { initSchema } from './database/init_schema';
@@ -77,6 +79,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/transportes', transportesRoutes);
 app.use('/api/price-lists', priceListsRoutes);
 app.use('/api/catalogs', catalogsRoutes);
+app.use('/api/afip', afipRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -104,6 +107,7 @@ async function initDatabase() {
       await addCustomerDirect();
       await addCustomerCuit();
       await addTransportesTables();
+      await addInvoicesTable();
       await addPriceLists();
       await addCatalogsTable();
       console.log('[DB] Tablas inicializadas correctamente');

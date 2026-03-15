@@ -60,6 +60,21 @@ export const getOrders = async (req: any, res: any) => {
       }
     }
 
+    const invoicesRows = await query(
+      `SELECT order_id, cae, cae_fch_vto, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`,
+      orderIds
+    );
+    const invoiceByOrderId: Record<string, any> = {};
+    for (const inv of invoicesRows as any[]) {
+      invoiceByOrderId[inv.order_id] = {
+        cae: inv.cae,
+        caeFchVto: inv.cae_fch_vto ?? undefined,
+        cbteDesde: inv.cbte_desde,
+        cbteHasta: inv.cbte_hasta,
+        cbteTipo: inv.cbte_tipo
+      };
+    }
+
     const ordersFull = ordersRow.map((order: any) => ({
       id: order.id,
       customerId: order.customer_id,
@@ -69,7 +84,8 @@ export const getOrders = async (req: any, res: any) => {
       total: Number(order.total),
       pickedBy: order.picked_by ?? undefined,
       dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
-      items: itemsByOrderId[order.id] || []
+      items: itemsByOrderId[order.id] || [],
+      invoice: invoiceByOrderId[order.id] ?? undefined
     }));
 
     res.json(ordersFull);
@@ -340,5 +356,83 @@ export const deleteOrder = async (req: any, res: any) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error eliminando pedido" });
+  }
+};
+
+/** Obtiene la factura AFIP asociada a un pedido (si existe). */
+export const getOrderInvoice = async (req: any, res: any) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const inv = await get(
+      'SELECT id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at FROM invoices WHERE order_id = ?',
+      [id]
+    );
+    if (!inv) return res.status(404).json({ message: 'Este pedido no tiene factura emitida' });
+    res.json({
+      id: inv.id,
+      orderId: inv.order_id,
+      cae: inv.cae,
+      caeFchVto: inv.cae_fch_vto ?? undefined,
+      puntoVta: inv.punto_venta,
+      cbteTipo: inv.cbte_tipo,
+      cbteDesde: inv.cbte_desde,
+      cbteHasta: inv.cbte_hasta,
+      createdAt: inv.created_at
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo factura' });
+  }
+};
+
+/** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
+export const emitirFactura = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const orderRow = await get('SELECT id, customer_id, date, total FROM orders WHERE id = ?', [id]);
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+    const existingInv = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
+    if (existingInv) return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
+
+    const customerRow = await get(
+      'SELECT id, business_name, cuit FROM customers WHERE id = ?',
+      [orderRow.customer_id]
+    );
+    if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+
+    const { emitirFactura: emitirAfip } = await import('../services/afip.service');
+    const result = await emitirAfip(
+      { id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id },
+      { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit }
+    );
+
+    const { v4: uuidv4 } = await import('uuid');
+    const invoiceId = uuidv4();
+    await execute(
+      `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [invoiceId, id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta]
+    );
+    res.status(201).json({
+      id: invoiceId,
+      orderId: id,
+      cae: result.cae,
+      caeFchVto: result.caeFchVto,
+      puntoVta: result.puntoVta,
+      cbteTipo: result.cbteTipo,
+      cbteDesde: result.cbteDesde,
+      cbteHasta: result.cbteHasta
+    });
+  } catch (error: any) {
+    console.error('emitirFactura:', error);
+    const msg = error?.message || 'Error emitiendo factura AFIP';
+    const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
+    res.status(status).json({ message: msg });
   }
 };

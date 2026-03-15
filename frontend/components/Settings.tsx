@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
@@ -1756,23 +1756,23 @@ const Settings: React.FC<SettingsProps> = ({
               <DollarSign size={20} className="text-emerald-400" />
               Dónde facturar desde LupoHub
             </h3>
-            <p className="text-slate-400 text-sm mb-4">El sistema no emite facturas electrónicas con CAE (AFIP). Para facturar tenés estas opciones:</p>
+            <p className="text-slate-400 text-sm mb-4">LupoHub puede emitir facturas electrónicas con CAE (AFIP) usando Afip SDK. Además tenés remito, Excel y datos para tu contador.</p>
             <ul className="space-y-3 text-sm">
               <li className="flex items-start gap-3 text-slate-300">
+                <Receipt size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                <span><strong className="text-white">Factura AFIP:</strong> en <strong>Pedidos</strong>, el botón «Emitir factura» (ícono recibo) aparece si en el servidor está configurado AFIP. Podés usar <strong>token</strong> (<code className="bg-slate-700 px-1 rounded text-xs">AFIP_ACCESS_TOKEN</code> de <a href="https://app.afipsdk.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">app.afipsdk.com</a>) o tu <strong>certificado y clave</strong> (<code className="bg-slate-700 px-1 rounded text-xs">AFIP_CERT_PATH</code>, <code className="bg-slate-700 px-1 rounded text-xs">AFIP_KEY_PATH</code> con rutas a tu .crt y .key en PEM). Siempre: <code className="bg-slate-700 px-1 rounded text-xs">AFIP_CUIT</code> y opcional <code className="bg-slate-700 px-1 rounded text-xs">AFIP_PTO_VTA</code>, <code className="bg-slate-700 px-1 rounded text-xs">AFIP_PRODUCTION=true</code> para producción. Ver <code className="bg-slate-700 px-1 rounded text-xs">docs/FACTURACION.md</code>.</span>
+              </li>
+              <li className="flex items-start gap-3 text-slate-300">
                 <FileText size={18} className="text-amber-400 shrink-0 mt-0.5" />
-                <span><strong className="text-white">Remito:</strong> en <strong>Pedidos</strong>, en cada pedido tocá el ícono de hoja «Generar remito» para imprimir o guardar como PDF (remitente, destinatario, ítems, transporte).</span>
+                <span><strong className="text-white">Remito:</strong> en Pedidos, ícono de hoja «Generar remito» para imprimir o guardar PDF (remitente, destinatario, ítems, transporte).</span>
               </li>
               <li className="flex items-start gap-3 text-slate-300">
                 <FileSpreadsheet size={18} className="text-emerald-400 shrink-0 mt-0.5" />
-                <span><strong className="text-white">Exportar a Excel:</strong> desde Pedidos podés exportar un pedido o todos para llevarlos a tu contador o cargarlos en otro sistema.</span>
+                <span><strong className="text-white">Exportar a Excel:</strong> desde Pedidos podés exportar un pedido o todos para tu contador u otro sistema.</span>
               </li>
               <li className="flex items-start gap-3 text-slate-300">
                 <Shield size={18} className="text-blue-400 shrink-0 mt-0.5" />
-                <span><strong className="text-white">CUIT en clientes:</strong> en <strong>Clientes</strong> cargá el CUIT/CUIL de cada cliente (y en esta Configuración, pestaña <strong>Transportes</strong>, los datos del remitente para los remitos).</span>
-              </li>
-              <li className="flex items-start gap-3 text-slate-300">
-                <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
-                <span><strong className="text-white">Factura electrónica (AFIP):</strong> para emitir facturas con validez fiscal hay que usar un proveedor (Nubefact, Billpad, etc.) o tu contador. En el proyecto está la guía en <code className="bg-slate-700 px-1 rounded text-xs">docs/FACTURACION.md</code>.</span>
+                <span><strong className="text-white">CUIT en clientes:</strong> en <strong>Clientes</strong> cargá el CUIT/CUIL de cada cliente. En Configuración → <strong>Transportes</strong> están los datos del remitente para los remitos.</span>
               </li>
             </ul>
           </div>

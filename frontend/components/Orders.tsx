@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, LayoutList, FileSpreadsheet } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, LayoutList, FileSpreadsheet, Receipt } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
+import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
+import { api } from '../services/api';
 
 interface OrdersProps {
   orders: Order[];
@@ -18,18 +19,27 @@ interface OrdersProps {
   onStartPicking?: (order: Order) => void;
   onEditOrder?: (order: Order) => void;
   onDeleteOrder?: (orderId: string) => void;
+  onFacturaEmitida?: (orderId: string, invoice: OrderInvoice) => void;
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
-  onNavigate, onStartPicking, onEditOrder, onDeleteOrder 
+  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida 
 }) => {
-  const { showConfirm } = useNotification();
+  const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
+  const [afipConfigured, setAfipConfigured] = useState(false);
+  const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
+
+  const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE;
+  useEffect(() => {
+    if (!canEmitirFactura) return;
+    api.getAfipStatus().then(r => setAfipConfigured(r?.configured ?? false)).catch(() => setAfipConfigured(false));
+  }, [canEmitirFactura]);
 
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
@@ -318,6 +328,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                          <AlertCircle size={10} /> PENDIENTES
                        </span>
                     )}
+                    {order.invoice && (
+                      <span className="bg-emerald-900/30 text-emerald-300 border border-emerald-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1" title={`CAE ${order.invoice.cae}`}>
+                        <Receipt size={10} /> FACTURADO
+                      </span>
+                    )}
                   </div>
                   {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
                     <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
@@ -330,6 +345,26 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {afipConfigured && canEmitirFactura && !order.invoice && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmitiendoFacturaId(order.id);
+                        api.emitirFactura(order.id)
+                          .then((res) => {
+                            onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                            showToast('success', `Factura emitida. CAE ${res.cae}`);
+                          })
+                          .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                          .finally(() => setEmitiendoFacturaId(null));
+                      }}
+                      disabled={!!emitiendoFacturaId}
+                      className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
+                      title="Emitir factura AFIP"
+                    >
+                      {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
+                    </button>
+                  )}
                   <button
                     onClick={(e) => openRemitoModal(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
