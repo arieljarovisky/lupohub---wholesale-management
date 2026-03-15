@@ -17,6 +17,15 @@ function exportPriceListExcel(items: { sku?: string; price: number; productId: s
   XLSX.writeFile(wb, `lista-precios-${safeName}.xlsx`);
 }
 
+/** Descarga plantilla Excel con todos los artículos (Código + Precio vacío) para completar y importar. */
+function downloadPriceListTemplate(products: { sku: string; name?: string }[]) {
+  const rows = products.map(p => ({ Código: p.sku, Precio: '' }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Precios');
+  XLSX.writeFile(wb, 'plantilla-lista-precios-todos-articulos.xlsx');
+}
+
 /** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -1123,8 +1132,16 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
               <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
                 <p className="text-xs font-bold text-slate-400 uppercase mb-2">Exportar / Importar Excel</p>
-                <p className="text-slate-500 text-xs mb-2">Mismo formato: columnas Código y Precio. Exportá para editar y volver a importar.</p>
+                <p className="text-slate-500 text-xs mb-2">Mismo formato: columnas Código y Precio. Plantilla con todos los artículos para completar precios e importar.</p>
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => downloadPriceListTemplate(productsForPriceList)}
+                    className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                    title="Descarga un Excel con todos los artículos del catálogo y columna Precio vacía para completar"
+                  >
+                    <FileUp size={14} /> Descargar plantilla (todos los artículos)
+                  </button>
                   <button
                     type="button"
                     onClick={() => exportPriceListExcel(priceListItems, editingPriceList?.name ?? '')}
