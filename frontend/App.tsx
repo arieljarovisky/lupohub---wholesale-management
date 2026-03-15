@@ -89,6 +89,9 @@ const App: React.FC = () => {
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
+  const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
+  const prevCreateOrderViewRef = useRef(false);
 
   // Fetch Data on Login
   useEffect(() => {
@@ -215,6 +218,14 @@ const App: React.FC = () => {
           setUsers([]);
           setPriceLists([]);
         }
+      } else if (currentUser?.role === Role.WAREHOUSE) {
+        try {
+          const fetchedPriceLists = await api.getPriceLists();
+          setPriceLists(fetchedPriceLists);
+        } catch {
+          setPriceLists([]);
+        }
+        setUsers([]);
       } else {
         setUsers([]);
       }
@@ -226,6 +237,31 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
+  const inCreateOrderView = baseView === 'create_order' || baseView === 'create_order_template' || !!editingOrder;
+  useEffect(() => {
+    if (!currentUser) return;
+    if (inCreateOrderView) {
+      const priceListId = (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) ? createOrderPriceListId : undefined;
+      if (currentUser.role === Role.CUSTOMER) {
+        api.getProductsAll({ priceListId: myCustomer?.priceListId ?? undefined }).then(setProducts);
+      } else if (currentUser.role === Role.SELLER) {
+        api.getProductsAll({ priceListId: currentUser.priceListId ?? undefined }).then(setProducts);
+      } else {
+        api.getProductsAll({ priceListId: priceListId ?? undefined }).then(setProducts);
+      }
+    } else if (prevCreateOrderViewRef.current) {
+      if (currentUser.role === Role.CUSTOMER) {
+        api.getProductsAll({ priceListId: myCustomer?.priceListId ?? undefined }).then(setProducts);
+      } else if (currentUser.role === Role.SELLER) {
+        api.getProductsAll({ priceListId: currentUser.priceListId ?? undefined }).then(setProducts);
+      } else {
+        api.getProductsAll({}).then(setProducts);
+      }
+    }
+    prevCreateOrderViewRef.current = inCreateOrderView;
+  }, [inCreateOrderView, createOrderPriceListId, currentUser?.role, currentUser?.priceListId, myCustomer?.priceListId]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -818,6 +854,9 @@ const App: React.FC = () => {
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 role={currentUser.role}
+                priceLists={priceLists}
+                selectedPriceListId={createOrderPriceListId}
+                onPriceListChange={setCreateOrderPriceListId}
               />
             </Suspense>
           )}
@@ -830,6 +869,9 @@ const App: React.FC = () => {
                 onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 role={currentUser.role}
+                priceLists={priceLists}
+                selectedPriceListId={createOrderPriceListId}
+                onPriceListChange={setCreateOrderPriceListId}
               />
             </Suspense>
           ) : null}

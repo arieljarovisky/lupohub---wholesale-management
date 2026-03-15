@@ -2448,9 +2448,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                        <span className="text-[10px] font-black uppercase tracking-wider bg-slate-900 text-slate-400 px-1.5 sm:px-2 py-0.5 rounded-lg border border-slate-700">
                          {category}
                        </span>
-                       <span className="text-[10px] font-black text-green-400 bg-green-900/20 px-1.5 sm:px-2 py-0.5 rounded-lg border border-green-900/30">
-                         ${groupVariants[0]?.price?.toLocaleString()}
-                       </span>
                     </div>
                   </div>
                 </div>

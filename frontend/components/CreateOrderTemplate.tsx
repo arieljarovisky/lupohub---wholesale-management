@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
+import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
@@ -14,6 +15,9 @@ interface CreateOrderTemplateProps {
   onCancel: () => void;
   sellerId?: string | null;
   role?: Role;
+  priceLists?: PriceList[];
+  selectedPriceListId?: string | null;
+  onPriceListChange?: (id: string | null) => void;
 }
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
@@ -39,7 +43,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   onSave,
   onCancel,
   sellerId,
-  role
+  role,
+  priceLists = [],
+  selectedPriceListId = null,
+  onPriceListChange
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
@@ -57,6 +64,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
+  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
 
   /** Restaurar borrador al montar (si la página se actualizó con un pedido sin enviar). */
   useEffect(() => {
@@ -490,6 +498,26 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           </div>
         </div>
       </header>
+
+      {/* Lista de precios: solo ADMIN/WAREHOUSE */}
+      {showPriceListSelector && (
+        <section className="shrink-0 mb-5">
+          <label className="block text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
+            <List size={14} /> Lista de precios
+          </label>
+          <select
+            className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
+            value={selectedPriceListId ?? ''}
+            onChange={(e) => onPriceListChange?.(e.target.value || null)}
+          >
+            <option value="">Precio base (sin lista)</option>
+            {priceLists.map(pl => (
+              <option key={pl.id} value={pl.id}>{pl.name}</option>
+            ))}
+          </select>
+          <p className="text-slate-500 text-[10px] mt-1">Los precios dependen de la lista elegida.</p>
+        </section>
+      )}
 
       {/* Cliente */}
       <section className="shrink-0 mb-5">

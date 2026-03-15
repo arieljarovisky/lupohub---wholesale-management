@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight } from 'lucide-react';
-import { Order, OrderStatus, Product, Customer, OrderItem, Role } from '../types';
+import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight, List } from 'lucide-react';
+import { Order, OrderStatus, Product, Customer, OrderItem, Role, PriceList } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
 
@@ -12,6 +12,9 @@ interface CreateOrderProps {
   sellerId?: string | null;
   initialOrder?: Order | null;
   role?: Role;
+  priceLists?: PriceList[];
+  selectedPriceListId?: string | null;
+  onPriceListChange?: (id: string | null) => void;
 }
 
 interface OrderRow {
@@ -25,8 +28,9 @@ interface OrderRow {
   isBackorder: boolean;
 }
 
-const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role }) => {
+const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role, priceLists = [], selectedPriceListId = null, onPriceListChange }) => {
   const hideStock = role === Role.SELLER || role === Role.CUSTOMER;
+  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [rows, setRows] = useState<OrderRow[]>([]);
@@ -209,6 +213,28 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           )}
         </div>
       </div>
+
+      {/* Lista de precios: solo ADMIN/WAREHOUSE */}
+      {showPriceListSelector && (
+        <div className="bg-slate-800 p-3 sm:p-4 rounded-2xl border border-slate-700 shrink-0">
+          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+            <List size={12} /> Lista de precios
+          </label>
+          <select
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white min-h-[48px]"
+            value={selectedPriceListId ?? ''}
+            onChange={(e) => onPriceListChange?.(e.target.value || null)}
+            style={{ colorScheme: 'dark' }}
+            aria-label="Lista de precios para este pedido"
+          >
+            <option value="" style={{ color: '#0f172a', backgroundColor: '#fff' }}>Precio base (sin lista)</option>
+            {priceLists.map(pl => (
+              <option key={pl.id} value={pl.id} style={{ color: '#0f172a', backgroundColor: '#fff' }}>{pl.name}</option>
+            ))}
+          </select>
+          <p className="text-slate-500 text-[10px] mt-1">Los precios de los productos dependen de la lista elegida.</p>
+        </div>
+      )}
 
       {/* Cliente: selector (bloqueado para cliente directo) */}
       <div className="bg-slate-800 p-3 sm:p-4 rounded-2xl border border-slate-700 shrink-0">
