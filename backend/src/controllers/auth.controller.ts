@@ -86,7 +86,7 @@ export const getMyCustomer = async (req: Request, res: Response) => {
   if (role !== 'CUSTOMER') return res.status(403).json({ message: 'Solo para clientes directos' });
   try {
     const row = await get(
-      `SELECT id, user_id, seller_id, name, business_name, email, address, city, price_list_id FROM customers WHERE user_id = ?`,
+      `SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, price_list_id FROM customers WHERE user_id = ?`,
       [userId]
     );
     if (!row) return res.status(404).json({ message: 'No se encontró el perfil de cliente' });
@@ -99,6 +99,7 @@ export const getMyCustomer = async (req: Request, res: Response) => {
       email: row.email ?? '',
       address: row.address ?? '',
       city: row.city ?? '',
+      cuit: row.cuit ?? undefined,
       priceListId: row.price_list_id ?? undefined
     });
   } catch (e) {

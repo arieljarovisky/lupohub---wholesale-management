@@ -1,4 +1,4 @@
-import { Product, ApiConfig } from '../types';
+import { Product, ApiConfig, RemitenteConfig } from '../types';
 
 // Helper to get config from localStorage (in a real app, this might come from a secure backend or context)
 export const getApiConfig = (): ApiConfig => {
@@ -11,6 +11,17 @@ export const getApiConfig = (): ApiConfig => {
 
 export const saveApiConfig = (config: ApiConfig) => {
   localStorage.setItem('lupo_api_config', JSON.stringify(config));
+};
+
+const REMITENTE_KEY = 'lupo_remitente';
+
+export const getRemitente = (): RemitenteConfig => {
+  const s = localStorage.getItem(REMITENTE_KEY);
+  return s ? JSON.parse(s) : { businessName: '' };
+};
+
+export const saveRemitente = (config: RemitenteConfig) => {
+  localStorage.setItem(REMITENTE_KEY, JSON.stringify(config));
 };
 
 // --- TIENDA NUBE API ---

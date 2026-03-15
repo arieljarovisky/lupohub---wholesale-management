@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Users, Search, Plus, MapPin, Mail, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2 } from 'lucide-react';
-import { Customer, Role, Order, OrderStatus, Product } from '../types';
+import { Customer, Role, Order, OrderStatus, Product, Transporte } from '../types';
+import { Truck } from 'lucide-react';
 
 interface CustomersProps {
   customers: Customer[];
@@ -12,9 +13,10 @@ interface CustomersProps {
   orders: Order[];
   products: Product[];
   priceLists?: { id: string; name: string }[];
+  transportes?: Transporte[];
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, orders, products, priceLists = [] }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, orders, products, priceLists = [], transportes = [] }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -27,6 +29,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newEmail, setNewEmail] = useState('');
   const [newAddress, setNewAddress] = useState('');
   const [newCity, setNewCity] = useState('');
+  const [newCuit, setNewCuit] = useState('');
+  const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
 
   const filteredCustomers = customers.filter(c => 
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -53,16 +57,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         name: newContactName,
         email: newEmail,
         address: newAddress || undefined,
-        city: newCity || undefined
+        city: newCity || undefined,
+        cuit: newCuit || undefined,
+        transporteIds: selectedTransporteIds
       };
       Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
-        setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data } : prev);
+        setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data, transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })) } : prev);
         setEditingCustomer(null);
         setNewBusinessName('');
         setNewContactName('');
         setNewEmail('');
         setNewAddress('');
         setNewCity('');
+        setNewCuit('');
+        setSelectedTransporteIds([]);
       }).catch(() => {});
       return;
     }
@@ -74,7 +82,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       name: newContactName,
       email: newEmail,
       address: newAddress,
-      city: newCity
+      city: newCity,
+      cuit: newCuit || undefined,
+      transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' }))
     };
 
     onCreateCustomer(newCustomer);
@@ -84,6 +94,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setNewEmail('');
     setNewAddress('');
     setNewCity('');
+    setNewCuit('');
+    setSelectedTransporteIds([]);
   };
 
   // --- LOGIC FOR STATISTICS ---
@@ -211,10 +223,22 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
              </button>
              <div>
                 <h2 className="text-2xl font-bold text-white">{selectedCustomer.businessName}</h2>
-                <div className="flex items-center gap-3 text-sm text-slate-400">
+                <div className="flex items-center gap-3 text-sm text-slate-400 flex-wrap">
                   <span className="flex items-center gap-1"><Users size={14}/> {selectedCustomer.name}</span>
                   <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
                   <span className="flex items-center gap-1"><MapPin size={14}/> {selectedCustomer.city}</span>
+                  {selectedCustomer.cuit && (
+                    <>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                      <span className="font-mono">CUIT {selectedCustomer.cuit}</span>
+                    </>
+                  )}
+                  {selectedCustomer.transportes && selectedCustomer.transportes.length > 0 && (
+                    <>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                      <span className="flex items-center gap-1"><Truck size={14} /> {selectedCustomer.transportes.map(t => t.name).join(', ')}</span>
+                    </>
+                  )}
                 </div>
              </div>
            </div>
@@ -226,6 +250,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewEmail(selectedCustomer.email);
                  setNewAddress(selectedCustomer.address || '');
                  setNewCity(selectedCustomer.city || '');
+                 setNewCuit(selectedCustomer.cuit || '');
+                 setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
                  setEditingCustomer(selectedCustomer);
                }}
                className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
@@ -453,6 +479,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <Mail size={12} className="mr-2 text-slate-600 shrink-0" />
                     {customer.email}
                   </div>
+                  {customer.cuit && (
+                    <div className="flex items-center text-slate-500 truncate font-mono">
+                      <span className="mr-2 text-slate-600 shrink-0">CUIT</span>
+                      {customer.cuit}
+                    </div>
+                  )}
+                  {customer.transportes && customer.transportes.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap text-slate-500">
+                      <Truck size={12} className="text-slate-600 shrink-0" />
+                      {customer.transportes.map(t => t.name).join(', ')}
+                    </div>
+                  )}
                   <div className="flex items-center text-slate-500 truncate">
                     <MapPin size={12} className="mr-2 text-slate-600 shrink-0" />
                     {customer.address}, {customer.city}
@@ -481,7 +519,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setSelectedTransporteIds([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -519,6 +557,37 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   placeholder="contacto@empresa.com"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT / CUIL (para facturación)</label>
+                <input 
+                  type="text" 
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                  value={newCuit}
+                  onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  placeholder="20-12345678-9 (solo números)"
+                />
+              </div>
+              {transportes.length > 0 && (
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (express para despacho)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {transportes.map(t => (
+                      <label key={t.id} className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-750 transition">
+                        <input
+                          type="checkbox"
+                          checked={selectedTransporteIds.includes(t.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedTransporteIds(prev => [...prev, t.id]);
+                            else setSelectedTransporteIds(prev => prev.filter(id => id !== t.id));
+                          }}
+                          className="rounded border-slate-600 text-blue-500 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-slate-200">{t.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Dirección</label>
@@ -545,7 +614,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setSelectedTransporteIds([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar

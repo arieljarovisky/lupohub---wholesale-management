@@ -62,6 +62,20 @@ export interface ApiConfig {
   };
 }
 
+/** Express / transporte por donde se despachan pedidos al cliente */
+export interface Transporte {
+  id: string;
+  name: string;
+}
+
+/** Datos del remitente para remitos (guardado en localStorage) */
+export interface RemitenteConfig {
+  businessName: string;
+  address?: string;
+  city?: string;
+  cuit?: string;
+}
+
 export interface Customer {
   id: string;
   sellerId?: string;
@@ -71,6 +85,10 @@ export interface Customer {
   email: string;
   address: string;
   city: string;
+  /** CUIT/CUIL del cliente (para facturación electrónica Argentina) */
+  cuit?: string;
+  /** Transportes (express) asignados para despachar pedidos a este cliente */
+  transportes?: Transporte[];
   priceListId?: string;
 }
 

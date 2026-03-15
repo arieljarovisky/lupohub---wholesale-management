@@ -3,6 +3,7 @@ import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User } from '../types';
 import { useNotification } from '../context/NotificationContext';
+import { getRemitente } from '../services/apiIntegration';
 
 interface OrdersProps {
   orders: Order[];
@@ -27,6 +28,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const { showConfirm } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
+  const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
+  const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
 
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
@@ -82,6 +85,79 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       sizeCode: item.sizeCode ?? p.size,
       colorName: item.colorName ?? p.color,
     };
+  };
+
+  /** Abre el modal para elegir transporte y luego genera el remito. */
+  const openRemitoModal = (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const customer = customers.find(c => c.id === order.customerId);
+    const firstTransport = customer?.transportes?.[0]?.name ?? '';
+    setRemitoOrder(order);
+    setRemitoTransporteName(firstTransport);
+  };
+
+  /** Genera el HTML del remito y abre la ventana para imprimir. transporteName = el elegido para este envío. */
+  const buildRemitoHtml = (order: Order, transporteName: string) => {
+    const customer = customers.find(c => c.id === order.customerId);
+    const remitente = getRemitente();
+    const items = order.items.map(enrichItem);
+    const formatDate = (d: string) => {
+      const x = new Date(d);
+      return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+    const transportesStr = transporteName.trim() || '—';
+    const remitenteBlock = remitente.businessName
+      ? `<strong>Remitente:</strong> ${remitente.businessName}${remitente.address ? ` — ${remitente.address}` : ''}${remitente.city ? ` — ${remitente.city}` : ''}${remitente.cuit ? ` — CUIT ${remitente.cuit}` : ''}`
+      : '<strong>Remitente:</strong> —';
+    const destBlock = `<strong>Destinatario:</strong> ${customer?.businessName || 'Cliente'} — ${customer?.address || ''} ${customer?.city || ''} ${customer?.cuit ? ` — CUIT ${customer.cuit}` : ''}`;
+    const rows = items.map(i => {
+      const sub = i.quantity * (i.priceAtMoment ?? 0);
+      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td>${i.quantity}</td><td>${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td>${sub.toLocaleString('es-AR')}</td></tr>`;
+    }).join('');
+    const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
+    const totalAmount = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
+      body { font-family: system-ui, sans-serif; max-width: 800px; margin: 24px auto; padding: 16px; color: #111; }
+      h1 { font-size: 1.5rem; margin-bottom: 8px; }
+      .meta { font-size: 0.9rem; color: #444; margin-bottom: 16px; }
+      .block { margin-bottom: 12px; font-size: 0.85rem; }
+      table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.8rem; }
+      th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; }
+      th { background: #eee; font-weight: bold; }
+      .firmas { display: flex; justify-content: space-between; margin-top: 32px; font-size: 0.8rem; }
+      .firma { width: 28%; text-align: center; border-top: 1px solid #333; padding-top: 4px; }
+      .no-print { margin-top: 16px; }
+      @media print { .no-print { display: none !important; } }
+    </style></head><body>
+      <h1>REMITO</h1>
+      <div class="meta">Nº <strong>${order.id}</strong> — Fecha: ${formatDate(order.date)}</div>
+      <div class="block">${remitenteBlock}</div>
+      <div class="block">${destBlock}</div>
+      <div class="block"><strong>Transporte:</strong> ${transportesStr}</div>
+      <table>
+        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="3"><strong>Total (${totalUnits} unidades)</strong></td><td></td><td></td><td><strong>$${totalAmount.toLocaleString('es-AR')}</strong></td></tr></tfoot>
+      </table>
+      <div class="firmas">
+        <div class="firma">Firma remitente</div>
+        <div class="firma">Firma transportista</div>
+        <div class="firma">Firma receptor</div>
+      </div>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 8px;">Imprimir / Guardar PDF</button> <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+    </body></html>`;
+  };
+
+  const confirmRemito = () => {
+    if (!remitoOrder) return;
+    const html = buildRemitoHtml(remitoOrder, remitoTransporteName);
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
+    setRemitoOrder(null);
+    setRemitoTransporteName('');
   };
 
   /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems, igual que la plantilla en la web. */
@@ -255,6 +331,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </div>
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={(e) => openRemitoModal(order, e)}
+                    className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
+                    title="Generar remito"
+                  >
+                    <FileText size={16} />
+                  </button>
+                  <button
                     onClick={(e) => exportOneOrderToExcel(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
                     title="Exportar este pedido a Excel"
@@ -310,6 +393,37 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
         )}
       </div>
+
+      {/* Modal: elegir transporte para el remito */}
+      {remitoOrder && (() => {
+        const customer = customers.find(c => c.id === remitoOrder.customerId);
+        const transportesOpciones = customer?.transportes ?? [];
+        return (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }}>
+            <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-bold text-white mb-1">Generar remito</h3>
+              <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {customer?.businessName || 'Cliente'}</p>
+              <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
+              <select
+                value={remitoTransporteName}
+                onChange={(e) => setRemitoTransporteName(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-6"
+              >
+                <option value="">— No especificado</option>
+                {transportesOpciones.map(t => (
+                  <option key={t.id} value={t.name}>{t.name}</option>
+                ))}
+              </select>
+              <div className="flex gap-3 justify-end">
+                <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
+                <button type="button" onClick={confirmRemito} className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition">
+                  <FileText size={18} /> Generar remito
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 });

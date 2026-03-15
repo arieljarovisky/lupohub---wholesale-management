@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMem
 import Sidebar from './components/Sidebar';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
-import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList } from './types';
+import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
@@ -85,6 +85,7 @@ const App: React.FC = () => {
   const [myCustomer, setMyCustomer] = useState<Customer | null>(null);
   
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [transportes, setTransportes] = useState<Transporte[]>([]);
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -176,18 +177,21 @@ const App: React.FC = () => {
         setOrders(fetchedOrders);
         setCustomers(myC ? [myC] : []);
         setAttributes([]);
+        setTransportes([]);
       } else {
       const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
-      const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers] = await Promise.all([
+      const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
         api.getProductsAll(effectivePriceListId ? { priceListId: effectivePriceListId } : {}),
         api.getOrders(),
         api.getColors(),
         api.getSizes(),
-        api.getCustomers()
+        api.getCustomers(),
+        api.getTransportes()
       ]);
       setProducts(fetchedProducts);
       setOrders(fetchedOrders);
       setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
+      setTransportes(Array.isArray(fetchedTransportes) ? fetchedTransportes : []);
       const colorAttrs = fetchedColors.map((c: { id: string; code?: string; name?: string; hex?: string | null }) => ({ 
         id: c.id, 
         type: 'color', 
@@ -729,6 +733,7 @@ const App: React.FC = () => {
                 onUpdateCustomer={handleUpdateCustomer}
                 onDeleteCustomer={handleDeleteCustomer}
                 priceLists={priceLists}
+                transportes={transportes}
                 orders={orders}
                 products={products}
               />
@@ -753,6 +758,19 @@ const App: React.FC = () => {
                 onDeleteUser={handleDeleteUser}
                 orders={orders}
                 currentUser={currentUser}
+                transportes={transportes}
+                onCreateTransporte={async (name) => {
+                  const t = await api.createTransporte(name);
+                  setTransportes(prev => [...prev, t]);
+                }}
+                onUpdateTransporte={async (id, name) => {
+                  const t = await api.updateTransporte(id, name);
+                  setTransportes(prev => prev.map(x => x.id === id ? t : x));
+                }}
+                onDeleteTransporte={async (id) => {
+                  await api.deleteTransporte(id);
+                  setTransportes(prev => prev.filter(x => x.id !== id));
+                }}
               />
             </Suspense>
           )}

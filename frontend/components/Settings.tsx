@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
-import { getApiConfig, saveApiConfig } from '../services/apiIntegration';
+import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
@@ -75,14 +75,19 @@ interface SettingsProps {
   onDeleteUser?: (id: string) => void | Promise<void>;
   orders?: Order[];
   currentUser?: User;
+  transportes?: import('../types').Transporte[];
+  onCreateTransporte?: (name: string) => void | Promise<void>;
+  onUpdateTransporte?: (id: string, name: string) => void | Promise<void>;
+  onDeleteTransporte?: (id: string) => void | Promise<void>;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   attributes, onCreateAttribute, onDeleteAttribute, onRefreshData, role,
-  users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser
+  users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser,
+  transportes = [], onCreateTransporte, onUpdateTransporte, onDeleteTransporte
 }) => {
   const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists'>(role === Role.WAREHOUSE ? 'sizes' : 'users');
+  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists' | 'transportes'>(role === Role.WAREHOUSE ? 'sizes' : 'users');
   const [newName, setNewName] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
   const [editingColorId, setEditingColorId] = useState<string | null>(null);
@@ -428,6 +433,16 @@ const Settings: React.FC<SettingsProps> = ({
   const [priceListItems, setPriceListItems] = useState<{ productId: string; price: number; sku?: string; name?: string }[]>([]);
   const [productsForPriceList, setProductsForPriceList] = useState<{ id: string; sku: string; name: string; base_price?: number }[]>([]);
 
+  // Transportes (express) - solo ADMIN
+  const [newTransporteName, setNewTransporteName] = useState('');
+  const [editingTransporteId, setEditingTransporteId] = useState<string | null>(null);
+  const [editingTransporteName, setEditingTransporteName] = useState('');
+  // Remitente para remitos
+  const [remitenteBusinessName, setRemitenteBusinessName] = useState('');
+  const [remitenteAddress, setRemitenteAddress] = useState('');
+  const [remitenteCity, setRemitenteCity] = useState('');
+  const [remitenteCuit, setRemitenteCuit] = useState('');
+
   useEffect(() => {
     const config = getApiConfig();
     setApiConfig(config);
@@ -437,6 +452,13 @@ const Settings: React.FC<SettingsProps> = ({
     if (activeTab === 'pricelists' || activeTab === 'users') {
       setPriceListsLoading(true);
       api.getPriceLists().then(list => { setPriceLists(list); setPriceListsLoading(false); }).catch(() => setPriceListsLoading(false));
+    }
+    if (activeTab === 'transportes') {
+      const r = getRemitente();
+      setRemitenteBusinessName(r.businessName ?? '');
+      setRemitenteAddress(r.address ?? '');
+      setRemitenteCity(r.city ?? '');
+      setRemitenteCuit(r.cuit ?? '');
     }
   }, [activeTab]);
 
@@ -626,6 +648,14 @@ const Settings: React.FC<SettingsProps> = ({
               }`}
             >
               CONECTIVIDAD APIs
+            </button>
+            <button
+              onClick={() => setActiveTab('transportes')}
+              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
+                activeTab === 'transportes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
+              }`}
+            >
+              TRANSPORTES
             </button>
           </>
         )}
@@ -1556,6 +1586,151 @@ const Settings: React.FC<SettingsProps> = ({
                </div>
              </div>
            </div>
+          </div>
+        </div>
+      )}
+
+      {role === Role.ADMIN && activeTab === 'transportes' && (
+        <div className="space-y-6">
+          {/* Datos del remitente para remitos */}
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <FileText size={20} className="text-amber-400" />
+              Datos del remitente (para remitos)
+            </h3>
+            <p className="text-sm text-slate-400 mb-4">Estos datos aparecen en el encabezado del remito al generar uno desde Pedidos.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Razón social</label>
+                <input type="text" value={remitenteBusinessName} onChange={(e) => setRemitenteBusinessName(e.target.value)} placeholder="Tu empresa o nombre" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">CUIT</label>
+                <input type="text" value={remitenteCuit} onChange={(e) => setRemitenteCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} placeholder="20-12345678-9" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white font-mono placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Domicilio</label>
+                <input type="text" value={remitenteAddress} onChange={(e) => setRemitenteAddress(e.target.value)} placeholder="Calle y número" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Localidad</label>
+                <input type="text" value={remitenteCity} onChange={(e) => setRemitenteCity(e.target.value)} placeholder="Ciudad / CP" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+            </div>
+            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
+          </div>
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <Ship size={20} className="text-blue-400" />
+              Transportes / Express
+            </h3>
+            <p className="text-sm text-slate-400 mb-4">Agregá los transportes por donde despachás pedidos. Luego asignálos a cada cliente en la sección Clientes.</p>
+            <div className="flex flex-wrap gap-3 items-end mb-6">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Nuevo transporte</label>
+                <input
+                  type="text"
+                  value={newTransporteName}
+                  onChange={(e) => setNewTransporteName(e.target.value)}
+                  placeholder="Ej: OCA, Andreani, Correo Argentino..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!newTransporteName.trim() || !onCreateTransporte) return;
+                  try {
+                    await Promise.resolve(onCreateTransporte(newTransporteName.trim()));
+                    setNewTransporteName('');
+                    showToast('success', 'Transporte agregado.');
+                  } catch {
+                    showToast('error', 'Error al agregar transporte.');
+                  }
+                }}
+                disabled={!newTransporteName.trim()}
+                className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Plus size={18} /> Agregar
+              </button>
+            </div>
+            <div className="space-y-2">
+              {transportes.length === 0 ? (
+                <p className="text-slate-500 text-sm">No hay transportes cargados. Agregá uno arriba.</p>
+              ) : (
+                transportes.map(t => (
+                  <div key={t.id} className="flex items-center justify-between gap-4 py-3 px-4 bg-slate-900 rounded-xl border border-slate-700">
+                    {editingTransporteId === t.id ? (
+                      <>
+                        <input
+                          type="text"
+                          value={editingTransporteName}
+                          onChange={(e) => setEditingTransporteName(e.target.value)}
+                          className="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!onUpdateTransporte || !editingTransporteName.trim()) return;
+                              try {
+                                await Promise.resolve(onUpdateTransporte(t.id, editingTransporteName.trim()));
+                                setEditingTransporteId(null);
+                                setEditingTransporteName('');
+                                showToast('success', 'Transporte actualizado.');
+                              } catch {
+                                showToast('error', 'Error al actualizar.');
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold"
+                          >
+                            Guardar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingTransporteId(null); setEditingTransporteName(''); }}
+                            className="px-3 py-1.5 bg-slate-600 text-slate-300 rounded-lg text-sm"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-white">{t.name}</span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setEditingTransporteId(t.id); setEditingTransporteName(t.name); }}
+                            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition"
+                            title="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!onDeleteTransporte || !window.confirm(`¿Eliminar "${t.name}"? Se quitará de los clientes que lo tengan asignado.`)) return;
+                              try {
+                                await Promise.resolve(onDeleteTransporte(t.id));
+                                showToast('success', 'Transporte eliminado.');
+                              } catch {
+                                showToast('error', 'Error al eliminar.');
+                              }
+                            }}
+                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition"
+                            title="Eliminar"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}

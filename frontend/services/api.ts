@@ -1,4 +1,4 @@
-import { Product, Order, OrderStatus, User, Customer } from '../types';
+import { Product, Order, OrderStatus, User, Customer, Transporte } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request, requestFormData, getBlob } from './httpClient';
 
@@ -490,6 +490,8 @@ export const api = {
         email: customer.email,
         address: customer.address,
         city: customer.city,
+        cuit: customer.cuit,
+        transporteIds: customer.transportes?.map(t => t.id) ?? [],
         priceListId: customer.priceListId
       });
       return {
@@ -500,12 +502,14 @@ export const api = {
         email: created.email ?? '',
         address: created.address ?? '',
         city: created.city ?? '',
+        cuit: created.cuit ?? undefined,
+        transportes: created.transportes ?? [],
         priceListId: created.priceListId ?? created.price_list_id ?? undefined
       } as Customer;
     }, customer, 'createCustomer');
   },
 
-  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
+  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
     return {
       id: updated.id,
@@ -515,8 +519,24 @@ export const api = {
       email: updated.email ?? '',
       address: updated.address ?? '',
       city: updated.city ?? '',
+      cuit: updated.cuit ?? undefined,
+      transportes: updated.transportes ?? [],
       priceListId: updated.priceListId ?? updated.price_list_id ?? undefined
     } as Customer;
+  },
+
+  getTransportes: async (): Promise<Transporte[]> => {
+    const rows = await request<any[]>('/transportes', 'GET');
+    return Array.isArray(rows) ? rows : [];
+  },
+  createTransporte: async (name: string): Promise<Transporte> => {
+    return request<Transporte>('/transportes', 'POST', { name: name.trim() });
+  },
+  updateTransporte: async (id: string, name: string): Promise<Transporte> => {
+    return request<Transporte>(`/transportes/${id}`, 'PATCH', { name: name.trim() });
+  },
+  deleteTransporte: async (id: string): Promise<void> => {
+    await request<void>(`/transportes/${id}`, 'DELETE');
   },
 
   deleteCustomer: async (id: string): Promise<void> => {
