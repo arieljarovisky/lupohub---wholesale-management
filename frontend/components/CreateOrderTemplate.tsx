@@ -755,7 +755,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       </div>
 
       {/* Pie: subtotal + confirmar */}
-      <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-50 mt-5">
+      <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-5 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
         <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-semibold text-slate-400">Subtotal</span>

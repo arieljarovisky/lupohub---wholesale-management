@@ -348,7 +348,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       </div>
 
       {!isReadOnly && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 bg-slate-950/95 backdrop-blur-md border-t md:border-t-0 border-slate-800 z-50">
+        <div className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 bg-slate-950/95 backdrop-blur-md border-t md:border-t-0 border-slate-800 z-[60] md:z-auto">
            <div className="flex items-center justify-between mb-3 md:mb-4 px-1">
               <span className="text-slate-500 text-xs font-black uppercase tracking-widest">Subtotal</span>
               <div className="text-right">
