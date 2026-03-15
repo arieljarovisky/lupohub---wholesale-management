@@ -215,18 +215,31 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Cliente</label>
         {isCustomerLocked ? (
           <div className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm text-white min-h-[48px] flex items-center">
-            {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
+            {(customers.find(c => c.id === selectedCustomerId) || customers[0])?.businessName || (customers[0]?.name) || 'Mi cuenta'}
           </div>
         ) : (
-          <select 
-            disabled={!!initialOrder || isReadOnly}
-            className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
-            value={selectedCustomerId}
-            onChange={(e) => setSelectedCustomerId(e.target.value)}
-          >
-            <option value="">Seleccionar cliente...</option>
-            {customers.map(c => <option key={c.id} value={c.id}>{c.businessName}</option>)}
-          </select>
+          <>
+            <select
+              disabled={!!initialOrder || isReadOnly}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
+              value={selectedCustomerId}
+              onChange={(e) => setSelectedCustomerId(e.target.value)}
+              style={{ colorScheme: 'dark' }}
+              aria-label="Seleccionar cliente"
+            >
+              <option value="">Seleccionar cliente...</option>
+              {customers.map(c => (
+                <option key={c.id} value={c.id} style={{ color: '#0f172a', backgroundColor: '#fff' }}>
+                  {c.businessName || c.name || `Cliente`}
+                </option>
+              ))}
+            </select>
+            {customers.length === 0 && !initialOrder && (
+              <p className="text-amber-400/90 text-xs mt-2 flex items-center gap-1">
+                <AlertCircle size={14} /> Agregá clientes en la sección Clientes para poder elegir uno.
+              </p>
+            )}
+          </>
         )}
       </div>
 
