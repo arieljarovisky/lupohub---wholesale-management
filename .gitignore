@@ -5,3 +5,6 @@ node_modules
 backend/afip-certs/*.crt
 backend/afip-certs/*.key
 backend/afip-certs/*.pem
+
+# Documentación .md (no subir a Git)
+*.md

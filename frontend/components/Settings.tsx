@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
+
+/** Exporta la lista de precios a Excel en el formato esperado por la importación (Código, Precio). */
+function exportPriceListExcel(items: { sku?: string; price: number; productId: string }[], listName: string) {
+  const rows = items.map(i => ({ Código: i.sku || i.productId, Precio: i.price }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Precios');
+  const safeName = (listName || 'lista-precios').replace(/[^\w\s-]/g, '').trim().slice(0, 30) || 'lista-precios';
+  XLSX.writeFile(wb, `lista-precios-${safeName}.xlsx`);
+}
 
 /** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
@@ -1112,11 +1122,19 @@ const Settings: React.FC<SettingsProps> = ({
                 </label>
               </div>
               <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
-                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar desde Excel</p>
-                <p className="text-slate-500 text-xs mb-2">.xlsx o .xls con columnas SKU y Precio (o cabeceras &quot;código&quot;, &quot;precio&quot;).</p>
-                <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
-                  <FileSpreadsheet size={14} /> Elegir Excel
-                  <input
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Exportar / Importar Excel</p>
+                <p className="text-slate-500 text-xs mb-2">Mismo formato: columnas Código y Precio. Exportá para editar y volver a importar.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportPriceListExcel(priceListItems, editingPriceList?.name ?? '')}
+                    className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                  >
+                    <Download size={14} /> Exportar Excel
+                  </button>
+                  <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                    <FileSpreadsheet size={14} /> Importar Excel
+                    <input
                     type="file"
                     accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                     className="sr-only"
@@ -1140,6 +1158,7 @@ const Settings: React.FC<SettingsProps> = ({
                     }}
                   />
                 </label>
+                </div>
               </div>
             </div>
             {priceListItems.map((item, idx) => (
