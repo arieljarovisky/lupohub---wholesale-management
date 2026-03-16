@@ -716,14 +716,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               Pedido #{ncOrder.id} — {ncOrder.customerBusinessName || getCustomerName(ncOrder)}
             </p>
             <div className="space-y-4 mb-6">
+              {hasNCTotal ? (
+                <p className="text-sm text-amber-400 bg-amber-900/20 rounded-lg p-3">Ya existe una nota de crédito por el total de este pedido. No se pueden emitir más notas de crédito.</p>
+              ) : (
+                <>
               <div className="flex gap-4 flex-wrap">
-                <label className={`flex items-center gap-2 ${canEmitTotal ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}>
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="ncTipo"
                     checked={ncTipo === 'total'}
-                    onChange={() => canEmitTotal && setNcTipo('total')}
-                    disabled={!canEmitTotal}
+                    onChange={() => setNcTipo('total')}
                     className="rounded border-slate-500 text-amber-500"
                   />
                   <span className="text-white">Todo el pedido</span>
@@ -733,9 +736,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <span className="text-white">Un artículo</span>
                 </label>
               </div>
-              {hasNCTotal && (
-                <p className="text-sm text-amber-400 bg-amber-900/20 rounded-lg p-2">Ya existe una NC por el total de este pedido. Solo podés emitir NC por artículos.</p>
-              )}
               {ncTipo === 'item' && ncOrder.items.length > 0 && (
                 <div className="space-y-3 pl-1">
                   <label className="block text-xs font-semibold text-slate-400 uppercase">Artículo</label>
@@ -782,12 +782,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </p>
                 </div>
               )}
-              {ncTipo === 'total' && canEmitTotal && (
+              {ncTipo === 'total' && (
                 <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${ncOrder.total.toLocaleString()}</strong></p>
+              )}
+                </>
               )}
             </div>
             <div className="flex gap-3 justify-end">
               <button type="button" onClick={() => setNcOrder(null)} disabled={emitiendoNC} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50">Cancelar</button>
+              {!hasNCTotal && (
               <button
                 type="button"
                 disabled={emitiendoNC || (ncTipo === 'total' ? !canEmitTotal : !canEmitItem || ncQuantity < 1 || (ncTipo === 'item' && ncQuantity > maxQtyRemaining))}
@@ -815,6 +818,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 {emitiendoNC ? <Clock size={18} className="animate-pulse" /> : <FileMinus size={18} />}
                 {emitiendoNC ? 'Emitiendo…' : 'Emitir nota de crédito'}
               </button>
+              )}
             </div>
           </div>
         </div>

@@ -530,22 +530,23 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
-    // Validar que no se emitan NC duplicadas: solo una NC por el total; por ítem no superar lo facturado
+    // Validar: si ya existe NC por el total, no se permite ninguna NC más (ni total ni por ítem)
     const existingNCs = await query(
       `SELECT scope, item_index, amount_credited FROM credit_notes WHERE order_id = ?`,
       [id]
     ) as { scope?: string; item_index?: number | null; amount_credited: string }[];
 
+    const yaExisteNCTotal = existingNCs.some(
+      (r) => (r.scope || 'total') === 'total'
+    );
+    if (yaExisteNCTotal) {
+      return res.status(400).json({
+        message: 'Ya existe una nota de crédito por el total de este pedido. No se pueden emitir más notas de crédito.',
+      });
+    }
+
     let amountToCredit: number;
     if (tipo === 'total') {
-      const yaExisteNCTotal = existingNCs.some(
-        (r) => (r.scope || 'total') === 'total'
-      );
-      if (yaExisteNCTotal) {
-        return res.status(400).json({
-          message: 'Ya existe una nota de crédito por el total de este pedido. Solo se permite una NC por el total por pedido.',
-        });
-      }
       amountToCredit = Number(orderRow.total) || 0;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else {
