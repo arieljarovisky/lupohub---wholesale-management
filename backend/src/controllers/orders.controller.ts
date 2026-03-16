@@ -430,6 +430,9 @@ export const emitirFactura = async (req: any, res: any) => {
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
+    const cbteTipoFromBody = req.body?.cbteTipo;
+    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
       { id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id },
@@ -438,7 +441,8 @@ export const emitirFactura = async (req: any, res: any) => {
         businessName: customerRow.business_name ?? '',
         cuit: customerRow.cuit,
         condicionIva: customerRow.condicion_iva ?? null
-      }
+      },
+      forceCbteTipo
     );
 
     const { v4: uuidv4 } = await import('uuid');
