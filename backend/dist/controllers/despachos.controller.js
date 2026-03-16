@@ -237,7 +237,18 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
             return res.status(400).json({ message: 'Ya existe un despacho con ese número' });
         }
         const productos = yield (0, db_1.query)(`
-      SELECT id, name, sku FROM products WHERE ultimo_despacho_id IS NULL ORDER BY name
+      SELECT 
+        p.id, 
+        p.name, 
+        p.sku,
+        COALESCE(SUM(s.stock), 0) as stock_total
+      FROM products p
+      LEFT JOIN product_colors pc ON pc.product_id = p.id
+      LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+      LEFT JOIN stocks s ON s.variant_id = pv.id
+      WHERE p.ultimo_despacho_id IS NULL
+      GROUP BY p.id, p.name, p.sku
+      ORDER BY p.name
     `);
         if (productos.length === 0) {
             return res.status(400).json({
@@ -252,10 +263,11 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
     `, [despachoId, numero_despacho, fecha, pais_origen, proveedor || null, descripcion || null, notas || null]);
         for (const p of productos) {
             const itemId = (0, uuid_1.v4)();
+            const cantidad = Number(p.stock_total) || 0;
             yield (0, db_1.execute)(`
         INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
-        VALUES (?, ?, ?, NULL, 0, NULL, ?)
-      `, [itemId, despachoId, p.id, `${p.name} - ${p.sku || ''}`.trim()]);
+      VALUES (?, ?, ?, NULL, ?, NULL, ?)
+    `, [itemId, despachoId, p.id, cantidad, `${p.name} - ${p.sku || ''}`.trim()]);
             yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, p.id]);
         }
         res.status(201).json({
