@@ -90,10 +90,16 @@ export const createCustomer = async (req: Request, res: Response) => {
     const condicionIva = (body.condicionIva ?? '').toString().trim() || null;
     const priceListId = body.priceListId?.trim() || null;
 
+    // Guardar nombre de contacto y razón social en columnas separadas:
+    // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
+    // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
+    const sqlName = name || null;
+    const sqlBusinessName = businessName || name || null;
+
     await execute(
       `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, name || businessName, businessName || name, email, address, city, cuit, phone, condicionIva, priceListId]
+      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, condicionIva, priceListId]
     );
 
     const created = await get(
