@@ -306,7 +306,7 @@ const App: React.FC = () => {
   const getVisibleCustomers = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.role === Role.CUSTOMER) return myCustomer ? [myCustomer] : [];
-    if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) return customers;
+    if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE || currentUser.role === Role.DEPOSITO) return customers;
     return customers.filter(c => c.sellerId === currentUser.id);
   }, [currentUser, myCustomer, customers]);
 
