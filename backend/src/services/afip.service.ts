@@ -132,7 +132,13 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const impNeto = Math.round((total / 1.21) * 100) / 100;
   const impIva = Math.round((total - impNeto) * 100) / 100;
 
-  const fecha = (order.date || new Date().toISOString().split('T')[0]).replace(/-/g, '');
+  const dateStr =
+    order.date instanceof Date
+      ? order.date.toISOString().split('T')[0]
+      : typeof order.date === 'string'
+        ? order.date
+        : new Date().toISOString().split('T')[0];
+  const fecha = dateStr.replace(/-/g, '');
   const cbteFch = parseInt(fecha, 10);
   if (isNaN(cbteFch) || fecha.length !== 8) {
     throw new Error('Fecha del pedido inválida para AFIP.');
