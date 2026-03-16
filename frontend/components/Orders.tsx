@@ -757,7 +757,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 });
