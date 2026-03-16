@@ -2,8 +2,8 @@
  * Servicio de facturación electrónica AFIP usando Afip SDK (app.afipsdk.com).
  * Configuración por variables de entorno:
  * - AFIP_CUIT (obligatorio): TU CUIT 11 dígitos.
- * - Opción A: AFIP_ACCESS_TOKEN (token de app.afipsdk.com).
- * - Opción B: AFIP_CERT_PATH y AFIP_KEY_PATH (rutas a archivos .crt y .key en formato PEM).
+ * - AFIP_ACCESS_TOKEN (token de app.afipsdk.com).
+ * - Certificado y clave: AFIP_CERT_PATH y AFIP_KEY_PATH (rutas) o AFIP_CERT y AFIP_KEY (PEM en env).
  * - AFIP_PTO_VTA (opcional, default 1).
  * - AFIP_PRODUCTION (opcional): "true" para producción, si no es homologación.
  */
@@ -72,6 +72,12 @@ function readCertOrKey(envVar: string, value: string, description: string): stri
   return fs.readFileSync(resolved, 'utf8').trim();
 }
 
+function normalizePem(value: string): string {
+  let p = value.trim();
+  if (p.includes('\\n')) p = p.replace(/\\n/g, '\n');
+  return p;
+}
+
 function getConfig(): AfipConfig {
   const cuit = process.env.AFIP_CUIT;
   if (!cuit) {
@@ -87,26 +93,42 @@ function getConfig(): AfipConfig {
   const accessToken = process.env.AFIP_ACCESS_TOKEN?.trim();
   const certPath = process.env.AFIP_CERT_PATH?.trim();
   const keyPath = process.env.AFIP_KEY_PATH?.trim();
+  const certEnv = process.env.AFIP_CERT?.trim();
+  const keyEnv = process.env.AFIP_KEY?.trim();
 
-  if (accessToken) {
-    return { cuit: cuitNum, puntoVta, accessToken, production };
+  let cert: string | undefined;
+  let key: string | undefined;
+  if (certEnv && keyEnv) {
+    cert = normalizePem(certEnv);
+    key = normalizePem(keyEnv);
+  } else if (certPath && keyPath) {
+    cert = readCertOrKey('AFIP_CERT_PATH', certPath, 'Certificado');
+    key = readCertOrKey('AFIP_KEY_PATH', keyPath, 'Clave privada');
   }
-  if (certPath && keyPath) {
-    const cert = readCertOrKey('AFIP_CERT_PATH', certPath, 'Certificado');
-    const key = readCertOrKey('AFIP_KEY_PATH', keyPath, 'Clave privada');
+
+  if (accessToken && cert && key) {
+    return { cuit: cuitNum, puntoVta, accessToken, cert, key, production };
+  }
+  if (accessToken) {
+    throw new Error(
+      'AFIP: para emitir facturas el SDK requiere certificado y clave. Definí AFIP_CERT_PATH y AFIP_KEY_PATH (rutas a .crt y .key) o AFIP_CERT y AFIP_KEY con el PEM en las variables de entorno (ej. en Railway).'
+    );
+  }
+  if (cert && key) {
     return { cuit: cuitNum, puntoVta, cert, key, production };
   }
   throw new Error(
-    'AFIP: definí AFIP_ACCESS_TOKEN (token de app.afipsdk.com) O bien AFIP_CERT_PATH y AFIP_KEY_PATH (rutas a tu .crt y .key en PEM). Ver docs/FACTURACION.md.'
+    'AFIP: definí AFIP_ACCESS_TOKEN (app.afipsdk.com) y además AFIP_CERT_PATH+AFIP_KEY_PATH o AFIP_CERT+AFIP_KEY. Ver docs/FACTURACION.md.'
   );
 }
 
 /** Verifica si AFIP está configurado (para mostrar u ocultar botón en el front). */
 export function isAfipConfigured(): boolean {
   if (!process.env.AFIP_CUIT) return false;
-  if (process.env.AFIP_ACCESS_TOKEN?.trim()) return true;
-  if (process.env.AFIP_CERT_PATH?.trim() && process.env.AFIP_KEY_PATH?.trim()) return true;
-  return false;
+  const hasToken = !!process.env.AFIP_ACCESS_TOKEN?.trim();
+  const hasCertPaths = !!process.env.AFIP_CERT_PATH?.trim() && !!process.env.AFIP_KEY_PATH?.trim();
+  const hasCertEnv = !!process.env.AFIP_CERT?.trim() && !!process.env.AFIP_KEY?.trim();
+  return hasToken && (hasCertPaths || hasCertEnv);
 }
 
 /**
@@ -156,9 +178,8 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     CUIT: cuit,
     production: config.production
   };
-  if (config.accessToken) {
-    afipOptions.access_token = config.accessToken;
-  } else if (config.cert && config.key) {
+  if (config.accessToken) afipOptions.access_token = config.accessToken;
+  if (config.cert && config.key) {
     afipOptions.cert = config.cert;
     afipOptions.key = config.key;
   }
