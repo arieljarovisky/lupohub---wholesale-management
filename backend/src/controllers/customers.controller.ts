@@ -199,39 +199,49 @@ export const deleteCustomer = async (req: Request, res: Response) => {
   }
 };
 
-/** Importar clientes en lote (desde Excel u otro origen). No duplica: si el email ya existe se omite. */
+/** Importar clientes en lote. Se exige razón social y CUIT. No duplica por CUIT ni por email. */
 export const importCustomers = async (req: Request, res: Response) => {
   try {
     const body = req.body as { customers?: Array<{ name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>; sellerId?: string };
     const rows = Array.isArray(body.customers) ? body.customers : [];
     const sellerId = body.sellerId?.trim() || null;
     let created = 0;
-    let skipped = 0; // ya existían (mismo email)
+    let skipped = 0;
     const errors: { row: number; email?: string; message: string }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const name = (r.name ?? '').toString().trim();
       const businessName = (r.businessName ?? '').toString().trim();
-      const email = (r.email ?? '').toString().trim();
+      let email = (r.email ?? '').toString().trim();
       const address = (r.address ?? '').toString().trim() || null;
       const city = (r.city ?? '').toString().trim() || null;
       const cuit = (r.cuit ?? '').toString().trim() || null;
+      const cuitSolo = (cuit || '').replace(/\D/g, '');
       const phone = (r.phone ?? '').toString().trim() || null;
       const condicionIva = (r.condicionIva ?? '').toString().trim() || null;
       const rowNum = i + 1;
 
-      if (!email) {
-        errors.push({ row: rowNum, message: 'Falta email' });
+      if (!businessName && !name) {
+        errors.push({ row: rowNum, message: 'Falta razón social' });
         continue;
       }
-      if (!businessName && !name) {
-        errors.push({ row: rowNum, email, message: 'Falta razón social o nombre de contacto' });
+      if (!cuit || !cuitSolo) {
+        errors.push({ row: rowNum, message: 'Falta CUIT' });
         continue;
       }
 
-      const existing = await get(`SELECT id FROM customers WHERE email = ? LIMIT 1`, [email]);
-      if (existing) {
+      if (!email) {
+        email = `importado-${cuitSolo}@sin-email.local`;
+      }
+
+      const existingByCuit = cuit ? await get(`SELECT id FROM customers WHERE cuit = ? LIMIT 1`, [cuit]) : null;
+      if (existingByCuit) {
+        skipped++;
+        continue;
+      }
+      const existingByEmail = await get(`SELECT id FROM customers WHERE email = ? LIMIT 1`, [email]);
+      if (existingByEmail) {
         skipped++;
         continue;
       }

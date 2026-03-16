@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 export type CustomerImportRow = {
   name?: string;
   businessName?: string;
-  email: string;
+  email?: string;
   address?: string;
   city?: string;
   cuit?: string;
@@ -13,8 +13,8 @@ export type CustomerImportRow = {
 
 /**
  * Parsea un Excel de clientes. Detecta columnas por cabecera.
- * Usa "E-mail" o "E-mail contacto" (el que tenga valor por fila).
- * Si solo tiene email sin razón social/nombre, usa el email como razón social para no perder la fila.
+ * Se exige razón social y CUIT por fila; el resto de campos pueden ir vacíos.
+ * Email es opcional (si falta, el backend genera uno a partir del CUIT).
  */
 export async function parseCustomersExcel(file: File): Promise<CustomerImportRow[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -67,24 +67,24 @@ export async function parseCustomersExcel(file: File): Promise<CustomerImportRow
 
   for (let i = start; i < rows.length; i++) {
     const row = rows[i];
-    const emailMain = trim(row[emailCol]);
-    const emailContacto = emailContactoCol >= 0 ? trim(row[emailContactoCol]) : '';
-    const email = emailMain || emailContacto;
-    if (!email) continue;
-
     const businessName = trim(row[businessNameCol]);
     const name = trim(row[nameCol]);
-    const hasName = !!(businessName || name);
-    const businessNameVal = businessName || (hasName ? undefined : email);
-    const nameVal = name || (hasName ? undefined : '');
+    const cuitRaw = cuitCol >= 0 ? trim(row[cuitCol]) : '';
+    const cuit = cuitRaw.replace(/\D/g, '').slice(0, 11) || undefined;
+    if (!businessName && !name) continue;
+    if (!cuit) continue;
+
+    const emailMain = trim(row[emailCol]);
+    const emailContacto = emailContactoCol >= 0 ? trim(row[emailContactoCol]) : '';
+    const email = emailMain || emailContacto || undefined;
 
     items.push({
-      businessName: businessNameVal || undefined,
-      name: nameVal || undefined,
+      businessName: businessName || undefined,
+      name: name || undefined,
       email,
       address: addressCol >= 0 ? trim(row[addressCol]) || undefined : undefined,
       city: cityCol >= 0 ? trim(row[cityCol]) || undefined : undefined,
-      cuit: cuitCol >= 0 ? trim(row[cuitCol]).replace(/\D/g, '').slice(0, 11) || undefined : undefined,
+      cuit,
       phone: phoneCol >= 0 ? trim(row[phoneCol]) || undefined : undefined,
       condicionIva: ivaCol >= 0 ? trim(row[ivaCol]) || undefined : undefined
     });

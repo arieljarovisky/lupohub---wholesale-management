@@ -445,7 +445,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     try {
       const rows = await parseCustomersExcel(file);
       if (rows.length === 0) {
-        showToast('warning', 'No se encontraron filas válidas. El Excel debe tener al menos Email y Razón social o Nombre.');
+        showToast('warning', 'No se encontraron filas válidas. El Excel debe tener Razón social y CUIT en cada fila.');
         setImportingExcel(false);
         return;
       }
@@ -465,7 +465,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         showToast('warning', `${res.errors.length} error(es): ${msg}${res.errors.length > 3 ? '…' : ''}`);
       }
       if (res.created === 0 && skipped === 0 && !res.errors?.length) {
-        showToast('warning', 'No se creó ningún cliente. Revisá que haya columnas E-mail (o E-mail contacto) y Razón social o Nombre.');
+        showToast('warning', 'No se creó ningún cliente. Revisá que haya columnas Razón social y CUIT (o Número).');
       }
     } catch (err: any) {
       showToast('error', err?.message || 'Error al importar el Excel.');

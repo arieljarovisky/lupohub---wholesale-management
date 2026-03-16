@@ -531,8 +531,8 @@ export const api = {
     }, customer, 'createCustomer');
   },
 
-  /** Importar clientes en lote (desde Excel). No duplica: los que ya existen por email se omiten. */
-  importCustomers: async (customers: Array<{ name?: string; businessName?: string; email: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>, sellerId?: string): Promise<{ created: number; skipped?: number; errors: { row: number; email?: string; message: string }[] }> => {
+  /** Importar clientes en lote (desde Excel). Se exige razón social y CUIT. No duplica por CUIT ni email. */
+  importCustomers: async (customers: Array<{ name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>, sellerId?: string): Promise<{ created: number; skipped?: number; errors: { row: number; email?: string; message: string }[] }> => {
     return request<any>('/customers/import', 'POST', { customers, sellerId: sellerId || undefined });
   },
 
