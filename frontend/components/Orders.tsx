@@ -452,7 +452,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       }}
                       disabled={!!emitiendoFacturaId}
                       className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                      title="Emitir factura AFIP"
+                      title="Emitir factura electrónica AFIP para este pedido"
                     >
                       {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
                     </button>
@@ -460,7 +460,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <button
                     onClick={(e) => openRemitoModal(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
-                    title="Generar remito"
+                    title="Generar remito (hoja de despacho) en PDF"
                   >
                     <FileText size={16} />
                   </button>
@@ -468,7 +468,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <button
                       onClick={(e) => openFactura(order, e)}
                       className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
-                      title="Ver factura / Descargar PDF"
+                      title="Ver factura AFIP emitida / Descargar PDF"
                     >
                       <Receipt size={16} />
                     </button>
@@ -483,7 +483,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         setNcQuantity(order.items[0]?.quantity ?? 1);
                       }}
                       className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
-                      title="Emitir nota de crédito"
+                      title="Emitir nota de crédito AFIP (total o por artículo)"
                     >
                       <FileMinus size={16} />
                     </button>
@@ -491,7 +491,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <button
                     onClick={(e) => exportOneOrderToExcel(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
-                    title="Exportar este pedido a Excel"
+                    title="Exportar este pedido a Excel (planilla)"
                   >
                     <FileSpreadsheet size={16} />
                   </button>
@@ -499,7 +499,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <button
                       onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Cancelar pedido', message: '¿Cancelar este pedido? Se restaurará el stock.', confirmLabel: 'Cancelar pedido', onConfirm: () => onUpdateStatus(order.id, OrderStatus.CANCELLED) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
-                      title="Cancelar pedido"
+                      title="Cancelar pedido (restaura stock)"
                     >
                       <XCircle size={16} />
                     </button>
@@ -508,7 +508,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <button
                       onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
-                      title="Eliminar pedido"
+                      title="Eliminar pedido definitivamente"
                     >
                       <Trash2 size={16} />
                     </button>
