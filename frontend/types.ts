@@ -117,6 +117,7 @@ export interface OrderItem {
 export interface OrderInvoice {
   cae: string;
   caeFchVto?: string;
+  puntoVta?: number;
   cbteDesde: number;
   cbteHasta: number;
   cbteTipo: number;
@@ -125,6 +126,8 @@ export interface OrderInvoice {
 export interface Order {
   id: string;
   customerId: string;
+  /** Nombre del cliente (viene del backend para no depender de la lista visible) */
+  customerBusinessName?: string;
   sellerId?: string | null; // null = pedido directo (cliente directo)
   pickedBy?: string; // Usuario de depósito que preparó/despachó
   dispatchedAt?: string; // Fecha/hora en que se despachó

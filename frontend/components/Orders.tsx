@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice } from '../types';
+import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -10,6 +10,7 @@ interface OrdersProps {
   orders: Order[];
   products: Product[];
   customers: Customer[];
+  transportes?: Transporte[];
   users: User[];
   role: Role;
   currentUserId?: string;
@@ -23,7 +24,7 @@ interface OrdersProps {
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
-  orders, products, customers, users, role, 
+  orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
   onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida 
 }) => {
@@ -63,7 +64,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const canEditOrder = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
-  const getCustomerName = (customerId: string) => customers.find(c => c.id === customerId)?.businessName || customers.find(c => c.id === customerId)?.name || customerId;
+  const getCustomerName = (orderOrCustomerId: Order | string) => {
+    if (typeof orderOrCustomerId === 'object' && orderOrCustomerId?.customerBusinessName) return orderOrCustomerId.customerBusinessName;
+    const id = typeof orderOrCustomerId === 'string' ? orderOrCustomerId : (orderOrCustomerId as Order).customerId;
+    return customers.find(c => c.id === id)?.businessName || customers.find(c => c.id === id)?.name || id;
+  };
 
   /** Fecha legible en la lista de pedidos (DD/MM/YYYY). */
   const formatOrderDate = (dateStr: string) => {
@@ -76,7 +81,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
   const safeSheetName = (order: Order) => {
     const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
-    const name = getCustomerName(order.customerId).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
+    const name = getCustomerName(order).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
     const sheetName = `${base} ${name}`.trim().slice(0, 31);
     return sheetName || `Pedido_${order.id.slice(-8)}`;
   };
@@ -115,14 +120,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const x = new Date(d);
       return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
-    const selectedTransport = customer?.transportes?.find(t => t.name === transporteName);
+    const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
     const transportesStr = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
       : '—';
     const remitenteBlock = remitente.businessName
       ? `<strong>Remitente:</strong> ${remitente.businessName}${remitente.address ? ` — ${remitente.address}` : ''}${remitente.city ? ` — ${remitente.city}` : ''}${remitente.cuit ? ` — CUIT ${remitente.cuit}` : ''}`
       : '<strong>Remitente:</strong> —';
-    const destBlock = `<strong>Destinatario:</strong> ${customer?.businessName || 'Cliente'} — ${customer?.address || ''} ${customer?.city || ''} ${customer?.cuit ? ` — CUIT ${customer.cuit}` : ''}`;
+    const destBlock = `<strong>Destinatario:</strong> ${order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'} — ${customer?.address || ''} ${customer?.city || ''} ${customer?.cuit ? ` — CUIT ${customer.cuit}` : ''}`;
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
       return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td>${i.quantity}</td><td>${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td>${sub.toLocaleString('es-AR')}</td></tr>`;
@@ -173,9 +178,70 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName('');
   };
 
+  /** Genera el HTML de la factura AFIP para ver e imprimir/guardar como PDF. */
+  const buildFacturaHtml = (order: Order) => {
+    if (!order.invoice) return '';
+    const inv = order.invoice;
+    const customer = customers.find(c => c.id === order.customerId);
+    const remitente = getRemitente();
+    const items = order.items.map(enrichItem);
+    const formatDate = (d: string) => {
+      const x = new Date(d);
+      return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+    const tipoLabel = inv.cbteTipo === 6 ? 'Factura B' : 'Factura A';
+    const nroComprobante = inv.puntoVta != null ? `${inv.puntoVta}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
+    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+    const rows = items.map(i => {
+      const sub = i.quantity * (i.priceAtMoment ?? 0);
+      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td style="text-align:right">${i.quantity}</td><td style="text-align:right">${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">${sub.toLocaleString('es-AR')}</td></tr>`;
+    }).join('');
+    const total = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+    const vtoCae = inv.caeFchVto ? formatDate(inv.caeFchVto) : '—';
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${tipoLabel} ${nroComprobante}</title><style>
+      body { font-family: system-ui, sans-serif; max-width: 700px; margin: 24px auto; padding: 20px; color: #111; }
+      h1 { font-size: 1.4rem; margin-bottom: 4px; }
+      .sub { font-size: 0.85rem; color: #444; margin-bottom: 16px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; font-size: 0.85rem; }
+      .block { margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.8rem; }
+      th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; }
+      th { background: #eee; font-weight: bold; }
+      .cae-block { margin-top: 20px; padding: 12px; background: #f5f5f5; font-size: 0.8rem; }
+      .no-print { margin-top: 20px; }
+      @media print { .no-print { display: none !important; } }
+    </style></head><body>
+      <h1>${tipoLabel}</h1>
+      <div class="sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${formatDate(order.date)} — Pedido ${order.id}</div>
+      <div class="grid">
+        <div><strong>Emisor</strong><br>${remitente.businessName || '—'}${remitente.cuit ? `<br>CUIT ${remitente.cuit}` : ''}${remitente.address ? `<br>${remitente.address}` : ''}${remitente.city ? `, ${remitente.city}` : ''}</div>
+        <div><strong>Cliente</strong><br>${clienteNombre}${customer?.cuit ? `<br>CUIT ${customer.cuit}` : ''}${customer?.address ? `<br>${customer.address}` : ''}${customer?.city ? `, ${customer.city}` : ''}</div>
+      </div>
+      <table>
+        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th style="text-align:right">Cant.</th><th style="text-align:right">P. unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="4"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
+      </table>
+      <div class="cae-block"><strong>CAE:</strong> ${inv.cae} &nbsp;|&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #059669; color: white; border: none; border-radius: 8px;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+    </body></html>`;
+  };
+
+  const openFactura = (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!order.invoice) return;
+    const html = buildFacturaHtml(order);
+    if (!html) return;
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
+  };
+
   /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems, igual que la plantilla en la web. */
   const buildOrderSheet = (order: Order) => {
-    const customerName = getCustomerName(order.customerId);
+    const customerName = getCustomerName(order);
     const itemHeaders = ['SKU', 'Producto', 'Talle', 'Color', 'Cantidad', 'Precio unit.', 'Subtotal'];
     const enrichedItems = order.items.map(enrichItem);
     const itemRows = enrichedItems.map(item => {
@@ -236,7 +302,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const ws = buildOrderSheet(order);
     const sheetName = safeSheetName(order).slice(0, 31);
     XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-    const clientNameForFile = getCustomerName(order.customerId).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
+    const clientNameForFile = getCustomerName(order).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
     const dateStr = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(workbook, `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`);
   };
@@ -311,7 +377,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             >
               <div className="flex justify-between items-start">
                 <div className="space-y-1 min-w-0 flex-1">
-                  <h3 className="text-xl font-black text-white truncate">{customer?.businessName || 'Cliente desconocido'}</h3>
+                  <h3 className="text-xl font-black text-white truncate">{order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}</h3>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>
@@ -323,7 +389,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                        </span>
                     )}
                     {order.invoice && (
-                      <span className="bg-emerald-900/30 text-emerald-300 border border-emerald-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1" title={`CAE ${order.invoice.cae}`}>
+                      <span
+                        className="bg-emerald-900/30 text-emerald-300 border border-emerald-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help"
+                        title={
+                          [
+                            'Factura real AFIP.',
+                            `CAE: ${order.invoice.cae}`,
+                            order.invoice.puntoVta != null ? `Nº: ${order.invoice.puntoVta}-${order.invoice.cbteDesde}` : `Nº: ${order.invoice.cbteDesde}`,
+                            order.invoice.caeFchVto ? `Vto. CAE: ${new Date(order.invoice.caeFchVto).toLocaleDateString('es-AR')}` : '',
+                            'Verificá en afip.gob.ar (Consulta de CUIT / comprobantes) con tu CUIT y este CAE.'
+                          ].filter(Boolean).join('\n')
+                        }
+                      >
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
@@ -366,6 +443,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   >
                     <FileText size={16} />
                   </button>
+                  {order.invoice && (
+                    <button
+                      onClick={(e) => openFactura(order, e)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
+                      title="Ver factura / Descargar PDF"
+                    >
+                      <Receipt size={16} />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => exportOneOrderToExcel(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
@@ -426,12 +512,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       {/* Modal: elegir transporte para el remito */}
       {remitoOrder && (() => {
         const customer = customers.find(c => c.id === remitoOrder.customerId);
-        const transportesOpciones = customer?.transportes ?? [];
+        const transportesDelCliente = customer?.transportes ?? [];
+        const transportesOpciones = transportesDelCliente.length > 0 ? transportesDelCliente : transportes;
         return (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }}>
             <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-white mb-1">Generar remito</h3>
-              <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {customer?.businessName || 'Cliente'}</p>
+              <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {remitoOrder.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'}</p>
               <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
               <select
                 value={remitoTransporteName}
@@ -440,9 +527,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               >
                 <option value="">— No especificado</option>
                 {transportesOpciones.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
+                  <option key={t.id} value={t.name}>{t.name}{t.address ? ` — ${t.address}` : ''}</option>
                 ))}
               </select>
+              {transportesOpciones.length === 0 && (
+                <p className="text-amber-500/90 text-xs mb-2">No hay transportes cargados. Agregá al menos uno en Configuración → Transportes y opcionalmente asignálos al cliente en Clientes.</p>
+              )}
               <div className="flex gap-3 justify-end">
                 <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
                 <button type="button" onClick={confirmRemito} className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition">

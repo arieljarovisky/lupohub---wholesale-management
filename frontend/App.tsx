@@ -762,6 +762,7 @@ const App: React.FC = () => {
             <Suspense fallback={<ViewFallback />}>
               <Orders
                 orders={orders} products={products} customers={getVisibleCustomers}
+                transportes={transportes}
                 users={users} role={currentUser.role} currentUserId={currentUser.id}
                 onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
                 onNavigate={setCurrentView} onStartPicking={handleStartPicking}

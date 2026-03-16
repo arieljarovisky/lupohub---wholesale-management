@@ -5,7 +5,12 @@ import { v4 as uuidv4 } from 'uuid';
 
 export const getOrders = async (req: any, res: any) => {
   try {
-    let ordersRow = await query("SELECT * FROM orders ORDER BY date DESC");
+    let ordersRow = await query(`
+      SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      ORDER BY o.date DESC
+    `);
     const user = req.user;
     if (user?.role === 'CUSTOMER') {
       const { get } = await import('../database/db');
@@ -61,7 +66,7 @@ export const getOrders = async (req: any, res: any) => {
     }
 
     const invoicesRows = await query(
-      `SELECT order_id, cae, cae_fch_vto, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`,
+      `SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`,
       orderIds
     );
     const invoiceByOrderId: Record<string, any> = {};
@@ -69,6 +74,7 @@ export const getOrders = async (req: any, res: any) => {
       invoiceByOrderId[inv.order_id] = {
         cae: inv.cae,
         caeFchVto: inv.cae_fch_vto ?? undefined,
+        puntoVta: inv.punto_venta ?? undefined,
         cbteDesde: inv.cbte_desde,
         cbteHasta: inv.cbte_hasta,
         cbteTipo: inv.cbte_tipo
@@ -78,6 +84,7 @@ export const getOrders = async (req: any, res: any) => {
     const ordersFull = ordersRow.map((order: any) => ({
       id: order.id,
       customerId: order.customer_id,
+      customerBusinessName: order.customer_business_name ?? order.customer_name ?? undefined,
       sellerId: order.seller_id,
       date: order.date,
       status: order.status,
