@@ -901,6 +901,12 @@ export const api = {
     }, [], 'getProductosSinDespacho');
   },
 
+  asignarDespachoATodos: async (data: { numero_despacho: string; fecha_despacho?: string; pais_origen?: string; proveedor?: string; descripcion?: string; notas?: string }): Promise<{ message: string; id: string; numero_despacho: string; total_asignados: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; id: string; numero_despacho: string; total_asignados: number }>('/despachos/asignar-todos', 'POST', data);
+    }, { message: 'Error', id: '', numero_despacho: '', total_asignados: 0 }, 'asignarDespachoATodos');
+  },
+
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
     const rows = await request<any[]>('/catalogs', 'GET');

@@ -58,6 +58,16 @@ const Despachos: React.FC = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
 
+  // Asignar despacho a todos
+  const [showAsignarTodosModal, setShowAsignarTodosModal] = useState(false);
+  const [asignarTodosForm, setAsignarTodosForm] = useState({
+    numero_despacho: '',
+    fecha_despacho: new Date().toISOString().split('T')[0],
+    pais_origen: 'Brasil'
+  });
+  const [savingAsignarTodos, setSavingAsignarTodos] = useState(false);
+  const [productosSinDespachoCount, setProductosSinDespachoCount] = useState<number | null>(null);
+
   // Form state
   const [form, setForm] = useState({
     numero_despacho: '',
@@ -287,13 +297,29 @@ const Despachos: React.FC = () => {
             <p className="text-slate-400 text-sm">Control y trazabilidad de mercadería importada</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={fetchDespachos}
             disabled={loading}
             className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+          </button>
+          <button
+            onClick={async () => {
+              setShowAsignarTodosModal(true);
+              setAsignarTodosForm({ numero_despacho: '', fecha_despacho: new Date().toISOString().split('T')[0], pais_origen: 'Brasil' });
+              try {
+                const list = await api.getProductosSinDespacho();
+                setProductosSinDespachoCount(Array.isArray(list) ? list.length : 0);
+              } catch {
+                setProductosSinDespachoCount(null);
+              }
+            }}
+            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm border border-slate-600"
+          >
+            <Package size={18} />
+            Asignar Nº a todos los artículos
           </button>
           <button
             onClick={() => handleOpenModal()}
@@ -880,6 +906,93 @@ const Despachos: React.FC = () => {
                     Agregar
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Asignar número de despacho a todos los artículos sin despacho */}
+      {showAsignarTodosModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="font-bold text-white text-lg flex items-center gap-2">
+                <Package size={20} className="text-indigo-400" />
+                Asignar número de despacho a todos los artículos
+              </h3>
+              <button onClick={() => setShowAsignarTodosModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {productosSinDespachoCount !== null && (
+                <p className="text-slate-400 text-sm">
+                  Hay <strong className="text-white">{productosSinDespachoCount}</strong> producto(s) sin número de despacho. Se creará un despacho con el número que indiques y se les asignará a todos.
+                </p>
+              )}
+              <div>
+                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Número de despacho *</label>
+                <input
+                  type="text"
+                  value={asignarTodosForm.numero_despacho}
+                  onChange={(e) => setAsignarTodosForm({ ...asignarTodosForm, numero_despacho: e.target.value })}
+                  placeholder="Ej: 22-001-IC04-123456-A"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Fecha</label>
+                  <input
+                    type="date"
+                    value={asignarTodosForm.fecha_despacho}
+                    onChange={(e) => setAsignarTodosForm({ ...asignarTodosForm, fecha_despacho: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-bold uppercase block mb-1">País de origen</label>
+                  <select
+                    value={asignarTodosForm.pais_origen}
+                    onChange={(e) => setAsignarTodosForm({ ...asignarTodosForm, pais_origen: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    {paisesComunes.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex justify-end gap-3">
+              <button
+                onClick={() => setShowAsignarTodosModal(false)}
+                className="px-4 py-2 text-slate-400 hover:text-white font-bold transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!asignarTodosForm.numero_despacho.trim()) {
+                    showToast('info', 'Ingresá el número de despacho');
+                    return;
+                  }
+                  setSavingAsignarTodos(true);
+                  try {
+                    const res = await api.asignarDespachoATodos(asignarTodosForm);
+                    setShowAsignarTodosModal(false);
+                    showToast('success', res.message || `Se asignó el despacho a ${res.total_asignados} producto(s).`);
+                    fetchDespachos();
+                  } catch (err: any) {
+                    showToast('error', err?.message || 'No se pudo asignar el despacho');
+                  } finally {
+                    setSavingAsignarTodos(false);
+                  }
+                }}
+                disabled={savingAsignarTodos || !asignarTodosForm.numero_despacho.trim()}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {savingAsignarTodos ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                Asignar a todos
               </button>
             </div>
           </div>
