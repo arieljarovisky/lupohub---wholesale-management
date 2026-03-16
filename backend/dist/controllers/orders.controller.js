@@ -46,9 +46,14 @@ exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
-        let ordersRow = yield (0, db_1.query)("SELECT * FROM orders ORDER BY date DESC");
+        let ordersRow = yield (0, db_1.query)(`
+      SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      ORDER BY o.date DESC
+    `);
         const user = req.user;
         if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
             const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
@@ -100,30 +105,32 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 });
             }
         }
-        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
+        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
         const invoiceByOrderId = {};
         for (const inv of invoicesRows) {
             invoiceByOrderId[inv.order_id] = {
                 cae: inv.cae,
                 caeFchVto: (_f = inv.cae_fch_vto) !== null && _f !== void 0 ? _f : undefined,
+                puntoVta: (_g = inv.punto_venta) !== null && _g !== void 0 ? _g : undefined,
                 cbteDesde: inv.cbte_desde,
                 cbteHasta: inv.cbte_hasta,
                 cbteTipo: inv.cbte_tipo
             };
         }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b;
+            var _a, _b, _c, _d;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
+                customerBusinessName: (_b = (_a = order.customer_business_name) !== null && _a !== void 0 ? _a : order.customer_name) !== null && _b !== void 0 ? _b : undefined,
                 sellerId: order.seller_id,
                 date: order.date,
                 status: order.status,
                 total: Number(order.total),
-                pickedBy: (_a = order.picked_by) !== null && _a !== void 0 ? _a : undefined,
+                pickedBy: (_c = order.picked_by) !== null && _c !== void 0 ? _c : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 items: itemsByOrderId[order.id] || [],
-                invoice: (_b = invoiceByOrderId[order.id]) !== null && _b !== void 0 ? _b : undefined
+                invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined
             });
         });
         res.json(ordersFull);

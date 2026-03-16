@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDespachoStats = exports.getProductosSinDespacho = exports.removeDespachoItem = exports.addDespachoItem = exports.deleteDespacho = exports.updateDespacho = exports.createDespacho = exports.getDespachoById = exports.getDespachos = void 0;
+exports.getDespachoStats = exports.getProductosSinDespacho = exports.asignarDespachoATodos = exports.removeDespachoItem = exports.addDespachoItem = exports.deleteDespacho = exports.updateDespacho = exports.createDespacho = exports.getDespachoById = exports.getDespachos = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 // Obtener todos los despachos
@@ -223,6 +223,53 @@ const removeDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.removeDespachoItem = removeDespachoItem;
+// Asignar un número de despacho a todos los productos que aún no tienen despacho
+const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { numero_despacho, fecha_despacho, pais_origen = 'Brasil', proveedor, descripcion, notas } = req.body;
+        if (!numero_despacho) {
+            return res.status(400).json({ message: 'Número de despacho es requerido' });
+        }
+        const fecha = fecha_despacho || new Date().toISOString().split('T')[0];
+        const existing = yield (0, db_1.get)(`SELECT id FROM despachos WHERE numero_despacho = ?`, [numero_despacho]);
+        if (existing) {
+            return res.status(400).json({ message: 'Ya existe un despacho con ese número' });
+        }
+        const productos = yield (0, db_1.query)(`
+      SELECT id, name, sku FROM products WHERE ultimo_despacho_id IS NULL ORDER BY name
+    `);
+        if (productos.length === 0) {
+            return res.status(400).json({
+                message: 'No hay productos sin despacho asignado. Todos los artículos ya tienen un número de despacho.',
+                total_asignados: 0
+            });
+        }
+        const despachoId = (0, uuid_1.v4)();
+        yield (0, db_1.execute)(`
+      INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'USD', 'despachado', ?)
+    `, [despachoId, numero_despacho, fecha, pais_origen, proveedor || null, descripcion || null, notas || null]);
+        for (const p of productos) {
+            const itemId = (0, uuid_1.v4)();
+            yield (0, db_1.execute)(`
+        INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
+        VALUES (?, ?, ?, NULL, 0, NULL, ?)
+      `, [itemId, despachoId, p.id, `${p.name} - ${p.sku || ''}`.trim()]);
+            yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, p.id]);
+        }
+        res.status(201).json({
+            message: `Se creó el despacho "${numero_despacho}" y se asignó a ${productos.length} producto(s).`,
+            id: despachoId,
+            numero_despacho,
+            total_asignados: productos.length
+        });
+    }
+    catch (error) {
+        console.error('Error asignando despacho a todos:', error);
+        res.status(500).json({ message: 'Error al asignar despacho', error: error.message });
+    }
+});
+exports.asignarDespachoATodos = asignarDespachoATodos;
 // Obtener productos sin despacho asignado
 const getProductosSinDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {

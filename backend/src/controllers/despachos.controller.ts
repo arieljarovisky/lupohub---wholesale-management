@@ -286,7 +286,7 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Ya existe un despacho con ese número' });
     }
 
-    const productos = await query<{ id: string; name: string; sku: string }>(`
+    const productos = await query(`
       SELECT id, name, sku FROM products WHERE ultimo_despacho_id IS NULL ORDER BY name
     `);
 

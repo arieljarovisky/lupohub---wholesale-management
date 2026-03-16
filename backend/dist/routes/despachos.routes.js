@@ -7,6 +7,8 @@ const router = (0, express_1.Router)();
 router.get('/stats', despachos_controller_1.getDespachoStats);
 // Productos sin despacho
 router.get('/productos-sin-despacho', despachos_controller_1.getProductosSinDespacho);
+// Asignar un número de despacho a todos los productos que no tienen despacho (debe ir antes de /:id)
+router.post('/asignar-todos', despachos_controller_1.asignarDespachoATodos);
 // CRUD de despachos
 router.get('/', despachos_controller_1.getDespachos);
 router.get('/:id', despachos_controller_1.getDespachoById);
