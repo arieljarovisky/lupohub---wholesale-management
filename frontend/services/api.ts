@@ -542,11 +542,11 @@ export const api = {
     const rows = await request<any[]>('/transportes', 'GET');
     return Array.isArray(rows) ? rows : [];
   },
-  createTransporte: async (name: string): Promise<Transporte> => {
-    return request<Transporte>('/transportes', 'POST', { name: name.trim() });
+  createTransporte: async (name: string, address?: string): Promise<Transporte> => {
+    return request<Transporte>('/transportes', 'POST', { name: name.trim(), address: address?.trim() || undefined });
   },
-  updateTransporte: async (id: string, name: string): Promise<Transporte> => {
-    return request<Transporte>(`/transportes/${id}`, 'PATCH', { name: name.trim() });
+  updateTransporte: async (id: string, name: string, address?: string): Promise<Transporte> => {
+    return request<Transporte>(`/transportes/${id}`, 'PATCH', { name: name.trim(), address: address?.trim() || undefined });
   },
   deleteTransporte: async (id: string): Promise<void> => {
     await request<void>(`/transportes/${id}`, 'DELETE');

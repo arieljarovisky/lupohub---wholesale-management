@@ -115,7 +115,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const x = new Date(d);
       return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
-    const transportesStr = transporteName.trim() || '—';
+    const selectedTransport = customer?.transportes?.find(t => t.name === transporteName);
+    const transportesStr = transporteName.trim()
+      ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
+      : '—';
     const remitenteBlock = remitente.businessName
       ? `<strong>Remitente:</strong> ${remitente.businessName}${remitente.address ? ` — ${remitente.address}` : ''}${remitente.city ? ` — ${remitente.city}` : ''}${remitente.cuit ? ` — CUIT ${remitente.cuit}` : ''}`
       : '<strong>Remitente:</strong> —';

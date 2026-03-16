@@ -67,6 +67,8 @@ export interface ApiConfig {
 export interface Transporte {
   id: string;
   name: string;
+  /** Dirección de donde retira el flete (origen) */
+  address?: string;
 }
 
 /** Datos del remitente para remitos (guardado en localStorage) */

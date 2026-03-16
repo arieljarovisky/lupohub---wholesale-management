@@ -12,12 +12,19 @@ export async function addTransportesTables(): Promise<void> {
       await execute(`
         CREATE TABLE transportes (
           id VARCHAR(36) PRIMARY KEY,
-          name VARCHAR(255) NOT NULL
+          name VARCHAR(255) NOT NULL,
+          address VARCHAR(500) NULL
         )
       `);
       console.log('[DB] Tabla transportes creada');
     } else {
-      console.log('[DB] Tabla transportes ya existe');
+      const col = await get(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transportes' AND COLUMN_NAME = 'address'`
+      );
+      if (!col) {
+        await execute(`ALTER TABLE transportes ADD COLUMN address VARCHAR(500) NULL AFTER name`);
+        console.log('[DB] Columna transportes.address agregada');
+      }
     }
 
     const ct = await get(

@@ -95,8 +95,8 @@ interface SettingsProps {
   orders?: Order[];
   currentUser?: User;
   transportes?: import('../types').Transporte[];
-  onCreateTransporte?: (name: string) => void | Promise<void>;
-  onUpdateTransporte?: (id: string, name: string) => void | Promise<void>;
+  onCreateTransporte?: (name: string, address?: string) => void | Promise<void>;
+  onUpdateTransporte?: (id: string, name: string, address?: string) => void | Promise<void>;
   onDeleteTransporte?: (id: string) => void | Promise<void>;
   /** Si se pasa, al montar se selecciona esta pestaña (ej. desde el menú "Facturación"). */
   initialTab?: 'facturacion';
@@ -460,8 +460,10 @@ const Settings: React.FC<SettingsProps> = ({
 
   // Transportes (express) - solo ADMIN
   const [newTransporteName, setNewTransporteName] = useState('');
+  const [newTransporteAddress, setNewTransporteAddress] = useState('');
   const [editingTransporteId, setEditingTransporteId] = useState<string | null>(null);
   const [editingTransporteName, setEditingTransporteName] = useState('');
+  const [editingTransporteAddress, setEditingTransporteAddress] = useState('');
   // Remitente para remitos
   const [remitenteBusinessName, setRemitenteBusinessName] = useState('');
   const [remitenteAddress, setRemitenteAddress] = useState('');
@@ -1674,35 +1676,48 @@ const Settings: React.FC<SettingsProps> = ({
               <Ship size={20} className="text-blue-400" />
               Transportes / Express
             </h3>
-            <p className="text-sm text-slate-400 mb-4">Agregá los transportes por donde despachás pedidos. Luego asignálos a cada cliente en la sección Clientes.</p>
-            <div className="flex flex-wrap gap-3 items-end mb-6">
-              <div className="flex-1 min-w-[200px]">
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Nuevo transporte</label>
-                <input
-                  type="text"
-                  value={newTransporteName}
-                  onChange={(e) => setNewTransporteName(e.target.value)}
-                  placeholder="Ej: OCA, Andreani, Correo Argentino..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+            <p className="text-sm text-slate-400 mb-4">Agregá los transportes por donde despachás pedidos. Indicá la dirección de retiro para que el flete sepa dónde pasar. Luego asignálos a cada cliente en la sección Clientes.</p>
+            <div className="space-y-3 mb-6">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Nuevo transporte</label>
+                  <input
+                    type="text"
+                    value={newTransporteName}
+                    onChange={(e) => setNewTransporteName(e.target.value)}
+                    placeholder="Ej: OCA, Andreani, Correo Argentino..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección de retiro</label>
+                  <input
+                    type="text"
+                    value={newTransporteAddress}
+                    onChange={(e) => setNewTransporteAddress(e.target.value)}
+                    placeholder="Calle, número, localidad (donde retira el flete)"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!newTransporteName.trim() || !onCreateTransporte) return;
+                    try {
+                      await Promise.resolve(onCreateTransporte(newTransporteName.trim(), newTransporteAddress.trim() || undefined));
+                      setNewTransporteName('');
+                      setNewTransporteAddress('');
+                      showToast('success', 'Transporte agregado.');
+                    } catch {
+                      showToast('error', 'Error al agregar transporte.');
+                    }
+                  }}
+                  disabled={!newTransporteName.trim()}
+                  className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Plus size={18} /> Agregar
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!newTransporteName.trim() || !onCreateTransporte) return;
-                  try {
-                    await Promise.resolve(onCreateTransporte(newTransporteName.trim()));
-                    setNewTransporteName('');
-                    showToast('success', 'Transporte agregado.');
-                  } catch {
-                    showToast('error', 'Error al agregar transporte.');
-                  }
-                }}
-                disabled={!newTransporteName.trim()}
-                className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <Plus size={18} /> Agregar
-              </button>
             </div>
             <div className="space-y-2">
               {transportes.length === 0 ? (
@@ -1711,23 +1726,34 @@ const Settings: React.FC<SettingsProps> = ({
                 transportes.map(t => (
                   <div key={t.id} className="flex items-center justify-between gap-4 py-3 px-4 bg-slate-900 rounded-xl border border-slate-700">
                     {editingTransporteId === t.id ? (
-                      <>
-                        <input
-                          type="text"
-                          value={editingTransporteName}
-                          onChange={(e) => setEditingTransporteName(e.target.value)}
-                          className="flex-1 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                          autoFocus
-                        />
+                      <div className="flex-1 flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+                        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={editingTransporteName}
+                            onChange={(e) => setEditingTransporteName(e.target.value)}
+                            placeholder="Nombre"
+                            className="bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            autoFocus
+                          />
+                          <input
+                            type="text"
+                            value={editingTransporteAddress}
+                            onChange={(e) => setEditingTransporteAddress(e.target.value)}
+                            placeholder="Dirección de retiro"
+                            className="bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                        </div>
                         <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={async () => {
                               if (!onUpdateTransporte || !editingTransporteName.trim()) return;
                               try {
-                                await Promise.resolve(onUpdateTransporte(t.id, editingTransporteName.trim()));
+                                await Promise.resolve(onUpdateTransporte(t.id, editingTransporteName.trim(), editingTransporteAddress.trim() || undefined));
                                 setEditingTransporteId(null);
                                 setEditingTransporteName('');
+                                setEditingTransporteAddress('');
                                 showToast('success', 'Transporte actualizado.');
                               } catch {
                                 showToast('error', 'Error al actualizar.');
@@ -1739,20 +1765,23 @@ const Settings: React.FC<SettingsProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setEditingTransporteId(null); setEditingTransporteName(''); }}
+                            onClick={() => { setEditingTransporteId(null); setEditingTransporteName(''); setEditingTransporteAddress(''); }}
                             className="px-3 py-1.5 bg-slate-600 text-slate-300 rounded-lg text-sm"
                           >
                             Cancelar
                           </button>
                         </div>
-                      </>
+                      </div>
                     ) : (
                       <>
-                        <span className="font-medium text-white">{t.name}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-white">{t.name}</span>
+                          {t.address && <p className="text-xs text-slate-400 mt-0.5 truncate" title={t.address}>{t.address}</p>}
+                        </div>
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            onClick={() => { setEditingTransporteId(t.id); setEditingTransporteName(t.name); }}
+                            onClick={() => { setEditingTransporteId(t.id); setEditingTransporteName(t.name); setEditingTransporteAddress(t.address ?? ''); }}
                             className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition"
                             title="Editar"
                           >

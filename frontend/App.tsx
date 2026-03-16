@@ -798,12 +798,12 @@ const App: React.FC = () => {
                 orders={orders}
                 currentUser={currentUser}
                 transportes={transportes}
-                onCreateTransporte={async (name) => {
-                  const t = await api.createTransporte(name);
+                onCreateTransporte={async (name, address) => {
+                  const t = await api.createTransporte(name, address);
                   setTransportes(prev => [...prev, t]);
                 }}
-                onUpdateTransporte={async (id, name) => {
-                  const t = await api.updateTransporte(id, name);
+                onUpdateTransporte={async (id, name, address) => {
+                  const t = await api.updateTransporte(id, name, address);
                   setTransportes(prev => prev.map(x => x.id === id ? t : x));
                 }}
                 onDeleteTransporte={async (id) => {
@@ -829,12 +829,12 @@ const App: React.FC = () => {
                 orders={orders}
                 currentUser={currentUser}
                 transportes={transportes}
-                onCreateTransporte={async (name) => {
-                  const t = await api.createTransporte(name);
+                onCreateTransporte={async (name, address) => {
+                  const t = await api.createTransporte(name, address);
                   setTransportes(prev => [...prev, t]);
                 }}
-                onUpdateTransporte={async (id, name) => {
-                  const t = await api.updateTransporte(id, name);
+                onUpdateTransporte={async (id, name, address) => {
+                  const t = await api.updateTransporte(id, name, address);
                   setTransportes(prev => prev.map(x => x.id === id ? t : x));
                 }}
                 onDeleteTransporte={async (id) => {

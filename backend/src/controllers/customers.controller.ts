@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 
-function toCustomer(row: any, transportes?: { id: string; name: string }[]) {
+function toCustomer(row: any, transportes?: { id: string; name: string; address?: string }[]) {
   return {
     id: row.id,
     sellerId: row.seller_id ?? '',
@@ -30,19 +30,19 @@ export const getCustomers = async (req: Request, res: Response) => {
     if (ids.length === 0) return res.json(customers);
     const placeholders = ids.map(() => '?').join(',');
     const links = await query(
-      `SELECT ct.customer_id AS customerId, t.id AS transporteId, t.name AS transporteName
+      `SELECT ct.customer_id AS customerId, t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress
        FROM customer_transportes ct
        JOIN transportes t ON t.id = ct.transporte_id
        WHERE ct.customer_id IN (${placeholders})
        ORDER BY t.name ASC`,
       ids
     );
-    const transportesByCustomer: Record<string, { id: string; name: string }[]> = {};
+    const transportesByCustomer: Record<string, { id: string; name: string; address?: string }[]> = {};
     for (const c of customers) transportesByCustomer[c.id] = [];
     for (const link of (links || []) as any[]) {
       const custId = link.customerId;
       if (transportesByCustomer[custId])
-        transportesByCustomer[custId].push({ id: link.transporteId, name: link.transporteName ?? link.transporteId });
+        transportesByCustomer[custId].push({ id: link.transporteId, name: link.transporteName ?? link.transporteId, address: link.transporteAddress ?? undefined });
     }
     const result = customers.map((c: any) => toCustomer(c, transportesByCustomer[c.id] ?? []));
     res.json(result);
@@ -99,10 +99,10 @@ export const createCustomer = async (req: Request, res: Response) => {
       await execute(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
     }
     const links = await query(
-      `SELECT t.id AS transporteId, t.name AS transporteName FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`,
+      `SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`,
       [id]
     );
-    const transportes = (links || []).map((l: any) => ({ id: l.transporteId, name: l.transporteName ?? l.transporteId }));
+    const transportes = (links || []).map((l: any) => ({ id: l.transporteId, name: l.transporteName ?? l.transporteId, address: l.transporteAddress ?? undefined }));
     res.status(201).json(toCustomer(created, transportes));
   } catch (error: any) {
     console.error('createCustomer:', error);
@@ -156,10 +156,10 @@ export const updateCustomer = async (req: Request, res: Response) => {
       [id]
     );
     const links = await query(
-      `SELECT t.id AS transporteId, t.name AS transporteName FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`,
+      `SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`,
       [id]
     );
-    const transportes = (links || []).map((l: any) => ({ id: l.transporteId, name: l.transporteName ?? l.transporteId }));
+    const transportes = (links || []).map((l: any) => ({ id: l.transporteId, name: l.transporteName ?? l.transporteId, address: l.transporteAddress ?? undefined }));
     res.json(toCustomer(updated, transportes));
   } catch (error: any) {
     console.error('updateCustomer:', error);
