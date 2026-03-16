@@ -769,6 +769,7 @@ const App: React.FC = () => {
                 onEditOrder={handleEditOrder}
                 onDeleteOrder={handleDeleteOrder}
                 onFacturaEmitida={(orderId, invoice) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, invoice } : o))}
+                onCreditNoteEmitida={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, creditNotesCount: (o.creditNotesCount ?? 0) + 1 } : o))}
               />
             </Suspense>
           )}

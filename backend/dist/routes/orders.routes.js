@@ -11,5 +11,7 @@ router.patch('/:id/status', orders_controller_1.updateOrderStatus);
 router.put('/:id', orders_controller_1.updateOrder);
 router.delete('/:id', orders_controller_1.deleteOrder);
 router.get('/:id/invoice', orders_controller_1.getOrderInvoice);
+router.get('/:id/credit-notes', orders_controller_1.getOrderCreditNotes);
 router.post('/:id/emitir-factura', auth_1.authMiddleware, orders_controller_1.emitirFactura);
+router.post('/:id/emitir-nota-credito', auth_1.authMiddleware, orders_controller_1.emitirNotaCredito);
 exports.default = router;

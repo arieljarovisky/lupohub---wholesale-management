@@ -463,6 +463,32 @@ export const api = {
     }
   },
 
+  /** Lista las notas de crédito de un pedido. */
+  getOrderCreditNotes: async (orderId: string): Promise<import('../types').CreditNote[]> => {
+    const rows = await request<any[]>(`/orders/${orderId}/credit-notes`, 'GET');
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      id: r.id,
+      orderId: r.orderId,
+      invoiceId: r.invoiceId,
+      cae: r.cae,
+      caeFchVto: r.caeFchVto,
+      puntoVta: r.puntoVta,
+      cbteTipo: r.cbteTipo,
+      cbteDesde: r.cbteDesde,
+      cbteHasta: r.cbteHasta,
+      amountCredited: Number(r.amountCredited),
+      createdAt: r.createdAt
+    }));
+  },
+
+  /** Emite una Nota de Crédito AFIP: todo el pedido (tipo: 'total') o un ítem (tipo: 'item', itemIndex, quantity opcional). */
+  emitirNotaCredito: async (
+    orderId: string,
+    data: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number }
+  ): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; amountCredited: number }> => {
+    return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data);
+  },
+
   // --- CUSTOMERS ---
   getCustomers: async (): Promise<Customer[]> => {
     return handleRequest(async () => {

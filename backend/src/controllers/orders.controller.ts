@@ -81,6 +81,19 @@ export const getOrders = async (req: any, res: any) => {
       };
     }
 
+    let creditNotesCountByOrderId: Record<string, number> = {};
+    try {
+      const cnRows = await query(
+        `SELECT order_id, COUNT(*) as cnt FROM credit_notes WHERE order_id IN (${placeholders}) GROUP BY order_id`,
+        orderIds
+      );
+      for (const r of cnRows as any[]) {
+        creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
+      }
+    } catch (_) {
+      // Tabla credit_notes puede no existir en DB antiguas
+    }
+
     const ordersFull = ordersRow.map((order: any) => ({
       id: order.id,
       customerId: order.customer_id,
@@ -92,7 +105,8 @@ export const getOrders = async (req: any, res: any) => {
       pickedBy: order.picked_by ?? undefined,
       dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
       items: itemsByOrderId[order.id] || [],
-      invoice: invoiceByOrderId[order.id] ?? undefined
+      invoice: invoiceByOrderId[order.id] ?? undefined,
+      creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0
     }));
 
     res.json(ordersFull);
@@ -440,6 +454,123 @@ export const emitirFactura = async (req: any, res: any) => {
     console.error('emitirFactura:', error);
     const msg = error?.message || 'Error emitiendo factura AFIP';
     const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
+    res.status(status).json({ message: msg });
+  }
+};
+
+/** Lista las notas de crédito emitidas para un pedido. */
+export const getOrderCreditNotes = async (req: any, res: any) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const rows = await query(
+      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, created_at
+       FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC`,
+      [id]
+    );
+    res.json((rows as any[]).map((r: any) => ({
+      id: r.id,
+      orderId: r.order_id,
+      invoiceId: r.invoice_id,
+      cae: r.cae,
+      caeFchVto: r.cae_fch_vto ?? undefined,
+      puntoVta: r.punto_venta,
+      cbteTipo: r.cbte_tipo,
+      cbteDesde: r.cbte_desde,
+      cbteHasta: r.cbte_hasta,
+      amountCredited: Number(r.amount_credited),
+      createdAt: r.created_at
+    })));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error listando notas de crédito' });
+  }
+};
+
+/** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
+export const emitirNotaCredito = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  const { tipo, itemIndex, quantity } = req.body || {};
+  if (!tipo || (tipo !== 'total' && tipo !== 'item')) {
+    return res.status(400).json({ message: 'Body debe incluir tipo: "total" o "item"' });
+  }
+
+  try {
+    const orderRow = await get('SELECT id, customer_id, total FROM orders WHERE id = ?', [id]);
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const invRow = await get(
+      'SELECT id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?',
+      [id]
+    );
+    if (!invRow) return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
+
+    const customerRow = await get(
+      'SELECT id, business_name, cuit FROM customers WHERE id = ?',
+      [orderRow.customer_id]
+    );
+    if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+
+    let amountToCredit: number;
+    if (tipo === 'total') {
+      amountToCredit = Number(orderRow.total) || 0;
+      if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
+    } else {
+      const itemsRows = await query(
+        `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+        [id]
+      );
+      const items = itemsRows as { quantity: number; price_at_moment: string }[];
+      if (!items.length) return res.status(400).json({ message: 'El pedido no tiene ítems.' });
+      const idx = typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10);
+      if (isNaN(idx) || idx < 0 || idx >= items.length) {
+        return res.status(400).json({ message: `itemIndex debe ser entre 0 y ${items.length - 1}` });
+      }
+      const item = items[idx];
+      const qty = quantity != null ? (typeof quantity === 'number' ? quantity : parseInt(String(quantity), 10)) : item.quantity;
+      if (isNaN(qty) || qty <= 0 || qty > item.quantity) {
+        return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para este ítem` });
+      }
+      const price = Number(item.price_at_moment) || 0;
+      amountToCredit = Math.round(qty * price * 100) / 100;
+      if (amountToCredit <= 0) return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
+    }
+
+    const { emitirNotaCredito: emitirNCAfip } = await import('../services/afip.service');
+    const result = await emitirNCAfip(
+      { puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde },
+      { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit },
+      amountToCredit
+    );
+
+    const creditNoteId = uuidv4();
+    await execute(
+      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit]
+    );
+
+    res.status(201).json({
+      id: creditNoteId,
+      orderId: id,
+      invoiceId: invRow.id,
+      cae: result.cae,
+      caeFchVto: result.caeFchVto,
+      puntoVta: result.puntoVta,
+      cbteTipo: result.cbteTipo,
+      cbteDesde: result.cbteDesde,
+      cbteHasta: result.cbteHasta,
+      amountCredited: amountToCredit
+    });
+  } catch (error: any) {
+    console.error('emitirNotaCredito:', error);
+    const msg = error?.message || 'Error emitiendo nota de crédito AFIP';
+    const status = msg.includes('no configurado') ? 503 : 500;
     res.status(status).json({ message: msg });
   }
 };

@@ -53,12 +53,16 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isAfipConfigured = isAfipConfigured;
 exports.emitirFactura = emitirFactura;
+exports.emitirNotaCredito = emitirNotaCredito;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const PTO_VTA_DEFAULT = 1;
 /** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
 const TIPO_CBTE_A = 1;
 const TIPO_CBTE_B = 6;
+/** Nota de Crédito A = 3, Nota de Crédito B = 8 */
+const TIPO_NC_A = 3;
+const TIPO_NC_B = 8;
 /** DocTipo: 80 = CUIT, 99 = Consumidor final */
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -231,6 +235,100 @@ function emitirFactura(order, customer) {
             cbteTipo: tipoCbte,
             cbteDesde: numeroFactura,
             cbteHasta: numeroFactura
+        };
+    });
+}
+/**
+ * Emite una Nota de Crédito en AFIP asociada a una factura existente.
+ * @param facturaOriginal - Factura que se está creditando (Pto.Vta, Tipo, Nro)
+ * @param customer - Cliente (mismo que la factura)
+ * @param amountToCredit - Monto total a creditar (incluye IVA)
+ */
+function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
+        const config = getConfig();
+        const { cuit, puntoVta } = config;
+        const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
+        const tieneCuit = cuitCliente.length >= 10;
+        const tipoCbte = tieneCuit ? TIPO_NC_A : TIPO_NC_B;
+        const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+        const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+        const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+        const total = Number(amountToCredit) || 0;
+        if (total <= 0)
+            throw new Error('El monto a creditar debe ser mayor a 0.');
+        const impNeto = Math.round((total / 1.21) * 100) / 100;
+        const impIva = Math.round((total - impNeto) * 100) / 100;
+        const dateStr = new Date().toISOString().split('T')[0];
+        const fecha = dateStr.replace(/-/g, '');
+        const cbteFch = parseInt(fecha, 10);
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_d) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const afipOptions = {
+            CUIT: cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        const afip = new Afip(afipOptions);
+        const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+        const numeroNC = lastVoucher + 1;
+        const data = {
+            CantReg: 1,
+            PtoVta: puntoVta,
+            CbteTipo: tipoCbte,
+            Concepto: CONCEPTO_PRODUCTOS,
+            DocTipo: docTipo,
+            DocNro: docNro,
+            CbteDesde: numeroNC,
+            CbteHasta: numeroNC,
+            CbteFch: cbteFch,
+            FchServDesde: null,
+            FchServHasta: null,
+            FchVtoPago: null,
+            ImpTotal: total,
+            ImpTotConc: 0,
+            ImpNeto: impNeto,
+            ImpOpEx: 0,
+            ImpIVA: impIva,
+            ImpTrib: 0,
+            MonId: 'PES',
+            MonCotiz: 1,
+            CondicionIVAReceptorId: condicionIva,
+            CbtesAsoc: [
+                {
+                    Tipo: facturaOriginal.cbteTipo,
+                    PtoVta: facturaOriginal.puntoVta,
+                    Nro: facturaOriginal.cbteDesde
+                }
+            ],
+            Iva: [
+                { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
+            ]
+        };
+        const res = yield afip.ElectronicBilling.createVoucher(data);
+        const cae = (_a = res === null || res === void 0 ? void 0 : res.CAE) !== null && _a !== void 0 ? _a : res === null || res === void 0 ? void 0 : res.cae;
+        const caeFchVto = (_c = (_b = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _c !== void 0 ? _c : '';
+        if (!cae) {
+            throw new Error('AFIP no devolvió CAE para la Nota de Crédito.');
+        }
+        return {
+            cae: String(cae),
+            caeFchVto: String(caeFchVto),
+            puntoVta,
+            cbteTipo: tipoCbte,
+            cbteDesde: numeroNC,
+            cbteHasta: numeroNC
         };
     });
 }

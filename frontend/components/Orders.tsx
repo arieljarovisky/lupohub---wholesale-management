@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -21,12 +21,13 @@ interface OrdersProps {
   onEditOrder?: (order: Order) => void;
   onDeleteOrder?: (orderId: string) => void;
   onFacturaEmitida?: (orderId: string, invoice: OrderInvoice) => void;
+  onCreditNoteEmitida?: (orderId: string) => void;
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
-  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida 
+  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida 
 }) => {
   const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
@@ -35,6 +36,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
   const [afipConfigured, setAfipConfigured] = useState(false);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
+  const [ncOrder, setNcOrder] = useState<Order | null>(null);
+  const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
+  const [ncItemIndex, setNcItemIndex] = useState(0);
+  const [ncQuantity, setNcQuantity] = useState<number>(1);
+  const [emitiendoNC, setEmitiendoNC] = useState(false);
 
   const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   useEffect(() => {
@@ -223,6 +229,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         <tfoot><tr><td colspan="4"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
       </table>
       <div class="cae-block"><strong>CAE:</strong> ${inv.cae} &nbsp;|&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+      <p class="no-print" style="font-size: 0.75rem; color: #666; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${formatDate(order.date)}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
       <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #059669; color: white; border: none; border-radius: 8px;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
@@ -452,6 +459,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <Receipt size={16} />
                     </button>
                   )}
+                  {order.invoice && afipConfigured && canEmitirFactura && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNcOrder(order);
+                        setNcTipo('total');
+                        setNcItemIndex(0);
+                        setNcQuantity(order.items[0]?.quantity ?? 1);
+                      }}
+                      className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
+                      title="Emitir nota de crédito"
+                    >
+                      <FileMinus size={16} />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => exportOneOrderToExcel(order, e)}
                     className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
@@ -543,6 +565,95 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
         );
       })()}
+
+      {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
+      {ncOrder && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-1">Emitir nota de crédito</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              Pedido #{ncOrder.id} — {ncOrder.customerBusinessName || getCustomerName(ncOrder)}
+            </p>
+            <div className="space-y-4 mb-6">
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ncTipo" checked={ncTipo === 'total'} onChange={() => setNcTipo('total')} className="rounded border-slate-500 text-amber-500" />
+                  <span className="text-white">Todo el pedido</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ncTipo" checked={ncTipo === 'item'} onChange={() => setNcTipo('item')} className="rounded border-slate-500 text-amber-500" />
+                  <span className="text-white">Un artículo</span>
+                </label>
+              </div>
+              {ncTipo === 'item' && ncOrder.items.length > 0 && (
+                <div className="space-y-3 pl-1">
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">Artículo</label>
+                  <select
+                    value={ncItemIndex}
+                    onChange={(e) => {
+                      const i = parseInt(e.target.value, 10);
+                      setNcItemIndex(i);
+                      setNcQuantity(ncOrder.items[i]?.quantity ?? 1);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  >
+                    {ncOrder.items.map((item, i) => {
+                      const en = enrichItem(item);
+                      const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
+                      return <option key={i} value={i}>{label} — {item.quantity} u × ${Number(item.priceAtMoment).toLocaleString()}</option>;
+                    })}
+                  </select>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">Cantidad a creditar</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={ncOrder.items[ncItemIndex]?.quantity ?? 1}
+                    value={ncQuantity}
+                    onChange={(e) => setNcQuantity(Math.max(1, Math.min(ncOrder.items[ncItemIndex]?.quantity ?? 1, parseInt(e.target.value, 10) || 1)))}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Monto a creditar: ${((ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0))).toLocaleString()}
+                  </p>
+                </div>
+              )}
+              {ncTipo === 'total' && (
+                <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${ncOrder.total.toLocaleString()}</strong></p>
+              )}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button type="button" onClick={() => setNcOrder(null)} disabled={emitiendoNC} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50">Cancelar</button>
+              <button
+                type="button"
+                disabled={emitiendoNC}
+                onClick={async () => {
+                  if (!ncOrder) return;
+                  setEmitiendoNC(true);
+                  try {
+                    const payload: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number } = { tipo: ncTipo };
+                    if (ncTipo === 'item') {
+                      payload.itemIndex = ncItemIndex;
+                      payload.quantity = ncQuantity;
+                    }
+                    const res = await api.emitirNotaCredito(ncOrder.id, payload);
+                    showToast('success', `Nota de crédito emitida. CAE ${res.cae}`);
+                    onCreditNoteEmitida?.(ncOrder.id);
+                    setNcOrder(null);
+                  } catch (err: any) {
+                    showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo nota de crédito');
+                  } finally {
+                    setEmitiendoNC(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition disabled:opacity-50"
+              >
+                {emitiendoNC ? <Clock size={18} className="animate-pulse" /> : <FileMinus size={18} />}
+                {emitiendoNC ? 'Emitiendo…' : 'Emitir nota de crédito'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

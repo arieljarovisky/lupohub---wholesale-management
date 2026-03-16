@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -117,8 +117,18 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 cbteTipo: inv.cbte_tipo
             };
         }
+        let creditNotesCountByOrderId = {};
+        try {
+            const cnRows = yield (0, db_1.query)(`SELECT order_id, COUNT(*) as cnt FROM credit_notes WHERE order_id IN (${placeholders}) GROUP BY order_id`, orderIds);
+            for (const r of cnRows) {
+                creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
+            }
+        }
+        catch (_) {
+            // Tabla credit_notes puede no existir en DB antiguas
+        }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d;
+            var _a, _b, _c, _d, _e;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
@@ -130,7 +140,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 pickedBy: (_c = order.picked_by) !== null && _c !== void 0 ? _c : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 items: itemsByOrderId[order.id] || [],
-                invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined
+                invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined,
+                creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0
             });
         });
         res.json(ordersFull);
@@ -467,3 +478,109 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.emitirFactura = emitirFactura;
+/** Lista las notas de crédito emitidas para un pedido. */
+const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.params;
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const rows = yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, created_at
+       FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC`, [id]);
+        res.json(rows.map((r) => {
+            var _a;
+            return ({
+                id: r.id,
+                orderId: r.order_id,
+                invoiceId: r.invoice_id,
+                cae: r.cae,
+                caeFchVto: (_a = r.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
+                puntoVta: r.punto_venta,
+                cbteTipo: r.cbte_tipo,
+                cbteDesde: r.cbte_desde,
+                cbteHasta: r.cbte_hasta,
+                amountCredited: Number(r.amount_credited),
+                createdAt: r.created_at
+            });
+        }));
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Error listando notas de crédito' });
+    }
+});
+exports.getOrderCreditNotes = getOrderCreditNotes;
+/** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
+const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+        return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    const { tipo, itemIndex, quantity } = req.body || {};
+    if (!tipo || (tipo !== 'total' && tipo !== 'item')) {
+        return res.status(400).json({ message: 'Body debe incluir tipo: "total" o "item"' });
+    }
+    try {
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, total FROM orders WHERE id = ?', [id]);
+        if (!orderRow)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const invRow = yield (0, db_1.get)('SELECT id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?', [id]);
+        if (!invRow)
+            return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
+        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+        if (!customerRow)
+            return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+        let amountToCredit;
+        if (tipo === 'total') {
+            amountToCredit = Number(orderRow.total) || 0;
+            if (amountToCredit <= 0)
+                return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
+        }
+        else {
+            const itemsRows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [id]);
+            const items = itemsRows;
+            if (!items.length)
+                return res.status(400).json({ message: 'El pedido no tiene ítems.' });
+            const idx = typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10);
+            if (isNaN(idx) || idx < 0 || idx >= items.length) {
+                return res.status(400).json({ message: `itemIndex debe ser entre 0 y ${items.length - 1}` });
+            }
+            const item = items[idx];
+            const qty = quantity != null ? (typeof quantity === 'number' ? quantity : parseInt(String(quantity), 10)) : item.quantity;
+            if (isNaN(qty) || qty <= 0 || qty > item.quantity) {
+                return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para este ítem` });
+            }
+            const price = Number(item.price_at_moment) || 0;
+            amountToCredit = Math.round(qty * price * 100) / 100;
+            if (amountToCredit <= 0)
+                return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
+        }
+        const { emitirNotaCredito: emitirNCAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit }, amountToCredit);
+        const creditNoteId = (0, uuid_1.v4)();
+        yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit]);
+        res.status(201).json({
+            id: creditNoteId,
+            orderId: id,
+            invoiceId: invRow.id,
+            cae: result.cae,
+            caeFchVto: result.caeFchVto,
+            puntoVta: result.puntoVta,
+            cbteTipo: result.cbteTipo,
+            cbteDesde: result.cbteDesde,
+            cbteHasta: result.cbteHasta,
+            amountCredited: amountToCredit
+        });
+    }
+    catch (error) {
+        console.error('emitirNotaCredito:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo nota de crédito AFIP';
+        const status = msg.includes('no configurado') ? 503 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.emitirNotaCredito = emitirNotaCredito;

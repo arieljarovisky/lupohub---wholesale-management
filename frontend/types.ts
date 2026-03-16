@@ -137,6 +137,23 @@ export interface Order {
   date: string;
   /** Factura electrónica AFIP emitida para este pedido */
   invoice?: OrderInvoice;
+  /** Cantidad de notas de crédito emitidas para este pedido (desde backend) */
+  creditNotesCount?: number;
+}
+
+/** Nota de crédito AFIP asociada a un pedido (lista desde API). */
+export interface CreditNote {
+  id: string;
+  orderId: string;
+  invoiceId: string;
+  cae: string;
+  caeFchVto?: string;
+  puntoVta: number;
+  cbteTipo: number;
+  cbteDesde: number;
+  cbteHasta: number;
+  amountCredited: number;
+  createdAt?: string;
 }
 
 export interface Visit {
