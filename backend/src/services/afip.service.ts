@@ -368,9 +368,10 @@ export async function emitirNotaCredito(
     MonId: 'PES',
     MonCotiz: 1,
     CondicionIVAReceptorId: condicionIva,
+    // AFIP exige tipo de comprobante asociado en formato válido (ej. "01", "06"). Código 10040 si el tipo es inválido.
     CbtesAsoc: [
       {
-        Tipo: facturaOriginal.cbteTipo,
+        Tipo: String(facturaOriginal.cbteTipo).padStart(2, '0'),
         PtoVta: facturaOriginal.puntoVta,
         Nro: facturaOriginal.cbteDesde
       }
