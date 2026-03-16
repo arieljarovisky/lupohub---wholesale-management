@@ -65,10 +65,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   );
 
   const canCancelOrder = (order: Order) =>
+    !order.invoice && // Un pedido facturado no debe poder cancelarse
     (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PREPARATION) &&
     (role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER);
 
-  const canEditOrder = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
+  const canEditOrderBase = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
   const getCustomerName = (orderOrCustomerId: Order | string) => {
     if (typeof orderOrCustomerId === 'object' && orderOrCustomerId?.customerBusinessName) return orderOrCustomerId.customerBusinessName;
@@ -385,7 +386,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
-        {filteredOrders.map((order) => {
+          {filteredOrders.map((order) => {
+          const canEditOrder = canEditOrderBase && !order.invoice;
           const customer = customers.find(c => c.id === order.customerId);
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
@@ -504,7 +506,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <XCircle size={16} />
                     </button>
                   )}
-                  {role === Role.ADMIN && (
+                  {role === Role.ADMIN && !order.invoice && (
                     <button
                       onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
