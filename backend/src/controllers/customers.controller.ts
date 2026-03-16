@@ -46,7 +46,7 @@ export const getCustomers = async (req: Request, res: Response) => {
       if (transportesByCustomer[custId])
         transportesByCustomer[custId].push({ id: link.transporteId, name: link.transporteName ?? link.transporteId, address: link.transporteAddress ?? undefined });
     }
-    const result = customers.map((c: any) => toCustomer(c, transportesByCustomer[c.id] ?? []));
+    const result = customers.map((c: any) => ({ ...c, transportes: transportesByCustomer[c.id] ?? [] }));
     res.json(result);
   } catch (error: any) {
     console.error('getCustomers:', error);
