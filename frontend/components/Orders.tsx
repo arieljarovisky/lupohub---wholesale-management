@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, LayoutList, FileSpreadsheet, Receipt } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -252,22 +252,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <span>Exportar a Excel</span>
           </button>
           {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
-            <>
-              <button
-                onClick={() => onNavigate('create_order')}
-                className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
-              >
-                <Plus size={20} />
-                <span>Nuevo Pedido</span>
-              </button>
-              <button
-                onClick={() => onNavigate('create_order_template')}
-                className="w-full sm:w-auto bg-slate-700 text-white px-5 py-3 rounded-2xl hover:bg-slate-600 border border-slate-600 transition flex items-center justify-center gap-2 font-bold active:scale-95"
-              >
-                <LayoutList size={20} />
-                <span>Pedido (plantilla)</span>
-              </button>
-            </>
+            <button
+              onClick={() => onNavigate('create_order')}
+              className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
+            >
+              <Plus size={20} />
+              <span>Nuevo Pedido</span>
+            </button>
           )}
         </div>
       </div>
