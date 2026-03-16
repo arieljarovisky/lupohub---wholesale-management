@@ -492,7 +492,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-<<<<<<< HEAD
                         showConfirm({
                           title: 'Emitir factura AFIP',
                           message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
@@ -508,11 +507,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               .finally(() => setEmitiendoFacturaId(null));
                           }
                         });
-=======
-                        setOrderToEmitFactura(order);
-                        setEmitirFacturaTipo('auto');
-                        setShowEmitirFacturaModal(true);
->>>>>>> 87c22027c73db3293285ebb691ae99a88d40e3e8
                       }}
                       disabled={!!emitiendoFacturaId}
                       className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
