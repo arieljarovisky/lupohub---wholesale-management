@@ -29,6 +29,7 @@ const customers_routes_1 = __importDefault(require("./routes/customers.routes"))
 const transportes_routes_1 = __importDefault(require("./routes/transportes.routes"));
 const price_lists_routes_1 = __importDefault(require("./routes/price_lists.routes"));
 const catalogs_routes_1 = __importDefault(require("./routes/catalogs.routes"));
+const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
 const afip_routes_1 = __importDefault(require("./routes/afip.routes"));
 const add_stock_movements_table_1 = require("./database/add_stock_movements_table");
 const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
@@ -92,6 +93,7 @@ app.use('/api/transportes', transportes_routes_1.default);
 app.use('/api/price-lists', price_lists_routes_1.default);
 app.use('/api/catalogs', catalogs_routes_1.default);
 app.use('/api/afip', afip_routes_1.default);
+app.use('/api/billing', billing_routes_1.default);
 // Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'OK', service: 'LupoHub Backend', db: 'MySQL' });

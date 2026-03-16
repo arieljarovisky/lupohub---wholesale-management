@@ -32,6 +32,7 @@ const Catalogs = lazyWithReload(() => import('./components/Catalogs'));
 const Orders = lazyWithReload(() => import('./components/Orders'));
 const Visits = lazyWithReload(() => import('./components/Visits'));
 const Settings = lazyWithReload(() => import('./components/Settings'));
+const Billing = lazyWithReload(() => import('./components/Billing'));
 const CreateOrder = lazyWithReload(() => import('./components/CreateOrder'));
 const CreateOrderTemplate = lazyWithReload(() => import('./components/CreateOrderTemplate'));
 const Customers = lazyWithReload(() => import('./components/Customers'));
@@ -798,33 +799,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'facturacion' && (
             <Suspense fallback={<ViewFallback />}>
-              <Settings
-                attributes={attributes}
-                onCreateAttribute={handleCreateAttribute}
-                onDeleteAttribute={handleDeleteAttribute}
-                onRefreshData={loadData}
-                role={currentUser.role}
-                users={users}
-                onUpdateUser={handleUpdateUser}
-                onCreateUser={handleCreateUser}
-                onDeleteUser={handleDeleteUser}
-                orders={orders}
-                currentUser={currentUser}
-                transportes={transportes}
-                onCreateTransporte={async (name, address) => {
-                  const t = await api.createTransporte(name, address);
-                  setTransportes(prev => [...prev, t]);
-                }}
-                onUpdateTransporte={async (id, name, address) => {
-                  const t = await api.updateTransporte(id, name, address);
-                  setTransportes(prev => prev.map(x => x.id === id ? t : x));
-                }}
-                onDeleteTransporte={async (id) => {
-                  await api.deleteTransporte(id);
-                  setTransportes(prev => prev.filter(x => x.id !== id));
-                }}
-                initialTab="facturacion"
-              />
+              <Billing role={currentUser.role} customers={customers} />
             </Suspense>
           )}
           {baseView === 'settings' && (

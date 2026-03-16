@@ -15,6 +15,7 @@ import customersRoutes from './routes/customers.routes';
 import transportesRoutes from './routes/transportes.routes';
 import priceListsRoutes from './routes/price_lists.routes';
 import catalogsRoutes from './routes/catalogs.routes';
+import billingRoutes from './routes/billing.routes';
 import afipRoutes from './routes/afip.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
@@ -82,6 +83,7 @@ app.use('/api/transportes', transportesRoutes);
 app.use('/api/price-lists', priceListsRoutes);
 app.use('/api/catalogs', catalogsRoutes);
 app.use('/api/afip', afipRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Health Check
 app.get('/health', (req, res) => {

@@ -947,6 +947,38 @@ export const api = {
     }, { message: 'Error', id: '', numero_despacho: '', total_asignados: 0 }, 'asignarDespachoATodos');
   },
 
+  // ============ FACTURACIÓN (Facturas + Notas de crédito) ============
+
+  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
+    const queryParams = new URLSearchParams();
+    if (params?.desde) queryParams.append('desde', params.desde);
+    if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.tipo) queryParams.append('tipo', params.tipo);
+    const qs = queryParams.toString();
+    return handleRequest(async () => {
+      return await request<any[]>(`/billing${qs ? '?' + qs : ''}`, 'GET');
+    }, [], 'getBilling');
+  },
+
+  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
+    const queryParams = new URLSearchParams();
+    if (params?.desde) queryParams.append('desde', params.desde);
+    if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.tipo) queryParams.append('tipo', params.tipo);
+    const qs = queryParams.toString();
+    const blob = await getBlob(`/billing/export${qs ? '?' + qs : ''}`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `facturacion_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
     const rows = await request<any[]>('/catalogs', 'GET');
