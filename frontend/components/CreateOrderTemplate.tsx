@@ -173,7 +173,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const newRows: TemplateRow[] = [];
       const defaultQtys: Record<string, number> = {};
       sizes.forEach(s => { defaultQtys[s.code] = 0; });
-      const price = Number((product as any).base_price) || 0;
+      const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
       byColor.forEach((vars, colorCode) => {
         const first = vars[0];
         const colorName = first?.color_name ?? colorCode;
@@ -253,6 +253,23 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setRows(prev => prev.filter(r => r.id !== id));
   };
 
+  /** Actualiza el precio de una fila (edición manual). */
+  const updateRowPrice = (rowId: string, value: number) => {
+    const n = Math.max(0, Number(value));
+    if (isNaN(n)) return;
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, price: n } : r));
+  };
+
+  /** Precio del producto según la lista de precios (products ya vienen con precio de la lista seleccionada). */
+  const getPriceFromList = (productId: string, productSku: string, fallbackBasePrice?: number): number => {
+    const p = products.find((x: any) => x.product_id === productId || x.base_sku === productSku || (x as any).sku === productSku || x.id === productId);
+    if (p != null) {
+      const listPrice = Number((p as any).price);
+      if (!isNaN(listPrice) && listPrice >= 0) return listPrice;
+    }
+    return Math.max(0, Number(fallbackBasePrice) || 0);
+  };
+
   /** Vuelve a agregar al pedido los colores de un artículo que ya está cargado (p. ej. si eliminaste una fila de color). */
   const addMissingColorsToArticle = async (productCode: string) => {
     const code = (productCode || '').trim();
@@ -274,7 +291,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const existingColorCodes = new Set(rows.filter(r => r.productCode === product.sku).map(r => r.colorCode));
       const defaultQtys: Record<string, number> = {};
       sizes.forEach(s => { defaultQtys[s.code] = 0; });
-      const price = Number((product as any).base_price) || 0;
+      const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
       const newRows: TemplateRow[] = [];
       byColor.forEach((vars, colorCode) => {
         if (existingColorCodes.has(colorCode)) return;
@@ -712,7 +729,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </td>
                               );
                             })}
-                            <td className="py-2.5 px-3 text-right font-mono text-sm text-emerald-400">${row.price.toLocaleString()}</td>
+                            <td className="py-2.5 px-3 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={row.price}
+                                onChange={(e) => updateRowPrice(row.id, e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                                className="w-20 min-w-[72px] h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-2 py-1 text-right text-emerald-400 font-mono text-sm tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                              />
+                            </td>
                             <td className="py-2.5 px-2">
                               <button
                                 type="button"
