@@ -46,7 +46,7 @@ export const getCustomers = async (req: Request, res: Response) => {
       if (transportesByCustomer[custId])
         transportesByCustomer[custId].push({ id: link.transporteId, name: link.transporteName ?? link.transporteId, address: link.transporteAddress ?? undefined });
     }
-    const result = customers.map((c: any) => toCustomer(c, transportesByCustomer[c.id] ?? []));
+    const result = customers.map((c: any) => ({ ...c, transportes: transportesByCustomer[c.id] ?? [] }));
     res.json(result);
   } catch (error: any) {
     console.error('getCustomers:', error);
@@ -90,10 +90,16 @@ export const createCustomer = async (req: Request, res: Response) => {
     const condicionIva = (body.condicionIva ?? '').toString().trim() || null;
     const priceListId = body.priceListId?.trim() || null;
 
+    // Guardar nombre de contacto y razón social en columnas separadas:
+    // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
+    // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
+    const sqlName = name || null;
+    const sqlBusinessName = businessName || name || null;
+
     await execute(
       `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, name || businessName, businessName || name, email, address, city, cuit, phone, condicionIva, priceListId]
+      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, condicionIva, priceListId]
     );
 
     const created = await get(
@@ -276,7 +282,7 @@ export const importCustomers = async (req: Request, res: Response) => {
 /** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
 export const bulkUpdateCuit = async (req: Request, res: Response) => {
   try {
-    const body = req.body as { updates?: Array<{ email?: string; businessName?: string; cuit: string }> };
+    const body = req.body as { updates?: Array<{ email?: string; businessName?: string; cuit: string; newBusinessName?: string; condicionIva?: string }> };
     const updates = Array.isArray(body.updates) ? body.updates : [];
     let updated = 0;
     let notFound = 0;
@@ -287,6 +293,8 @@ export const bulkUpdateCuit = async (req: Request, res: Response) => {
       const cuit = (u.cuit ?? '').toString().trim().replace(/\D/g, '').slice(0, 11);
       const email = (u.email ?? '').toString().trim() || null;
       const businessName = (u.businessName ?? '').toString().trim() || null;
+      const newBusinessName = (u.newBusinessName ?? '').toString().trim() || null;
+      const condicionIva = (u.condicionIva ?? '').toString().trim() || null;
 
       if (!cuit) {
         errors.push({ row: i + 1, message: 'CUIT vacío' });
@@ -302,14 +310,25 @@ export const bulkUpdateCuit = async (req: Request, res: Response) => {
         customer = await get('SELECT id FROM customers WHERE LOWER(TRIM(email)) = LOWER(?) LIMIT 1', [email]);
       }
       if (!customer && businessName) {
-        customer = await get('SELECT id FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
+        customer = await get('SELECT id, business_name, condicion_iva FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
       }
       if (!customer) {
         notFound++;
         continue;
       }
 
-      await execute('UPDATE customers SET cuit = ? WHERE id = ?', [cuit, customer.id]);
+      const setClauses: string[] = ['cuit = ?'];
+      const params: any[] = [cuit];
+      if (newBusinessName) {
+        setClauses.push('business_name = ?');
+        params.push(newBusinessName);
+      }
+      if (condicionIva) {
+        setClauses.push('condicion_iva = ?');
+        params.push(condicionIva);
+      }
+      params.push(customer.id);
+      await execute(`UPDATE customers SET ${setClauses.join(', ')} WHERE id = ?`, params);
       updated++;
     }
 

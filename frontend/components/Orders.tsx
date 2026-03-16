@@ -35,7 +35,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
   const [afipConfigured, setAfipConfigured] = useState(false);
+  const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
+  const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
+  const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
+  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
@@ -74,6 +78,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   useEffect(() => {
     if (!canEmitirFactura) return;
     api.getAfipStatus().then(r => setAfipConfigured(r?.configured ?? false)).catch(() => setAfipConfigured(false));
+    api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
 
   const getStatusColor = (status: OrderStatus) => {
@@ -227,7 +232,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!order.invoice) return '';
     const inv = order.invoice;
     const customer = customers.find(c => c.id === order.customerId);
-    const remitente = getRemitente();
+    const localRemitente = getRemitente();
+    const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
+      ? { ...issuerFromApi, logoUrl: localRemitente.logoUrl }
+      : localRemitente;
     const items = order.items.map(enrichItem);
     const formatDate = (d: string) => {
       const x = new Date(d);
@@ -484,6 +492,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+<<<<<<< HEAD
                         showConfirm({
                           title: 'Emitir factura AFIP',
                           message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
@@ -499,6 +508,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               .finally(() => setEmitiendoFacturaId(null));
                           }
                         });
+=======
+                        setOrderToEmitFactura(order);
+                        setEmitirFacturaTipo('auto');
+                        setShowEmitirFacturaModal(true);
+>>>>>>> 87c22027c73db3293285ebb691ae99a88d40e3e8
                       }}
                       disabled={!!emitiendoFacturaId}
                       className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
@@ -595,6 +609,59 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
         )}
       </div>
+
+      {/* Modal: elegir tipo de factura (A o B) antes de emitir */}
+      {showEmitirFacturaModal && orderToEmitFactura && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
+            <p className="text-sm text-slate-400 mb-4">Pedido #{orderToEmitFactura.id} — {orderToEmitFactura.customerBusinessName || getCustomerName(orderToEmitFactura)}</p>
+            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tipo de comprobante</label>
+            <div className="space-y-2 mb-6">
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'auto'} onChange={() => setEmitirFacturaTipo('auto')} className="rounded border-slate-500 text-emerald-500" />
+                <span className="text-white">Automático</span>
+                <span className="text-slate-500 text-xs">(según condición IVA del cliente)</span>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'A'} onChange={() => setEmitirFacturaTipo('A')} className="rounded border-slate-500 text-emerald-500" />
+                <span className="text-white font-medium">Factura A</span>
+                <span className="text-slate-500 text-xs">(cliente con CUIT, Responsable Inscripto)</span>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'B'} onChange={() => setEmitirFacturaTipo('B')} className="rounded border-slate-500 text-emerald-500" />
+                <span className="text-white font-medium">Factura B</span>
+                <span className="text-slate-500 text-xs">(Consumidor final / Monotributo)</span>
+              </label>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button type="button" onClick={() => { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); }} disabled={!!emitiendoFacturaId} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!orderToEmitFactura) return;
+                  const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
+                  setEmitiendoFacturaId(orderToEmitFactura.id);
+                  api.emitirFactura(orderToEmitFactura.id, cbteTipo != null ? { cbteTipo } : undefined)
+                    .then((res) => {
+                      onFacturaEmitida?.(orderToEmitFactura.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                      showToast('success', `Factura emitida. CAE ${res.cae}`);
+                      setShowEmitirFacturaModal(false);
+                      setOrderToEmitFactura(null);
+                    })
+                    .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                    .finally(() => setEmitiendoFacturaId(null));
+                }}
+                disabled={!!emitiendoFacturaId}
+                className="px-5 py-2.5 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 transition disabled:opacity-50"
+              >
+                {emitiendoFacturaId === orderToEmitFactura?.id ? <Clock size={18} className="animate-pulse" /> : <Receipt size={18} />}
+                {emitiendoFacturaId === orderToEmitFactura?.id ? 'Emitiendo…' : 'Emitir factura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: elegir transporte para el remito */}
       {remitoOrder && (() => {

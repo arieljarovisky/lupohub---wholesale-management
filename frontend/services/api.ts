@@ -449,9 +449,19 @@ export const api = {
     return res ?? { configured: false };
   },
 
-  /** Emite factura electrónica AFIP para un pedido. Requiere token y rol ADMIN o Depósito. */
-  emitirFactura: async (orderId: string): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number }> => {
-    return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST');
+  /** Datos del emisor desde el servidor (CUIT, razón social, etc.) para mostrar en la factura. */
+  getAfipIssuer: async (): Promise<{ cuit: string; businessName: string; address: string; city: string }> => {
+    try {
+      const res = await request<any>('/afip/issuer', 'GET');
+      return { cuit: res?.cuit ?? '', businessName: res?.businessName ?? '', address: res?.address ?? '', city: res?.city ?? '' };
+    } catch {
+      return { cuit: '', businessName: '', address: '', city: '' };
+    }
+  },
+
+  /** Emite factura electrónica AFIP para un pedido. cbteTipo: 1 = Factura A, 6 = Factura B; si no se envía, se elige por condición IVA del cliente. */
+  emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number }> => {
+    return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {});
   },
 
   /** Obtiene los datos de la factura AFIP asociada a un pedido (si existe). */

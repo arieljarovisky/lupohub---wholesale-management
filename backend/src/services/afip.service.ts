@@ -136,13 +136,28 @@ export function isAfipConfigured(): boolean {
   return hasToken && (hasCertPaths || hasCertEnv);
 }
 
+/** Datos del emisor para mostrar en la factura (desde env). El front puede usarlos si no tiene remitente en localStorage. */
+export function getAfipIssuerData(): { cuit: string; businessName?: string; address?: string; city?: string } | null {
+  const cuit = process.env.AFIP_CUIT?.trim();
+  if (!cuit) return null;
+  const cuitSolo = cuit.replace(/\D/g, '');
+  if (cuitSolo.length !== 11) return null;
+  return {
+    cuit: cuitSolo,
+    businessName: process.env.AFIP_RAZON_SOCIAL?.trim() || undefined,
+    address: process.env.AFIP_ADDRESS?.trim() || undefined,
+    city: process.env.AFIP_CITY?.trim() || undefined
+  };
+}
+
 /**
  * Emite una factura electrónica en AFIP por el pedido dado.
- * Regla:
+ * Regla (si no se fuerza tipo):
  * - Responsable Inscripto => Factura A
  * - Otros (Monotributo, Exento, CF, etc.) => Factura B
+ * @param forceCbteTipo - Si es 1 o 6, se usa ese tipo (A o B) en lugar de calcular por cliente.
  */
-export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip): Promise<InvoiceResult> {
+export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip, forceCbteTipo?: 1 | 6): Promise<InvoiceResult> {
   const config = getConfig();
   const { cuit, puntoVta } = config;
 
@@ -153,24 +168,37 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const esResponsableInscripto =
     condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
 
-  const tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
-  const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-  const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-
-  let condicionIva: number;
-  if (!tieneCuit) {
-    condicionIva = CONSUMIDOR_FINAL;
-  } else if (esResponsableInscripto) {
-    condicionIva = IVA_RESPONSABLE_INSCRIPTO;
-  } else if (condicionIvaDesc.includes('monotrib')) {
-    condicionIva = 6; // Responsable Monotributo
-  } else if (condicionIvaDesc.includes('exento')) {
-    condicionIva = 4; // IVA Sujeto Exento
-  } else if (condicionIvaDesc.includes('consumidor final')) {
-    condicionIva = CONSUMIDOR_FINAL;
+  let tipoCbte: number;
+  if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B) {
+    tipoCbte = forceCbteTipo;
   } else {
-    // Fallback genérico si no se reconoce la descripción
-    condicionIva = CONSUMIDOR_FINAL;
+    tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
+  }
+
+  let docTipo: number;
+  let docNro: number;
+  let condicionIva: number;
+  if (tipoCbte === TIPO_CBTE_A) {
+    if (!tieneCuit) throw new Error('Para Factura A el cliente debe tener CUIT cargado.');
+    docTipo = DOC_TIPO_CUIT;
+    docNro = parseInt(cuitCliente, 10);
+    condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+  } else {
+    docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+    docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+    if (!tieneCuit) {
+      condicionIva = CONSUMIDOR_FINAL;
+    } else if (esResponsableInscripto) {
+      condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+    } else if (condicionIvaDesc.includes('monotrib')) {
+      condicionIva = 6; // Responsable Monotributo
+    } else if (condicionIvaDesc.includes('exento')) {
+      condicionIva = 4; // IVA Sujeto Exento
+    } else if (condicionIvaDesc.includes('consumidor final')) {
+      condicionIva = CONSUMIDOR_FINAL;
+    } else {
+      condicionIva = CONSUMIDOR_FINAL;
+    }
   }
 
   const total = Number(order.total) || 0;
