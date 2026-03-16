@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight, List } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, OrderItem, Role, PriceList } from '../types';
 import { api } from '../services/api';
@@ -32,6 +32,9 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const hideStock = role === Role.SELLER || role === Role.CUSTOMER;
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -75,6 +78,24 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
     if (isCustomerLocked && customers.length === 1) setSelectedCustomerId(customers[0].id);
   }, [customers, selectedCustomerId, isCustomerLocked]);
+
+  const filteredCustomers = React.useMemo(() => {
+    const q = clientFilter.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(c => {
+      const name = (c.businessName || c.name || '').toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [customers, clientFilter]);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(e.target as Node)) setClientDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
   const searchTrimmed = searchTerm.trim().toLowerCase();
   const searchWords = searchTrimmed ? searchTrimmed.split(/\s+/).filter(Boolean) : [];
@@ -245,21 +266,37 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           </div>
         ) : (
           <>
-            <select
-              disabled={!!initialOrder || isReadOnly}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
-              value={selectedCustomerId}
-              onChange={(e) => setSelectedCustomerId(e.target.value)}
-              style={{ colorScheme: 'dark' }}
-              aria-label="Seleccionar cliente"
-            >
-              <option value="">Seleccionar cliente...</option>
-              {customers.map(c => (
-                <option key={c.id} value={c.id} style={{ color: '#0f172a', backgroundColor: '#fff' }}>
-                  {c.businessName || c.name || `Cliente`}
-                </option>
-              ))}
-            </select>
+            <div ref={clientDropdownRef} className="relative">
+              <input
+                type="text"
+                disabled={!!initialOrder || isReadOnly}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 pr-10 text-sm focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 text-white min-h-[48px]"
+                value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
+                onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
+                onFocus={() => setClientDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
+                placeholder="Escribí para filtrar o seleccionar cliente..."
+                aria-label="Seleccionar cliente"
+              />
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+              {clientDropdownOpen && (
+                <ul className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-700 bg-slate-900 shadow-xl py-1">
+                  {filteredCustomers.length === 0 ? (
+                    <li className="px-3 py-2.5 text-slate-500 text-sm">Ningún cliente coincide</li>
+                  ) : (
+                    filteredCustomers.map(c => (
+                      <li
+                        key={c.id}
+                        className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
+                        onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id); setClientFilter(''); setClientDropdownOpen(false); }}
+                      >
+                        {c.businessName || c.name || 'Cliente'}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
             {customers.length === 0 && !initialOrder && (
               <p className="text-amber-400/90 text-xs mt-2 flex items-center gap-1">
                 <AlertCircle size={14} /> Agregá clientes en la sección Clientes para poder elegir uno.

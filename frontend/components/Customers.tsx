@@ -227,8 +227,81 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   // 2. Customer Detail View (Drill down Level 1)
   if (selectedCustomer) {
     const stats = getCustomerStats(selectedCustomer.id);
+
+    const editModal = (isCreating || editingCustomer) && (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div className="bg-slate-900 rounded-3xl w-full max-w-lg border border-slate-700 shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
+            <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
+            <button
+              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+              className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="p-6 space-y-4 overflow-y-auto">
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Razón Social</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newBusinessName} onChange={(e) => setNewBusinessName(e.target.value)} placeholder="Ej: Lenceria Perez SRL" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Nombre Contacto</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newContactName} onChange={(e) => setNewContactName(e.target.value)} placeholder="Ej: Juan Perez" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Email</label>
+              <input type="email" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="contacto@empresa.com" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT / CUIL (para facturación)</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono" value={newCuit} onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} placeholder="20-12345678-9 (solo números)" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Teléfono</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Ej: 11 1234-5678" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCondicionIva} onChange={(e) => setNewCondicionIva(e.target.value)} placeholder="Ej: Responsable Inscripto, Monotributo, Consumidor Final" />
+            </div>
+            {transportes.length > 0 && (
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (express para despacho)</label>
+                <div className="flex flex-wrap gap-2">
+                  {transportes.map(t => (
+                    <label key={t.id} className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-750 transition">
+                      <input type="checkbox" checked={selectedTransporteIds.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTransporteIds(prev => [...prev, t.id]); else setSelectedTransporteIds(prev => prev.filter(id => id !== t.id)); }} className="rounded border-slate-600 text-blue-500 focus:ring-blue-500" />
+                      <span className="text-sm text-slate-200">{t.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Dirección</label>
+                <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newAddress} onChange={(e) => setNewAddress(e.target.value)} placeholder="Calle 123" />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Ciudad</label>
+                <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCity} onChange={(e) => setNewCity(e.target.value)} placeholder="CABA" />
+              </div>
+            </div>
+          </div>
+          <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
+            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
+            <button onClick={handleSave} disabled={!newBusinessName || !newEmail} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all">
+              <Save size={18} />
+              {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
     
     return (
+      <>
       <div className="animate-fade-in space-y-6 pb-12">
         {/* Navigation Header */}
         <div className="flex items-center justify-between">
@@ -434,6 +507,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            )}
         </div>
       </div>
+      {editModal}
+    </>
     );
   }
 
@@ -551,7 +626,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     </button>
                   )}
                   {role === Role.ADMIN && (
-                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded font-mono">ID: {customer.sellerId}</span>
+                    <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded font-mono" title={customer.id}>ID: {customer.id?.slice(0, 8) || '—'}</span>
                   )}
                 </div>
               </div>

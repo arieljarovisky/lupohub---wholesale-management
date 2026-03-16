@@ -50,6 +50,7 @@ const ViewFallback = () => (
 const App: React.FC = () => {
   const { showToast } = useNotification();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
   // Login State
@@ -93,44 +94,44 @@ const App: React.FC = () => {
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
 
-  // Fetch Data on Login
+  // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
     const savedUser = localStorage.getItem('lupo_current_user');
     const savedToken = localStorage.getItem('lupo_api_token');
     if (savedToken) setAuthToken(savedToken);
 
-    if (!currentUser && savedToken) {
-      // Refrescar usuario desde el backend para tener priceListId (y datos) actualizados
-      api.refreshUser()
-        .then((res) => {
-          if (res.user) {
-            setCurrentUser(res.user);
-            try {
-              localStorage.setItem('lupo_current_user', JSON.stringify(res.user));
-              if (res.token) localStorage.setItem('lupo_api_token', res.token);
-              if (res.token) setAuthToken(res.token);
-            } catch {}
-          } else if (savedUser) {
-            try {
-              setCurrentUser(JSON.parse(savedUser) as User);
-            } catch {}
-          }
-        })
-        .catch(() => {
-          if (savedUser) {
-            try {
-              setCurrentUser(JSON.parse(savedUser) as User);
-            } catch {}
-          }
-        });
+    if (!savedToken) {
+      setAuthChecked(true);
       return;
     }
-    if (savedUser && !currentUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser) as User);
-      } catch {}
-    }
-    // Restore last view if available and allowed
+
+    api.refreshUser()
+      .then((res) => {
+        if (res.user) {
+          setCurrentUser(res.user);
+          try {
+            localStorage.setItem('lupo_current_user', JSON.stringify(res.user));
+            if (res.token) localStorage.setItem('lupo_api_token', res.token);
+            if (res.token) setAuthToken(res.token);
+          } catch {}
+        } else if (savedUser) {
+          try {
+            setCurrentUser(JSON.parse(savedUser) as User);
+          } catch {}
+        }
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        try {
+          if (savedUser) setCurrentUser(JSON.parse(savedUser) as User);
+        } catch {}
+        setAuthChecked(true);
+      });
+  }, []);
+
+  // Restore view and load data when currentUser is set
+  useEffect(() => {
+    if (!currentUser) return;
     const savedView = localStorage.getItem('lupo_current_view');
     if (savedView && currentUser) {
       const role = currentUser.role;
@@ -154,9 +155,7 @@ const App: React.FC = () => {
         setCurrentView(savedView);
       }
     }
-    if (currentUser) {
-      loadData();
-    }
+    loadData();
   }, [currentUser]);
 
   // Persist current view on changes
@@ -307,7 +306,7 @@ const App: React.FC = () => {
     if (!currentUser) return [];
     if (currentUser.role === Role.CUSTOMER) return myCustomer ? [myCustomer] : [];
     if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE || currentUser.role === Role.DEPOSITO) return customers;
-    return customers.filter(c => c.sellerId === currentUser.id);
+    return customers.filter(c => !c.sellerId || c.sellerId === currentUser.id);
   }, [currentUser, myCustomer, customers]);
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
@@ -573,6 +572,17 @@ const App: React.FC = () => {
     setActivePickingOrder(null);
     setCurrentView('orders');
   };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-[100dvh] min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 size={40} className="text-blue-500 animate-spin" />
+          <p className="text-slate-400 text-sm">Cargando sesión...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (

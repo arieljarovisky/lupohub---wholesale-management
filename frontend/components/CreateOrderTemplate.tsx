@@ -49,6 +49,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   onPriceListChange
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
@@ -84,6 +87,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       localStorage.removeItem(DRAFT_KEY);
     }
   }, [customers]);
+
+  const filteredCustomers = useMemo(() => {
+    const q = clientFilter.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(c => {
+      const name = (c.businessName || c.name || '').toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [customers, clientFilter]);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(e.target as Node)) setClientDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
   /** Guardar borrador (debounced) cuando hay cliente o filas. */
   const saveDraft = useCallback((customerId: string, date: string, draftRows: TemplateRow[]) => {
@@ -544,16 +565,35 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
           </div>
         ) : (
-          <select
-            className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
-            value={selectedCustomerId}
-            onChange={(e) => setSelectedCustomerId(e.target.value)}
-          >
-            <option value="">Seleccionar cliente...</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.businessName}</option>
-            ))}
-          </select>
+          <div ref={clientDropdownRef} className="relative">
+            <input
+              type="text"
+              className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 pr-10 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
+              value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
+              onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
+              onFocus={() => setClientDropdownOpen(true)}
+              onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
+              placeholder="Escribí para filtrar o seleccionar cliente..."
+            />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+            {clientDropdownOpen && (
+              <ul className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-700/80 bg-slate-900 shadow-xl py-1">
+                {filteredCustomers.length === 0 ? (
+                  <li className="px-3 py-2.5 text-slate-500 text-sm">Ningún cliente coincide</li>
+                ) : (
+                  filteredCustomers.map(c => (
+                    <li
+                      key={c.id}
+                      className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
+                      onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id); setClientFilter(''); setClientDropdownOpen(false); }}
+                    >
+                      {c.businessName || c.name || 'Cliente'}
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+          </div>
         )}
       </section>
 
