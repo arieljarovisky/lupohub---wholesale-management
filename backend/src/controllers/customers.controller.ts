@@ -317,18 +317,18 @@ export const bulkUpdateCuit = async (req: Request, res: Response) => {
         continue;
       }
 
-      const updates: string[] = ['cuit = ?'];
+      const setClauses: string[] = ['cuit = ?'];
       const params: any[] = [cuit];
       if (newBusinessName) {
-        updates.push('business_name = ?');
+        setClauses.push('business_name = ?');
         params.push(newBusinessName);
       }
       if (condicionIva) {
-        updates.push('condicion_iva = ?');
+        setClauses.push('condicion_iva = ?');
         params.push(condicionIva);
       }
       params.push(customer.id);
-      await execute(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params);
+      await execute(`UPDATE customers SET ${setClauses.join(', ')} WHERE id = ?`, params);
       updated++;
     }
 
