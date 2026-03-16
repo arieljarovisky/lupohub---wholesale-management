@@ -563,11 +563,23 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <XCircle size={16} />
                     </button>
                   )}
-                  {role === Role.ADMIN && !order.invoice && (
+                  {role === Role.ADMIN && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (order.invoice) {
+                          showConfirm({
+                            title: 'Eliminar pedido facturado',
+                            message: 'Este pedido tiene factura emitida en AFIP. Eliminarlo solo borrará el registro en esta app; la factura seguirá existiendo en AFIP. Para anular el efecto fiscal deberías emitir una nota de crédito. ¿Eliminar igual el pedido de la lista?',
+                            confirmLabel: 'Eliminar de la lista',
+                            onConfirm: () => onDeleteOrder?.(order.id)
+                          });
+                        } else {
+                          showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) });
+                        }
+                      }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
-                      title="Eliminar pedido definitivamente"
+                      title={order.invoice ? 'Eliminar pedido de la lista (la factura AFIP sigue vigente)' : 'Eliminar pedido definitivamente'}
                     >
                       <Trash2 size={16} />
                     </button>
