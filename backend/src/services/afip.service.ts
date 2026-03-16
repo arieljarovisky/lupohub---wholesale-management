@@ -132,11 +132,12 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const impNeto = Math.round((total / 1.21) * 100) / 100;
   const impIva = Math.round((total - impNeto) * 100) / 100;
 
+  const dateVal = order.date as string | Date;
   const dateStr =
-    order.date instanceof Date
-      ? order.date.toISOString().split('T')[0]
-      : typeof order.date === 'string'
-        ? order.date
+    dateVal instanceof Date
+      ? dateVal.toISOString().split('T')[0]
+      : typeof dateVal === 'string'
+        ? dateVal
         : new Date().toISOString().split('T')[0];
   const fecha = dateStr.replace(/-/g, '');
   const cbteFch = parseInt(fecha, 10);

@@ -10,4 +10,6 @@ router.post('/', orders_controller_1.createOrder);
 router.patch('/:id/status', orders_controller_1.updateOrderStatus);
 router.put('/:id', orders_controller_1.updateOrder);
 router.delete('/:id', orders_controller_1.deleteOrder);
+router.get('/:id/invoice', orders_controller_1.getOrderInvoice);
+router.post('/:id/emitir-factura', auth_1.authMiddleware, orders_controller_1.emitirFactura);
 exports.default = router;

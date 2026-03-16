@@ -42,11 +42,11 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     try {
         let ordersRow = yield (0, db_1.query)("SELECT * FROM orders ORDER BY date DESC");
         const user = req.user;
@@ -100,8 +100,19 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 });
             }
         }
+        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
+        const invoiceByOrderId = {};
+        for (const inv of invoicesRows) {
+            invoiceByOrderId[inv.order_id] = {
+                cae: inv.cae,
+                caeFchVto: (_f = inv.cae_fch_vto) !== null && _f !== void 0 ? _f : undefined,
+                cbteDesde: inv.cbte_desde,
+                cbteHasta: inv.cbte_hasta,
+                cbteTipo: inv.cbte_tipo
+            };
+        }
         const ordersFull = ordersRow.map((order) => {
-            var _a;
+            var _a, _b;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
@@ -111,7 +122,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 total: Number(order.total),
                 pickedBy: (_a = order.picked_by) !== null && _a !== void 0 ? _a : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
-                items: itemsByOrderId[order.id] || []
+                items: itemsByOrderId[order.id] || [],
+                invoice: (_b = invoiceByOrderId[order.id]) !== null && _b !== void 0 ? _b : undefined
             });
         });
         res.json(ordersFull);
@@ -180,20 +192,28 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId }));
         const items = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE i.order_id = ?
     `, [orderId]);
         const itemsMapped = items.map((row) => {
-            var _a;
+            var _a, _b, _c, _d, _e;
             return ({
                 variantId: row.variantId,
                 productId: row.productId,
                 quantity: row.quantity,
                 picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
-                priceAtMoment: Number(row.priceAtMoment)
+                priceAtMoment: Number(row.priceAtMoment),
+                sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
+                productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
+                sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
+                colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
             });
         });
         const orderResponse = {
@@ -300,20 +320,28 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE i.order_id = ?
     `, [id]);
         const itemsMapped = itemsRows.map((row) => {
-            var _a;
+            var _a, _b, _c, _d, _e;
             return ({
                 variantId: row.variantId,
                 productId: row.productId,
                 quantity: row.quantity,
                 picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
-                priceAtMoment: Number(row.priceAtMoment)
+                priceAtMoment: Number(row.priceAtMoment),
+                sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
+                productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
+                sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
+                colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
             });
         });
         res.json({
@@ -359,3 +387,76 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.deleteOrder = deleteOrder;
+/** Obtiene la factura AFIP asociada a un pedido (si existe). */
+const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.params;
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const inv = yield (0, db_1.get)('SELECT id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at FROM invoices WHERE order_id = ?', [id]);
+        if (!inv)
+            return res.status(404).json({ message: 'Este pedido no tiene factura emitida' });
+        res.json({
+            id: inv.id,
+            orderId: inv.order_id,
+            cae: inv.cae,
+            caeFchVto: (_a = inv.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
+            puntoVta: inv.punto_venta,
+            cbteTipo: inv.cbte_tipo,
+            cbteDesde: inv.cbte_desde,
+            cbteHasta: inv.cbte_hasta,
+            createdAt: inv.created_at
+        });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Error obteniendo factura' });
+    }
+});
+exports.getOrderInvoice = getOrderInvoice;
+/** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
+const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+        return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total FROM orders WHERE id = ?', [id]);
+        if (!orderRow)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
+        if (existingInv)
+            return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
+        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+        if (!customerRow)
+            return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+        const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit });
+        const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
+        const invoiceId = uuidv4();
+        yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [invoiceId, id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta]);
+        res.status(201).json({
+            id: invoiceId,
+            orderId: id,
+            cae: result.cae,
+            caeFchVto: result.caeFchVto,
+            puntoVta: result.puntoVta,
+            cbteTipo: result.cbteTipo,
+            cbteDesde: result.cbteDesde,
+            cbteHasta: result.cbteHasta
+        });
+    }
+    catch (error) {
+        console.error('emitirFactura:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo factura AFIP';
+        const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.emitirFactura = emitirFactura;

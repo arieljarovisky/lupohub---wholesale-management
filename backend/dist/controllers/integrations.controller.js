@@ -58,6 +58,8 @@ const TN_TOKEN_URL = 'https://www.tiendanube.com/apps/authorize/token';
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 /** Pausa entre requests a Tienda Nube para no superar el límite de solicitudes (configurable con TN_RATE_LIMIT_DELAY_MS, default 800ms). */
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
+/** Máximo de publicaciones a traer al sincronizar con Mercado Libre (evitar timeout). Configurable con ML_SYNC_MAX_ITEMS (default 5000). */
+const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 function putTnVariantWithRetry(url_1, body_1, headers_1) {
@@ -542,8 +544,8 @@ const normalizeSizesInTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
                 }
             }
             page++;
-            if (page > 100)
-                hasMore = false;
+            if (page > 300)
+                hasMore = false; // hasta 300 páginas × 50 = 15.000 productos
         }
         res.json({
             message: 'Normalización de talles en Tienda Nube completada',
@@ -691,11 +693,13 @@ const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                 allItems = allItems.concat(results);
                 logs.push(`[ML] Página ${Math.floor(offset / limit) + 1}: ${results.length} items (total acumulado: ${allItems.length})`);
                 offset += limit;
-                // Continuar si hay más items
+                // Continuar si hay más items (respetar total de la API y límite configurable)
                 const total = ((_a = searchRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) || 0;
                 if (offset >= total || results.length === 0)
                     break;
-            } while (offset < 500); // Máximo 500 items para evitar timeout
+                if (allItems.length >= ML_SYNC_MAX_ITEMS)
+                    break;
+            } while (true);
         }
         catch (searchError) {
             logs.push(`[ML ERROR] Error buscando items: ${((_c = (_b = searchError.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.message) || searchError.message}`);
@@ -1750,8 +1754,22 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
             }
             for (const [productId, variantIdsInProduct] of tnProductIds) {
                 try {
-                    const varRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`, { headers: tnHeaders });
-                    const tnVariants = varRes.data || [];
+                    // Paginar variantes de TN para traer todas (la API devuelve por defecto una cantidad limitada por página)
+                    let tnVariants = [];
+                    const tnPerPage = 200;
+                    let tnPage = 1;
+                    let hasMoreTn = true;
+                    while (hasMoreTn) {
+                        const varRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`, { headers: tnHeaders, params: { page: tnPage, per_page: tnPerPage } });
+                        const chunk = Array.isArray(varRes.data) ? varRes.data : [];
+                        tnVariants = tnVariants.concat(chunk);
+                        if (chunk.length < tnPerPage)
+                            hasMoreTn = false;
+                        else
+                            tnPage++;
+                        if (tnPage > 50)
+                            hasMoreTn = false;
+                    }
                     for (const variantId of variantIdsInProduct) {
                         const tnVid = variantToTnVariant.get(variantId);
                         const tv = tnVariants.find((v) => String(v.id) === String(tnVid));
@@ -2889,10 +2907,7 @@ const getTiendaNubeProductVariants = (req, res) => __awaiter(void 0, void 0, voi
             'Authentication': `bearer ${integration.access_token}`,
             'User-Agent': TN_USER_AGENT
         };
-        const [productRes, variantsRes] = yield Promise.all([
-            axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true }),
-            axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, { headers, validateStatus: () => true })
-        ]);
+        const productRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true });
         if (productRes.status !== 200) {
             const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
             return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
@@ -2911,11 +2926,23 @@ const getTiendaNubeProductVariants = (req, res) => __awaiter(void 0, void 0, voi
             if (isColorAttr(n))
                 colorIdx = i;
         });
+        // Paginar variantes: la API devuelve por defecto una cantidad limitada por página
         let variantsList = [];
-        if (variantsRes.status === 200 && Array.isArray(variantsRes.data)) {
-            variantsList = variantsRes.data;
+        const perPage = 200;
+        let vPage = 1;
+        let hasMoreVariants = true;
+        while (hasMoreVariants) {
+            const variantsRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, { headers, params: { page: vPage, per_page: perPage }, validateStatus: () => true });
+            const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
+            variantsList = variantsList.concat(chunk);
+            if (chunk.length < perPage)
+                hasMoreVariants = false;
+            else
+                vPage++;
+            if (vPage > 50)
+                hasMoreVariants = false; // seguridad: máx 50 páginas = 10.000 variantes
         }
-        else if (Array.isArray(p === null || p === void 0 ? void 0 : p.variants)) {
+        if (variantsList.length === 0 && Array.isArray(p === null || p === void 0 ? void 0 : p.variants)) {
             variantsList = p.variants;
         }
         const toStr = (x) => { var _a, _b, _c; return (_c = (x != null && typeof x === 'object' ? ((_b = (_a = x.es) !== null && _a !== void 0 ? _a : x.pt) !== null && _b !== void 0 ? _b : x.en) : x)) !== null && _c !== void 0 ? _c : ''; };

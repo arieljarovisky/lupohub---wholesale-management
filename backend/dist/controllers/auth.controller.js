@@ -86,7 +86,7 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.refreshToken = refreshToken;
 /** Devuelve el cliente vinculado al usuario cuando el rol es CUSTOMER (cliente directo). */
 const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
     const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
     if (!userId)
@@ -94,7 +94,7 @@ const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (role !== 'CUSTOMER')
         return res.status(403).json({ message: 'Solo para clientes directos' });
     try {
-        const row = yield (0, db_1.get)(`SELECT id, user_id, seller_id, name, business_name, email, address, city, price_list_id FROM customers WHERE user_id = ?`, [userId]);
+        const row = yield (0, db_1.get)(`SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE user_id = ?`, [userId]);
         if (!row)
             return res.status(404).json({ message: 'No se encontró el perfil de cliente' });
         res.json({
@@ -106,7 +106,10 @@ const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             email: (_e = row.email) !== null && _e !== void 0 ? _e : '',
             address: (_f = row.address) !== null && _f !== void 0 ? _f : '',
             city: (_g = row.city) !== null && _g !== void 0 ? _g : '',
-            priceListId: (_h = row.price_list_id) !== null && _h !== void 0 ? _h : undefined
+            cuit: (_h = row.cuit) !== null && _h !== void 0 ? _h : undefined,
+            phone: (_j = row.phone) !== null && _j !== void 0 ? _j : undefined,
+            condicionIva: (_k = row.condicion_iva) !== null && _k !== void 0 ? _k : undefined,
+            priceListId: (_l = row.price_list_id) !== null && _l !== void 0 ? _l : undefined
         });
     }
     catch (e) {
