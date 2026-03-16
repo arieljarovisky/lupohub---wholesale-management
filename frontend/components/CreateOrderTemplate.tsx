@@ -65,24 +65,25 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
+  const draftRestoredRef = useRef(false);
 
-  /** Restaurar borrador al montar (si la página se actualizó con un pedido sin enviar). */
+  /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
   useEffect(() => {
+    if (customers.length === 0 || draftRestoredRef.current) return;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw) as { selectedCustomerId?: string; orderDate?: string; rows?: TemplateRow[] };
       if (!draft || (!draft.rows?.length && !draft.selectedCustomerId)) return;
-      if (draft.selectedCustomerId) setSelectedCustomerId(draft.selectedCustomerId);
+      draftRestoredRef.current = true;
       if (draft.orderDate) setOrderDate(draft.orderDate);
-      if (Array.isArray(draft.rows) && draft.rows.length > 0) {
-        setRows(draft.rows);
-        showToast('success', 'Borrador restaurado');
-      }
+      if (Array.isArray(draft.rows) && draft.rows.length > 0) setRows(draft.rows);
+      const validCustomerId = draft.selectedCustomerId && customers.some(c => c.id === draft.selectedCustomerId);
+      if (validCustomerId) setSelectedCustomerId(draft.selectedCustomerId!);
     } catch {
       localStorage.removeItem(DRAFT_KEY);
     }
-  }, [showToast]);
+  }, [customers]);
 
   /** Guardar borrador (debounced) cuando hay cliente o filas. */
   const saveDraft = useCallback((customerId: string, date: string, draftRows: TemplateRow[]) => {
@@ -412,7 +413,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return;
     }
     onSave(order);
-    showToast('success', 'Borrador guardado. Aparecerá en Pedidos → Borrador.');
   };
 
   const totalUnits = useMemo(() => {
