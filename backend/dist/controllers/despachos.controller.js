@@ -62,18 +62,19 @@ const getDespachoById = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!despacho) {
             return res.status(404).json({ message: 'Despacho no encontrado' });
         }
-        // Obtener items del despacho
+        // Obtener items del despacho (color name viene de colors, no de product_colors)
         const items = yield (0, db_1.query)(`
       SELECT 
         di.*,
         p.name as product_name,
         p.sku as product_sku,
         pv.sku as variant_sku,
-        pc.color_name
+        c.name as color_name
       FROM despacho_items di
       LEFT JOIN products p ON p.id = di.product_id
       LEFT JOIN product_variants pv ON pv.id = di.variant_id
       LEFT JOIN product_colors pc ON pc.id = pv.product_color_id
+      LEFT JOIN colors c ON c.id = pc.color_id
       WHERE di.despacho_id = ?
       ORDER BY di.created_at
     `, [id]);
@@ -279,9 +280,11 @@ const getProductosSinDespacho = (req, res) => __awaiter(void 0, void 0, void 0, 
         p.name, 
         p.sku, 
         p.pais_origen,
-        COALESCE(SUM(pv.stock), 0) as stock_total
+        COALESCE(SUM(s.stock), 0) as stock_total
       FROM products p
-      LEFT JOIN product_variants pv ON pv.product_id = p.id
+      LEFT JOIN product_colors pc ON pc.product_id = p.id
+      LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+      LEFT JOIN stocks s ON s.variant_id = pv.id
       WHERE p.ultimo_despacho_id IS NULL
       GROUP BY p.id, p.name, p.sku, p.pais_origen
       ORDER BY p.name
