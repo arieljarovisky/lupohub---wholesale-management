@@ -12,8 +12,9 @@ export type CustomerImportRow = {
 };
 
 /**
- * Parsea un Excel de clientes. Detecta columnas por cabecera (Razón social, Email, Dirección, etc.).
- * Requiere al menos Email y (Razón social o Nombre) por fila.
+ * Parsea un Excel de clientes. Detecta columnas por cabecera.
+ * Usa "E-mail" o "E-mail contacto" (el que tenga valor por fila).
+ * Si solo tiene email sin razón social/nombre, usa el email como razón social para no perder la fila.
  */
 export async function parseCustomersExcel(file: File): Promise<CustomerImportRow[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -28,10 +29,15 @@ export async function parseCustomersExcel(file: File): Promise<CustomerImportRow
 
   const findCol = (keywords: string[]): number =>
     firstLower.findIndex(h => keywords.some(k => (h || '').includes(k)));
+  const findColAfter = (keywords: string[], afterIndex: number): number => {
+    const idx = firstLower.findIndex((h, i) => i > afterIndex && keywords.some(k => (h || '').includes(k)));
+    return idx >= 0 ? idx : -1;
+  };
 
   const businessNameKw = ['razón social', 'razon social', 'empresa', 'cliente', 'businessname', 'business name', 'denominación', 'denominacion', 'fantasía', 'fantasia'];
   const nameKw = ['contacto habitual', 'nombre', 'name', 'contacto', 'contact', 'persona', 'titular'];
   const emailKw = ['e-mail', 'email', 'mail', 'correo', 'e mail', 'correo electrónico'];
+  const emailContactoKw = ['e-mail contacto', 'email contacto', 'mail contacto', 'correo contacto', 'e-mail del contacto'];
   const addressKw = ['domicilio', 'dirección', 'direccion', 'address', 'calle', 'domicilio fiscal'];
   const cityKw = ['localidad', 'ciudad', 'city', 'provincia', 'cp', 'código postal', 'codigo postal'];
   const cuitKw = ['número', 'numero', 'cuit', 'cuil', 'cif', 'número de documento', 'numero de documento', 'documento', 'tax id', 'identificación fiscal'];
@@ -40,14 +46,15 @@ export async function parseCustomersExcel(file: File): Promise<CustomerImportRow
 
   let businessNameCol = findCol(businessNameKw);
   let nameCol = findCol(nameKw);
-  const emailCol = findCol(emailKw);
+  let emailCol = findCol(emailKw);
+  const emailContactoCol = emailCol >= 0 ? findColAfter(emailContactoKw, emailCol) : findCol(emailContactoKw);
   const addressCol = findCol(addressKw);
   const cityCol = findCol(cityKw);
   const cuitCol = findCol(cuitKw);
   const phoneCol = findCol(phoneKw);
   const ivaCol = findCol(ivaKw);
 
-  if (emailCol < 0) emailCol = 1;
+  if (emailCol < 0) emailCol = emailContactoCol >= 0 ? emailContactoCol : 1;
   if (businessNameCol < 0 && nameCol < 0) businessNameCol = 0;
   if (businessNameCol < 0) businessNameCol = nameCol;
   if (nameCol < 0) nameCol = businessNameCol;
@@ -60,15 +67,20 @@ export async function parseCustomersExcel(file: File): Promise<CustomerImportRow
 
   for (let i = start; i < rows.length; i++) {
     const row = rows[i];
-    const email = trim(row[emailCol]);
+    const emailMain = trim(row[emailCol]);
+    const emailContacto = emailContactoCol >= 0 ? trim(row[emailContactoCol]) : '';
+    const email = emailMain || emailContacto;
+    if (!email) continue;
+
     const businessName = trim(row[businessNameCol]);
     const name = trim(row[nameCol]);
-    if (!email) continue;
-    if (!businessName && !name) continue;
+    const hasName = !!(businessName || name);
+    const businessNameVal = businessName || (hasName ? undefined : email);
+    const nameVal = name || (hasName ? undefined : '');
 
     items.push({
-      businessName: businessName || undefined,
-      name: name || undefined,
+      businessName: businessNameVal || undefined,
+      name: nameVal || undefined,
       email,
       address: addressCol >= 0 ? trim(row[addressCol]) || undefined : undefined,
       city: cityCol >= 0 ? trim(row[cityCol]) || undefined : undefined,

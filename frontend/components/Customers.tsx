@@ -450,16 +450,22 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         return;
       }
       const res = await api.importCustomers(rows, role === Role.SELLER ? sellerId : undefined);
+      const skipped = res.skipped ?? 0;
       if (res.created > 0) {
-        showToast('success', `Se importaron ${res.created} cliente(s).`);
+        let msg = `Se importaron ${res.created} cliente(s).`;
+        if (skipped > 0) msg += ` Omitidos (ya existían): ${skipped}.`;
+        showToast('success', msg);
+        onRefreshData?.();
+      } else if (skipped > 0) {
+        showToast('info', `Todos los clientes del archivo ya existían (${skipped} omitidos). No se duplicaron.`);
         onRefreshData?.();
       }
       if (res.errors?.length) {
         const msg = res.errors.slice(0, 3).map(e => `Fila ${e.row}: ${e.message}`).join('; ');
         showToast('warning', `${res.errors.length} error(es): ${msg}${res.errors.length > 3 ? '…' : ''}`);
       }
-      if (res.created === 0 && !res.errors?.length) {
-        showToast('warning', 'No se creó ningún cliente. Revisá que las columnas sean Email y Razón social (o Nombre).');
+      if (res.created === 0 && skipped === 0 && !res.errors?.length) {
+        showToast('warning', 'No se creó ningún cliente. Revisá que haya columnas E-mail (o E-mail contacto) y Razón social o Nombre.');
       }
     } catch (err: any) {
       showToast('error', err?.message || 'Error al importar el Excel.');

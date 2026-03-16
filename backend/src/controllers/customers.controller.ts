@@ -199,13 +199,14 @@ export const deleteCustomer = async (req: Request, res: Response) => {
   }
 };
 
-/** Importar clientes en lote (desde Excel u otro origen). Body: { customers: Array<{ name?, businessName?, email, address?, city?, cuit?, phone?, condicionIva? }> } */
+/** Importar clientes en lote (desde Excel u otro origen). No duplica: si el email ya existe se omite. */
 export const importCustomers = async (req: Request, res: Response) => {
   try {
     const body = req.body as { customers?: Array<{ name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>; sellerId?: string };
     const rows = Array.isArray(body.customers) ? body.customers : [];
     const sellerId = body.sellerId?.trim() || null;
     let created = 0;
+    let skipped = 0; // ya existían (mismo email)
     const errors: { row: number; email?: string; message: string }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -229,6 +230,12 @@ export const importCustomers = async (req: Request, res: Response) => {
         continue;
       }
 
+      const existing = await get(`SELECT id FROM customers WHERE email = ? LIMIT 1`, [email]);
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
       const id = uuidv4();
       const nameVal = name || businessName;
       const businessNameVal = businessName || name;
@@ -242,14 +249,14 @@ export const importCustomers = async (req: Request, res: Response) => {
         created++;
       } catch (err: any) {
         if (err.code === 'ER_DUP_ENTRY') {
-          errors.push({ row: rowNum, email, message: 'Ya existe un cliente con ese email' });
+          skipped++;
         } else {
           errors.push({ row: rowNum, email, message: err.message || 'Error al crear' });
         }
       }
     }
 
-    res.json({ created, errors });
+    res.json({ created, skipped, errors });
   } catch (error: any) {
     console.error('importCustomers:', error);
     res.status(500).json({ message: 'Error importando clientes' });
