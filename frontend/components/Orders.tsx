@@ -297,7 +297,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           >
             <option value="ALL">Todos los Clientes</option>
             {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.businessName}</option>
+              <option key={c.id} value={c.id}>{c.businessName || c.name || 'Cliente'}</option>
             ))}
           </select>
         </div>
