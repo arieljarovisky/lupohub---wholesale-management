@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { Customer, Role, Order, OrderStatus, Product, Transporte } from '../types';
 import { Truck } from 'lucide-react';
+import { parseCustomersExcel } from '../utils/customersUtils';
+import { api } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 
 interface CustomersProps {
   customers: Customer[];
@@ -10,18 +13,23 @@ interface CustomersProps {
   onCreateCustomer: (customer: Customer) => void;
   onUpdateCustomer?: (customerId: string, data: Partial<Customer>) => void | Promise<void>;
   onDeleteCustomer?: (customerId: string) => void | Promise<void>;
+  /** Llamado después de importar clientes desde Excel para refrescar la lista */
+  onRefreshData?: () => void;
   orders: Order[];
   products: Product[];
   priceLists?: { id: string; name: string }[];
   transportes?: Transporte[];
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, orders, products, priceLists = [], transportes = [] }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [] }) => {
+  const { showToast } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [importingExcel, setImportingExcel] = useState(false);
+  const importExcelInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
   const [newBusinessName, setNewBusinessName] = useState('');
@@ -30,6 +38,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newAddress, setNewAddress] = useState('');
   const [newCity, setNewCity] = useState('');
   const [newCuit, setNewCuit] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newCondicionIva, setNewCondicionIva] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
 
   const filteredCustomers = customers.filter(c => 
@@ -59,6 +69,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         address: newAddress || undefined,
         city: newCity || undefined,
         cuit: newCuit || undefined,
+        phone: newPhone || undefined,
+        condicionIva: newCondicionIva || undefined,
         transporteIds: selectedTransporteIds
       };
       Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
@@ -70,6 +82,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewAddress('');
         setNewCity('');
         setNewCuit('');
+        setNewPhone('');
+        setNewCondicionIva('');
         setSelectedTransporteIds([]);
       }).catch(() => {});
       return;
@@ -84,6 +98,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       address: newAddress,
       city: newCity,
       cuit: newCuit || undefined,
+      phone: newPhone || undefined,
+      condicionIva: newCondicionIva || undefined,
       transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' }))
     };
 
@@ -95,6 +111,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setNewAddress('');
     setNewCity('');
     setNewCuit('');
+    setNewPhone('');
+    setNewCondicionIva('');
     setSelectedTransporteIds([]);
   };
 
@@ -227,10 +245,22 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="flex items-center gap-1"><Users size={14}/> {selectedCustomer.name}</span>
                   <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
                   <span className="flex items-center gap-1"><MapPin size={14}/> {selectedCustomer.city}</span>
+                  {selectedCustomer.phone && (
+                    <>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                      <span className="flex items-center gap-1"><Phone size={14}/> {selectedCustomer.phone}</span>
+                    </>
+                  )}
                   {selectedCustomer.cuit && (
                     <>
                       <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
                       <span className="font-mono">CUIT {selectedCustomer.cuit}</span>
+                    </>
+                  )}
+                  {selectedCustomer.condicionIva && (
+                    <>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                      <span>IVA: {selectedCustomer.condicionIva}</span>
                     </>
                   )}
                   {selectedCustomer.transportes && selectedCustomer.transportes.length > 0 && (
@@ -251,6 +281,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewAddress(selectedCustomer.address || '');
                  setNewCity(selectedCustomer.city || '');
                  setNewCuit(selectedCustomer.cuit || '');
+                 setNewPhone(selectedCustomer.phone || '');
+                 setNewCondicionIva(selectedCustomer.condicionIva || '');
                  setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
                  setEditingCustomer(selectedCustomer);
                }}
@@ -405,18 +437,66 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     );
   }
 
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingExcel(true);
+    try {
+      const rows = await parseCustomersExcel(file);
+      if (rows.length === 0) {
+        showToast('warning', 'No se encontraron filas válidas. El Excel debe tener al menos Email y Razón social o Nombre.');
+        setImportingExcel(false);
+        return;
+      }
+      const res = await api.importCustomers(rows, role === Role.SELLER ? sellerId : undefined);
+      if (res.created > 0) {
+        showToast('success', `Se importaron ${res.created} cliente(s).`);
+        onRefreshData?.();
+      }
+      if (res.errors?.length) {
+        const msg = res.errors.slice(0, 3).map(e => `Fila ${e.row}: ${e.message}`).join('; ');
+        showToast('warning', `${res.errors.length} error(es): ${msg}${res.errors.length > 3 ? '…' : ''}`);
+      }
+      if (res.created === 0 && !res.errors?.length) {
+        showToast('warning', 'No se creó ningún cliente. Revisá que las columnas sean Email y Razón social (o Nombre).');
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error al importar el Excel.');
+    }
+    setImportingExcel(false);
+  };
+
   // 3. List View (Default)
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-white">Cartera de Clientes</h2>
-        <button 
-          onClick={() => setIsCreating(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium"
-        >
-          <Plus size={18} />
-          <span>Nuevo Cliente</span>
-        </button>
+        <div className="flex gap-2">
+          <input
+            ref={importExcelInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleImportExcel}
+          />
+          <button
+            type="button"
+            onClick={() => importExcelInputRef.current?.click()}
+            disabled={importingExcel}
+            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+          >
+            {importingExcel ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+            <span>{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
+          </button>
+          <button 
+            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium"
+          >
+            <Plus size={18} />
+            <span>Nuevo Cliente</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
@@ -519,7 +599,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -565,6 +645,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   value={newCuit}
                   onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))}
                   placeholder="20-12345678-9 (solo números)"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Teléfono</label>
+                <input 
+                  type="text" 
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  placeholder="Ej: 11 1234-5678"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+                <input 
+                  type="text" 
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  value={newCondicionIva}
+                  onChange={(e) => setNewCondicionIva(e.target.value)}
+                  placeholder="Ej: Responsable Inscripto, Monotributo, Consumidor Final"
                 />
               </div>
               {transportes.length > 0 && (
@@ -614,7 +714,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar

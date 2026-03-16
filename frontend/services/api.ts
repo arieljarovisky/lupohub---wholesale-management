@@ -468,6 +468,8 @@ export const api = {
         address: r.address ?? '',
         city: r.city ?? '',
         cuit: r.cuit ?? undefined,
+        phone: r.phone ?? undefined,
+        condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
         transportes: r.transportes ?? [],
         priceListId: r.priceListId ?? r.price_list_id ?? undefined
       })) as Customer[];
@@ -486,6 +488,9 @@ export const api = {
         email: r.email ?? '',
         address: r.address ?? '',
         city: r.city ?? '',
+        cuit: r.cuit ?? undefined,
+        phone: r.phone ?? undefined,
+        condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
         priceListId: r.priceListId ?? undefined
       } as Customer;
     } catch {
@@ -504,6 +509,8 @@ export const api = {
         address: customer.address,
         city: customer.city,
         cuit: customer.cuit,
+        phone: customer.phone,
+        condicionIva: customer.condicionIva,
         transporteIds: customer.transportes?.map(t => t.id) ?? [],
         priceListId: customer.priceListId
       });
@@ -516,13 +523,20 @@ export const api = {
         address: created.address ?? '',
         city: created.city ?? '',
         cuit: created.cuit ?? undefined,
+        phone: created.phone ?? undefined,
+        condicionIva: created.condicionIva ?? created.condicion_iva ?? undefined,
         transportes: created.transportes ?? [],
         priceListId: created.priceListId ?? created.price_list_id ?? undefined
       } as Customer;
     }, customer, 'createCustomer');
   },
 
-  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
+  /** Importar clientes en lote (desde Excel). Devuelve cuántos se crearon y errores por fila. */
+  importCustomers: async (customers: Array<{ name?: string; businessName?: string; email: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>, sellerId?: string): Promise<{ created: number; errors: { row: number; email?: string; message: string }[] }> => {
+    return request<any>('/customers/import', 'POST', { customers, sellerId: sellerId || undefined });
+  },
+
+  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
     return {
       id: updated.id,
@@ -533,6 +547,8 @@ export const api = {
       address: updated.address ?? '',
       city: updated.city ?? '',
       cuit: updated.cuit ?? undefined,
+      phone: updated.phone ?? undefined,
+      condicionIva: updated.condicionIva ?? updated.condicion_iva ?? undefined,
       transportes: updated.transportes ?? [],
       priceListId: updated.priceListId ?? updated.price_list_id ?? undefined
     } as Customer;

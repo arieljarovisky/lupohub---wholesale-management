@@ -26,6 +26,7 @@ import { addExternalSkuToVariants } from './database/add_external_sku';
 import { addMercadoLibreItemIdToVariants } from './database/add_mercado_libre_item_id';
 import { addCustomerDirect } from './database/add_customer_direct';
 import { addCustomerCuit } from './database/add_customer_cuit';
+import { addCustomerPhoneIva } from './database/add_customer_phone_iva';
 import { addTransportesTables } from './database/add_transportes_tables';
 import { addInvoicesTable } from './database/add_invoices_table';
 import { addPriceLists } from './database/add_price_lists';
@@ -106,6 +107,7 @@ async function initDatabase() {
       await addMercadoLibreItemIdToVariants();
       await addCustomerDirect();
       await addCustomerCuit();
+      await addCustomerPhoneIva();
       await addTransportesTables();
       await addInvoicesTable();
       await addPriceLists();

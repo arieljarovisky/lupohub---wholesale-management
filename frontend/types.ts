@@ -90,6 +90,10 @@ export interface Customer {
   city: string;
   /** CUIT/CUIL del cliente (para facturación electrónica Argentina) */
   cuit?: string;
+  /** Teléfono (empresa o contacto) */
+  phone?: string;
+  /** Condición de IVA (ej. Responsable Inscripto, Monotributo, Consumidor Final) */
+  condicionIva?: string;
   /** Transportes (express) asignados para despachar pedidos a este cliente */
   transportes?: Transporte[];
   priceListId?: string;

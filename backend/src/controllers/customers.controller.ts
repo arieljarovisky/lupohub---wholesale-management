@@ -13,6 +13,8 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     address: row.address ?? '',
     city: row.city ?? '',
     cuit: row.cuit ?? undefined,
+    phone: row.phone ?? undefined,
+    condicionIva: row.condicion_iva ?? undefined,
     priceListId: row.price_list_id ?? undefined,
     transportes: transportes ?? []
   };
@@ -22,7 +24,7 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
 export const getCustomers = async (req: Request, res: Response) => {
   try {
     const rows = await query(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, price_list_id
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id
        FROM customers ORDER BY business_name ASC, name ASC`
     );
     const customers = (rows || []).map((r: any) => toCustomer(r));
@@ -64,6 +66,8 @@ export const createCustomer = async (req: Request, res: Response) => {
       address?: string;
       city?: string;
       cuit?: string;
+      phone?: string;
+      condicionIva?: string;
       transporteIds?: string[];
       priceListId?: string;
     };
@@ -82,16 +86,18 @@ export const createCustomer = async (req: Request, res: Response) => {
     const address = (body.address ?? '').toString().trim() || null;
     const city = (body.city ?? '').toString().trim() || null;
     const cuit = (body.cuit ?? '').toString().trim() || null;
+    const phone = (body.phone ?? '').toString().trim() || null;
+    const condicionIva = (body.condicionIva ?? '').toString().trim() || null;
     const priceListId = body.priceListId?.trim() || null;
 
     await execute(
-      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, price_list_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, name || businessName, businessName || name, email, address, city, cuit, priceListId]
+      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, sellerId, name || businessName, businessName || name, email, address, city, cuit, phone, condicionIva, priceListId]
     );
 
     const created = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, price_list_id FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE id = ?`,
       [id]
     );
     const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x: string) => x && typeof x === 'string') : [];
@@ -125,6 +131,8 @@ export const updateCustomer = async (req: Request, res: Response) => {
       city?: string;
       sellerId?: string;
       cuit?: string;
+      phone?: string;
+      condicionIva?: string;
       transporteIds?: string[];
       priceListId?: string | null;
     };
@@ -138,6 +146,8 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.address !== undefined) { updates.push('address = ?'); params.push(body.address?.trim() || null); }
     if (body.city !== undefined) { updates.push('city = ?'); params.push(body.city?.trim() || null); }
     if (body.cuit !== undefined) { updates.push('cuit = ?'); params.push(body.cuit?.trim() || null); }
+    if (body.phone !== undefined) { updates.push('phone = ?'); params.push(body.phone?.trim() || null); }
+    if (body.condicionIva !== undefined) { updates.push('condicion_iva = ?'); params.push(body.condicionIva?.trim() || null); }
     if (body.sellerId !== undefined) { updates.push('seller_id = ?'); params.push(body.sellerId?.trim() || null); }
     if (body.priceListId !== undefined) { updates.push('price_list_id = ?'); params.push(body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null); }
     if (updates.length > 0) {
@@ -152,7 +162,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, price_list_id FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(
@@ -186,5 +196,62 @@ export const deleteCustomer = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('deleteCustomer:', error);
     res.status(500).json({ message: 'Error eliminando cliente' });
+  }
+};
+
+/** Importar clientes en lote (desde Excel u otro origen). Body: { customers: Array<{ name?, businessName?, email, address?, city?, cuit?, phone?, condicionIva? }> } */
+export const importCustomers = async (req: Request, res: Response) => {
+  try {
+    const body = req.body as { customers?: Array<{ name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>; sellerId?: string };
+    const rows = Array.isArray(body.customers) ? body.customers : [];
+    const sellerId = body.sellerId?.trim() || null;
+    let created = 0;
+    const errors: { row: number; email?: string; message: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const name = (r.name ?? '').toString().trim();
+      const businessName = (r.businessName ?? '').toString().trim();
+      const email = (r.email ?? '').toString().trim();
+      const address = (r.address ?? '').toString().trim() || null;
+      const city = (r.city ?? '').toString().trim() || null;
+      const cuit = (r.cuit ?? '').toString().trim() || null;
+      const phone = (r.phone ?? '').toString().trim() || null;
+      const condicionIva = (r.condicionIva ?? '').toString().trim() || null;
+      const rowNum = i + 1;
+
+      if (!email) {
+        errors.push({ row: rowNum, message: 'Falta email' });
+        continue;
+      }
+      if (!businessName && !name) {
+        errors.push({ row: rowNum, email, message: 'Falta razón social o nombre de contacto' });
+        continue;
+      }
+
+      const id = uuidv4();
+      const nameVal = name || businessName;
+      const businessNameVal = businessName || name;
+
+      try {
+        await execute(
+          `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, sellerId, nameVal, businessNameVal, email, address, city, cuit, phone, condicionIva, null]
+        );
+        created++;
+      } catch (err: any) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          errors.push({ row: rowNum, email, message: 'Ya existe un cliente con ese email' });
+        } else {
+          errors.push({ row: rowNum, email, message: err.message || 'Error al crear' });
+        }
+      }
+    }
+
+    res.json({ created, errors });
+  } catch (error: any) {
+    console.error('importCustomers:', error);
+    res.status(500).json({ message: 'Error importando clientes' });
   }
 };

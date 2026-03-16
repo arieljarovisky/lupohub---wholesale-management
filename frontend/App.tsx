@@ -771,6 +771,7 @@ const App: React.FC = () => {
                 onCreateCustomer={handleCreateCustomer}
                 onUpdateCustomer={handleUpdateCustomer}
                 onDeleteCustomer={handleDeleteCustomer}
+                onRefreshData={loadData}
                 priceLists={priceLists}
                 transportes={transportes}
                 orders={orders}
