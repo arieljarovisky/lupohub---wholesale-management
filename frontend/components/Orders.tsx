@@ -35,7 +35,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [afipConfigured, setAfipConfigured] = useState(false);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
 
-  const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE;
+  const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   useEffect(() => {
     if (!canEmitirFactura) return;
     api.getAfipStatus().then(r => setAfipConfigured(r?.configured ?? false)).catch(() => setAfipConfigured(false));
@@ -406,7 +406,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
                 </div>
                 <div className="flex items-center gap-4">
-                   {role === Role.WAREHOUSE && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
+                   {(role === Role.WAREHOUSE || role === Role.DEPOSITO) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
                      <button 
                         onClick={(e) => { e.stopPropagation(); onStartPicking?.(order); }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-500 transition"

@@ -2,6 +2,7 @@ export enum Role {
   ADMIN = 'ADMIN',
   SELLER = 'SELLER',
   WAREHOUSE = 'WAREHOUSE',
+  DEPOSITO = 'DEPOSITO',
   CUSTOMER = 'CUSTOMER'
 }
 
