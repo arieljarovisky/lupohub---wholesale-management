@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importCustomers = exports.deleteCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 function toCustomer(row, transportes) {
@@ -268,3 +268,47 @@ const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.importCustomers = importCustomers;
+/** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
+const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const body = req.body;
+        const updates = Array.isArray(body.updates) ? body.updates : [];
+        let updated = 0;
+        let notFound = 0;
+        const errors = [];
+        for (let i = 0; i < updates.length; i++) {
+            const u = updates[i];
+            const cuit = ((_a = u.cuit) !== null && _a !== void 0 ? _a : '').toString().trim().replace(/\D/g, '').slice(0, 11);
+            const email = ((_b = u.email) !== null && _b !== void 0 ? _b : '').toString().trim() || null;
+            const businessName = ((_c = u.businessName) !== null && _c !== void 0 ? _c : '').toString().trim() || null;
+            if (!cuit) {
+                errors.push({ row: i + 1, message: 'CUIT vacío' });
+                continue;
+            }
+            if (!email && !businessName) {
+                errors.push({ row: i + 1, message: 'Falta email o razón social' });
+                continue;
+            }
+            let customer = null;
+            if (email) {
+                customer = yield (0, db_1.get)('SELECT id FROM customers WHERE LOWER(TRIM(email)) = LOWER(?) LIMIT 1', [email]);
+            }
+            if (!customer && businessName) {
+                customer = yield (0, db_1.get)('SELECT id FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
+            }
+            if (!customer) {
+                notFound++;
+                continue;
+            }
+            yield (0, db_1.execute)('UPDATE customers SET cuit = ? WHERE id = ?', [cuit, customer.id]);
+            updated++;
+        }
+        res.json({ updated, notFound, errors });
+    }
+    catch (error) {
+        console.error('bulkUpdateCuit:', error);
+        res.status(500).json({ message: 'Error actualizando CUIT en lote' });
+    }
+});
+exports.bulkUpdateCuit = bulkUpdateCuit;

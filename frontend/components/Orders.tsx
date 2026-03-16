@@ -184,7 +184,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName('');
   };
 
-  /** Genera el HTML de la factura AFIP para ver e imprimir/guardar como PDF. */
+  /** Genera el HTML de la factura AFIP para ver e imprimir/guardar como PDF. Estilo Lupo Argentina + logo y Nº despacho por ítem. */
   const buildFacturaHtml = (order: Order) => {
     if (!order.invoice) return '';
     const inv = order.invoice;
@@ -200,37 +200,51 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
-      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td style="text-align:right">${i.quantity}</td><td style="text-align:right">${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">${sub.toLocaleString('es-AR')}</td></tr>`;
+      const despacho = i.numeroDespacho ?? '—';
+      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td style="text-align:center">${despacho}</td><td style="text-align:right">${i.quantity}</td><td style="text-align:right">${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">${sub.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const total = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const vtoCae = inv.caeFchVto ? formatDate(inv.caeFchVto) : '—';
+    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="Lupo Argentina" class="factura-logo" />` : '';
+    const brandName = remitente.businessName || 'Lupo Argentina';
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${tipoLabel} ${nroComprobante}</title><style>
-      body { font-family: system-ui, sans-serif; max-width: 700px; margin: 24px auto; padding: 20px; color: #111; }
-      h1 { font-size: 1.4rem; margin-bottom: 4px; }
-      .sub { font-size: 0.85rem; color: #444; margin-bottom: 16px; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; font-size: 0.85rem; }
-      .block { margin-bottom: 8px; }
+      :root { --lupo-primary: #0f172a; --lupo-accent: #b45309; --lupo-light: #f8fafc; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 0; color: #0f172a; background: #fff; }
+      .factura-header { background: var(--lupo-primary); color: #fff; padding: 20px 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+      .factura-logo { max-height: 56px; max-width: 180px; object-fit: contain; }
+      .factura-brand { font-size: 1.5rem; font-weight: 800; letter-spacing: 0.02em; }
+      .factura-body { padding: 24px; }
+      .factura-doc-title { font-size: 1.35rem; font-weight: 700; color: var(--lupo-primary); margin-bottom: 4px; }
+      .factura-doc-sub { font-size: 0.9rem; color: #475569; margin-bottom: 20px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; font-size: 0.9rem; }
+      .grid strong { color: var(--lupo-primary); }
       table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.8rem; }
-      th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; }
-      th { background: #eee; font-weight: bold; }
-      .cae-block { margin-top: 20px; padding: 12px; background: #f5f5f5; font-size: 0.8rem; }
-      .no-print { margin-top: 20px; }
-      @media print { .no-print { display: none !important; } }
+      th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+      th { background: var(--lupo-primary); color: #fff; font-weight: 600; }
+      .cae-block { margin-top: 24px; padding: 14px; background: var(--lupo-light); border-left: 4px solid var(--lupo-accent); font-size: 0.85rem; }
+      .no-print { margin-top: 24px; }
+      @media print { .no-print { display: none !important; } .factura-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style></head><body>
-      <h1>${tipoLabel}</h1>
-      <div class="sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${formatDate(order.date)} — Pedido ${order.id}</div>
+      <div class="factura-header">
+        ${logoHtml}
+        <span class="factura-brand">${brandName}</span>
+      </div>
+      <div class="factura-body">
+      <div class="factura-doc-title">${tipoLabel}</div>
+      <div class="factura-doc-sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${formatDate(order.date)} — Pedido ${order.id}</div>
       <div class="grid">
         <div><strong>Emisor</strong><br>${remitente.businessName || '—'}${remitente.cuit ? `<br>CUIT ${remitente.cuit}` : ''}${remitente.address ? `<br>${remitente.address}` : ''}${remitente.city ? `, ${remitente.city}` : ''}</div>
         <div><strong>Cliente</strong><br>${clienteNombre}${customer?.cuit ? `<br>CUIT ${customer.cuit}` : ''}${customer?.address ? `<br>${customer.address}` : ''}${customer?.city ? `, ${customer.city}` : ''}</div>
       </div>
       <table>
-        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th style="text-align:right">Cant.</th><th style="text-align:right">P. unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th>Nº despacho</th><th style="text-align:right">Cant.</th><th style="text-align:right">P. unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="4"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
+        <tfoot><tr><td colspan="5"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
       </table>
       <div class="cae-block"><strong>CAE:</strong> ${inv.cae} &nbsp;|&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-      <p class="no-print" style="font-size: 0.75rem; color: #666; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${formatDate(order.date)}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #059669; color: white; border: none; border-radius: 8px;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+      <p class="no-print" style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${formatDate(order.date)}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: var(--lupo-accent); color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+      </div>
     </body></html>`;
   };
 

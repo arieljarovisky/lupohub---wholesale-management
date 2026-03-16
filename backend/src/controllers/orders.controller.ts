@@ -34,13 +34,15 @@ export const getOrders = async (req: any, res: any) => {
              COALESCE(pv.sku, p.sku) AS sku,
              p.name AS productName,
              s.size_code AS sizeCode,
-             c.name AS colorName
+             c.name AS colorName,
+             d.numero_despacho AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
       WHERE i.order_id IN (${placeholders})
     `, orderIds);
 
@@ -60,7 +62,8 @@ export const getOrders = async (req: any, res: any) => {
           sku: row.sku ?? undefined,
           productName: row.productName ?? undefined,
           sizeCode: row.sizeCode ?? undefined,
-          colorName: row.colorName ?? undefined
+          colorName: row.colorName ?? undefined,
+          numeroDespacho: row.numeroDespacho ?? undefined
         });
       }
     }

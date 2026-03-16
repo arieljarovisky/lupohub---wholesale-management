@@ -46,7 +46,7 @@ exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura 
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
         let ordersRow = yield (0, db_1.query)(`
       SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
@@ -76,13 +76,15 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
              COALESCE(pv.sku, p.sku) AS sku,
              p.name AS productName,
              s.size_code AS sizeCode,
-             c.name AS colorName
+             c.name AS colorName,
+             d.numero_despacho AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
       WHERE i.order_id IN (${placeholders})
     `, orderIds);
         const itemsByOrderId = {};
@@ -101,7 +103,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
                     productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
                     sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
-                    colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
+                    colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined,
+                    numeroDespacho: (_f = row.numeroDespacho) !== null && _f !== void 0 ? _f : undefined
                 });
             }
         }
@@ -110,8 +113,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         for (const inv of invoicesRows) {
             invoiceByOrderId[inv.order_id] = {
                 cae: inv.cae,
-                caeFchVto: (_f = inv.cae_fch_vto) !== null && _f !== void 0 ? _f : undefined,
-                puntoVta: (_g = inv.punto_venta) !== null && _g !== void 0 ? _g : undefined,
+                caeFchVto: (_g = inv.cae_fch_vto) !== null && _g !== void 0 ? _g : undefined,
+                puntoVta: (_h = inv.punto_venta) !== null && _h !== void 0 ? _h : undefined,
                 cbteDesde: inv.cbte_desde,
                 cbteHasta: inv.cbte_hasta,
                 cbteTipo: inv.cbte_tipo

@@ -272,3 +272,50 @@ export const importCustomers = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error importando clientes' });
   }
 };
+
+/** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
+export const bulkUpdateCuit = async (req: Request, res: Response) => {
+  try {
+    const body = req.body as { updates?: Array<{ email?: string; businessName?: string; cuit: string }> };
+    const updates = Array.isArray(body.updates) ? body.updates : [];
+    let updated = 0;
+    let notFound = 0;
+    const errors: { row: number; message: string }[] = [];
+
+    for (let i = 0; i < updates.length; i++) {
+      const u = updates[i];
+      const cuit = (u.cuit ?? '').toString().trim().replace(/\D/g, '').slice(0, 11);
+      const email = (u.email ?? '').toString().trim() || null;
+      const businessName = (u.businessName ?? '').toString().trim() || null;
+
+      if (!cuit) {
+        errors.push({ row: i + 1, message: 'CUIT vacío' });
+        continue;
+      }
+      if (!email && !businessName) {
+        errors.push({ row: i + 1, message: 'Falta email o razón social' });
+        continue;
+      }
+
+      let customer: any = null;
+      if (email) {
+        customer = await get('SELECT id FROM customers WHERE LOWER(TRIM(email)) = LOWER(?) LIMIT 1', [email]);
+      }
+      if (!customer && businessName) {
+        customer = await get('SELECT id FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
+      }
+      if (!customer) {
+        notFound++;
+        continue;
+      }
+
+      await execute('UPDATE customers SET cuit = ? WHERE id = ?', [cuit, customer.id]);
+      updated++;
+    }
+
+    res.json({ updated, notFound, errors });
+  } catch (error: any) {
+    console.error('bulkUpdateCuit:', error);
+    res.status(500).json({ message: 'Error actualizando CUIT en lote' });
+  }
+};

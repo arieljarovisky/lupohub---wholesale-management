@@ -469,6 +469,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [remitenteAddress, setRemitenteAddress] = useState('');
   const [remitenteCity, setRemitenteCity] = useState('');
   const [remitenteCuit, setRemitenteCuit] = useState('');
+  const [remitenteLogoUrl, setRemitenteLogoUrl] = useState('');
 
   useEffect(() => {
     const config = getApiConfig();
@@ -486,6 +487,7 @@ const Settings: React.FC<SettingsProps> = ({
       setRemitenteAddress(r.address ?? '');
       setRemitenteCity(r.city ?? '');
       setRemitenteCuit(r.cuit ?? '');
+      setRemitenteLogoUrl(r.logoUrl ?? '');
     }
   }, [activeTab]);
 
@@ -1650,8 +1652,12 @@ const Settings: React.FC<SettingsProps> = ({
               <FileText size={20} className="text-amber-400" />
               Datos del remitente (para remitos)
             </h3>
-            <p className="text-sm text-slate-400 mb-4">Estos datos aparecen en el encabezado del remito al generar uno desde Pedidos.</p>
+            <p className="text-sm text-slate-400 mb-4">Estos datos aparecen en remitos y en la factura AFIP (ver factura desde Pedidos). El logo se muestra en el encabezado de la factura.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="md:col-span-2">
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">URL del logo (Lupo Argentina)</label>
+                <input type="url" value={remitenteLogoUrl} onChange={(e) => setRemitenteLogoUrl(e.target.value)} placeholder="https://... (imagen del logo para factura)" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Razón social</label>
                 <input type="text" value={remitenteBusinessName} onChange={(e) => setRemitenteBusinessName(e.target.value)} placeholder="Tu empresa o nombre" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -1669,7 +1675,7 @@ const Settings: React.FC<SettingsProps> = ({
                 <input type="text" value={remitenteCity} onChange={(e) => setRemitenteCity(e.target.value)} placeholder="Ciudad / CP" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
             </div>
-            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
+            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined, logoUrl: remitenteLogoUrl.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
           </div>
           <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">

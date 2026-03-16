@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { Customer, Role, Order, OrderStatus, Product, Transporte } from '../types';
 import { Truck } from 'lucide-react';
-import { parseCustomersExcel } from '../utils/customersUtils';
+import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 
@@ -29,7 +29,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [importingExcel, setImportingExcel] = useState(false);
+  const [updatingCuit, setUpdatingCuit] = useState(false);
   const importExcelInputRef = useRef<HTMLInputElement>(null);
+  const cuitUpdateInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
   const [newBusinessName, setNewBusinessName] = useState('');
@@ -548,6 +550,39 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setImportingExcel(false);
   };
 
+  const handleCuitUpdateExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUpdatingCuit(true);
+    try {
+      const rows = await parseCustomersCuitUpdateExcel(file);
+      if (rows.length === 0) {
+        showToast('warning', 'No se encontraron filas con CUIT. El Excel debe tener Razón social o Email + columna CUIT/Número.');
+        setUpdatingCuit(false);
+        return;
+      }
+      const res = await api.bulkUpdateCuit(rows);
+      if (res.updated > 0) {
+        showToast('success', `Se actualizó el CUIT a ${res.updated} cliente(s).`);
+        onRefreshData?.();
+      }
+      if (res.notFound > 0) {
+        showToast('info', `${res.notFound} fila(s) no coincidieron con ningún cliente (revisá razón social o email).`);
+      }
+      if (res.errors?.length) {
+        const msg = res.errors.slice(0, 3).map(er => `Fila ${er.row}: ${er.message}`).join('; ');
+        showToast('warning', `${res.errors.length} error(es): ${msg}${res.errors.length > 3 ? '…' : ''}`);
+      }
+      if (res.updated === 0 && res.notFound === 0 && !res.errors?.length) {
+        showToast('info', 'No se actualizó ningún cliente.');
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error al actualizar CUIT.');
+    }
+    setUpdatingCuit(false);
+  };
+
   // 3. List View (Default)
   return (
     <div className="space-y-6">
@@ -561,6 +596,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             className="hidden"
             onChange={handleImportExcel}
           />
+          <input
+            ref={cuitUpdateInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleCuitUpdateExcel}
+          />
+          <button
+            type="button"
+            onClick={() => cuitUpdateInputRef.current?.click()}
+            disabled={updatingCuit}
+            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+            title="Excel con Razón social o Email + CUIT para actualizar solo el CUIT de clientes existentes"
+          >
+            {updatingCuit ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+            <span>{updatingCuit ? 'Actualizando…' : 'Actualizar CUIT en lote'}</span>
+          </button>
           <button
             type="button"
             onClick={() => importExcelInputRef.current?.click()}

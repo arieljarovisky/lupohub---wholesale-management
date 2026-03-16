@@ -571,6 +571,11 @@ export const api = {
     return request<any>('/customers/import', 'POST', { customers, sellerId: sellerId || undefined });
   },
 
+  /** Actualizar solo el CUIT de clientes existentes (identificados por razón social o email). */
+  bulkUpdateCuit: async (updates: Array<{ businessName?: string; email?: string; cuit: string }>): Promise<{ updated: number; notFound: number; errors: { row: number; message: string }[] }> => {
+    return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
+  },
+
   updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
     return {

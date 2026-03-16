@@ -71,12 +71,14 @@ export interface Transporte {
   address?: string;
 }
 
-/** Datos del remitente para remitos (guardado en localStorage) */
+/** Datos del remitente para remitos y factura (guardado en localStorage) */
 export interface RemitenteConfig {
   businessName: string;
   address?: string;
   city?: string;
   cuit?: string;
+  /** URL del logo de la empresa (para factura/remito) */
+  logoUrl?: string;
 }
 
 export interface Customer {
@@ -111,6 +113,8 @@ export interface OrderItem {
   productName?: string;
   sizeCode?: string;
   colorName?: string;
+  /** Número de despacho de importación del producto (desde backend) */
+  numeroDespacho?: string;
 }
 
 /** Factura AFIP asociada a un pedido (viene en getOrders). */
