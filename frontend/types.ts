@@ -67,7 +67,7 @@ export interface ApiConfig {
 export interface Transporte {
   id: string;
   name: string;
-  /** Dirección de donde retira el flete (origen) */
+  /** Dirección donde hay que despachar el paquete (sucursal o domicilio del transporte) */
   address?: string;
 }
 

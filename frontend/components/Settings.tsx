@@ -1676,7 +1676,7 @@ const Settings: React.FC<SettingsProps> = ({
               <Ship size={20} className="text-blue-400" />
               Transportes / Express
             </h3>
-            <p className="text-sm text-slate-400 mb-4">Agregá los transportes por donde despachás pedidos. Indicá la dirección de retiro para que el flete sepa dónde pasar. Luego asignálos a cada cliente en la sección Clientes.</p>
+            <p className="text-sm text-slate-400 mb-4">Agregá los transportes por donde despachás pedidos. Indicá la dirección donde tenés que llevar o enviar el paquete (sucursal, domicilio del transporte). Luego asignálos a cada cliente en la sección Clientes.</p>
             <div className="space-y-3 mb-6">
               <div className="flex flex-wrap gap-3 items-end">
                 <div className="flex-1 min-w-[200px]">
@@ -1690,12 +1690,12 @@ const Settings: React.FC<SettingsProps> = ({
                   />
                 </div>
                 <div className="flex-1 min-w-[200px]">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección de retiro</label>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección donde despachar</label>
                   <input
                     type="text"
                     value={newTransporteAddress}
                     onChange={(e) => setNewTransporteAddress(e.target.value)}
-                    placeholder="Calle, número, localidad (donde retira el flete)"
+                    placeholder="Sucursal o domicilio donde llevar el paquete"
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -1740,7 +1740,7 @@ const Settings: React.FC<SettingsProps> = ({
                             type="text"
                             value={editingTransporteAddress}
                             onChange={(e) => setEditingTransporteAddress(e.target.value)}
-                            placeholder="Dirección de retiro"
+                            placeholder="Dirección donde despachar el paquete"
                             className="bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </div>
