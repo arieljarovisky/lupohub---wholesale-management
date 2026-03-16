@@ -472,7 +472,7 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
     const rows = await query(
-      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, created_at
+      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
        FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC`,
       [id]
     );
@@ -487,6 +487,8 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
       cbteDesde: r.cbte_desde,
       cbteHasta: r.cbte_hasta,
       amountCredited: Number(r.amount_credited),
+      scope: r.scope ?? 'total',
+      itemIndex: r.item_index ?? undefined,
       createdAt: r.created_at
     })));
   } catch (error) {
@@ -524,8 +526,22 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
+    // Validar que no se emitan NC duplicadas: solo una NC por el total; por ítem no superar lo facturado
+    const existingNCs = await query(
+      `SELECT scope, item_index, amount_credited FROM credit_notes WHERE order_id = ?`,
+      [id]
+    ) as { scope?: string; item_index?: number | null; amount_credited: string }[];
+
     let amountToCredit: number;
     if (tipo === 'total') {
+      const yaExisteNCTotal = existingNCs.some(
+        (r) => (r.scope || 'total') === 'total'
+      );
+      if (yaExisteNCTotal) {
+        return res.status(400).json({
+          message: 'Ya existe una nota de crédito por el total de este pedido. Solo se permite una NC por el total por pedido.',
+        });
+      }
       amountToCredit = Number(orderRow.total) || 0;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else {
@@ -547,6 +563,15 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       const price = Number(item.price_at_moment) || 0;
       amountToCredit = Math.round(qty * price * 100) / 100;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
+      const itemLineTotal = Math.round(Number(item.quantity) * price * 100) / 100;
+      const yaCreditadoItem = existingNCs
+        .filter((r) => (r.scope || '') === 'item' && r.item_index === idx)
+        .reduce((sum, r) => sum + Number(r.amount_credited || 0), 0);
+      if (yaCreditadoItem + amountToCredit > itemLineTotal + 0.01) {
+        return res.status(400).json({
+          message: `No se puede creditar más de lo facturado para este artículo. Ya creditado: $${yaCreditadoItem.toFixed(2)}. Máximo a creditar para este ítem: $${(itemLineTotal - yaCreditadoItem).toFixed(2)}.`,
+        });
+      }
     }
 
     const { emitirNotaCredito: emitirNCAfip } = await import('../services/afip.service');
@@ -557,10 +582,12 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     );
 
     const creditNoteId = uuidv4();
+    const scope = tipo;
+    const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
     await execute(
-      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit]
+      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]
     );
 
     res.status(201).json({

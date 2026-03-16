@@ -477,6 +477,8 @@ export const api = {
       cbteDesde: r.cbteDesde,
       cbteHasta: r.cbteHasta,
       amountCredited: Number(r.amountCredited),
+      scope: r.scope === 'item' ? 'item' : 'total',
+      itemIndex: r.itemIndex,
       createdAt: r.createdAt
     }));
   },

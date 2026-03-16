@@ -157,6 +157,10 @@ export interface CreditNote {
   cbteDesde: number;
   cbteHasta: number;
   amountCredited: number;
+  /** 'total' = NC por todo el pedido; 'item' = NC por un ítem */
+  scope?: 'total' | 'item';
+  /** Índice del ítem cuando scope === 'item' */
+  itemIndex?: number;
   createdAt?: string;
 }
 
