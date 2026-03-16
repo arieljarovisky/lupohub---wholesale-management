@@ -40,6 +40,8 @@ export interface CustomerForAfip {
   id: string;
   businessName: string;
   cuit?: string | null;
+  /** Descripción de la condición frente al IVA del cliente (ej. Responsable Inscripto, Monotributo, Exento, Consumidor Final). */
+  condicionIva?: string | null;
 }
 
 export interface InvoiceResult {
@@ -136,7 +138,9 @@ export function isAfipConfigured(): boolean {
 
 /**
  * Emite una factura electrónica en AFIP por el pedido dado.
- * Si el cliente tiene CUIT se emite Factura A; si no, Factura B (consumidor final).
+ * Regla:
+ * - Responsable Inscripto => Factura A
+ * - Otros (Monotributo, Exento, CF, etc.) => Factura B
  */
 export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip): Promise<InvoiceResult> {
   const config = getConfig();
@@ -145,10 +149,29 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
   const tieneCuit = cuitCliente.length >= 10; // CUIT 11 dígitos, CUIL 10–11
 
-  const tipoCbte = tieneCuit ? TIPO_CBTE_A : TIPO_CBTE_B;
+  const condicionIvaDesc = (customer.condicionIva ?? '').toLowerCase();
+  const esResponsableInscripto =
+    condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
+
+  const tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
   const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
   const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-  const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+
+  let condicionIva: number;
+  if (!tieneCuit) {
+    condicionIva = CONSUMIDOR_FINAL;
+  } else if (esResponsableInscripto) {
+    condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+  } else if (condicionIvaDesc.includes('monotrib')) {
+    condicionIva = 6; // Responsable Monotributo
+  } else if (condicionIvaDesc.includes('exento')) {
+    condicionIva = 4; // IVA Sujeto Exento
+  } else if (condicionIvaDesc.includes('consumidor final')) {
+    condicionIva = CONSUMIDOR_FINAL;
+  } else {
+    // Fallback genérico si no se reconoce la descripción
+    condicionIva = CONSUMIDOR_FINAL;
+  }
 
   const total = Number(order.total) || 0;
   if (total <= 0) throw new Error('El total del pedido debe ser mayor a 0.');

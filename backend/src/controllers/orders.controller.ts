@@ -425,7 +425,7 @@ export const emitirFactura = async (req: any, res: any) => {
     if (existingInv) return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
 
     const customerRow = await get(
-      'SELECT id, business_name, cuit FROM customers WHERE id = ?',
+      'SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?',
       [orderRow.customer_id]
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
@@ -433,7 +433,12 @@ export const emitirFactura = async (req: any, res: any) => {
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
       { id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id },
-      { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit }
+      {
+        id: customerRow.id,
+        businessName: customerRow.business_name ?? '',
+        cuit: customerRow.cuit,
+        condicionIva: customerRow.condicion_iva ?? null
+      }
     );
 
     const { v4: uuidv4 } = await import('uuid');

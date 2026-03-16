@@ -146,19 +146,42 @@ function isAfipConfigured() {
 }
 /**
  * Emite una factura electrónica en AFIP por el pedido dado.
- * Si el cliente tiene CUIT se emite Factura A; si no, Factura B (consumidor final).
+ * Regla:
+ * - Responsable Inscripto => Factura A
+ * - Otros (Monotributo, Exento, CF, etc.) => Factura B
  */
 function emitirFactura(order, customer) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
+        var _a, _b, _c, _d;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
         const tieneCuit = cuitCliente.length >= 10; // CUIT 11 dígitos, CUIL 10–11
-        const tipoCbte = tieneCuit ? TIPO_CBTE_A : TIPO_CBTE_B;
+        const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
+        const esResponsableInscripto = condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
+        const tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
         const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
         const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-        const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+        let condicionIva;
+        if (!tieneCuit) {
+            condicionIva = CONSUMIDOR_FINAL;
+        }
+        else if (esResponsableInscripto) {
+            condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+        }
+        else if (condicionIvaDesc.includes('monotrib')) {
+            condicionIva = 6; // Responsable Monotributo
+        }
+        else if (condicionIvaDesc.includes('exento')) {
+            condicionIva = 4; // IVA Sujeto Exento
+        }
+        else if (condicionIvaDesc.includes('consumidor final')) {
+            condicionIva = CONSUMIDOR_FINAL;
+        }
+        else {
+            // Fallback genérico si no se reconoce la descripción
+            condicionIva = CONSUMIDOR_FINAL;
+        }
         const total = Number(order.total) || 0;
         if (total <= 0)
             throw new Error('El total del pedido debe ser mayor a 0.');
@@ -180,7 +203,7 @@ function emitirFactura(order, customer) {
         try {
             Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
         }
-        catch (_d) {
+        catch (_e) {
             throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
         }
         const afipOptions = {
@@ -223,8 +246,8 @@ function emitirFactura(order, customer) {
             ]
         };
         const res = yield afip.ElectronicBilling.createVoucher(data);
-        const cae = (_a = res === null || res === void 0 ? void 0 : res.CAE) !== null && _a !== void 0 ? _a : res === null || res === void 0 ? void 0 : res.cae;
-        const caeFchVto = (_c = (_b = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _c !== void 0 ? _c : '';
+        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
+        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
             throw new Error('AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.');
         }

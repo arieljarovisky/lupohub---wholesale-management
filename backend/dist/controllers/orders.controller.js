@@ -438,7 +438,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -453,11 +453,16 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
         if (existingInv)
             return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
-        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit });
+        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, {
+            id: customerRow.id,
+            businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
+            cuit: customerRow.cuit,
+            condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : null
+        });
         const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
         const invoiceId = uuidv4();
         yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
