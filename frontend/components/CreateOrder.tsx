@@ -26,6 +26,9 @@ interface OrderRow {
   price: number;
   quantity: number;
   isBackorder: boolean;
+  /** Si true, quantity es en packs (descuento = quantity × mayoristaPackSize) */
+  sellAsPack?: boolean;
+  mayoristaPackSize?: number;
 }
 
 const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role, priceLists = [], selectedPriceListId = null, onPriceListChange }) => {
@@ -40,7 +43,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSearchProductKey, setExpandedSearchProductKey] = useState<string | null>(null);
-  const [variantSelect, setVariantSelect] = useState<{ sku: string; productName: string; price: number; variants: Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number }> } | null>(null);
+  const [variantSelect, setVariantSelect] = useState<{ sku: string; productName: string; price: number; mayoristaPackSize: number; variants: Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number }> } | null>(null);
 
   const isReadOnly = initialOrder?.status === OrderStatus.DISPATCHED;
 
@@ -59,6 +62,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         const name = (item as any).productName ?? p?.name ?? 'Variante';
         const sku = (item as any).sku ?? p?.sku ?? 'N/A';
         const desc = [name, (item as any).sizeCode, (item as any).colorName].filter(Boolean).join(' · ') || name;
+        const packSize = (item as any).mayoristaPackSize ?? (p as any)?.mayorista_pack_size ?? 1;
         return {
           id: `row-${Math.random()}`,
           variantId: (item as any).variantId,
@@ -66,7 +70,9 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           description: desc,
           price: item.priceAtMoment,
           quantity: item.quantity,
-          isBackorder: !!(item as any).isBackorder
+          isBackorder: !!(item as any).isBackorder,
+          sellAsPack: !!(item as any).sellAsPack,
+          mayoristaPackSize: packSize
         };
       });
       setRows(mappedRows);
@@ -146,6 +152,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       setSearchTerm('');
       return;
     }
+    const mayoristaPackSize = Math.max(1, Number((product as any).mayorista_pack_size) || 1);
     // Si el producto ya es una variante de la lista (tiene id = variant id), agregar directo sin abrir selector
     if (product.id) {
       const desc = [product.name, product.size, product.color].filter(Boolean).join(' · ') || product.name || 'Variante';
@@ -156,12 +163,27 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         description: desc,
         price: product.price,
         quantity: 1,
-        isBackorder: product.stock <= 0
+        isBackorder: product.stock <= 0,
+        sellAsPack: false,
+        mayoristaPackSize
       }]);
       setSearchTerm('');
       return;
     }
-    const variants = await api.getVariantsBySku(baseSku || product.sku);
+    const productBySku = await api.getProductBySku(baseSku || product.sku);
+    if (!productBySku) {
+      setSearchTerm('');
+      return;
+    }
+    const rawVariants = productBySku.variants || [];
+    const variants = rawVariants.map((v: any) => ({
+      variantId: v.variant_id,
+      colorCode: v.color_code,
+      colorName: v.color_name,
+      sizeCode: v.size_code,
+      stock: Number(v.stock ?? 0)
+    }));
+    const packSize = Math.max(1, Number(productBySku.mayorista_pack_size) || 1);
     if (variants.length <= 1) {
       const v = variants[0] || { variantId: '', colorName: '', sizeCode: '', colorCode: '', stock: product.stock };
       const fullCode = [product.sku, v.sizeCode, v.colorCode].filter(Boolean).join('-');
@@ -173,10 +195,12 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         description: desc || `${product.name} (${labelTalle(v.sizeCode || '')}) - ${v.colorName}`,
         price: product.price,
         quantity: 1,
-        isBackorder: (v.stock ?? 0) <= 0
+        isBackorder: (v.stock ?? 0) <= 0,
+        sellAsPack: false,
+        mayoristaPackSize: packSize
       }]);
     } else {
-      setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, variants });
+      setVariantSelect({ sku: product.sku, productName: product.name, price: product.price, mayoristaPackSize: packSize, variants });
     }
     setSearchTerm('');
   };
@@ -189,6 +213,20 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const updateQuantity = (id: string, qty: number) => {
     if (isReadOnly) return;
     setRows(rows.map(r => r.id === id ? { ...r, quantity: Math.max(1, qty) } : r));
+  };
+
+  const packSize = (row: OrderRow) => Math.max(1, row.mayoristaPackSize ?? 1);
+  const canSellAsPack = (row: OrderRow) => packSize(row) > 1;
+  const toggleSellAsPack = (id: string) => {
+    if (isReadOnly) return;
+    setRows(rows.map(r => {
+      if (r.id !== id || !canSellAsPack(r)) return r;
+      const p = packSize(r);
+      if (r.sellAsPack) {
+        return { ...r, sellAsPack: false, quantity: Math.max(1, r.quantity * p) };
+      }
+      return { ...r, sellAsPack: true, quantity: Math.max(1, Math.floor(r.quantity / p)) };
+    }));
   };
 
   const total = rows.reduce((acc, r) => acc + (r.price * r.quantity), 0);
@@ -204,7 +242,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         productId: products.find(p => p.sku === r.sku)?.id,
         quantity: r.quantity,
         priceAtMoment: r.price,
-        isBackorder: r.isBackorder
+        isBackorder: r.isBackorder,
+        sellAsPack: r.sellAsPack === true
       })),
       total,
       status: initialOrder?.status ?? OrderStatus.CONFIRMED,
@@ -331,7 +370,19 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                   {row.isBackorder && <span className="text-[8px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded font-black uppercase shrink-0">Faltante</span>}
                 </div>
                 <div className="text-sm font-bold text-white break-words line-clamp-2 sm:truncate">{row.description}</div>
-                <div className="text-xs text-blue-400 mt-1 font-bold">${row.price.toLocaleString()} un.</div>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <span className="text-xs text-blue-400 font-bold">${row.price.toLocaleString()} un.</span>
+                  {canSellAsPack(row) && (
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={() => toggleSellAsPack(row.id)}
+                      className="text-[10px] px-2 py-0.5 rounded-lg border font-semibold transition-colors touch-manipulation border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300 disabled:opacity-50"
+                    >
+                      {row.sellAsPack ? `Por pack (x${packSize(row)})` : 'Por unidad'}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
                 <div className="flex items-center bg-slate-800 rounded-xl border border-slate-700 min-h-[44px]">
@@ -343,7 +394,9 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                   >
                     -
                   </button>
-                  <span className="w-8 sm:w-6 text-center font-black text-white text-sm tabular-nums">{row.quantity}</span>
+                  <span className="w-8 sm:w-6 text-center font-black text-white text-sm tabular-nums" title={row.sellAsPack ? `${row.quantity} pack = ${row.quantity * packSize(row)} un.` : undefined}>
+                    {row.quantity}
+                  </span>
                   <button 
                     disabled={isReadOnly}
                     onClick={() => updateQuantity(row.id, row.quantity + 1)} 
@@ -587,7 +640,9 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                     description: desc || `${variantSelect.productName} (${labelTalle(v.sizeCode)}) - ${v.colorName}`,
                     price: variantSelect.price,
                     quantity: 1,
-                    isBackorder: v.stock <= 0
+                    isBackorder: v.stock <= 0,
+                    sellAsPack: false,
+                    mayoristaPackSize: variantSelect.mayoristaPackSize ?? 1
                   }]);
                   setVariantSelect(null);
                 }}

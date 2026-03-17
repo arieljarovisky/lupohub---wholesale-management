@@ -68,6 +68,7 @@ export const getProducts = async (req: Request, res: Response) => {
       SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
+             COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
              COALESCE(st.stock, 0) AS stock_total,
              c.name AS color_name, s.size_code AS size_code, s.name AS size_name
@@ -94,6 +95,7 @@ export const getProducts = async (req: Request, res: Response) => {
       category: r.category,
       base_price: Number(r.base_price ?? 0),
       stock_total: Number(r.stock_total ?? 0),
+      mayorista_pack_size: Math.max(1, Number(r.mayorista_pack_size) || 1),
       color_name: r.color_name ?? null,
       size_code: r.size_code ?? null,
       size_name: r.size_name ?? null,
@@ -318,7 +320,8 @@ export const getProductById = async (req: Request, res: Response) => {
     const product = await get(
       `SELECT id, sku, name, category, base_price, description,
               COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+              COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+              COALESCE(NULLIF(mayorista_pack_size, 0), 1) AS mayorista_pack_size
        FROM products WHERE id = ?`,
       [id]
     );
@@ -337,7 +340,8 @@ export const getProductBySku = async (req: any, res: any) => {
     let product = await get(
       `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
               COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
        FROM products p WHERE p.sku = ?`,
       [sku]
     );
@@ -347,7 +351,8 @@ export const getProductBySku = async (req: any, res: any) => {
       product = await get(
         `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
                 COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
          FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`,
         [`${sku}-%`]
       );
@@ -424,14 +429,15 @@ export const patchStock = async (req: any, res: any) => {
 
 export const updateProduct = async (req: any, res: any) => {
   const { id } = req.params;
-  const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize } = req.body as {
+  const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize, mayoristaPackSize } = req.body as {
     name?: string; category?: string; base_price?: number; description?: string;
-    mercadoLibrePackSize?: number; tiendaNubePackSize?: number;
+    mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number;
   };
   if (!id) return res.status(400).json({ message: 'ID inv?lido' });
   try {
     const mlPack = mercadoLibrePackSize != null ? Math.max(1, Math.floor(Number(mercadoLibrePackSize))) : null;
     const tnPack = tiendaNubePackSize != null ? Math.max(1, Math.floor(Number(tiendaNubePackSize))) : null;
+    const mayPack = mayoristaPackSize != null ? Math.max(1, Math.floor(Number(mayoristaPackSize))) : null;
     await execute(
       `UPDATE products SET 
          name = COALESCE(?, name),
@@ -439,13 +445,15 @@ export const updateProduct = async (req: any, res: any) => {
          base_price = COALESCE(?, base_price),
          description = COALESCE(?, description),
          mercado_libre_pack_size = COALESCE(?, mercado_libre_pack_size),
-         tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size)
+         tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size),
+         mayorista_pack_size = COALESCE(?, mayorista_pack_size)
        WHERE id = ?`,
-      [name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, id]
+      [name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, mayPack, id]
     );
     const updated = await get(`SELECT id, sku, name, category, base_price, description,
       COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-      COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size FROM products WHERE id = ?`, [id]);
+      COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+      COALESCE(NULLIF(mayorista_pack_size, 0), 1) AS mayorista_pack_size FROM products WHERE id = ?`, [id]);
     if (!updated) return res.status(404).json({ message: 'Producto no encontrado' });
     res.json(updated);
   } catch (error) {

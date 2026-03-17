@@ -23,6 +23,7 @@ import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
 import { addPackSizeToProducts } from './database/add_pack_size_products';
+import { addOrderItemSellAsPack } from './database/add_order_item_sell_as_pack';
 import { addExternalSkuToVariants } from './database/add_external_sku';
 import { addMercadoLibreItemIdToVariants } from './database/add_mercado_libre_item_id';
 import { addCustomerDirect } from './database/add_customer_direct';
@@ -113,6 +114,7 @@ async function initDatabase() {
       await fixIntegrationsTable();
       await addDespachosTable();
       await addPackSizeToProducts();
+      await addOrderItemSellAsPack();
       await addExternalSkuToVariants();
       await addMercadoLibreItemIdToVariants();
       await addCustomerDirect();

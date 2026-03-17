@@ -132,7 +132,8 @@ export const api = {
       stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
       price: Number((r as any).base_price ?? (r as any).price ?? 0),
       description: r.description ?? '',
-      externalIds: r.externalIds
+      externalIds: r.externalIds,
+      mayorista_pack_size: Math.max(1, Number((r as any).mayorista_pack_size) || 1)
     } as Product;
   },
 
@@ -235,10 +236,10 @@ export const api = {
     return res?.rows ?? [];
   },
 
-  getProductBySku: async (sku: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; externalIds?: any; variants?: any[] } | null> => {
+  getProductBySku: async (sku: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; mayorista_pack_size?: number; externalIds?: any; variants?: any[] } | null> => {
     try {
       const res = await request<any>(`/products/${encodeURIComponent(sku)}`, 'GET');
-      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1 } : null;
+      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1, mayorista_pack_size: res.mayorista_pack_size ?? 1 } : null;
     } catch {
       return null;
     }
@@ -354,7 +355,7 @@ export const api = {
     };
   },
   
-  updateProduct: async (product: Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number }): Promise<Product> => {
+  updateProduct: async (product: Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number }): Promise<Product> => {
     const payload: any = {
       name: product.name,
       category: product.category,
@@ -363,6 +364,7 @@ export const api = {
     };
     if (product.mercadoLibrePackSize != null) payload.mercadoLibrePackSize = product.mercadoLibrePackSize;
     if (product.tiendaNubePackSize != null) payload.tiendaNubePackSize = product.tiendaNubePackSize;
+    if (product.mayoristaPackSize != null) payload.mayoristaPackSize = product.mayoristaPackSize;
     return handleRequest(async () => {
       return await request<Product>(`/products/${product.id}`, 'PUT', payload);
     }, product, 'updateProduct');

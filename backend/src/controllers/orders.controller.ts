@@ -37,6 +37,8 @@ export const getOrders = async (req: any, res: any) => {
     const placeholders = orderIds.map(() => '?').join(',');
     const itemsRows = await query(`
       SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack,
+             COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku,
              p.name AS productName,
@@ -66,6 +68,8 @@ export const getOrders = async (req: any, res: any) => {
           quantity: row.quantity,
           picked: row.picked ?? 0,
           priceAtMoment: Number(row.priceAtMoment),
+          sellAsPack: !!(row.sellAsPack),
+          mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
           sku: row.sku ?? undefined,
           productName: row.productName ?? undefined,
           sizeCode: row.sizeCode ?? undefined,
@@ -182,9 +186,10 @@ export const createOrder = async (req: any, res: any) => {
       if (!variantId) {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
+      const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       await execute(
-        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0]
+        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack]
       );
     }
 
@@ -197,7 +202,9 @@ export const createOrder = async (req: any, res: any) => {
     const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [orderId]);
     if (!created) return res.status(201).json({ ...newOrder, id: orderId });
     const items = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+             pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -213,6 +220,8 @@ export const createOrder = async (req: any, res: any) => {
       quantity: row.quantity,
       picked: row.picked ?? 0,
       priceAtMoment: Number(row.priceAtMoment),
+      sellAsPack: !!(row.sellAsPack),
+      mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
       sku: row.sku ?? undefined,
       productName: row.productName ?? undefined,
       sizeCode: row.sizeCode ?? undefined,
@@ -325,15 +334,18 @@ export const updateOrder = async (req: any, res: any) => {
       if (!variantId) {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
+      const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       await execute(
-        "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)",
-        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment]
+        "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]
       );
     }
     const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
     if (!created) return res.json({ ...updated, id });
     const itemsRows = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+             pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -349,6 +361,8 @@ export const updateOrder = async (req: any, res: any) => {
       quantity: row.quantity,
       picked: row.picked ?? 0,
       priceAtMoment: Number(row.priceAtMoment),
+      sellAsPack: !!(row.sellAsPack),
+      mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
       sku: row.sku ?? undefined,
       productName: row.productName ?? undefined,
       sizeCode: row.sizeCode ?? undefined,

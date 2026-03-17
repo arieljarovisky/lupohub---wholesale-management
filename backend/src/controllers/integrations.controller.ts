@@ -998,11 +998,13 @@ const processTiendaNubeOrder = async (orderId: string) => {
 
       if (quantity === 0) continue;
 
-      let variant = null;
+      let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
       if (tnVariantId) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE pv.tienda_nube_variant_id = ?`,
           [tnVariantId]
@@ -1010,8 +1012,10 @@ const processTiendaNubeOrder = async (orderId: string) => {
       }
       if (!variant?.id && itemSku) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
           [itemSku, itemSku]
@@ -1019,18 +1023,21 @@ const processTiendaNubeOrder = async (orderId: string) => {
       }
       if (!variant?.id && itemSku) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN products p ON p.id = (SELECT product_id FROM product_colors WHERE id = pv.product_color_id)
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
           [itemSku, `${itemSku}%`, itemSku]
         );
       }
 
       if (variant?.id) {
+        const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
+        const unitsToDeduct = quantity * tnPack;
         const currentStock = Number(variant.current_stock) || 0;
-        const newStock = Math.max(0, currentStock - quantity);
+        const newStock = Math.max(0, currentStock - unitsToDeduct);
         const ok = await updateVariantStock(
           variant.id,
           newStock,
@@ -1040,7 +1047,7 @@ const processTiendaNubeOrder = async (orderId: string) => {
         );
         if (ok) {
           discountedCount++;
-          console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+          console.log(`[TN Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
         } else {
           console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
         }
@@ -1268,11 +1275,13 @@ const processMercadoLibreOrder = async (orderId: string) => {
       const quantity = item.quantity;
       const itemSku = (item.item?.sku || item.sku || '').toString().trim();
 
-      let variant = null;
+      let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
       if (mlVariationId) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE pv.mercado_libre_variant_id = ?`,
           [mlVariationId]
@@ -1280,8 +1289,10 @@ const processMercadoLibreOrder = async (orderId: string) => {
       }
       if (!variant?.id && itemSku) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
           [itemSku, itemSku]
@@ -1289,7 +1300,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
       }
       if (!variant?.id && itemSku) {
         variant = await get(
-          `SELECT pv.id, s.stock as current_stock
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
            JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -1300,8 +1311,10 @@ const processMercadoLibreOrder = async (orderId: string) => {
       }
 
       if (variant?.id) {
-        const currentStock = variant.current_stock || 0;
-        const newStock = Math.max(0, currentStock - quantity);
+        const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
+        const unitsToDeduct = quantity * mlPack;
+        const currentStock = Number(variant.current_stock) || 0;
+        const newStock = Math.max(0, currentStock - unitsToDeduct);
         await updateVariantStock(
           variant.id,
           newStock,
@@ -1309,7 +1322,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
           `Orden ML: ${orderId}`,
           true
         );
-        console.log(`[ML Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+        console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
       } else if (mlVariationId || itemSku) {
         console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);
       }

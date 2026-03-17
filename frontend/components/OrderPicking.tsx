@@ -178,6 +178,9 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
                    <div className="flex flex-col items-center md:items-end px-2">
                       <span className="text-[9px] uppercase font-black text-slate-500 tracking-wider">Total</span>
                       <span className="text-xl font-black text-white">{item.quantity}</span>
+                      {(item as any).sellAsPack && (item as any).mayoristaPackSize > 1 && (
+                        <span className="text-[10px] text-slate-500">pack (x{(item as any).mayoristaPackSize}) = {item.quantity * ((item as any).mayoristaPackSize || 1)} un.</span>
+                      )}
                    </div>
 
                    {/* Input Control */}

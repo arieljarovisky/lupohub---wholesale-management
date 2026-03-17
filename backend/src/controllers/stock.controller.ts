@@ -96,23 +96,34 @@ export const updateVariantStock = async (
   }
 };
 
+// Unidades a descontar por ítem: si sell_as_pack=1, quantity está en packs → multiplicar por mayorista_pack_size
+function unitsToDeductForOrderItem(quantity: number, sellAsPack: boolean | number, mayoristaPackSize: number | null | undefined): number {
+  const packSize = Math.max(1, Number(mayoristaPackSize) || 1);
+  return sellAsPack ? quantity * packSize : quantity;
+}
+
 // Descontar stock por pedido mayorista
 export const deductStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
   const errors: string[] = [];
   
   try {
     const items = await query(
-      `SELECT oi.variant_id, oi.quantity, pv.sku, s.stock as current_stock
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
        FROM order_items oi
        JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`,
       [orderId]
     );
 
-    for (const item of items) {
+    for (const item of items as any[]) {
+      const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
       const currentStock = item.current_stock || 0;
-      const newStock = Math.max(0, currentStock - item.quantity);
+      const newStock = Math.max(0, currentStock - units);
 
       const success = await updateVariantStock(
         item.variant_id,
@@ -139,17 +150,22 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
   
   try {
     const items = await query(
-      `SELECT oi.variant_id, oi.quantity, pv.sku, s.stock as current_stock
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
        FROM order_items oi
        JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`,
       [orderId]
     );
 
-    for (const item of items) {
+    for (const item of items as any[]) {
+      const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
       const currentStock = item.current_stock || 0;
-      const newStock = currentStock + item.quantity;
+      const newStock = currentStock + units;
 
       const success = await updateVariantStock(
         item.variant_id,

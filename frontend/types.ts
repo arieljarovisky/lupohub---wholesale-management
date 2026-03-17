@@ -51,6 +51,8 @@ export interface Product {
   description?: string;
   integrations?: ProductIntegrations;
   externalIds?: ExternalIds; // Link to external platforms
+  /** Unidades por pack en venta mayorista (default 1 = solo por unidad) */
+  mayorista_pack_size?: number;
 }
 
 export interface ApiConfig {
@@ -110,6 +112,10 @@ export interface OrderItem {
   picked?: number;      // Quantity prepared by warehouse
   priceAtMoment: number;
   isBackorder?: boolean;
+  /** Si true, quantity está en packs (se descontarán quantity × mayoristaPackSize unidades del stock) */
+  sellAsPack?: boolean;
+  /** Unidades por pack en mayorista (desde backend o producto); solo relevante si sellAsPack es true */
+  mayoristaPackSize?: number;
   /** Datos de display desde el backend (getOrders) */
   sku?: string;
   productName?: string;

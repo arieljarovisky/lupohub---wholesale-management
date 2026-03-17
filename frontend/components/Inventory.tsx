@@ -115,7 +115,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingProductGroupKey, setEditingProductGroupKey] = useState<string | null>(null);
-  const [editProductForm, setEditProductForm] = useState<{ name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string }>({ name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1' });
+  const [editProductForm, setEditProductForm] = useState<{ name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string; mayoristaPackSize: string }>({ name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1', mayoristaPackSize: '1' });
   const [loadingEditProduct, setLoadingEditProduct] = useState(false);
   const [savingEditProduct, setSavingEditProduct] = useState(false);
 
@@ -1682,7 +1682,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           base_price: String(p.base_price ?? ''),
           description: p.description || '',
           mercadoLibrePackSize: String(p.mercado_libre_pack_size ?? 1),
-          tiendaNubePackSize: String(p.tienda_nube_pack_size ?? 1)
+          tiendaNubePackSize: String(p.tienda_nube_pack_size ?? 1),
+          mayoristaPackSize: String(p.mayorista_pack_size ?? 1)
         });
       }
     }).finally(() => setLoadingEditProduct(false));
@@ -1714,6 +1715,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const base_price = parseFloat(editProductForm.base_price);
     const mlPack = parseInt(editProductForm.mercadoLibrePackSize, 10);
     const tnPack = parseInt(editProductForm.tiendaNubePackSize, 10);
+    const mayPack = parseInt(editProductForm.mayoristaPackSize, 10);
     if (!name) {
       showToast('error', 'El nombre es obligatorio');
       return;
@@ -1731,8 +1733,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         price: base_price,
         description: editProductForm.description || undefined,
         mercadoLibrePackSize: isNaN(mlPack) || mlPack < 1 ? undefined : mlPack,
-        tiendaNubePackSize: isNaN(tnPack) || tnPack < 1 ? undefined : tnPack
-      } as Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number });
+        tiendaNubePackSize: isNaN(tnPack) || tnPack < 1 ? undefined : tnPack,
+        mayoristaPackSize: isNaN(mayPack) || mayPack < 1 ? undefined : mayPack
+      } as Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number });
       showToast('success', 'Producto actualizado');
       const groupKeyToRefetch = editingProductGroupKey;
       setEditingProductId(null);
@@ -3095,7 +3098,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       placeholder="Descripción del artículo"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Pack ML (x)</label>
                       <input
@@ -3116,8 +3119,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
                       />
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Pack mayorista (x)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editProductForm.mayoristaPackSize}
+                        onChange={(e) => setEditProductForm(f => ({ ...f, mayoristaPackSize: e.target.value }))}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none"
+                      />
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-500">Pack: cuántas unidades por caja en ML/TN (ej. x2 = enviar stock/2).</p>
+                  <p className="text-[10px] text-slate-500">Pack ML/TN: unidades por caja al publicar (stock enviado = stock ÷ pack). Pack mayorista: si &gt; 1, en pedidos podés vender por unidad o por pack; el stock se descuenta en unidades.</p>
                 </>
               )}
             </div>
