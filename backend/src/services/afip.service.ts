@@ -184,19 +184,21 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     docNro = parseInt(cuitCliente, 10);
     condicionIva = IVA_RESPONSABLE_INSCRIPTO;
   } else {
+    // Factura B: AFIP 10243 solo acepta condiciones válidas para clase B (4, 5, 7, 8, 9, 10, 15). No 1 ni 6.
     docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
     docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
     if (!tieneCuit) {
       condicionIva = CONSUMIDOR_FINAL;
-    } else if (esResponsableInscripto) {
-      condicionIva = IVA_RESPONSABLE_INSCRIPTO;
-    } else if (condicionIvaDesc.includes('monotrib')) {
-      condicionIva = 6; // Responsable Monotributo
     } else if (condicionIvaDesc.includes('exento')) {
       condicionIva = 4; // IVA Sujeto Exento
+    } else if (condicionIvaDesc.includes('no categorizado')) {
+      condicionIva = 7; // Sujeto No Categorizado
     } else if (condicionIvaDesc.includes('consumidor final')) {
       condicionIva = CONSUMIDOR_FINAL;
+    } else if (condicionIvaDesc.includes('no alcanzado')) {
+      condicionIva = 15; // IVA No Alcanzado
     } else {
+      // Monotributo, RI y resto: para Factura B usar 5 (CF) por restricción AFIP
       condicionIva = CONSUMIDOR_FINAL;
     }
   }
@@ -313,19 +315,19 @@ export async function emitirNotaCredito(
   const tipoCbte = tieneCuit ? TIPO_NC_A : TIPO_NC_B;
   const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
   const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-  // Condición IVA según tipo de comprobante y datos del cliente (AFIP 10243 exige valor válido para la clase de comprobante)
+  // Condición IVA según tipo de comprobante (AFIP 10243: debe ser válida para la clase de comprobante; FEParamGetCondicionIvaReceptor)
+  // NC A: solo 1 (Responsable Inscripto). NC B: solo 4, 5, 7, 8, 9, 10, 15 (no 1 ni 6).
   const condicionIvaDesc = (customer.condicionIva ?? '').toLowerCase();
   let condicionIva: number;
   if (tipoCbte === TIPO_NC_A) {
     condicionIva = IVA_RESPONSABLE_INSCRIPTO; // NC A siempre receptor RI
   } else {
-    // NC B: usar la misma lógica que Factura B (Monotributo=6, Exento=4, etc.)
-    if (condicionIvaDesc.includes('monotrib')) condicionIva = 6; // Responsable Monotributo
-    else if (condicionIvaDesc.includes('exento')) condicionIva = 4; // IVA Sujeto Exento
-    else if (condicionIvaDesc.includes('consumidor final')) condicionIva = CONSUMIDOR_FINAL;
-    else if (condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto')) condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+    // NC B: solo condiciones válidas para comprobante clase B/C (4, 5, 7, 8, 9, 10, 15). 6 (Monotributo) y 1 (RI) no son válidas.
+    if (condicionIvaDesc.includes('exento')) condicionIva = 4; // IVA Sujeto Exento
     else if (condicionIvaDesc.includes('no categorizado')) condicionIva = 7; // Sujeto No Categorizado
-    else condicionIva = CONSUMIDOR_FINAL; // default para CF / no informado
+    else if (condicionIvaDesc.includes('consumidor final')) condicionIva = CONSUMIDOR_FINAL;
+    else if (condicionIvaDesc.includes('no alcanzado')) condicionIva = 15; // IVA No Alcanzado
+    else condicionIva = CONSUMIDOR_FINAL; // Monotributo, RI y resto -> 5 (CF) para NC B
   }
 
   const total = Number(amountToCredit) || 0;
