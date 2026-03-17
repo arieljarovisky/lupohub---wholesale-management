@@ -710,7 +710,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
               )}
             </div>
+            {/* cierre grid de configuración */}
           </div>
+        </div>
         )}
 
         {/* Orders List Section */}
