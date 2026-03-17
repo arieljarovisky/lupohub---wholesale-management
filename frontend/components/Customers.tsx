@@ -58,7 +58,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         showToast('success', `Condición IVA: ${data.condicionIva || 'Consumidor Final'}`);
       })
       .catch((err) => {
-        showToast('error', err?.response?.data?.error || err?.message || 'No se pudo consultar AFIP.');
+        const msg = err?.response?.data?.error || err?.message || 'No se pudo consultar AFIP.';
+        const msgLower = String(msg).toLowerCase();
+        // Si AFIP no tiene el CUIT (ej. homologación con CUIT real), avisar sin bloquear: puede cargar la condición a mano
+        if (msgLower.includes('no existe persona') || msgLower.includes('no encontrado') || msgLower.includes('cuit no encontrado')) {
+          showToast('info', 'No se pudo obtener la condición desde AFIP. Cargala manualmente en el campo Condición de IVA.');
+        } else {
+          showToast('error', msg);
+        }
       })
       .finally(() => setConsultingCuit(false));
   };

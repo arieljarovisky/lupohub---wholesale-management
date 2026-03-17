@@ -102,11 +102,16 @@ export const request = async <T = any>(path: string, method: HttpMethod = 'GET',
   } catch (err: any) {
     if (axios.isAxiosError(err)) {
       if (err.code === 'ECONNABORTED') throw new Error('Request timed out');
-      
+
       const errorData = err.response?.data;
-      const errorMessage = errorData?.message || errorData || err.message;
-      
-      throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+      // Backend puede enviar { message: "..." } o { error: "..." }
+      const serverMsg =
+        (typeof errorData?.message === 'string' && errorData.message) ||
+        (typeof errorData?.error === 'string' && errorData.error) ||
+        (typeof errorData === 'string' && errorData);
+      const errorMessage = serverMsg || err.message;
+
+      throw new Error(errorMessage);
     }
     throw err;
   }
