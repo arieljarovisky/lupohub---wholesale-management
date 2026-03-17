@@ -31,6 +31,7 @@ import { addCustomerPhoneIva } from './database/add_customer_phone_iva';
 import { addTransportesTables } from './database/add_transportes_tables';
 import { addInvoicesTable } from './database/add_invoices_table';
 import { addCreditNotesTable } from './database/add_credit_notes_table';
+import { addOrdersArchived } from './database/add_orders_archived';
 import { addPriceLists } from './database/add_price_lists';
 import { addCatalogsTable } from './database/add_catalogs_table';
 import { initSchema } from './database/init_schema';
@@ -114,6 +115,7 @@ async function initDatabase() {
       await addTransportesTables();
       await addInvoicesTable();
       await addCreditNotesTable();
+      await addOrdersArchived();
       await addPriceLists();
       await addCatalogsTable();
       console.log('[DB] Tablas inicializadas correctamente');

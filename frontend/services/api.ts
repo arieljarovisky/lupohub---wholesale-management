@@ -412,10 +412,18 @@ export const api = {
   },
 
   // --- ORDERS ---
-  getOrders: async (): Promise<Order[]> => {
+  getOrders: async (opts?: { includeArchived?: boolean; archivedOnly?: boolean }): Promise<Order[]> => {
     return handleRequest(async () => {
-      return await request<Order[]>('/orders', 'GET');
+      const params = new URLSearchParams();
+      if (opts?.includeArchived) params.set('includeArchived', 'true');
+      if (opts?.archivedOnly) params.set('archivedOnly', 'true');
+      const q = params.toString();
+      return await request<Order[]>(`/orders${q ? '?' + q : ''}`, 'GET');
     }, MOCK_ORDERS, 'getOrders');
+  },
+
+  archiveOrder: async (orderId: string, archived: boolean): Promise<{ id: string; archived: boolean }> => {
+    return await request<{ id: string; archived: boolean }>(`/orders/${orderId}/archive`, 'PATCH', { archived });
   },
 
   createOrder: async (order: Order): Promise<Order> => {

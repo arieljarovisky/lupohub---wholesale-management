@@ -5,10 +5,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 export const getOrders = async (req: any, res: any) => {
   try {
+    const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
+    const archivedOnly = req.query.archivedOnly === 'true' || req.query.archivedOnly === '1';
+    let whereArchived = ' AND (o.archived = 0 OR o.archived IS NULL)';
+    if (archivedOnly) whereArchived = ' AND o.archived = 1';
+    else if (includeArchived) whereArchived = '';
+
     let ordersRow = await query(`
       SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
       FROM orders o
       LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE 1=1 ${whereArchived}
       ORDER BY o.date DESC
     `);
     const user = req.user;
@@ -107,6 +114,7 @@ export const getOrders = async (req: any, res: any) => {
       total: Number(order.total),
       pickedBy: order.picked_by ?? undefined,
       dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
+      archived: !!(order.archived),
       items: itemsByOrderId[order.id] || [],
       invoice: invoiceByOrderId[order.id] ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0
@@ -361,10 +369,32 @@ export const updateOrder = async (req: any, res: any) => {
   }
 }
 
+/** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
+export const archiveOrder = async (req: any, res: any) => {
+  const { id } = req.params;
+  const archived = req.body?.archived === true || req.body?.archived === 1;
+  if (!id) return res.status(400).json({ message: "ID de pedido inválido" });
+  try {
+    const row = await get("SELECT id FROM orders WHERE id = ?", [id]);
+    if (!row) return res.status(404).json({ message: "Pedido no encontrado" });
+    await execute("UPDATE orders SET archived = ? WHERE id = ?", [archived ? 1 : 0, id]);
+    res.json({ id, archived });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error actualizando archivado del pedido" });
+  }
+};
+
 export const deleteOrder = async (req: any, res: any) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ message: "ID inválido" });
   try {
+    const hasInvoice = await get("SELECT id FROM invoices WHERE order_id = ?", [id]);
+    if (hasInvoice) {
+      return res.status(400).json({
+        message: "No se puede eliminar un pedido que tiene factura emitida. La factura sigue vigente en AFIP. Para anular el efecto fiscal emití una nota de crédito."
+      });
+    }
     const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
     const status = currentOrder?.status;
     if (status === 'Confirmado' || status === 'Preparación') {

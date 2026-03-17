@@ -91,6 +91,8 @@ const App: React.FC = () => {
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** Filtro de archivados en pedidos: 'no' = ocultar archivados, 'yes' = ver todos, 'only' = solo archivados */
+  const [orderArchivedFilter, setOrderArchivedFilter] = useState<'no' | 'yes' | 'only'>('no');
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
@@ -173,7 +175,8 @@ const App: React.FC = () => {
     setIsLoading(true);
     try {
       if (currentUser?.role === Role.CUSTOMER) {
-        const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders()]);
+        const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
+        const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders(orderParams)]);
         setMyCustomer(myC || null);
         const fetchedProducts = await api.getProductsAll({ priceListId: myC?.priceListId ?? undefined });
         setProducts(fetchedProducts);
@@ -183,9 +186,10 @@ const App: React.FC = () => {
         setTransportes([]);
       } else {
       const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
+      const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
         api.getProductsAll(effectivePriceListId ? { priceListId: effectivePriceListId } : {}),
-        api.getOrders(),
+        api.getOrders(orderParams),
         api.getColors(),
         api.getSizes(),
         api.getCustomers(),
@@ -302,6 +306,16 @@ const App: React.FC = () => {
       showToast('error', 'Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).');
     }
   };
+
+  // Refrescar pedidos cuando cambia el filtro de archivados (evitar doble fetch inicial con ref)
+  const orderArchivedFilterRef = useRef(orderArchivedFilter);
+  useEffect(() => {
+    if (!currentUser) return;
+    if (orderArchivedFilterRef.current === orderArchivedFilter) return;
+    orderArchivedFilterRef.current = orderArchivedFilter;
+    const p = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
+    api.getOrders(p).then(setOrders).catch(() => {});
+  }, [orderArchivedFilter, currentUser]);
 
   const getVisibleCustomers = useMemo(() => {
     if (!currentUser) return [];
@@ -765,6 +779,9 @@ const App: React.FC = () => {
                 orders={orders} products={products} customers={getVisibleCustomers}
                 transportes={transportes}
                 users={users} role={currentUser.role} currentUserId={currentUser.id}
+                orderArchivedFilter={orderArchivedFilter}
+                setOrderArchivedFilter={setOrderArchivedFilter}
+                refreshOrders={() => api.getOrders({ includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' }).then(setOrders)}
                 onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
                 onNavigate={setCurrentView} onStartPicking={handleStartPicking}
                 onEditOrder={handleEditOrder}

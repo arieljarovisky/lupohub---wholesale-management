@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -22,12 +22,16 @@ interface OrdersProps {
   onDeleteOrder?: (orderId: string) => void;
   onFacturaEmitida?: (orderId: string, invoice: OrderInvoice) => void;
   onCreditNoteEmitida?: (orderId: string) => void;
+  orderArchivedFilter?: 'no' | 'yes' | 'only';
+  setOrderArchivedFilter?: (v: 'no' | 'yes' | 'only') => void;
+  refreshOrders?: () => void;
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
-  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida 
+  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida,
+  orderArchivedFilter = 'no', setOrderArchivedFilter, refreshOrders
 }) => {
   const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
@@ -47,6 +51,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [ncItemIndex, setNcItemIndex] = useState(0);
   const [ncQuantity, setNcQuantity] = useState<number>(1);
   const [emitiendoNC, setEmitiendoNC] = useState(false);
+  const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ncOrder) {
@@ -432,6 +437,33 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             ))}
           </select>
         </div>
+
+        {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-slate-500 uppercase">Archivados:</span>
+            <button
+              type="button"
+              onClick={() => setOrderArchivedFilter('no')}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'no' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
+            >
+              Ocultar archivados
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrderArchivedFilter('yes')}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'yes' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
+            >
+              Ver todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrderArchivedFilter('only')}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'only' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
+            >
+              Solo archivados
+            </button>
+          </div>
+        )}
       </div>
 
       {afipConfigured && !afipProduction && (
@@ -574,26 +606,43 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <XCircle size={16} />
                     </button>
                   )}
-                  {role === Role.ADMIN && (
+                  {role === Role.ADMIN && !order.invoice && (
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (order.invoice) {
-                          showConfirm({
-                            title: 'Eliminar pedido facturado',
-                            message: 'Este pedido tiene factura emitida en AFIP. Eliminarlo solo borrará el registro en esta app; la factura seguirá existiendo en AFIP. Para anular el efecto fiscal deberías emitir una nota de crédito. ¿Eliminar igual el pedido de la lista?',
-                            confirmLabel: 'Eliminar de la lista',
-                            onConfirm: () => onDeleteOrder?.(order.id)
-                          });
-                        } else {
-                          showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) });
-                        }
-                      }}
+                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
                       className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
-                      title={order.invoice ? 'Eliminar pedido de la lista (la factura AFIP sigue vigente)' : 'Eliminar pedido definitivamente'}
+                      title="Eliminar pedido definitivamente"
                     >
                       <Trash2 size={16} />
                     </button>
+                  )}
+                  {refreshOrders && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
+                    order.archived ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setArchivingOrderId(order.id);
+                          api.archiveOrder(order.id, false).then(() => { refreshOrders(); showToast('success', 'Pedido desarchivado'); }).catch((err: any) => showToast('error', err?.message || 'Error')).finally(() => setArchivingOrderId(null));
+                        }}
+                        disabled={!!archivingOrderId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title="Desarchivar (mostrar en lista activa)"
+                      >
+                        {archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <ArchiveRestore size={16} />}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setArchivingOrderId(order.id);
+                          api.archiveOrder(order.id, true).then(() => { refreshOrders(); showToast('success', 'Pedido archivado'); }).catch((err: any) => showToast('error', err?.message || 'Error')).finally(() => setArchivingOrderId(null));
+                        }}
+                        disabled={!!archivingOrderId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title="Archivar (ocultar de la lista activa)"
+                      >
+                        {archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <Archive size={16} />}
+                      </button>
+                    )
                   )}
                   {canEditOrder && <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />}
                 </div>

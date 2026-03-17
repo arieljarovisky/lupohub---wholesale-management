@@ -143,6 +143,8 @@ export interface Order {
   invoice?: OrderInvoice;
   /** Cantidad de notas de crédito emitidas para este pedido (desde backend) */
   creditNotesCount?: number;
+  /** Si está archivado (oculto de la lista por defecto) */
+  archived?: boolean;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */
