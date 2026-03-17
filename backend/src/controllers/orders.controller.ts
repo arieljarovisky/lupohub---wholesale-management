@@ -76,7 +76,7 @@ export const getOrders = async (req: any, res: any) => {
     }
 
     const invoicesRows = await query(
-      `SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`,
+      `SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo, created_at FROM invoices WHERE order_id IN (${placeholders})`,
       orderIds
     );
     const invoiceByOrderId: Record<string, any> = {};
@@ -87,7 +87,8 @@ export const getOrders = async (req: any, res: any) => {
         puntoVta: inv.punto_venta ?? undefined,
         cbteDesde: inv.cbte_desde,
         cbteHasta: inv.cbte_hasta,
-        cbteTipo: inv.cbte_tipo
+        cbteTipo: inv.cbte_tipo,
+        createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : undefined
       };
     }
 

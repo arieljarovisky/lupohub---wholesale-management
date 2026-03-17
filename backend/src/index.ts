@@ -86,6 +86,12 @@ app.use('/api/catalogs', catalogsRoutes);
 app.use('/api/afip', afipRoutes);
 app.use('/api/billing', billingRoutes);
 
+// Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const message = err?.message || String(err) || 'Error interno del servidor';
+  if (!res.headersSent) res.status(500).json({ error: message, message });
+});
+
 // Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', service: 'LupoHub Backend', db: 'MySQL' });

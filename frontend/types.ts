@@ -127,6 +127,8 @@ export interface OrderInvoice {
   cbteDesde: number;
   cbteHasta: number;
   cbteTipo: number;
+  /** Fecha de emisión del comprobante (ISO); se usa para mostrar en la factura. */
+  createdAt?: string;
 }
 
 export interface Order {

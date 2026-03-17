@@ -26,18 +26,17 @@ router.get('/issuer', (_req, res) => {
 });
 
 /** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
-router.get('/condicion-iva', authMiddleware, async (req: Request, res: Response) => {
+router.get('/condicion-iva', authMiddleware, (req: Request, res: Response) => {
   const cuit = (req.query.cuit as string)?.trim();
   if (!cuit) {
     return res.status(400).json({ error: 'Falta el parámetro cuit.' });
   }
-  try {
-    const result = await getCondicionIvaByCuit(cuit);
-    res.json(result);
-  } catch (err: any) {
-    const message = err?.message || 'Error al consultar AFIP.';
-    res.status(400).json({ error: message });
-  }
+  getCondicionIvaByCuit(cuit)
+    .then((result) => res.json(result))
+    .catch((err: any) => {
+      const message = err?.message || String(err) || 'Error al consultar AFIP.';
+      if (!res.headersSent) res.status(400).json({ error: message });
+    });
 });
 
 export default router;

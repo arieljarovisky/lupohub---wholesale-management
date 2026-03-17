@@ -265,6 +265,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     };
     const tipoLabel = inv.cbteTipo === 6 ? 'Factura B' : 'Factura A';
     const nroComprobante = inv.puntoVta != null ? `${inv.puntoVta}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
+    const fechaComprobante = inv.createdAt
+      ? formatDate(inv.createdAt.split('T')[0])
+      : formatDate(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
@@ -299,7 +302,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       </div>
       <div class="factura-body">
       <div class="factura-doc-title">${tipoLabel}</div>
-      <div class="factura-doc-sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${formatDate(order.date)} — Pedido ${order.id}</div>
+      <div class="factura-doc-sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${fechaComprobante} — Pedido ${order.id}</div>
       <div class="grid">
         <div><strong>Emisor</strong><br>${remitente.businessName || '—'}${remitente.cuit ? `<br>CUIT ${remitente.cuit}` : ''}${remitente.address ? `<br>${remitente.address}` : ''}${remitente.city ? `, ${remitente.city}` : ''}</div>
         <div><strong>Cliente</strong><br>${clienteNombre}${customer?.cuit ? `<br>CUIT ${customer.cuit}` : ''}${customer?.address ? `<br>${customer.address}` : ''}${customer?.city ? `, ${customer.city}` : ''}</div>
@@ -310,7 +313,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         <tfoot><tr><td colspan="5"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
       </table>
       <div class="cae-block"><strong>CAE:</strong> ${inv.cae} &nbsp;|&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-      <p class="no-print" style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${formatDate(order.date)}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
+      <p class="no-print" style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${fechaComprobante}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
       <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: var(--lupo-accent); color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
       </div>
     </body></html>`;
