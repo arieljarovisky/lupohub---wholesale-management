@@ -52,6 +52,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [ncQuantity, setNcQuantity] = useState<number>(1);
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
+  const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ncOrder) {
@@ -589,6 +590,38 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       title="Ver factura AFIP emitida / Descargar PDF"
                     >
                       <Receipt size={16} />
+                    </button>
+                  )}
+                  {order.invoice && afipConfigured && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const inv = order.invoice!;
+                        const ptoVta = (inv as any).puntoVta ?? (inv as any).punto_venta ?? 1;
+                        const cbteTipo = (inv as any).cbteTipo ?? (inv as any).cbte_tipo ?? 6;
+                        const cbteNro = (inv as any).cbteDesde ?? (inv as any).cbte_desde ?? 0;
+                        if (!cbteNro) return;
+                        setVerificandoAfipOrderId(order.id);
+                        api.consultarComprobanteAfip(ptoVta, cbteTipo, cbteNro)
+                          .then((r) => {
+                            if (r.existe) {
+                              showToast('success', `AFIP tiene el comprobante. CAE: ${(r.resultado?.CodAutorizacion ?? r.resultado?.codAutorizacion) ?? 'OK'}`);
+                            } else {
+                              showToast('warning', r.error ?? 'AFIP no devolvió el comprobante.');
+                            }
+                          })
+                          .catch((err: any) => showToast('error', err?.message ?? 'Error al consultar AFIP'))
+                          .finally(() => setVerificandoAfipOrderId(null));
+                      }}
+                      disabled={verificandoAfipOrderId === order.id}
+                      className="p-2 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-700/50 transition"
+                      title="Verificar en AFIP que el comprobante existe (FECompConsultar)"
+                    >
+                      {verificandoAfipOrderId === order.id ? (
+                        <span className="text-xs">...</span>
+                      ) : (
+                        <CheckCircle size={16} />
+                      )}
                     </button>
                   )}
                   {order.invoice && afipConfigured && canEmitirFactura && (

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit } from '../services/afip.service';
+import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit, consultarComprobanteAfip } from '../services/afip.service';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -35,6 +35,24 @@ router.get('/condicion-iva', authMiddleware, (req: Request, res: Response) => {
     .then((result) => res.json(result))
     .catch((err: any) => {
       const message = err?.message || String(err) || 'Error al consultar AFIP.';
+      if (!res.headersSent) res.status(400).json({ error: message });
+    });
+});
+
+/** Consulta en AFIP si un comprobante existe (FECompConsultar). Confirmación 100% de que AFIP lo tiene. */
+router.get('/consultar-comprobante', authMiddleware, (req: Request, res: Response) => {
+  const ptoVta = parseInt(req.query.puntoVta as string, 10);
+  const cbteTipo = parseInt(req.query.cbteTipo as string, 10);
+  const cbteNro = parseInt(req.query.cbteNro as string, 10);
+  if (isNaN(ptoVta) || isNaN(cbteTipo) || isNaN(cbteNro)) {
+    return res.status(400).json({
+      error: 'Faltan o son inválidos: puntoVta, cbteTipo, cbteNro (números). Ej: ?puntoVta=20&cbteTipo=6&cbteNro=1'
+    });
+  }
+  consultarComprobanteAfip(ptoVta, cbteTipo, cbteNro)
+    .then((r) => res.json(r))
+    .catch((err: any) => {
+      const message = err?.message || String(err) || 'Error al consultar comprobante.';
       if (!res.headersSent) res.status(400).json({ error: message });
     });
 });

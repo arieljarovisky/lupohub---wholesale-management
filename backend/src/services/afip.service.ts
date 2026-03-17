@@ -508,3 +508,58 @@ export async function getCondicionIvaByCuit(cuit: string): Promise<CondicionIvaR
 
   return { condicionIva, businessName, address, city };
 }
+
+/**
+ * Consulta en AFIP si un comprobante existe (FECompConsultar).
+ * Si AFIP responde con datos del comprobante → la factura está registrada.
+ * @returns Objeto con existe, datos del comprobante (si existe) y posible error de AFIP.
+ */
+export async function consultarComprobanteAfip(
+  puntoVta: number,
+  cbteTipo: number,
+  cbteNro: number
+): Promise<{ existe: boolean; resultado?: any; error?: string }> {
+  const config = getConfig();
+
+  let Afip: any;
+  try {
+    Afip = (await import('@afipsdk/afip.js')).default;
+  } catch {
+    throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+  }
+
+  const afipOptions: Record<string, unknown> = {
+    CUIT: config.cuit,
+    production: config.production
+  };
+  if (config.accessToken) afipOptions.access_token = config.accessToken;
+  if (config.cert && config.key) {
+    afipOptions.cert = config.cert;
+    afipOptions.key = config.key;
+  }
+  const afip = new Afip(afipOptions);
+  const ws = afip.WebService('wsfe');
+
+  const raw = await ws.executeRequest('FECompConsultar', {
+    FeCompConsReq: {
+      PtoVta: puntoVta,
+      CbteTipo: cbteTipo,
+      CbteNro: cbteNro
+    }
+  });
+
+  const result = raw?.FECompConsultarResult ?? raw;
+  const errors = result?.Errors?.Err ?? result?.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const msg = errors.map((e: any) => e.Msg ?? e.msg ?? e).join('; ');
+    return { existe: false, error: msg };
+  }
+
+  const resultGet = result?.ResultGet ?? result?.resultGet;
+  const codAuth = resultGet?.CodAutorizacion ?? resultGet?.codAutorizacion;
+  if (resultGet && codAuth) {
+    return { existe: true, resultado: resultGet };
+  }
+
+  return { existe: false, error: 'AFIP no devolvió datos del comprobante.' };
+}

@@ -477,6 +477,16 @@ export const api = {
     return res ?? { condicionIva: '' };
   },
 
+  /** Consulta en AFIP si un comprobante existe (FECompConsultar). Confirmación 100% de que AFIP lo tiene. */
+  consultarComprobanteAfip: async (puntoVta: number, cbteTipo: number, cbteNro: number): Promise<{ existe: boolean; resultado?: any; error?: string }> => {
+    const params = new URLSearchParams({
+      puntoVta: String(puntoVta),
+      cbteTipo: String(cbteTipo),
+      cbteNro: String(cbteNro)
+    });
+    return await request<{ existe: boolean; resultado?: any; error?: string }>(`/afip/consultar-comprobante?${params}`, 'GET');
+  },
+
   /** Emite factura electrónica AFIP para un pedido. cbteTipo: 1 = Factura A, 6 = Factura B; si no se envía, se elige por condición IVA del cliente. */
   emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number }> => {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {});
