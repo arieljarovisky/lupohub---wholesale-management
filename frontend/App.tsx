@@ -321,7 +321,9 @@ const App: React.FC = () => {
     if (!currentUser) return [];
     if (currentUser.role === Role.CUSTOMER) return myCustomer ? [myCustomer] : [];
     if (currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE || currentUser.role === Role.DEPOSITO) return customers;
-    return customers.filter(c => !c.sellerId || c.sellerId === currentUser.id);
+    // Vendedores solo ven los clientes asignados a ellos
+    if (currentUser.role === Role.SELLER) return customers.filter(c => c.sellerId === currentUser.id);
+    return customers;
   }, [currentUser, myCustomer, customers]);
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
@@ -752,7 +754,14 @@ const App: React.FC = () => {
 
           {baseView === 'dashboard' && (
             <Suspense fallback={<ViewFallback />}>
-              <Dashboard products={products} orders={orders} role={currentUser.role} onNavigate={setCurrentView} />
+              <Dashboard
+                products={products}
+                orders={orders}
+                role={currentUser.role}
+                onNavigate={setCurrentView}
+                currentUserId={currentUser.id}
+                customers={getVisibleCustomers}
+              />
             </Suspense>
           )}
           {baseView === 'inventory' && (
