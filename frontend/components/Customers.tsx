@@ -422,185 +422,134 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            </div>
         </div>
 
-        {role === Role.ADMIN && (
+        {role === Role.ADMIN && priceLists.length > 0 && onUpdateCustomer && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {priceLists.length > 0 && onUpdateCustomer && (
-              <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-2">
-                <label className="block text-xs font-black text-slate-500 uppercase mb-2">
-                  Lista de precios (cliente con acceso a la app)
-                </label>
-                <select
-                  value={selectedCustomer.priceListId ?? ''}
-                  onChange={async (e) => {
-                    const value = e.target.value || null;
-                    try {
-                      await Promise.resolve(onUpdateCustomer(selectedCustomer.id, { priceListId: value }));
-                      setSelectedCustomer(prev => prev ? { ...prev, priceListId: value ?? undefined } : null);
-                    } catch (err) {
-                      console.error(err);
-                    }
-                  }}
-                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="">Precio base</option>
-                  {priceLists.map(pl => (
-                    <option key={pl.id} value={pl.id}>{pl.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Acceso directo del cliente (usuario y contraseña) */}
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Users size={16} className="text-slate-400" />
-                  <span className="text-xs font-black text-slate-400 uppercase tracking-[0.18em]">
-                    Acceso del cliente
-                  </span>
-                </div>
-              </div>
-
-              {selectedCustomer.userId ? (
-                <div className="space-y-1 text-sm">
-                  <p className="text-slate-300">
-                    Este cliente ya tiene un usuario asignado.
-                  </p>
-                  <p className="text-slate-400">
-                    Email de acceso:&nbsp;
-                    <span className="font-semibold text-slate-100">
-                      {currentCustomerUserEmail(selectedCustomer) || '—'}
-                    </span>
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Para cambiar contraseña o datos del usuario, usá la sección de usuarios o el flujo de recuperación de contraseña.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3 text-sm">
-                  <p className="text-slate-300">
-                    Creá un usuario para que este cliente pueda ingresar y hacer sus propios pedidos mayoristas.
-                  </p>
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                      Email de acceso
-                    </label>
-                    <input
-                      type="email"
-                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-500"
-                      placeholder={selectedCustomer.email || 'cliente@ejemplo.com'}
-                      value={accessEmail}
-                      onChange={(e) => setAccessEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                      Contraseña inicial
-                    </label>
-                    <input
-                      type="password"
-                      className="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-500"
-                      value={accessPassword}
-                      onChange={(e) => setAccessPassword(e.target.value)}
-                      placeholder="Mínimo 6 caracteres"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    disabled={savingAccessUser || !accessEmail || !accessPassword}
-                    onClick={async () => {
-                      if (!selectedCustomer) return;
-                      if (!accessEmail || !accessPassword) return;
-                      setSavingAccessUser(true);
-                      try {
-                        const payload = {
-                          name: selectedCustomer.businessName || selectedCustomer.name || undefined,
-                          email: accessEmail || selectedCustomer.email,
-                          password: accessPassword,
-                        };
-                        const updated = await api.attachUserToCustomer(selectedCustomer.id, payload);
-                        showToast('success', 'Usuario de cliente creado y asignado.');
-                        onUpdateCustomer?.(updated.id, updated);
-                        setSelectedCustomer(updated);
-                        setAccessEmail('');
-                        setAccessPassword('');
-                      } catch (e: any) {
-                        const msg =
-                          e?.response?.data?.message ||
-                          e?.message ||
-                          'Error creando el usuario del cliente';
-                        showToast('error', msg);
-                      } finally {
-                        setSavingAccessUser(false);
-                      }
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm px-4 py-2.5 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {savingAccessUser && <Loader2 size={16} className="animate-spin" />}
-                    <span>Crear usuario para este cliente</span>
-                  </button>
-                  <p className="text-[11px] text-slate-500">
-                    El usuario tendrá rol <strong>CLIENTE</strong> y solo verá sus propios pedidos.
-                  </p>
-                </div>
-              )}
+            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-2">
+              <label className="block text-xs font-black text-slate-500 uppercase mb-2">
+                Lista de precios (cliente con acceso a la app)
+              </label>
+              <select
+                value={selectedCustomer.priceListId ?? ''}
+                onChange={async (e) => {
+                  const value = e.target.value || null;
+                  try {
+                    await Promise.resolve(onUpdateCustomer(selectedCustomer.id, { priceListId: value }));
+                    setSelectedCustomer(prev => prev ? { ...prev, priceListId: value ?? undefined } : null);
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="">Precio base</option>
+                {priceLists.map(pl => (
+                  <option key={pl.id} value={pl.id}>{pl.name}</option>
+                ))}
+              </select>
             </div>
           </div>
         )}
 
         {/* Stats Grid */}
+        <div className="mt-6">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.25em] mb-3 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.8)]" />
+            Resumen de actividad
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-           {/* Total Spent */}
-           <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg">
+            {/* Total Spent */}
+            <div className="relative overflow-hidden bg-gradient-to-br from-emerald-900/60 via-slate-900 to-slate-900 p-5 rounded-3xl border border-emerald-700/70 shadow-[0_18px_45px_rgba(16,185,129,0.25)]">
+              <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-emerald-500/20 blur-2xl" />
               <div className="flex items-center gap-3 mb-2">
-                 <div className="p-2 bg-green-900/20 rounded-lg text-green-500"><DollarSign size={20}/></div>
-                 <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Inversión Total</span>
+                <div className="p-2 bg-emerald-500/20 rounded-xl text-emerald-300">
+                  <DollarSign size={20} />
+                </div>
+                <span className="text-[10px] font-black text-emerald-200 uppercase tracking-[0.22em]">
+                  Inversión Total
+                </span>
               </div>
               <p className="text-2xl font-black text-white">${stats.totalSpent.toLocaleString()}</p>
-              <p className="text-[10px] text-slate-500 mt-1">Histórico acumulado</p>
-           </div>
+              <p className="text-[10px] text-slate-400 mt-1">Histórico acumulado</p>
+            </div>
 
-           {/* Orders Count */}
-           <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg">
+            {/* Orders Count */}
+            <div className="bg-slate-800/90 p-5 rounded-3xl border border-slate-700 shadow-lg">
               <div className="flex items-center gap-3 mb-2">
-                 <div className="p-2 bg-blue-900/20 rounded-lg text-blue-500"><ShoppingBag size={20}/></div>
-                 <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Pedidos</span>
+                <div className="p-2 bg-blue-900/20 rounded-lg text-blue-500">
+                  <ShoppingBag size={20} />
+                </div>
+                <span className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                  Pedidos
+                </span>
               </div>
               <p className="text-2xl font-black text-white">{stats.orders.length}</p>
-              <p className="text-[10px] text-slate-500 mt-1">{stats.completedOrders} completados</p>
-           </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {stats.completedOrders} completados
+              </p>
+            </div>
 
-           {/* Average Ticket */}
-           <div className="bg-slate-800 p-5 rounded-3xl border border-slate-700 shadow-lg">
+            {/* Average Ticket */}
+            <div className="bg-slate-800/90 p-5 rounded-3xl border border-slate-700 shadow-lg">
               <div className="flex items-center gap-3 mb-2">
-                 <div className="p-2 bg-purple-900/20 rounded-lg text-purple-500"><TrendingUp size={20}/></div>
-                 <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Ticket Promedio</span>
+                <div className="p-2 bg-purple-900/20 rounded-lg text-purple-500">
+                  <TrendingUp size={20} />
+                </div>
+                <span className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                  Ticket Promedio
+                </span>
               </div>
-              <p className="text-2xl font-black text-white">${Math.round(stats.averageTicket).toLocaleString()}</p>
+              <p className="text-2xl font-black text-white">
+                ${Math.round(stats.averageTicket).toLocaleString()}
+              </p>
               <p className="text-[10px] text-slate-500 mt-1">Por pedido realizado</p>
-           </div>
+            </div>
 
-           {/* Top Product */}
-           <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-5 rounded-3xl border border-indigo-800 shadow-lg relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500 blur-3xl opacity-20 rounded-full"></div>
+            {/* Top Product */}
+            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-5 rounded-3xl border border-indigo-800 shadow-lg relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500 blur-3xl opacity-20 rounded-full" />
               <div className="flex items-center gap-3 mb-2 relative z-10">
-                 <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-300"><Star size={20}/></div>
-                 <span className="text-xs font-black text-indigo-300 uppercase tracking-wider">Más Comprado</span>
+                <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-300">
+                  <Star size={20} />
+                </div>
+                <span className="text-xs font-black text-indigo-300 uppercase tracking-wider">
+                  Más Comprado
+                </span>
               </div>
               {stats.topProduct ? (
-                 <div className="relative z-10">
-                    <p className="text-lg font-bold text-white truncate" title={stats.topProduct.name}>{stats.topProduct.name}</p>
-                    <p className="text-xs text-indigo-300 mt-0.5">{stats.topProductCount} unidades adquiridas</p>
-                 </div>
+                <div className="relative z-10">
+                  <p
+                    className="text-lg font-bold text-white truncate"
+                    title={stats.topProduct.name}
+                  >
+                    {stats.topProduct.name}
+                  </p>
+                  <p className="text-xs text-indigo-300 mt-0.5">
+                    {stats.topProductCount} unidades adquiridas
+                  </p>
+                </div>
               ) : (
-                 <p className="text-sm text-slate-500 relative z-10">Sin datos suficientes</p>
+                <p className="text-sm text-slate-500 relative z-10">
+                  Sin datos suficientes
+                </p>
               )}
-           </div>
+            </div>
+          </div>
         </div>
 
         {/* Zona de configuración avanzada (lista de precios, vendedor asignado, acceso cliente) */}
         {role === Role.ADMIN && (
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="mt-10 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.25em] flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.8)]" />
+                Configuración del cliente
+              </h3>
+              <span className="text-[11px] text-slate-500 bg-slate-800/70 border border-slate-700 px-3 py-1 rounded-full">
+                Solo visible para administradores
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Lista de precios */}
             {priceLists.length > 0 && onUpdateCustomer && (
               <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-2">
