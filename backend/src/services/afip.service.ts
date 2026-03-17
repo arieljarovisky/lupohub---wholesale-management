@@ -538,28 +538,20 @@ export async function consultarComprobanteAfip(
     afipOptions.key = config.key;
   }
   const afip = new Afip(afipOptions);
-  const ws = afip.WebService('wsfe');
+  // ElectronicBilling inyecta Auth (Token, Sign, Cuit); el WebService genérico no.
+  try {
+    const resultGet = await afip.ElectronicBilling.getVoucherInfo(cbteNro, puntoVta, cbteTipo);
 
-  const raw = await ws.executeRequest('FECompConsultar', {
-    FeCompConsReq: {
-      PtoVta: puntoVta,
-      CbteTipo: cbteTipo,
-      CbteNro: cbteNro
+    if (resultGet && (resultGet.CodAutorizacion ?? resultGet.codAutorizacion)) {
+      return { existe: true, resultado: resultGet };
     }
-  });
 
-  const result = raw?.FECompConsultarResult ?? raw;
-  const errors = result?.Errors?.Err ?? result?.errors;
-  if (Array.isArray(errors) && errors.length > 0) {
-    const msg = errors.map((e: any) => e.Msg ?? e.msg ?? e).join('; ');
-    return { existe: false, error: msg };
+    return { existe: false, error: 'AFIP no devolvió el comprobante (no existe o no autorizado).' };
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    if (msg.includes('Auth') || msg.includes('mal formado')) {
+      throw new Error('AFIP: credenciales inválidas o token vencido. Reautorizá el servicio wsfe (auth-web-service-prod) en app.afipsdk.com.');
+    }
+    throw err;
   }
-
-  const resultGet = result?.ResultGet ?? result?.resultGet;
-  const codAuth = resultGet?.CodAutorizacion ?? resultGet?.codAutorizacion;
-  if (resultGet && codAuth) {
-    return { existe: true, resultado: resultGet };
-  }
-
-  return { existe: false, error: 'AFIP no devolvió datos del comprobante.' };
 }
