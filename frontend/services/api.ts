@@ -384,6 +384,16 @@ export const api = {
     await request<void>(`/products/${encodeURIComponent(productId)}`, 'DELETE');
   },
 
+  // --- CUSTOMERS ACCESS / USERS ---
+
+  /** Asigna o crea un usuario (rol CUSTOMER) para un cliente existente. Solo ADMIN. */
+  attachUserToCustomer: async (
+    customerId: string,
+    payload: { name?: string; email: string; password: string }
+  ): Promise<Customer> => {
+    return await request<Customer>(`/customers/${encodeURIComponent(customerId)}/attach-user`, 'POST', payload);
+  },
+
   patchStock: async (args: { variantId?: string; sku?: string; colorCode?: string; sizeCode?: string; stock: number }): Promise<{ variantId: string; stock: number }> => {
     return handleRequest(async () => {
       return await request<{ variantId: string; stock: number }>(`/products/stock`, 'PATCH', args);

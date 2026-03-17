@@ -125,7 +125,7 @@ export const createCustomer = async (req: Request, res: Response) => {
   }
 };
 
-/** Actualizar cliente (ej. price_list_id para clientes con acceso). */
+/** Actualizar cliente (ej. vendedor, razón social, price_list_id, etc.). */
 export const updateCustomer = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -180,6 +180,90 @@ export const updateCustomer = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('updateCustomer:', error);
     res.status(500).json({ message: 'Error actualizando cliente' });
+  }
+};
+
+/** Crear o vincular usuario de acceso directo a un cliente (rol CUSTOMER). Solo ADMIN. */
+export const attachUserToCustomer = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden asignar usuarios a clientes' });
+    }
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const body = req.body as { name?: string; email?: string; password?: string };
+    const name = (body.name ?? '').toString().trim();
+    const email = (body.email ?? '').toString().trim();
+    const password = (body.password ?? '').toString();
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email y contraseña son requeridos para crear el usuario del cliente' });
+    }
+
+    const existingCustomer = await get(
+      'SELECT id, user_id, business_name, name, email FROM customers WHERE id = ?',
+      [id]
+    );
+    if (!existingCustomer) {
+      return res.status(404).json({ message: 'Cliente no encontrado' });
+    }
+
+    // Si ya tiene user_id asociado, no creamos otro usuario
+    if (existingCustomer.user_id) {
+      return res.status(400).json({ message: 'Este cliente ya tiene un usuario asignado' });
+    }
+
+    // ¿Ya existe un usuario con ese email?
+    const existingUser = await get(
+      'SELECT id, name, email, role FROM users WHERE email = ?',
+      [email]
+    );
+
+    let userId: string;
+    if (existingUser) {
+      // Solo permitimos vincular usuarios de rol CUSTOMER
+      if (existingUser.role !== 'CUSTOMER') {
+        return res.status(400).json({ message: 'Ya existe un usuario con ese email y no es de tipo CLIENTE' });
+      }
+      userId = existingUser.id;
+    } else {
+      // Crear usuario nuevo con rol CUSTOMER
+      userId = uuidv4();
+      const displayName =
+        name ||
+        existingCustomer.business_name ||
+        existingCustomer.name ||
+        email;
+      await execute(
+        'INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, displayName, email, password, 'CUSTOMER', 0]
+      );
+    }
+
+    // Vincular usuario al cliente
+    await execute('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
+
+    const updated = await get(
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE id = ?`,
+      [id]
+    );
+    const links = await query(
+      `SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`,
+      [id]
+    );
+    const transportes = (links || []).map((l: any) => ({
+      id: l.transporteId,
+      name: l.transporteName ?? l.transporteId,
+      address: l.transporteAddress ?? undefined
+    }));
+
+    return res.status(200).json(toCustomer(updated, transportes));
+  } catch (error: any) {
+    console.error('attachUserToCustomer:', error);
+    res.status(500).json({ message: 'Error asignando usuario al cliente', detail: error?.message });
   }
 };
 
