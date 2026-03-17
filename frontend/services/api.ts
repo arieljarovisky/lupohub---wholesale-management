@@ -444,8 +444,8 @@ export const api = {
   },
 
   /** Indica si AFIP está configurado en el servidor (para mostrar botón Emitir factura). */
-  getAfipStatus: async (): Promise<{ configured: boolean }> => {
-    const res = await request<{ configured: boolean }>('/afip/status', 'GET');
+  getAfipStatus: async (): Promise<{ configured: boolean; production?: boolean }> => {
+    const res = await request<{ configured: boolean; production?: boolean }>('/afip/status', 'GET');
     return res ?? { configured: false };
   },
 

@@ -35,6 +35,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
   const [afipConfigured, setAfipConfigured] = useState(false);
+  const [afipProduction, setAfipProduction] = useState(true);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
@@ -77,7 +78,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   useEffect(() => {
     if (!canEmitirFactura) return;
-    api.getAfipStatus().then(r => setAfipConfigured(r?.configured ?? false)).catch(() => setAfipConfigured(false));
+    api.getAfipStatus().then(r => {
+      setAfipConfigured(r?.configured ?? false);
+      setAfipProduction(r?.production ?? true);
+    }).catch(() => { setAfipConfigured(false); setAfipProduction(true); });
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
 
@@ -429,6 +433,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </select>
         </div>
       </div>
+
+      {afipConfigured && !afipProduction && (
+        <div className="rounded-xl border border-amber-700/60 bg-amber-900/30 text-amber-200 px-4 py-3 text-sm flex items-center gap-2">
+          <AlertCircle size={20} className="flex-shrink-0 text-amber-400" />
+          <span><strong>Facturación en homologación.</strong> Las facturas se emiten en el ambiente de prueba de AFIP y <strong>no aparecen en AFIP real</strong>. Para que lleguen a AFIP, configurá <code className="bg-amber-900/50 px-1 rounded">AFIP_PRODUCTION=true</code> y usá certificado/token de producción en el servidor.</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
           {filteredOrders.map((order) => {

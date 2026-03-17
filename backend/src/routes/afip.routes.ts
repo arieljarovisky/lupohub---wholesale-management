@@ -1,13 +1,16 @@
 import { Router } from 'express';
-import { isAfipConfigured, getAfipIssuerData } from '../services/afip.service';
+import { isAfipConfigured, getAfipIssuerData, isAfipProduction } from '../services/afip.service';
 import { optionalAuthMiddleware } from '../middleware/auth';
 
 const router = Router();
 router.use(optionalAuthMiddleware);
 
-/** Indica si AFIP está configurado en el servidor (CUIT + access token). */
+/** Indica si AFIP está configurado y si es ambiente producción (para que las facturas lleguen a AFIP real). */
 router.get('/status', (_req, res) => {
-  res.json({ configured: isAfipConfigured() });
+  res.json({
+    configured: isAfipConfigured(),
+    production: isAfipProduction()
+  });
 });
 
 /** Datos del emisor para la factura (CUIT, razón social, domicilio desde env). Usar en la vista de factura si no hay remitente en localStorage. */

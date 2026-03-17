@@ -136,6 +136,11 @@ export function isAfipConfigured(): boolean {
   return hasToken && (hasCertPaths || hasCertEnv);
 }
 
+/** Indica si la app está configurada para facturar en producción AFIP (si no, es homologación). */
+export function isAfipProduction(): boolean {
+  return process.env.AFIP_PRODUCTION === 'true' || process.env.AFIP_PRODUCTION === '1';
+}
+
 /** Datos del emisor para mostrar en la factura (desde env). El front puede usarlos si no tiene remitente en localStorage. */
 export function getAfipIssuerData(): { cuit: string; businessName?: string; address?: string; city?: string } | null {
   const cuit = process.env.AFIP_CUIT?.trim();
@@ -240,6 +245,8 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     afipOptions.key = config.key;
   }
   const afip = new Afip(afipOptions);
+  const ambiente = config.production ? 'producción' : 'homologación';
+  console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
 
   const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
   const numeroFactura = lastVoucher + 1;
@@ -357,6 +364,8 @@ export async function emitirNotaCredito(
     afipOptions.key = config.key;
   }
   const afip = new Afip(afipOptions);
+  const ambiente = config.production ? 'producción' : 'homologación';
+  console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
 
   const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
   const numeroNC = lastVoucher + 1;
