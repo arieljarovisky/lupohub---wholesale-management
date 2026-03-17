@@ -550,11 +550,11 @@ const App: React.FC = () => {
   };
 
   const handleStartPicking = async (order: Order) => {
-    if (currentUser?.role === Role.WAREHOUSE) {
+    if (currentUser?.role === Role.WAREHOUSE || currentUser?.role === Role.DEPOSITO) {
       try {
-        await api.updateOrderStatus(order.id, OrderStatus.PREPARATION, currentUser.id);
-        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, pickedBy: currentUser.id } : o));
-        setActivePickingOrder({ ...order, pickedBy: currentUser.id });
+        await api.updateOrderStatus(order.id, OrderStatus.PREPARING, currentUser.id);
+        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: OrderStatus.PREPARING, pickedBy: currentUser.id } : o));
+        setActivePickingOrder({ ...order, status: OrderStatus.PREPARING, pickedBy: currentUser.id });
       } catch {
         showToast('error', 'Error al registrar preparación del pedido');
         return;
@@ -566,20 +566,14 @@ const App: React.FC = () => {
   };
 
   const handleFinishPicking = async (orderId: string, updatedItems: OrderItem[]) => {
-    const allPicked = updatedItems.every(i => i.picked === i.quantity);
-    const newStatus = allPicked ? OrderStatus.DISPATCHED : OrderStatus.PREPARATION;
-    
-    // In a real full implementation, we should update items individually in DB.
-    // Since our backend endpoint only updates status for now, we will just update status.
-    // To properly support saving picked items, backend needs an endpoint for updating order items.
-    
-    // For now, we update local state + status in DB
-    setOrders(prev => prev.map(o => o.id === orderId ? { 
-      ...o, 
+    // Al finalizar picking el pedido pasa a "Falta controlar" (luego Depósito pasará a Controlado y Despachado)
+    const newStatus = OrderStatus.PENDING_CONTROL;
+
+    setOrders(prev => prev.map(o => o.id === orderId ? {
+      ...o,
       items: updatedItems,
       status: newStatus,
-      pickedBy: currentUser?.id,
-      dispatchedAt: newStatus === OrderStatus.DISPATCHED ? new Date().toISOString() : o.dispatchedAt
+      pickedBy: currentUser?.id
     } : o));
 
     await handleUpdateOrderStatus(orderId, newStatus, currentUser?.id);

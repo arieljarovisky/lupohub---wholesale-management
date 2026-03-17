@@ -254,8 +254,9 @@ export const updateOrderStatus = async (req: any, res: any) => {
       }
     }
 
-    // Si se cancela un pedido confirmado, restaurar stock
-    if (previousStatus === 'Confirmado' && status === 'Cancelado') {
+    // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
+    const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+    if (status === 'Cancelado' && hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
       
@@ -265,7 +266,7 @@ export const updateOrderStatus = async (req: any, res: any) => {
     }
 
     // Documentar quién prepara/despacha y cuándo
-    if (status === 'Preparación' && pickedBy) {
+    if ((status === 'Preparando' || status === 'Preparación') && pickedBy) {
       await execute("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
     } else if (status === 'Despachado') {
       await execute(
@@ -397,7 +398,8 @@ export const deleteOrder = async (req: any, res: any) => {
     }
     const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
     const status = currentOrder?.status;
-    if (status === 'Confirmado' || status === 'Preparación') {
+    const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+    if (hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
       if (!result.success) {

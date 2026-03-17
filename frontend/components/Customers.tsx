@@ -72,7 +72,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700 text-slate-300';
       case OrderStatus.CONFIRMED: return 'bg-blue-900/40 text-blue-300 border border-blue-800';
-      case OrderStatus.PREPARATION: return 'bg-yellow-900/40 text-yellow-300 border border-yellow-800';
+      case OrderStatus.PREPARING: return 'bg-yellow-900/40 text-yellow-300 border border-yellow-800';
+      case OrderStatus.PENDING_CONTROL: return 'bg-amber-900/40 text-amber-300 border border-amber-800';
+      case OrderStatus.CONTROLLED: return 'bg-emerald-900/40 text-emerald-300 border border-emerald-800';
       case OrderStatus.DISPATCHED: return 'bg-green-900/40 text-green-300 border border-green-800';
       case OrderStatus.CANCELLED: return 'bg-red-900/40 text-red-300 border border-red-800';
       default: return 'bg-slate-700 text-slate-400';

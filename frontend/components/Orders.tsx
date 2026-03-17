@@ -94,9 +94,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700/50 text-slate-300 border border-slate-600';
       case OrderStatus.CONFIRMED: return 'bg-blue-900/30 text-blue-300 border border-blue-800';
-      case OrderStatus.PREPARATION: return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800';
+      case OrderStatus.PREPARING: return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800';
+      case OrderStatus.PENDING_CONTROL: return 'bg-amber-900/30 text-amber-300 border border-amber-800';
+      case OrderStatus.CONTROLLED: return 'bg-emerald-900/30 text-emerald-300 border border-emerald-800';
       case OrderStatus.DISPATCHED: return 'bg-green-900/30 text-green-300 border border-green-800';
       case OrderStatus.CANCELLED: return 'bg-red-900/30 text-red-300 border border-red-800';
+      case 'Preparación': return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800'; // compat antiguo
       default: return 'bg-slate-700/50 text-slate-400 border border-slate-600';
     }
   };
@@ -106,10 +109,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     (filterCustomer === 'ALL' || o.customerId === filterCustomer)
   );
 
+  const statusesCancelables = [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
   const canCancelOrder = (order: Order) =>
-    !order.invoice && // Un pedido facturado no debe poder cancelarse
-    (order.status === OrderStatus.CONFIRMED || order.status === OrderStatus.PREPARATION) &&
-    (role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER);
+    !order.invoice &&
+    (statusesCancelables.includes(order.status) || order.status === 'Preparación') &&
+    (role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER || role === Role.WAREHOUSE || role === Role.DEPOSITO);
+
+  /** Siguiente estado posible para el flujo Depósito (Preparando → Falta controlar → Controlado → Despachado). */
+  const getNextStatusForOrder = (order: Order): OrderStatus | null => {
+    const s = order.status;
+    if (s === OrderStatus.PREPARING || s === 'Preparación') return OrderStatus.PENDING_CONTROL;
+    if (s === OrderStatus.PENDING_CONTROL) return OrderStatus.CONTROLLED;
+    if (s === OrderStatus.CONTROLLED) return OrderStatus.DISPATCHED;
+    return null;
+  };
 
   const canEditOrderBase = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
 
@@ -652,13 +665,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <div className="text-xs text-slate-500">
                   {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
                 </div>
-                <div className="flex items-center gap-4">
-                   {(role === Role.WAREHOUSE || role === Role.DEPOSITO) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
-                     <button 
+                <div className="flex items-center gap-4 flex-wrap">
+                   {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
+                     <button
                         onClick={(e) => { e.stopPropagation(); onStartPicking?.(order); }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-500 transition"
+                        title="Abrir pantalla de picking (pone el pedido en Preparando si estaba Confirmado)"
                      >
                         Picking
+                     </button>
+                   )}
+                   {getNextStatusForOrder(order) !== null && (role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) && (
+                     <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = getNextStatusForOrder(order);
+                          if (next) onUpdateStatus(order.id, next);
+                        }}
+                        className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500 transition"
+                        title={`Pasar a ${getNextStatusForOrder(order)}`}
+                     >
+                        → {getNextStatusForOrder(order)}
                      </button>
                    )}
                    <div className="text-lg font-black text-blue-400">${order.total.toLocaleString()}</div>

@@ -8,8 +8,11 @@ export enum Role {
 export enum OrderStatus {
   DRAFT = 'Borrador',
   CONFIRMED = 'Confirmado',
-  PREPARATION = 'Preparación',
-  DISPATCHED = 'Despachado'
+  PREPARING = 'Preparando',
+  PENDING_CONTROL = 'Falta controlar',
+  CONTROLLED = 'Controlado',
+  DISPATCHED = 'Despachado',
+  CANCELLED = 'Cancelado'
 }
 
 export interface Product {

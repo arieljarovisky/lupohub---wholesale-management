@@ -71,7 +71,7 @@ export const MOCK_ORDERS: Order[] = [
     sellerId: 'u2', 
     pickedBy: 'u3', // Claimed by Carlos
     date: '2023-10-26', 
-    status: OrderStatus.PREPARATION, 
+    status: OrderStatus.PREPARING, 
     total: 16400,
     items: [{ productId: 'p4', quantity: 2, picked: 2, priceAtMoment: 8200 }] 
   },
