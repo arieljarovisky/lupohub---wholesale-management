@@ -245,10 +245,10 @@ export const api = {
     }
   },
 
-  getProductById: async (id: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; description?: string; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number } | null> => {
+  getProductById: async (id: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; description?: string; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; mayorista_pack_size?: number } | null> => {
     try {
       const res = await request<any>(`/products/by-id/${encodeURIComponent(id)}`, 'GET');
-      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1 } : null;
+      return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1, mayorista_pack_size: res.mayorista_pack_size ?? 1 } : null;
     } catch {
       return null;
     }
@@ -289,7 +289,20 @@ export const api = {
       return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
     }, data, 'updateVariant');
   },
-  
+
+  getVariantPublications: async (variantId: string): Promise<Array<{ id: string; platform: string; external_product_id: string; external_variant_id: string; pack_size: number; created_at?: string }>> => {
+    const res = await request<any[]>(`/products/variants/${encodeURIComponent(variantId)}/publications`, 'GET');
+    return Array.isArray(res) ? res : [];
+  },
+
+  addVariantPublication: async (variantId: string, data: { platform: 'mercadolibre' | 'tiendanube'; externalProductId: string; externalVariantId?: string; packSize?: number }): Promise<any> => {
+    return request<any>(`/products/variants/${encodeURIComponent(variantId)}/publications`, 'POST', data);
+  },
+
+  deleteVariantPublication: async (variantId: string, publicationId: string): Promise<void> => {
+    await request<void>(`/products/variants/${encodeURIComponent(variantId)}/publications/${encodeURIComponent(publicationId)}`, 'DELETE');
+  },
+
   getColors: async (): Promise<Array<{ id: string; code: string; name: string; hex?: string | null }>> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/colors', 'GET');
@@ -408,7 +421,7 @@ export const api = {
     }, undefined, 'updateProductExternalIds');
   },
 
-  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string }): Promise<{ stockFromML?: number }> => {
+  updateVariantExternalIds: async (variantId: string, ids: { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string }): Promise<{ stockFromML?: number }> => {
     return handleRequest(async () => {
       return await request<{ stockFromML?: number }>(`/products/variants/${variantId}/external-ids`, 'PUT', ids);
     }, {}, 'updateVariantExternalIds');

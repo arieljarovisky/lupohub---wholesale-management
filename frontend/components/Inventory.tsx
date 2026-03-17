@@ -98,6 +98,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [linkTnVariants, setLinkTnVariants] = useState<{ variantId: number | string; sku: string; color: string; size: string; stock: number }[] | null>(null);
   const [loadingMlVariations, setLoadingMlVariations] = useState(false);
   const [loadingTnVariants, setLoadingTnVariants] = useState(false);
+  const [variantPublications, setVariantPublications] = useState<Array<{ id: string; platform: string; external_product_id: string; external_variant_id: string; pack_size: number }>>([]);
+  const [addPubPlatform, setAddPubPlatform] = useState<'mercadolibre' | 'tiendanube'>('mercadolibre');
+  const [addPubProductId, setAddPubProductId] = useState('');
+  const [addPubVariantId, setAddPubVariantId] = useState('');
+  const [addPubPackSize, setAddPubPackSize] = useState(1);
+  const [addPubSaving, setAddPubSaving] = useState(false);
 
   // Vincular grupo en lote
   const [showBulkLinkModal, setShowBulkLinkModal] = useState(false);
@@ -1512,10 +1518,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // 1. Update Variant External IDs (si hay Item ML, el backend trae el stock de ML y lo guarda en inventario)
       const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
+        tiendaNubeProductId: linkTnId.trim() || undefined,
         mercadoLibreVariantId: linkMlVariantId || linkMlId || undefined,
         mercadoLibreItemId: linkMlId || undefined,
         externalSku: linkExternalSku.trim() || undefined
-      });
+      } as { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string });
       const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
       if (newStockFromML !== undefined) {
         setLinkSaveStockFromML(newStockFromML);
@@ -1628,6 +1635,54 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  useEffect(() => {
+    if (!linkingVariant?.id) {
+      setVariantPublications([]);
+      return;
+    }
+    api.getVariantPublications(linkingVariant.id).then(setVariantPublications).catch(() => setVariantPublications([]));
+  }, [linkingVariant?.id]);
+
+  const refreshVariantPublications = () => {
+    if (linkingVariant?.id) api.getVariantPublications(linkingVariant.id).then(setVariantPublications).catch(() => {});
+  };
+
+  const handleAddVariantPublication = async () => {
+    if (!linkingVariant?.id || !addPubProductId.trim()) {
+      showToast('error', 'Ingresá el ID de la publicación (producto/ítem)');
+      return;
+    }
+    setAddPubSaving(true);
+    try {
+      await api.addVariantPublication(linkingVariant.id, {
+        platform: addPubPlatform,
+        externalProductId: addPubProductId.trim(),
+        externalVariantId: addPubVariantId.trim() || undefined,
+        packSize: addPubPackSize
+      });
+      showToast('success', 'Publicación agregada. El stock se sincronizará a esta publicación.');
+      setAddPubProductId('');
+      setAddPubVariantId('');
+      setAddPubPackSize(1);
+      refreshVariantPublications();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error agregando publicación');
+    } finally {
+      setAddPubSaving(false);
+    }
+  };
+
+  const handleDeleteVariantPublication = async (publicationId: string) => {
+    if (!linkingVariant?.id) return;
+    try {
+      await api.deleteVariantPublication(linkingVariant.id, publicationId);
+      showToast('success', 'Publicación desvinculada');
+      refreshVariantPublications();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al desvincular');
+    }
+  };
+
   // --- Creation Logic ---
 
   const openCreationModal = (variantData?: {name: string, skuBase: string, category: string, price: number}) => {
@@ -1683,7 +1738,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           description: p.description || '',
           mercadoLibrePackSize: String(p.mercado_libre_pack_size ?? 1),
           tiendaNubePackSize: String(p.tienda_nube_pack_size ?? 1),
-          mayoristaPackSize: String(p.mayorista_pack_size ?? 1)
+          mayoristaPackSize: String((p as { mayorista_pack_size?: number }).mayorista_pack_size ?? 1)
         });
       }
     }).finally(() => setLoadingEditProduct(false));
@@ -3458,6 +3513,40 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                              ))}
                           </div>
                           <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-cyan-500/70" placeholder="Otro" />
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Otras publicaciones (misma variante): ML por unidad + ML por pack, o TN en otro producto */}
+                 <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4 space-y-3">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                       <Link size={12} /> Otras publicaciones (misma variante)
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                       Podés vincular esta variante a más de una publicación: por ejemplo una en ML que vende por unidad y otra que vende por pack. Cada una tiene su propio pack size y el stock se reparte a todas.
+                    </p>
+                    {variantPublications.length > 0 && (
+                       <ul className="space-y-2">
+                          {variantPublications.map((pub) => (
+                             <li key={pub.id} className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-slate-900/60 border border-slate-700/50">
+                                <span className="text-xs font-mono text-slate-300 truncate">
+                                   {pub.platform === 'mercadolibre' ? 'ML' : 'TN'} {pub.external_product_id}{pub.external_variant_id ? ` / ${pub.external_variant_id}` : ''} · pack x{pub.pack_size}
+                                </span>
+                                <button type="button" onClick={() => handleDeleteVariantPublication(pub.id)} className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-700/50 transition shrink-0" aria-label="Quitar"><Trash2 size={14} /></button>
+                             </li>
+                          ))}
+                       </ul>
+                    )}
+                    <div className="grid grid-cols-1 gap-2 pt-1">
+                       <div className="flex gap-2 flex-wrap">
+                          <select value={addPubPlatform} onChange={(e) => setAddPubPlatform(e.target.value as 'mercadolibre' | 'tiendanube')} className="bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-indigo-500/70">
+                             <option value="mercadolibre">Mercado Libre</option>
+                             <option value="tiendanube">Tienda Nube</option>
+                          </select>
+                          <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'ID producto TN' : 'ID ítem ML'} className="flex-1 min-w-[120px] bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500/70" />
+                          <input type="text" value={addPubVariantId} onChange={(e) => setAddPubVariantId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'ID variante TN' : 'ID variación ML (opcional)'} className="w-28 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500/70" />
+                          <input type="number" min={1} max={999} value={addPubPackSize} onChange={(e) => setAddPubPackSize(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-14 bg-slate-800/60 border border-slate-600/60 rounded-lg px-2 py-2 text-white font-mono text-sm outline-none focus:border-indigo-500/70" title="Pack (x)" />
+                          <button type="button" onClick={handleAddVariantPublication} disabled={addPubSaving || !addPubProductId.trim()} className="px-3 py-2 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50 whitespace-nowrap">{(addPubSaving ? '...' : 'Agregar')}</button>
                        </div>
                     </div>
                  </div>

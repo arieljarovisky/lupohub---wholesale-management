@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -10,6 +10,9 @@ router.get('/variants/:variantId', authMiddleware, getVariantById);
 // Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
 router.put('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, updateVariant);
 router.put('/variants/:variantId/external-ids', authMiddleware, adminOrDepositoMiddleware, updateVariantExternalIds);
+router.get('/variants/:variantId/publications', authMiddleware, getVariantPublications);
+router.post('/variants/:variantId/publications', authMiddleware, adminOrDepositoMiddleware, addVariantPublication);
+router.delete('/variants/:variantId/publications/:publicationId', authMiddleware, adminOrDepositoMiddleware, deleteVariantPublication);
 router.delete('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, deleteVariant);
 
 router.delete('/all', authMiddleware, adminOrDepositoMiddleware, deleteAllProducts);

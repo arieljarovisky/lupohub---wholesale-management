@@ -209,9 +209,34 @@ function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): v
   };
 }
 
-// Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
+// Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
+    const publications = await query(
+      `SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`,
+      [variantId]
+    );
+
+    if (publications && (publications as any[]).length > 0) {
+      for (const pub of publications as any[]) {
+        const pack = Math.max(1, Number(pub.pack_size) || 1);
+        const stockToSend = stockForPlatform(newStock, pack);
+        if (pub.platform === 'tiendanube' && pub.external_variant_id) {
+          await updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend);
+        } else if (pub.platform === 'mercadolibre') {
+          const itemId = pub.external_product_id;
+          const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
+          if (variationId) {
+            await updateMercadoLibreStockByVariant(itemId, variationId, stockToSend);
+          } else {
+            await updateMercadoLibreStockByItem(itemId, stockToSend);
+          }
+        }
+      }
+      return;
+    }
+
+    // Fallback: enlaces legacy en product_variants + products
     const variant = await get(
       `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
@@ -223,29 +248,17 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
        WHERE pv.id = ?`,
       [variantId]
     );
-
     if (!variant) return;
 
     const stockTN = stockForPlatform(newStock, variant.tn_pack);
     const stockML = stockForPlatform(newStock, variant.ml_pack);
     const skuMLTN = variant.external_sku || variant.sku;
 
-    // Sincronizar con Tienda Nube
     if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-      await updateTiendaNubeStock(
-        variant.tienda_nube_id,
-        variant.tienda_nube_variant_id,
-        stockTN
-      );
+      await updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
     }
-
-    // Sincronizar con Mercado Libre: priorizar variación cuando exista (publicación con varias tallas/colores)
     if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-      await updateMercadoLibreStockByVariant(
-        variant.mercado_libre_id,
-        variant.mercado_libre_variant_id,
-        stockML
-      );
+      await updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
     } else if (variant.mercado_libre_item_id) {
       await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
     } else if (skuMLTN) {

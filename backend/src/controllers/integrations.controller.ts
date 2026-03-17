@@ -1000,6 +1000,16 @@ const processTiendaNubeOrder = async (orderId: string) => {
 
       let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
       if (tnVariantId) {
+        const fromPub = await get(
+          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`,
+          [tnVariantId]
+        );
+        if (fromPub?.id) {
+          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
+        }
+      }
+      if (!variant?.id && tnVariantId) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
@@ -1271,12 +1281,24 @@ const processMercadoLibreOrder = async (orderId: string) => {
     const { updateVariantStock } = await import('./stock.controller');
 
     for (const item of order.order_items || []) {
+      const mlItemId = item.item?.id;
       const mlVariationId = item.item?.variation_id;
       const quantity = item.quantity;
       const itemSku = (item.item?.sku || item.sku || '').toString().trim();
 
       let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
-      if (mlVariationId) {
+      if (mlItemId) {
+        const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
+        const fromPub = await get(
+          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`,
+          [mlItemId, extVariantId]
+        );
+        if (fromPub?.id) {
+          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
+        }
+      }
+      if (!variant?.id && mlVariationId) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
