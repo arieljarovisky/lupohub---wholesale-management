@@ -70,7 +70,7 @@ export const getOrders = async (req: any, res: any) => {
           productName: row.productName ?? undefined,
           sizeCode: row.sizeCode ?? undefined,
           colorName: row.colorName ?? undefined,
-          numeroDespacho: row.numeroDespacho ?? undefined
+          numeroDespacho: row.numeroDespacho ?? row.numero_despacho ?? undefined
         });
       }
     }

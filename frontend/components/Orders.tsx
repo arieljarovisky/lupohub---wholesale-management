@@ -268,7 +268,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
-      const despacho = i.numeroDespacho ?? '—';
+      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? '—';
       return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td style="text-align:center">${despacho}</td><td style="text-align:right">${i.quantity}</td><td style="text-align:right">${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">${sub.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const total = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
