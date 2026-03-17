@@ -313,7 +313,20 @@ export async function emitirNotaCredito(
   const tipoCbte = tieneCuit ? TIPO_NC_A : TIPO_NC_B;
   const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
   const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-  const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+  // Condición IVA según tipo de comprobante y datos del cliente (AFIP 10243 exige valor válido para la clase de comprobante)
+  const condicionIvaDesc = (customer.condicionIva ?? '').toLowerCase();
+  let condicionIva: number;
+  if (tipoCbte === TIPO_NC_A) {
+    condicionIva = IVA_RESPONSABLE_INSCRIPTO; // NC A siempre receptor RI
+  } else {
+    // NC B: usar la misma lógica que Factura B (Monotributo=6, Exento=4, etc.)
+    if (condicionIvaDesc.includes('monotrib')) condicionIva = 6; // Responsable Monotributo
+    else if (condicionIvaDesc.includes('exento')) condicionIva = 4; // IVA Sujeto Exento
+    else if (condicionIvaDesc.includes('consumidor final')) condicionIva = CONSUMIDOR_FINAL;
+    else if (condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto')) condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+    else if (condicionIvaDesc.includes('no categorizado')) condicionIva = 7; // Sujeto No Categorizado
+    else condicionIva = CONSUMIDOR_FINAL; // default para CF / no informado
+  }
 
   const total = Number(amountToCredit) || 0;
   if (total <= 0) throw new Error('El monto a creditar debe ser mayor a 0.');

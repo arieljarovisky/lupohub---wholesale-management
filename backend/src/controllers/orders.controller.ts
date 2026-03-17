@@ -525,7 +525,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     if (!invRow) return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
 
     const customerRow = await get(
-      'SELECT id, business_name, cuit FROM customers WHERE id = ?',
+      'SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?',
       [orderRow.customer_id]
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
@@ -582,7 +582,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     const { emitirNotaCredito: emitirNCAfip } = await import('../services/afip.service');
     const result = await emitirNCAfip(
       { puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde },
-      { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit },
+      { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit, condicionIva: customerRow.condicion_iva ?? undefined },
       amountToCredit
     );
 
