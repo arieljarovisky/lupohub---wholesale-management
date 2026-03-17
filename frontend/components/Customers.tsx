@@ -43,6 +43,25 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newPhone, setNewPhone] = useState('');
   const [newCondicionIva, setNewCondicionIva] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
+  const [consultingCuit, setConsultingCuit] = useState(false);
+
+  const handleCuitBlur = () => {
+    const cuitClean = newCuit.replace(/\D/g, '');
+    if (cuitClean.length !== 11) return;
+    setConsultingCuit(true);
+    api.getCondicionIvaByCuit(newCuit)
+      .then((data) => {
+        setNewCondicionIva(data.condicionIva || '');
+        if (data.businessName && !newBusinessName.trim()) setNewBusinessName(data.businessName);
+        if (data.address && !newAddress.trim()) setNewAddress(data.address);
+        if (data.city && !newCity.trim()) setNewCity(data.city);
+        showToast('success', `Condición IVA: ${data.condicionIva || 'Consumidor Final'}`);
+      })
+      .catch((err) => {
+        showToast('error', err?.response?.data?.error || err?.message || 'No se pudo consultar AFIP.');
+      })
+      .finally(() => setConsultingCuit(false));
+  };
 
   const filteredCustomers = customers.filter(c => 
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -257,14 +276,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT / CUIL (para facturación)</label>
-              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono" value={newCuit} onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} placeholder="20-12345678-9 (solo números)" />
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono" value={newCuit} onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} onBlur={handleCuitBlur} placeholder="20-12345678-9 (solo números)" />
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Teléfono</label>
               <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Ej: 11 1234-5678" />
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA {consultingCuit && <span className="text-amber-400 font-normal">(consultando AFIP…)</span>}</label>
               <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCondicionIva} onChange={(e) => setNewCondicionIva(e.target.value)} placeholder="Ej: Responsable Inscripto, Monotributo, Consumidor Final" />
             </div>
             {transportes.length > 0 && (
@@ -772,11 +791,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT / CUIL (para facturación)</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
                   value={newCuit}
                   onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  onBlur={handleCuitBlur}
                   placeholder="20-12345678-9 (solo números)"
                 />
               </div>
@@ -791,7 +811,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 />
               </div>
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA {consultingCuit && <span className="text-amber-400 font-normal">(consultando AFIP…)</span>}</label>
                 <input 
                   type="text" 
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"

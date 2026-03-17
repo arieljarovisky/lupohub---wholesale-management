@@ -1,6 +1,6 @@
-import { Router } from 'express';
-import { isAfipConfigured, getAfipIssuerData, isAfipProduction } from '../services/afip.service';
-import { optionalAuthMiddleware } from '../middleware/auth';
+import { Router, Request, Response } from 'express';
+import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit } from '../services/afip.service';
+import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -23,6 +23,21 @@ router.get('/issuer', (_req, res) => {
     address: data.address ?? '',
     city: data.city ?? ''
   });
+});
+
+/** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
+router.get('/condicion-iva', authMiddleware, async (req: Request, res: Response) => {
+  const cuit = (req.query.cuit as string)?.trim();
+  if (!cuit) {
+    return res.status(400).json({ error: 'Falta el parámetro cuit.' });
+  }
+  try {
+    const result = await getCondicionIvaByCuit(cuit);
+    res.json(result);
+  } catch (err: any) {
+    const message = err?.message || 'Error al consultar AFIP.';
+    res.status(400).json({ error: message });
+  }
 });
 
 export default router;

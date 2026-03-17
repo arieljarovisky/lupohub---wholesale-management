@@ -422,3 +422,94 @@ export async function emitirNotaCredito(
     cbteHasta: numeroNC
   };
 }
+
+/** Mapeo idImpuesto (Padrón) → descripción condición IVA para el cliente */
+const ID_IMPUESTO_A_CONDICION_IVA: Record<number, string> = {
+  30: 'IVA Responsable Inscripto',
+  20: 'Responsable Monotributo',
+  32: 'IVA Sujeto Exento',
+  34: 'IVA No Alcanzado'
+};
+
+export interface CondicionIvaResult {
+  condicionIva: string;
+  businessName?: string;
+  address?: string;
+  city?: string;
+}
+
+/**
+ * Obtiene la condición frente al IVA (y opcionalmente razón social y domicilio) de un CUIT
+ * consultando el Padrón Constancia de Inscripción (getPersona_v2).
+ * Requiere tener autorizado el web service "ws_sr_constancia_inscripcion" en producción
+ * (además de wsfe); en homologación suele funcionar con el mismo token/cert.
+ */
+export async function getCondicionIvaByCuit(cuit: string): Promise<CondicionIvaResult> {
+  const config = getConfig();
+  const cuitClean = String(cuit).replace(/\D/g, '');
+  if (cuitClean.length !== 11) {
+    throw new Error('El CUIT debe tener 11 dígitos.');
+  }
+  const idPersona = parseInt(cuitClean, 10);
+  if (isNaN(idPersona)) throw new Error('CUIT inválido.');
+
+  let Afip: any;
+  try {
+    Afip = (await import('@afipsdk/afip.js')).default;
+  } catch {
+    throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+  }
+
+  const afipOptions: Record<string, unknown> = {
+    CUIT: config.cuit,
+    production: config.production
+  };
+  if (config.accessToken) afipOptions.access_token = config.accessToken;
+  if (config.cert && config.key) {
+    afipOptions.cert = config.cert;
+    afipOptions.key = config.key;
+  }
+  const afip = new Afip(afipOptions);
+  const ws = afip.WebService('ws_sr_constancia_inscripcion');
+  const raw = await ws.executeRequest('getPersona_v2', {
+    cuitRepresentada: config.cuit,
+    idPersona
+  });
+
+  const pr = raw?.personaReturn ?? raw;
+  const errorConstancia = pr?.errorConstancia;
+  const errorRegimen = pr?.errorRegimenGeneral;
+  const errorMono = pr?.errorMonotributo;
+  if (errorConstancia?.mensaje || (Array.isArray(errorConstancia?.error) && errorConstancia.error.length > 0)) {
+    const msg = errorConstancia.mensaje || (errorConstancia.error && errorConstancia.error[0]) || 'CUIT no encontrado en AFIP.';
+    throw new Error(msg);
+  }
+  if (errorRegimen?.mensaje || (Array.isArray(errorRegimen?.error) && errorRegimen.error.length > 0)) {
+    const msg = errorRegimen.mensaje || (errorRegimen.error && errorRegimen.error[0]) || 'Error régimen general.';
+    throw new Error(msg);
+  }
+  if (errorMono?.mensaje || (Array.isArray(errorMono?.error) && errorMono.error.length > 0)) {
+    const msg = errorMono.mensaje || (errorMono.error && errorMono.error[0]) || 'Error monotributo.';
+    throw new Error(msg);
+  }
+
+  const datosGenerales = pr?.datosGenerales ?? {};
+  const businessName = datosGenerales.razonSocial ?? datosGenerales.apellido ?? undefined;
+  const domicilio = datosGenerales.domicilioFiscal ?? datosGenerales.dependencia;
+  const address = domicilio?.direccion ?? undefined;
+  const city = domicilio?.localidad ?? domicilio?.descripcionProvincia ?? undefined;
+
+  let condicionIva = 'Consumidor Final';
+  const impuestosRg = pr?.datosRegimenGeneral?.impuesto ?? [];
+  const impuestosMono = pr?.datosMonotributo?.impuesto ?? [];
+  const todosImpuestos = [...impuestosRg, ...impuestosMono];
+  for (const imp of todosImpuestos) {
+    const id = imp?.idImpuesto;
+    if (id != null && ID_IMPUESTO_A_CONDICION_IVA[id]) {
+      condicionIva = ID_IMPUESTO_A_CONDICION_IVA[id];
+      break;
+    }
+  }
+
+  return { condicionIva, businessName, address, city };
+}

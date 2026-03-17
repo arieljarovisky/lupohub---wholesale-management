@@ -467,6 +467,16 @@ export const api = {
     }
   },
 
+  /** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
+  getCondicionIvaByCuit: async (cuit: string): Promise<{ condicionIva: string; businessName?: string; address?: string; city?: string }> => {
+    const cuitClean = String(cuit).replace(/\D/g, '');
+    const res = await request<{ condicionIva: string; businessName?: string; address?: string; city?: string }>(
+      `/afip/condicion-iva?cuit=${encodeURIComponent(cuitClean)}`,
+      'GET'
+    );
+    return res ?? { condicionIva: '' };
+  },
+
   /** Emite factura electrónica AFIP para un pedido. cbteTipo: 1 = Factura A, 6 = Factura B; si no se envía, se elige por condición IVA del cliente. */
   emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number }> => {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {});
