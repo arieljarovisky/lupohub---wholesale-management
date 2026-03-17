@@ -22,6 +22,17 @@ interface CustomersProps {
   users?: User[];
 }
 
+const CONDICIONES_IVA = [
+  'Consumidor Final',
+  'IVA Responsable Inscripto',
+  'Responsable Monotributo',
+  'IVA Sujeto Exento',
+  'IVA No Alcanzado',
+  'Sujeto No Categorizado',
+  'IVA Liberado - Ley Nº 19.640',
+  'Monotributista Social',
+];
+
 const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [], users = [] }) => {
   const { showToast } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
@@ -49,33 +60,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newPhone, setNewPhone] = useState('');
   const [newCondicionIva, setNewCondicionIva] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
-  const [consultingCuit, setConsultingCuit] = useState(false);
-
-  const handleCuitBlur = () => {
-    const cuitClean = newCuit.replace(/\D/g, '');
-    if (cuitClean.length !== 11) return;
-    setConsultingCuit(true);
-    api.getCondicionIvaByCuit(newCuit)
-      .then((data) => {
-        setNewCondicionIva(data.condicionIva || '');
-        if (data.businessName && !newBusinessName.trim()) setNewBusinessName(data.businessName);
-        if (data.address && !newAddress.trim()) setNewAddress(data.address);
-        if (data.city && !newCity.trim()) setNewCity(data.city);
-        showToast('success', `Condición IVA: ${data.condicionIva || 'Consumidor Final'}`);
-      })
-      .catch((err) => {
-        const msg = err?.response?.data?.error || err?.message || 'No se pudo consultar AFIP.';
-        const msgLower = String(msg).toLowerCase();
-        const is500 = err?.response?.status === 500;
-        // Si AFIP no tiene el CUIT o error de servidor: avisar sin bloquear; puede cargar la condición a mano
-        if (msgLower.includes('no existe persona') || msgLower.includes('no encontrado') || msgLower.includes('cuit no encontrado') || is500) {
-          showToast('info', 'No se pudo obtener la condición desde AFIP. Cargala manualmente en el campo Condición de IVA.');
-        } else {
-          showToast('error', msg);
-        }
-      })
-      .finally(() => setConsultingCuit(false));
-  };
 
   const filteredCustomers = customers.filter(c => 
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -303,15 +287,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT / CUIL (para facturación)</label>
-              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono" value={newCuit} onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} onBlur={handleCuitBlur} placeholder="20-12345678-9 (solo números)" />
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono" value={newCuit} onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} placeholder="20-12345678-9 (solo números)" />
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Teléfono</label>
               <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Ej: 11 1234-5678" />
             </div>
             <div>
-              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA {consultingCuit && <span className="text-amber-400 font-normal">(consultando AFIP…)</span>}</label>
-              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCondicionIva} onChange={(e) => setNewCondicionIva(e.target.value)} placeholder="Ej: Responsable Inscripto, Monotributo, Consumidor Final" />
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+              <select className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCondicionIva} onChange={(e) => setNewCondicionIva(e.target.value)}>
+                <option value="">— Seleccionar —</option>
+                {CONDICIONES_IVA.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                {newCondicionIva && !CONDICIONES_IVA.includes(newCondicionIva) && (
+                  <option value={newCondicionIva}>{newCondicionIva}</option>
+                )}
+              </select>
             </div>
             {transportes.length > 0 && (
               <div>
@@ -1043,7 +1035,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
                   value={newCuit}
                   onChange={(e) => setNewCuit(e.target.value.replace(/\D/g, '').slice(0, 11))}
-                  onBlur={handleCuitBlur}
                   placeholder="20-12345678-9 (solo números)"
                 />
               </div>
@@ -1058,14 +1049,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 />
               </div>
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA {consultingCuit && <span className="text-amber-400 font-normal">(consultando AFIP…)</span>}</label>
-                <input 
-                  type="text" 
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
+                <select
                   className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                   value={newCondicionIva}
                   onChange={(e) => setNewCondicionIva(e.target.value)}
-                  placeholder="Ej: Responsable Inscripto, Monotributo, Consumidor Final"
-                />
+                >
+                  <option value="">— Seleccionar —</option>
+                  {CONDICIONES_IVA.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  {newCondicionIva && !CONDICIONES_IVA.includes(newCondicionIva) && (
+                    <option value={newCondicionIva}>{newCondicionIva}</option>
+                  )}
+                </select>
               </div>
               {transportes.length > 0 && (
                 <div>
