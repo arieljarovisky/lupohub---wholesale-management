@@ -87,6 +87,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return c?.email || '';
   };
 
+  const getSellerName = (sellerId?: string) => {
+    if (!sellerId) return '';
+    const seller = users.find(u => u.id === sellerId);
+    return seller?.name || '';
+  };
+
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700 text-slate-300';
@@ -936,9 +942,16 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               
               <div className="relative z-10">
                 <h3 className="text-lg font-bold text-white mb-0.5 truncate">{customer.businessName}</h3>
-                <p className="text-sm text-slate-400 mb-4 truncate">{customer.name}</p>
+                <p className="text-sm text-slate-400 mb-2 truncate">{customer.name}</p>
+
+                {role === Role.ADMIN && customer.sellerId && (
+                  <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-slate-800/80 border border-slate-700 px-2 py-1 text-[11px] text-slate-300">
+                    <Users size={11} className="text-slate-400" />
+                    <span>Vendedor: {getSellerName(customer.sellerId) || customer.sellerId.slice(0, 6)}</span>
+                  </div>
+                )}
                 
-                <div className="space-y-2 text-xs border-t border-slate-800 pt-3">
+                <div className="space-y-2 text-xs border-t border-slate-800 pt-3 mt-2">
                   <div className="flex items-center text-slate-500 truncate">
                     <Mail size={12} className="mr-2 text-slate-600 shrink-0" />
                     {customer.email}
