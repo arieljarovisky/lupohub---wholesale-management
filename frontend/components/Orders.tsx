@@ -38,6 +38,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
+  const [remitoBultos, setRemitoBultos] = useState<string>('');
+  const [remitoDescripcion, setRemitoDescripcion] = useState<string>('');
   const [afipConfigured, setAfipConfigured] = useState(false);
   const [afipProduction, setAfipProduction] = useState(true);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
@@ -174,17 +176,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     };
   };
 
-  /** Abre el modal para elegir transporte y luego genera el remito. */
+  /** Abre el modal para elegir transporte, bultos y descripción (para expreso al interior) y luego genera el remito. */
   const openRemitoModal = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     const customer = customers.find(c => c.id === order.customerId);
     const firstTransport = customer?.transportes?.[0]?.name ?? '';
     setRemitoOrder(order);
     setRemitoTransporteName(firstTransport);
+    setRemitoBultos('');
+    setRemitoDescripcion('');
   };
 
-  /** Genera el HTML del remito. Mismo estilo que la factura: logo izq, nº y fecha der, Datos empresa / Datos cliente, transporte, tabla, firmas, C.A.I. */
-  const buildRemitoHtml = (order: Order, transporteName: string) => {
+  /** Genera el HTML del remito. Incluye opcionalmente cantidad de bultos y descripción (para envíos por expreso al interior). */
+  const buildRemitoHtml = (order: Order, transporteName: string, bultos?: number | string | null, descripcion?: string | null) => {
     const customer = customers.find(c => c.id === order.customerId);
     const remitente = getRemitente();
     const items = order.items.map(enrichItem);
@@ -198,6 +202,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const transportesStr = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
       : '—';
+    const numBultos = bultos !== undefined && bultos !== null && bultos !== '' ? (typeof bultos === 'number' ? bultos : parseInt(String(bultos), 10)) : null;
+    const descripcionTrim = descripcion && String(descripcion).trim() ? String(descripcion).trim().replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
@@ -230,8 +236,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
       .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; }
       .inv-datos strong { display: block; font-size: 0.8rem; color: #374151; margin-bottom: 6px; font-weight: 700; }
-      .rem-transporte { font-size: 0.9rem; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+      .rem-transporte { font-size: 0.9rem; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
       .rem-transporte strong { color: #374151; }
+      .rem-bultos-desc { font-size: 0.9rem; margin-bottom: 20px; padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+      .rem-bultos-desc strong { color: #374151; }
+      .rem-bultos-desc .rem-desc-block { margin-top: 8px; }
+      .rem-bultos-desc .rem-desc-text { margin-top: 6px; padding: 8px 10px; background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb; white-space: pre-line; }
       .inv-table-wrap { margin-bottom: 24px; }
       .inv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
       .inv-table th { text-align: left; padding: 10px 12px; font-weight: 600; color: #111; border-bottom: 2px solid #e5e7eb; }
@@ -267,6 +277,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
       </div>
       <div class="rem-transporte"><strong>Transporte:</strong> ${transportesStr}</div>
+      ${(numBultos != null && !isNaN(numBultos)) || descripcionTrim ? `
+      <div class="rem-bultos-desc">
+        ${(numBultos != null && !isNaN(numBultos)) ? `<div><strong>Cantidad de bultos:</strong> ${numBultos}</div>` : ''}
+        ${descripcionTrim ? `<div class="rem-desc-block"><strong>Descripción de lo que va:</strong><div class="rem-desc-text">${descripcionTrim}</div></div>` : ''}
+      </div>` : ''}
       <div class="inv-table-wrap">
         <table class="inv-table">
           <thead><tr><th>Descripción / Producto</th><th>Talle</th><th>Color</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
@@ -286,7 +301,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const confirmRemito = () => {
     if (!remitoOrder) return;
-    const html = buildRemitoHtml(remitoOrder, remitoTransporteName);
+    const bultosVal = remitoBultos.trim() ? remitoBultos : null;
+    const html = buildRemitoHtml(remitoOrder, remitoTransporteName, bultosVal, remitoDescripcion.trim() || null);
     const w = window.open('', '_blank');
     if (w) {
       w.document.write(html);
@@ -294,6 +310,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
     setRemitoOrder(null);
     setRemitoTransporteName('');
+    setRemitoBultos('');
+    setRemitoDescripcion('');
   };
 
   /** Genera el HTML de la factura AFIP. Estilo limpio: logo izq, nº y fecha der, Datos empresa / Datos cliente, tabla Base/IVA/Total, resumen y CAE en pie. */
@@ -879,15 +897,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         const transportesDelCliente = customer?.transportes ?? [];
         const transportesOpciones = transportesDelCliente.length > 0 ? transportesDelCliente : transportes;
         return (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }}>
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); setRemitoBultos(''); setRemitoDescripcion(''); }}>
+            <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-white mb-1">Generar remito</h3>
               <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {remitoOrder.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'}</p>
               <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
               <select
                 value={remitoTransporteName}
                 onChange={(e) => setRemitoTransporteName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-6"
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-4"
               >
                 <option value="">— No especificado</option>
                 {transportesOpciones.map(t => (
@@ -895,10 +913,34 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 ))}
               </select>
               {transportesOpciones.length === 0 && (
-                <p className="text-amber-500/90 text-xs mb-2">No hay transportes cargados. Agregá al menos uno en Configuración → Transportes y opcionalmente asignálos al cliente en Clientes.</p>
+                <p className="text-amber-500/90 text-xs mb-2">No hay transportes cargados. Agregá al menos uno en Configuración → Remitos y opcionalmente asignálos al cliente en Clientes.</p>
               )}
+              <p className="text-xs text-amber-200/90 mb-2">Para envío por expreso (al interior)</p>
+              <div className="grid grid-cols-1 gap-3 mb-4">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Cantidad de bultos</label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Ej: 2"
+                    value={remitoBultos}
+                    onChange={(e) => setRemitoBultos(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Descripción de lo que va</label>
+                  <textarea
+                    placeholder="Ej: 2 cajas con indumentaria"
+                    value={remitoDescripcion}
+                    onChange={(e) => setRemitoDescripcion(e.target.value)}
+                    rows={2}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none resize-y"
+                  />
+                </div>
+              </div>
               <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
+                <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); setRemitoBultos(''); setRemitoDescripcion(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
                 <button type="button" onClick={confirmRemito} className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition">
                   <FileText size={18} /> Generar remito
                 </button>
