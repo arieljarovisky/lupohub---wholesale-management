@@ -215,12 +215,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const caiFooterHtml = caiRemitoTrim
       ? `<div class="rem-cai">C.A.I. ${caiRemitoTrim}${caiVencimientoStr ? ` — Vencimiento: ${caiVencimientoStr}` : ''}</div>`
       : '';
-    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="" class="inv-logo" />` : '';
+    const logoBlockRemito = (remitente.logoUrl && remitente.logoUrl.trim())
+      ? `<img src="${remitente.logoUrl.trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" />`
+      : `<span class="inv-logo-placeholder">${(remitente.businessName || 'Empresa').replace(/</g, '&lt;')}</span>`;
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
       * { box-sizing: border-box; }
       body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
       .inv-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb; }
-      .inv-logo { max-height: 48px; max-width: 140px; object-fit: contain; display: block; }
+      .inv-logo-wrap { min-height: 52px; display: flex; align-items: center; }
+      .inv-logo { max-height: 52px; max-width: 180px; width: auto; height: auto; object-fit: contain; display: block; }
+      .inv-logo-placeholder { font-size: 1.25rem; font-weight: 700; color: #111; }
       .inv-meta { text-align: right; }
       .inv-meta .inv-num { font-size: 1.1rem; font-weight: 700; color: #111; }
       .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
@@ -244,7 +248,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       @media print { .no-print { display: none !important; } body { padding: 24px; } }
     </style></head><body>
       <div class="inv-top">
-        <div>${logoHtml}</div>
+        <div class="inv-logo-wrap">${logoBlockRemito}</div>
         <div class="inv-meta">
           <div class="inv-num">REMITO Nº: ${order.id}</div>
           <div class="inv-fecha">Fecha: ${formatDateShort(order.date)}</div>
@@ -321,14 +325,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return `<tr><td>${desc}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
-    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="" class="inv-logo" />` : '';
+    const logoUrlFactura = (remitente as any).logoUrl && String((remitente as any).logoUrl).trim();
+    const logoBlockFactura = logoUrlFactura
+      ? `<img src="${logoUrlFactura}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" />`
+      : `<span class="inv-logo-placeholder">${((remitente as any).businessName || 'Empresa').replace(/</g, '&lt;')}</span>`;
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
       * { box-sizing: border-box; }
       body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
       .inv-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb; }
-      .inv-logo { max-height: 48px; max-width: 140px; object-fit: contain; display: block; }
+      .inv-logo-wrap { min-height: 52px; display: flex; align-items: center; }
+      .inv-logo { max-height: 52px; max-width: 180px; width: auto; height: auto; object-fit: contain; display: block; }
+      .inv-logo-placeholder { font-size: 1.25rem; font-weight: 700; color: #111; }
       .inv-meta { text-align: right; }
       .inv-meta .inv-num { font-size: 1.1rem; font-weight: 700; color: #111; }
       .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
@@ -352,7 +361,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       @media print { .no-print { display: none !important; } body { padding: 24px; } }
     </style></head><body>
       <div class="inv-top">
-        <div>${logoHtml}</div>
+        <div class="inv-logo-wrap">${logoBlockFactura}</div>
         <div class="inv-meta">
           <div class="inv-num">FACTURA Nº: ${nroComprobante}</div>
           <div class="inv-fecha">Fecha: ${fechaComprobante}</div>

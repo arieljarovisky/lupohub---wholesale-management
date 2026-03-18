@@ -153,7 +153,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, []);
 
   const searchTrimmed = searchTerm.trim().toLowerCase();
-  /** Agrupar por artículo (base_sku) para mostrar un ítem por código. */
+  /** Agrupar por artículo (base_sku) para mostrar un ítem por código; totalStock = suma de stock de todas las variantes. */
   const filteredProductGroups = useMemo(() => {
     let list = products;
     if (searchTrimmed) {
@@ -166,12 +166,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         return words.every(w => text.includes(w));
       });
     }
-    const byBase = new Map<string, Product>();
+    const byBase = new Map<string, { product: Product; totalStock: number }>();
     for (const p of list) {
       const base = (p as any).base_sku ?? ((p.sku || '').replace(/-[^-]+-[^-]+$/, '').trim() || p.sku || p.id);
-      if (!byBase.has(base)) byBase.set(base, p);
+      const stock = Math.max(0, Number(p.stock ?? 0));
+      if (!byBase.has(base)) {
+        byBase.set(base, { product: p, totalStock: stock });
+      } else {
+        const prev = byBase.get(base)!;
+        prev.totalStock += stock;
+      }
     }
-    return Array.from(byBase.entries()).slice(0, 50).map(([baseSku, p]) => ({ baseSku, product: p }));
+    return Array.from(byBase.entries()).slice(0, 50).map(([baseSku, { product: p, totalStock }]) => ({ baseSku, product: p, totalStock }));
   }, [products, searchTrimmed]);
 
   const addProductBySku = async (baseSku: string) => {
@@ -907,7 +913,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             />
           </div>
           <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
-            {filteredProductGroups.map(({ baseSku, product: p }) => (
+            {filteredProductGroups.map(({ baseSku, product: p, totalStock }) => (
               <button
                 key={baseSku}
                 type="button"
@@ -919,7 +925,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                   <div className="font-semibold text-white text-sm truncate">{p.name}</div>
                   <div className="text-xs font-mono text-slate-400 truncate">{baseSku}</div>
                 </div>
-                <Package size={20} className="text-slate-500 shrink-0" />
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-semibold px-2 py-1 rounded-lg ${totalStock > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-600/50 text-slate-400'}`}>
+                    {totalStock > 0 ? `Hay stock (${totalStock})` : 'Sin stock'}
+                  </span>
+                  <Package size={20} className="text-slate-500" />
+                </div>
               </button>
             ))}
             {filteredProductGroups.length === 0 && products.length > 0 && (
