@@ -159,7 +159,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [filterCategory, setFilterCategory] = useState(stored.filterCategory ?? 'ALL');
   const [filterSize, setFilterSize] = useState(stored.filterSize ?? 'ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
-  const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'>('ALL');
+  const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH'>('ALL');
   const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
@@ -986,8 +986,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
   const getGroupFilteredVariants = (groupKey: string, groupVariants: Product[]) => {
     const raw = getGroupRawVariants(groupKey, groupVariants);
-    if (filterColor === 'ALL') return raw;
-    return raw.filter(p => checkColorMatch(p, filterColor));
+    const byColor = filterColor === 'ALL' ? raw : raw.filter(p => checkColorMatch(p, filterColor));
+    if (filterSync === 'MISMATCH') {
+      return byColor.filter(p => {
+        const ext = variantExternalStocks[p.id];
+        if (!ext) return false;
+        const ml = ext.stockML;
+        const tn = ext.stockTN;
+        if (ml == null || tn == null) return false;
+        return ml !== tn;
+      });
+    }
+    return byColor;
   };
   const getGroupDisplayStock = (groupKey: string, groupVariants: Product[]) => {
     const variants = getGroupFilteredVariants(groupKey, groupVariants);
@@ -2362,6 +2372,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                      <option value="ML">Mercado Libre</option>
                      <option value="TN">Tienda Nube</option>
                      <option value="BOTH">En ambos</option>
+                  <option value="MISMATCH">ML ≠ TN</option>
                      <option value="NONE">No sincronizado</option>
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />
