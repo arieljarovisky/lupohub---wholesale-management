@@ -3458,12 +3458,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           </div>
                        )}
                        <div>
-                          <label className="text-[11px] text-slate-500 block mb-1">ID variación ML (si tiene talles/colores)</label>
+                          <label className="text-[11px] font-medium text-slate-400 block mb-1.5">ID variación ML (si tiene talles/colores)</label>
                           <input 
                             type="text" 
                             value={linkMlVariantId}
                             onChange={(e) => setLinkMlVariantId(e.target.value)}
-                            placeholder="Se llena al cargar variantes o manual"
+                            placeholder="Ej: 177049455976 — se llena al cargar variantes o manual"
                             className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
                           />
                        </div>
@@ -3475,55 +3475,65 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     )}
                  </div>
 
-                 {/* Packs */}
-                 <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                       <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pack (unidades por publicación)</p>
-                       <span className="text-[10px] text-slate-500" title="Stock enviado = stock local ÷ pack">100 un. ÷ x2 = 50 en la publicación</span>
+                 {/* PACK (UNIDADES POR PUBLICACIÓN) - igual que la referencia */}
+                 <div className="rounded-xl bg-slate-800/50 border border-slate-600/60 p-4 sm:p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                       <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider">Pack (unidades por publicación)</h4>
+                       <p className="text-[11px] text-slate-400 font-medium bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-600/50">
+                          <span className="text-white">100 un.</span>
+                          <span className="text-slate-500 mx-1">÷</span>
+                          <span className="text-amber-400 font-bold">x2</span>
+                          <span className="text-slate-500 mx-1">=</span>
+                          <span className="text-green-400 font-bold">50</span>
+                          <span className="text-slate-500 ml-1">en la publicación</span>
+                       </p>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                       <div className="space-y-2">
-                          <label className="text-[11px] text-slate-500">Mercado Libre</label>
-                          <div className="flex flex-wrap gap-1.5">
+                    <p className="text-[10px] text-slate-500 -mt-2">
+                      Cuántas unidades de tu depósito forman una unidad en la publicación. x1 = venta por unidad; x2 = pack de 2 (cada venta descuenta 2 del stock).
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                       <div className="space-y-3">
+                          <label className="text-[11px] font-semibold text-amber-400/90 uppercase tracking-wide block">Mercado Libre</label>
+                          <div className="flex flex-wrap gap-2">
                              {[1, 2, 3, 6, 12].map((n) => (
                                <button
                                  key={n}
                                  type="button"
                                  onClick={() => setLinkPackMl(n)}
-                                 className={`px-2.5 py-1.5 rounded-lg text-sm font-bold transition ${linkPackMl === n ? 'bg-amber-500/90 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white'}`}
+                                 className={`min-w-[44px] px-3 py-2 rounded-lg text-sm font-bold transition ${linkPackMl === n ? 'bg-amber-500 text-white shadow-md shadow-amber-900/30' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600/50'}`}
                                >
                                  x{n}
                                </button>
                              ))}
                           </div>
-                          <input type="number" min={1} max={999} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-amber-500/70" placeholder="Otro" />
+                          <input type="number" min={1} max={999} value={linkPackMl} onChange={(e) => setLinkPackMl(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30" placeholder="Otro valor" aria-label="Pack ML (unidades por publicación)" />
                        </div>
-                       <div className="space-y-2">
-                          <label className="text-[11px] text-slate-500">Tienda Nube</label>
-                          <div className="flex flex-wrap gap-1.5">
+                       <div className="space-y-3">
+                          <label className="text-[11px] font-semibold text-cyan-400/90 uppercase tracking-wide block">Tienda Nube</label>
+                          <div className="flex flex-wrap gap-2">
                              {[1, 2, 3, 6, 12].map((n) => (
                                <button
                                  key={n}
                                  type="button"
                                  onClick={() => setLinkPackTn(n)}
-                                 className={`px-2.5 py-1.5 rounded-lg text-sm font-bold transition ${linkPackTn === n ? 'bg-cyan-500/90 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white'}`}
+                                 className={`min-w-[44px] px-3 py-2 rounded-lg text-sm font-bold transition ${linkPackTn === n ? 'bg-cyan-500 text-white shadow-md shadow-cyan-900/30' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600/50'}`}
                                >
                                  x{n}
                                </button>
                              ))}
                           </div>
-                          <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-cyan-500/70" placeholder="Otro" />
+                          <input type="number" min={1} max={999} value={linkPackTn} onChange={(e) => setLinkPackTn(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30" placeholder="Otro valor" aria-label="Pack TN (unidades por publicación)" />
                        </div>
                     </div>
                  </div>
 
-                 {/* Otras publicaciones (misma variante): ML por unidad + ML por pack, o TN en otro producto */}
-                 <div className="rounded-xl bg-slate-800/30 border border-slate-700/50 p-4 space-y-3">
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
-                       <Link size={12} /> Otras publicaciones (misma variante)
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                       Podés vincular esta variante a más de una publicación: por ejemplo una en ML que vende por unidad y otra que vende por pack. Cada una tiene su propio pack size y el stock se reparte a todas.
+                 {/* Otras publicaciones (misma variante) */}
+                 <div className="rounded-xl bg-slate-800/40 border border-slate-700/50 p-4 sm:p-5 space-y-3">
+                    <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                       <Link size={14} className="text-slate-500" /> Otras publicaciones (misma variante)
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                       Misma variante en más de una publicación: ej. una en ML por unidad (x1) y otra por pack (x2). Cada una con su pack y el stock se descuenta bien en cada venta.
                     </p>
                     {variantPublications.length > 0 && (
                        <ul className="space-y-2">
