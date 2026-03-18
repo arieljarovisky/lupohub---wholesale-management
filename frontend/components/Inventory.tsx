@@ -104,6 +104,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [addPubVariantId, setAddPubVariantId] = useState('');
   const [addPubPackSize, setAddPubPackSize] = useState(1);
   const [addPubSaving, setAddPubSaving] = useState(false);
+  const [showAddPublicationForm, setShowAddPublicationForm] = useState(false);
 
   // Vincular grupo en lote
   const [showBulkLinkModal, setShowBulkLinkModal] = useState(false);
@@ -1483,6 +1484,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const handleOpenLinkModal = (product: Product) => {
     setLinkingVariant(product);
+    setShowAddPublicationForm(false);
     setLinkTnId(product.externalIds?.tiendaNube || '');
     setLinkTnVariantId(product.externalIds?.tiendaNubeVariant || '');
     setLinkMlId((product.externalIds as any)?.mercadoLibreItemId || product.externalIds?.mercadoLibre || '');
@@ -1665,6 +1667,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setAddPubVariantId('');
       setAddPubPackSize(1);
       refreshVariantPublications();
+      setShowAddPublicationForm(false);
     } catch (e: any) {
       showToast('error', e?.message || 'Error agregando publicación');
     } finally {
@@ -3541,13 +3544,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </div>
                  </div>
 
-                 {/* Otras publicaciones (misma variante) */}
+                 {/* Otras publicaciones (misma variante) — ej. la publicación por pack */}
                  <div className="rounded-xl bg-slate-800/40 border border-slate-700/50 p-4 sm:p-5 space-y-3">
                     <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-2">
                        <Link size={14} className="text-slate-500" /> Otras publicaciones (misma variante)
                     </h4>
                     <p className="text-[11px] text-slate-500">
-                       Misma variante en más de una publicación: ej. una en ML por unidad (x1) y otra por pack (x2). Cada una con su pack y el stock se descuenta bien en cada venta.
+                       Misma variante en más de una publicación: ej. una por unidad (x1) y otra por pack (x2). Agregá la publicación por pack acá.
                     </p>
                     {variantPublications.length > 0 && (
                        <ul className="space-y-2">
@@ -3561,18 +3564,51 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           ))}
                        </ul>
                     )}
-                    <div className="grid grid-cols-1 gap-2 pt-1">
-                       <div className="flex gap-2 flex-wrap">
-                          <select value={addPubPlatform} onChange={(e) => setAddPubPlatform(e.target.value as 'mercadolibre' | 'tiendanube')} className="bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-indigo-500/70">
-                             <option value="mercadolibre">Mercado Libre</option>
-                             <option value="tiendanube">Tienda Nube</option>
-                          </select>
-                          <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'ID producto TN' : 'ID ítem ML'} className="flex-1 min-w-[120px] bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500/70" />
-                          <input type="text" value={addPubVariantId} onChange={(e) => setAddPubVariantId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'ID variante TN' : 'ID variación ML (opcional)'} className="w-28 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500/70" />
-                          <input type="number" min={1} max={999} value={addPubPackSize} onChange={(e) => setAddPubPackSize(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-14 bg-slate-800/60 border border-slate-600/60 rounded-lg px-2 py-2 text-white font-mono text-sm outline-none focus:border-indigo-500/70" title="Pack (x)" />
-                          <button type="button" onClick={handleAddVariantPublication} disabled={addPubSaving || !addPubProductId.trim()} className="px-3 py-2 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-sm font-medium disabled:opacity-50 whitespace-nowrap">{(addPubSaving ? '...' : 'Agregar')}</button>
+                    {!showAddPublicationForm ? (
+                       <button
+                         type="button"
+                         onClick={() => setShowAddPublicationForm(true)}
+                         className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-sm font-semibold border border-indigo-500/50 transition"
+                       >
+                          <Plus size={18} />
+                          Agregar otra publicación
+                       </button>
+                    ) : (
+                       <div className="rounded-lg bg-slate-900/60 border border-slate-600/60 p-4 space-y-3">
+                          <p className="text-[11px] font-semibold text-slate-400">Nueva publicación (ej. la que es por pack)</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                             <div>
+                                <label className="text-[11px] text-slate-500 block mb-1">Plataforma</label>
+                                <select value={addPubPlatform} onChange={(e) => setAddPubPlatform(e.target.value as 'mercadolibre' | 'tiendanube')} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-indigo-500">
+                                   <option value="mercadolibre">Mercado Libre</option>
+                                   <option value="tiendanube">Tienda Nube</option>
+                                </select>
+                             </div>
+                             <div>
+                                <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID producto TN' : 'ID publicación (ítem) ML'}</label>
+                                <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'Ej: 198440687' : 'Ej: MLA1179934011'} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
+                             </div>
+                          </div>
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID variante TN (opcional)' : 'ID variación ML (opcional)'}</label>
+                             <input type="text" value={addPubVariantId} onChange={(e) => setAddPubVariantId(e.target.value)} placeholder="Si tiene talles/colores" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
+                          </div>
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1.5">Pack (unidades por publicación)</label>
+                             <div className="flex flex-wrap gap-2 items-center">
+                                {[1, 2, 3, 6, 12].map((n) => (
+                                  <button key={n} type="button" onClick={() => setAddPubPackSize(n)} className={`min-w-[44px] px-3 py-2 rounded-lg text-sm font-bold transition ${addPubPackSize === n ? 'bg-indigo-500 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600/50'}`}>x{n}</button>
+                                ))}
+                                <input type="number" min={1} max={999} value={addPubPackSize} onChange={(e) => setAddPubPackSize(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-20 bg-slate-800 border border-slate-600 rounded-lg px-2 py-2 text-white font-mono text-sm outline-none focus:border-indigo-500" title="Otro valor" />
+                             </div>
+                             <p className="text-[10px] text-slate-500 mt-1">x1 = por unidad; x2 = pack de 2 (cada venta descuenta 2 del stock).</p>
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                             <button type="button" onClick={() => setShowAddPublicationForm(false)} className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium transition">Cancelar</button>
+                             <button type="button" onClick={handleAddVariantPublication} disabled={addPubSaving || !addPubProductId.trim()} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 whitespace-nowrap">{(addPubSaving ? '...' : 'Agregar publicación')}</button>
+                          </div>
                        </div>
-                    </div>
+                    )}
                  </div>
               </div>
               <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-end gap-3 bg-slate-900/80">
