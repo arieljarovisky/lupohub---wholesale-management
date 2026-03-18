@@ -3544,6 +3544,67 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </div>
                  </div>
 
+                 {/* Botón para agregar otra publicación (por pack) */}
+                 <div className="space-y-3">
+                    {variantPublications.length > 0 && (
+                       <ul className="space-y-2">
+                          {variantPublications.map((pub) => (
+                             <li key={pub.id} className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-slate-800/60 border border-slate-700/50">
+                                <span className="text-xs font-mono text-slate-300 truncate">
+                                   {pub.platform === 'mercadolibre' ? 'ML' : 'TN'} {pub.external_product_id}{pub.external_variant_id ? ` / ${pub.external_variant_id}` : ''} · pack x{pub.pack_size}
+                                </span>
+                                <button type="button" onClick={() => handleDeleteVariantPublication(pub.id)} className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-700/50 transition shrink-0" aria-label="Quitar"><Trash2 size={14} /></button>
+                             </li>
+                          ))}
+                       </ul>
+                    )}
+                    {!showAddPublicationForm ? (
+                       <button
+                         type="button"
+                         onClick={() => setShowAddPublicationForm(true)}
+                         className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-sm font-semibold border border-indigo-500/50 transition"
+                       >
+                          <Plus size={18} />
+                          Agregar otra publicación (por pack)
+                       </button>
+                    ) : (
+                       <div className="rounded-lg bg-slate-900/60 border border-slate-600/60 p-4 space-y-3">
+                          <p className="text-[11px] font-semibold text-slate-400">Nueva publicación por pack</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                             <div>
+                                <label className="text-[11px] text-slate-500 block mb-1">Plataforma</label>
+                                <select value={addPubPlatform} onChange={(e) => setAddPubPlatform(e.target.value as 'mercadolibre' | 'tiendanube')} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-indigo-500">
+                                   <option value="mercadolibre">Mercado Libre</option>
+                                   <option value="tiendanube">Tienda Nube</option>
+                                </select>
+                             </div>
+                             <div>
+                                <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID producto TN' : 'ID publicación (ítem) ML'}</label>
+                                <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'Ej: 198440687' : 'Ej: MLA1179934011'} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
+                             </div>
+                          </div>
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID variante TN (opcional)' : 'ID variación ML (opcional)'}</label>
+                             <input type="text" value={addPubVariantId} onChange={(e) => setAddPubVariantId(e.target.value)} placeholder="Si tiene talles/colores" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
+                          </div>
+                          <div>
+                             <label className="text-[11px] text-slate-500 block mb-1.5">Pack (unidades por publicación)</label>
+                             <div className="flex flex-wrap gap-2 items-center">
+                                {[1, 2, 3, 6, 12].map((n) => (
+                                  <button key={n} type="button" onClick={() => setAddPubPackSize(n)} className={`min-w-[44px] px-3 py-2 rounded-lg text-sm font-bold transition ${addPubPackSize === n ? 'bg-indigo-500 text-white' : 'bg-slate-700/80 text-slate-400 hover:bg-slate-600 hover:text-white border border-slate-600/50'}`}>x{n}</button>
+                                ))}
+                                <input type="number" min={1} max={999} value={addPubPackSize} onChange={(e) => setAddPubPackSize(Math.max(1, parseInt(e.target.value, 10) || 1))} className="w-20 bg-slate-800 border border-slate-600 rounded-lg px-2 py-2 text-white font-mono text-sm outline-none focus:border-indigo-500" title="Otro valor" />
+                             </div>
+                             <p className="text-[10px] text-slate-500 mt-1">x2 = pack de 2 (cada venta descuenta 2 del stock).</p>
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                             <button type="button" onClick={() => setShowAddPublicationForm(false)} className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium transition">Cancelar</button>
+                             <button type="button" onClick={handleAddVariantPublication} disabled={addPubSaving || !addPubProductId.trim()} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 whitespace-nowrap">{(addPubSaving ? '...' : 'Agregar publicación')}</button>
+                          </div>
+                       </div>
+                    )}
+                 </div>
+
               </div>
               <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-end gap-3 bg-slate-900/80">
                  <button 
