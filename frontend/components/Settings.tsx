@@ -646,11 +646,6 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      <div>
-         <h2 className="text-2xl font-bold text-white">Configuración</h2>
-         <p className="text-slate-400 text-sm">Administración central de LUPO Hub Argentina.</p>
-      </div>
-
       <div className="flex space-x-2 border-b border-slate-700 overflow-x-auto touch-scroll scrollbar-hide pb-px -mx-1 px-1 sm:mx-0 sm:px-0">
         {role === Role.ADMIN && (
           <>
@@ -692,7 +687,7 @@ const Settings: React.FC<SettingsProps> = ({
                 activeTab === 'transportes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
               }`}
             >
-              TRANSPORTES
+              REMITOS
             </button>
             <button
               onClick={() => setActiveTab('facturacion')}
@@ -1870,7 +1865,7 @@ const Settings: React.FC<SettingsProps> = ({
               </li>
               <li className="flex items-start gap-3 text-slate-300">
                 <Shield size={18} className="text-blue-400 shrink-0 mt-0.5" />
-                <span><strong className="text-white">CUIT en clientes:</strong> en <strong>Clientes</strong> cargá el CUIT/CUIL de cada cliente. En Configuración → <strong>Transportes</strong> están los datos del remitente para los remitos.</span>
+                <span><strong className="text-white">CUIT en clientes:</strong> en <strong>Clientes</strong> cargá el CUIT/CUIL de cada cliente. En Configuración → <strong>Remitos</strong> están los datos del remitente y los transportes.</span>
               </li>
             </ul>
           </div>
