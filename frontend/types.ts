@@ -81,8 +81,14 @@ export interface RemitenteConfig {
   address?: string;
   city?: string;
   cuit?: string;
+  email?: string;
+  phone?: string;
   /** URL del logo de la empresa (para factura/remito) */
   logoUrl?: string;
+  /** C.A.I. para remitos (Código de Autorización de Impresión, como en Tango) */
+  caiRemito?: string;
+  /** Fecha de vencimiento del C.A.I. (YYYY-MM-DD) */
+  caiRemitoVencimiento?: string;
 }
 
 export interface Customer {

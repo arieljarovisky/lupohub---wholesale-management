@@ -183,58 +183,100 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName(firstTransport);
   };
 
-  /** Genera el HTML del remito y abre la ventana para imprimir. transporteName = el elegido para este envío. */
+  /** Genera el HTML del remito. Mismo estilo que la factura: logo izq, nº y fecha der, Datos empresa / Datos cliente, transporte, tabla, firmas, C.A.I. */
   const buildRemitoHtml = (order: Order, transporteName: string) => {
     const customer = customers.find(c => c.id === order.customerId);
     const remitente = getRemitente();
     const items = order.items.map(enrichItem);
-    const formatDate = (d: string) => {
+    const formatDateShort = (d: string) => {
       const x = new Date(d);
-      return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (isNaN(x.getTime())) return d;
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      return `${String(x.getDate()).padStart(2,'0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
     };
     const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
     const transportesStr = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
       : '—';
-    const remitenteBlock = remitente.businessName
-      ? `<strong>Remitente:</strong> ${remitente.businessName}${remitente.address ? ` — ${remitente.address}` : ''}${remitente.city ? ` — ${remitente.city}` : ''}${remitente.cuit ? ` — CUIT ${remitente.cuit}` : ''}`
-      : '<strong>Remitente:</strong> —';
-    const destBlock = `<strong>Destinatario:</strong> ${order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'} — ${customer?.address || ''} ${customer?.city || ''} ${customer?.cuit ? ` — CUIT ${customer.cuit}` : ''}`;
+    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
+    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
-      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td>${i.quantity}</td><td>${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td>${sub.toLocaleString('es-AR')}</td></tr>`;
+      const desc = [(i.sku ?? ''), (i.productName ?? '')].filter(Boolean).join(' — ') || '—';
+      return `<tr><td>${desc}</td><td>${i.sizeCode ?? '—'}</td><td>${i.colorName ?? '—'}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">$${sub.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
     const totalAmount = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+    const caiRemitoTrim = remitente.caiRemito?.trim();
+    const caiVencimientoStr = remitente.caiRemitoVencimiento
+      ? (() => { const d = new Date(remitente.caiRemitoVencimiento! + 'T12:00:00'); return isNaN(d.getTime()) ? remitente.caiRemitoVencimiento : formatDateShort(remitente.caiRemitoVencimiento); })()
+      : '';
+    const caiFooterHtml = caiRemitoTrim
+      ? `<div class="rem-cai">C.A.I. ${caiRemitoTrim}${caiVencimientoStr ? ` — Vencimiento: ${caiVencimientoStr}` : ''}</div>`
+      : '';
+    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="" class="inv-logo" />` : '';
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
-      body { font-family: system-ui, sans-serif; max-width: 800px; margin: 24px auto; padding: 16px; color: #111; }
-      h1 { font-size: 1.5rem; margin-bottom: 8px; }
-      .meta { font-size: 0.9rem; color: #444; margin-bottom: 16px; }
-      .block { margin-bottom: 12px; font-size: 0.85rem; }
-      table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.8rem; }
-      th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; }
-      th { background: #eee; font-weight: bold; }
-      .firmas { display: flex; justify-content: space-between; margin-top: 32px; font-size: 0.8rem; }
-      .firma { width: 28%; text-align: center; border-top: 1px solid #333; padding-top: 4px; }
-      .no-print { margin-top: 16px; }
-      @media print { .no-print { display: none !important; } }
+      * { box-sizing: border-box; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
+      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb; }
+      .inv-logo { max-height: 48px; max-width: 140px; object-fit: contain; display: block; }
+      .inv-meta { text-align: right; }
+      .inv-meta .inv-num { font-size: 1.1rem; font-weight: 700; color: #111; }
+      .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
+      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; }
+      .inv-datos strong { display: block; font-size: 0.8rem; color: #374151; margin-bottom: 6px; font-weight: 700; }
+      .rem-transporte { font-size: 0.9rem; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+      .rem-transporte strong { color: #374151; }
+      .inv-table-wrap { margin-bottom: 24px; }
+      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+      .inv-table th { text-align: left; padding: 10px 12px; font-weight: 600; color: #111; border-bottom: 2px solid #e5e7eb; }
+      .inv-table th:nth-child(4) { text-align: center; }
+      .inv-table th:nth-child(n+5) { text-align: right; }
+      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+      .inv-table td:nth-child(4) { text-align: center; }
+      .inv-table td:nth-child(n+5) { text-align: right; }
+      .rem-firmas { display: flex; justify-content: space-between; margin-top: 28px; font-size: 0.8rem; }
+      .rem-firma { width: 28%; text-align: center; border-top: 1px solid #d1d5db; padding-top: 8px; color: #6b7280; }
+      .inv-footer { padding-top: 20px; margin-top: 24px; border-top: 1px solid #e5e7eb; font-size: 0.8rem; color: #6b7280; }
+      .rem-cai { margin-bottom: 8px; }
+      .no-print { margin-top: 24px; }
+      @media print { .no-print { display: none !important; } body { padding: 24px; } }
     </style></head><body>
-      <h1>REMITO</h1>
-      <div class="meta">Nº <strong>${order.id}</strong> — Fecha: ${formatDate(order.date)}</div>
-      <div class="block">${remitenteBlock}</div>
-      <div class="block">${destBlock}</div>
-      <div class="block"><strong>Transporte:</strong> ${transportesStr}</div>
-      <table>
-        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="3"><strong>Total (${totalUnits} unidades)</strong></td><td></td><td></td><td><strong>$${totalAmount.toLocaleString('es-AR')}</strong></td></tr></tfoot>
-      </table>
-      <div class="firmas">
-        <div class="firma">Firma remitente</div>
-        <div class="firma">Firma transportista</div>
-        <div class="firma">Firma receptor</div>
+      <div class="inv-top">
+        <div>${logoHtml}</div>
+        <div class="inv-meta">
+          <div class="inv-num">REMITO Nº: ${order.id}</div>
+          <div class="inv-fecha">Fecha: ${formatDateShort(order.date)}</div>
+        </div>
       </div>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 8px;">Imprimir / Guardar PDF</button> <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+      <div class="inv-datos">
+        <div>
+          <strong>Datos empresa</strong>
+          ${remitente.businessName || '—'}<br>
+          ${empresaDir ? empresaDir + '<br>' : ''}${remitente.cuit ? 'CUIT ' + remitente.cuit + '<br>' : ''}${remitente.email ? remitente.email + '<br>' : ''}${remitente.phone ? remitente.phone : ''}
+        </div>
+        <div>
+          <strong>Datos cliente</strong>
+          ${clienteNombre}<br>
+          ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
+        </div>
+      </div>
+      <div class="rem-transporte"><strong>Transporte:</strong> ${transportesStr}</div>
+      <div class="inv-table-wrap">
+        <table class="inv-table">
+          <thead><tr><th>Descripción / Producto</th><th>Talle</th><th>Color</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="3"><strong>Total (${totalUnits} unidades)</strong></td><td></td><td></td><td style="text-align:right"><strong>$${totalAmount.toLocaleString('es-AR')}</strong></td></tr></tfoot>
+        </table>
+      </div>
+      <div class="rem-firmas">
+        <div class="rem-firma">Firma remitente</div>
+        <div class="rem-firma">Firma transportista</div>
+        <div class="rem-firma">Firma receptor</div>
+      </div>
+      <div class="inv-footer">${caiFooterHtml}</div>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #374151; color: white; border: none; border-radius: 8px; font-weight: 600;">Imprimir / Guardar PDF</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
 
@@ -250,73 +292,103 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName('');
   };
 
-  /** Genera el HTML de la factura AFIP para ver e imprimir/guardar como PDF. Estilo Lupo Argentina + logo y Nº despacho por ítem. */
+  /** Genera el HTML de la factura AFIP. Estilo limpio: logo izq, nº y fecha der, Datos empresa / Datos cliente, tabla Base/IVA/Total, resumen y CAE en pie. */
   const buildFacturaHtml = (order: Order) => {
     if (!order.invoice) return '';
     const inv = order.invoice;
     const customer = customers.find(c => c.id === order.customerId);
     const localRemitente = getRemitente();
     const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
-      ? { ...issuerFromApi, logoUrl: localRemitente.logoUrl }
+      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
       : localRemitente;
     const items = order.items.map(enrichItem);
-    const formatDate = (d: string) => {
+    const formatDateShort = (d: string) => {
       const x = new Date(d);
-      return isNaN(x.getTime()) ? d : x.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (isNaN(x.getTime())) return d;
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const day = x.getDate();
+      const month = meses[x.getMonth()];
+      const year = x.getFullYear();
+      return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
-    const tipoLabel = inv.cbteTipo === 6 ? 'Factura B' : 'Factura A';
-    const nroComprobante = inv.puntoVta != null ? `${inv.puntoVta}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
-    const fechaComprobante = inv.createdAt
-      ? formatDate(inv.createdAt.split('T')[0])
-      : formatDate(order.date);
+    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
+    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt.split('T')[0]) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+    const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const rows = items.map(i => {
-      const sub = i.quantity * (i.priceAtMoment ?? 0);
-      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? '—';
-      return `<tr><td>${(i.sku ?? '')} ${(i.productName ?? '')}</td><td>${i.sizeCode ?? ''}</td><td>${i.colorName ?? ''}</td><td style="text-align:center">${despacho}</td><td style="text-align:right">${i.quantity}</td><td style="text-align:right">${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">${sub.toLocaleString('es-AR')}</td></tr>`;
+      const base = i.quantity * (i.priceAtMoment ?? 0);
+      const desc = [(i.sku ?? ''), (i.productName ?? ''), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+      return `<tr><td>${desc}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
-    const total = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
-    const vtoCae = inv.caeFchVto ? formatDate(inv.caeFchVto) : '—';
-    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="Lupo Argentina" class="factura-logo" />` : '';
-    const brandName = remitente.businessName || 'Lupo Argentina';
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${tipoLabel} ${nroComprobante}</title><style>
-      :root { --lupo-primary: #0f172a; --lupo-accent: #b45309; --lupo-light: #f8fafc; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 0; color: #0f172a; background: #fff; }
-      .factura-header { background: var(--lupo-primary); color: #fff; padding: 20px 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-      .factura-logo { max-height: 56px; max-width: 180px; object-fit: contain; }
-      .factura-brand { font-size: 1.5rem; font-weight: 800; letter-spacing: 0.02em; }
-      .factura-body { padding: 24px; }
-      .factura-doc-title { font-size: 1.35rem; font-weight: 700; color: var(--lupo-primary); margin-bottom: 4px; }
-      .factura-doc-sub { font-size: 0.9rem; color: #475569; margin-bottom: 20px; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; font-size: 0.9rem; }
-      .grid strong { color: var(--lupo-primary); }
-      table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.8rem; }
-      th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
-      th { background: var(--lupo-primary); color: #fff; font-weight: 600; }
-      .cae-block { margin-top: 24px; padding: 14px; background: var(--lupo-light); border-left: 4px solid var(--lupo-accent); font-size: 0.85rem; }
+    const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
+    const logoHtml = remitente.logoUrl ? `<img src="${remitente.logoUrl}" alt="" class="inv-logo" />` : '';
+    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
+    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
+      * { box-sizing: border-box; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
+      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb; }
+      .inv-logo { max-height: 48px; max-width: 140px; object-fit: contain; display: block; }
+      .inv-meta { text-align: right; }
+      .inv-meta .inv-num { font-size: 1.1rem; font-weight: 700; color: #111; }
+      .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
+      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 24px; font-size: 0.9rem; line-height: 1.5; }
+      .inv-datos strong { display: block; font-size: 0.8rem; color: #374151; margin-bottom: 6px; font-weight: 700; }
+      .inv-table-wrap { margin-bottom: 20px; }
+      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+      .inv-table th { text-align: left; padding: 10px 12px; font-weight: 600; color: #111; border-bottom: 2px solid #e5e7eb; }
+      .inv-table th:nth-child(2) { text-align: center; }
+      .inv-table th:nth-child(n+3) { text-align: right; }
+      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+      .inv-table td:nth-child(2) { text-align: center; }
+      .inv-table td:nth-child(n+3) { text-align: right; }
+      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 28px; }
+      .inv-summary-inner { min-width: 240px; font-size: 0.9rem; }
+      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 24px; padding: 6px 0; }
+      .inv-summary-inner .row.total { font-weight: 700; font-size: 1.05rem; margin-top: 8px; padding-top: 10px; border-top: 1px solid #d1d5db; }
+      .inv-footer { padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 0.8rem; color: #6b7280; }
+      .inv-cae { margin-bottom: 12px; }
       .no-print { margin-top: 24px; }
-      @media print { .no-print { display: none !important; } .factura-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      @media print { .no-print { display: none !important; } body { padding: 24px; } }
     </style></head><body>
-      <div class="factura-header">
-        ${logoHtml}
-        <span class="factura-brand">${brandName}</span>
+      <div class="inv-top">
+        <div>${logoHtml}</div>
+        <div class="inv-meta">
+          <div class="inv-num">FACTURA Nº: ${nroComprobante}</div>
+          <div class="inv-fecha">Fecha: ${fechaComprobante}</div>
+        </div>
       </div>
-      <div class="factura-body">
-      <div class="factura-doc-title">${tipoLabel}</div>
-      <div class="factura-doc-sub">Nº <strong>${nroComprobante}</strong> — Fecha: ${fechaComprobante} — Pedido ${order.id}</div>
-      <div class="grid">
-        <div><strong>Emisor</strong><br>${remitente.businessName || '—'}${remitente.cuit ? `<br>CUIT ${remitente.cuit}` : ''}${remitente.address ? `<br>${remitente.address}` : ''}${remitente.city ? `, ${remitente.city}` : ''}</div>
-        <div><strong>Cliente</strong><br>${clienteNombre}${customer?.cuit ? `<br>CUIT ${customer.cuit}` : ''}${customer?.address ? `<br>${customer.address}` : ''}${customer?.city ? `, ${customer.city}` : ''}</div>
+      <div class="inv-datos">
+        <div>
+          <strong>Datos empresa</strong>
+          ${remitente.businessName || '—'}<br>
+          ${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}
+        </div>
+        <div>
+          <strong>Datos cliente</strong>
+          ${clienteNombre}<br>
+          ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
+        </div>
       </div>
-      <table>
-        <thead><tr><th>Producto / SKU</th><th>Talle</th><th>Color</th><th>Nº despacho</th><th style="text-align:right">Cant.</th><th style="text-align:right">P. unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="5"><strong>Total</strong></td><td></td><td style="text-align:right"><strong>$${total.toLocaleString('es-AR')}</strong></td></tr></tfoot>
-      </table>
-      <div class="cae-block"><strong>CAE:</strong> ${inv.cae} &nbsp;|&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-      <p class="no-print" style="font-size: 0.75rem; color: #64748b; margin-top: 12px;">Para ver este comprobante en afip.gob.ar: Consulta por CUIT con <strong>fecha ${fechaComprobante}</strong>, tu CUIT y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}. Si en la app facturás en homologación, entrá al <strong>ambiente de homologación</strong> de AFIP para consultar.</p>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: var(--lupo-accent); color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #64748b; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+      <div class="inv-table-wrap">
+        <table class="inv-table">
+          <thead><tr><th>Descripción / Producto</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
+      <div class="inv-summary">
+        <div class="inv-summary-inner">
+          <div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div>
+          <div class="row"><span>IVA 21%</span><span>—</span></div>
+          <div class="row"><span>Retención</span><span>—</span></div>
+          <div class="row total"><span>Total</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div>
+        </div>
+      </div>
+      <div class="inv-footer">
+        <div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+        <p class="no-print" style="font-size: 0.75rem; color: #9ca3af;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p>
+      </div>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #374151; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
 

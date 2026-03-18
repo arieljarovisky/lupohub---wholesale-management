@@ -470,6 +470,10 @@ const Settings: React.FC<SettingsProps> = ({
   const [remitenteCity, setRemitenteCity] = useState('');
   const [remitenteCuit, setRemitenteCuit] = useState('');
   const [remitenteLogoUrl, setRemitenteLogoUrl] = useState('');
+  const [remitenteCaiRemito, setRemitenteCaiRemito] = useState('');
+  const [remitenteCaiVencimiento, setRemitenteCaiVencimiento] = useState('');
+  const [remitenteEmail, setRemitenteEmail] = useState('');
+  const [remitentePhone, setRemitentePhone] = useState('');
 
   useEffect(() => {
     const config = getApiConfig();
@@ -488,6 +492,10 @@ const Settings: React.FC<SettingsProps> = ({
       setRemitenteCity(r.city ?? '');
       setRemitenteCuit(r.cuit ?? '');
       setRemitenteLogoUrl(r.logoUrl ?? '');
+      setRemitenteCaiRemito(r.caiRemito ?? '');
+      setRemitenteCaiVencimiento(r.caiRemitoVencimiento ?? '');
+      setRemitenteEmail(r.email ?? '');
+      setRemitentePhone(r.phone ?? '');
     }
   }, [activeTab]);
 
@@ -1674,8 +1682,27 @@ const Settings: React.FC<SettingsProps> = ({
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Localidad</label>
                 <input type="text" value={remitenteCity} onChange={(e) => setRemitenteCity(e.target.value)} placeholder="Ciudad / CP" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Email</label>
+                <input type="email" value={remitenteEmail} onChange={(e) => setRemitenteEmail(e.target.value)} placeholder="email@empresa.com" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Teléfono</label>
+                <input type="text" value={remitentePhone} onChange={(e) => setRemitentePhone(e.target.value)} placeholder="11-1234-5678" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
             </div>
-            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined, logoUrl: remitenteLogoUrl.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
+            <p className="text-sm text-slate-400 mb-3 mt-6">C.A.I. para remitos (como en Tango: lo cargás vos, se imprime en el pie del remito con vencimiento.)</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">C.A.I. (remitos)</label>
+                <input type="text" value={remitenteCaiRemito} onChange={(e) => setRemitenteCaiRemito(e.target.value)} placeholder="Ej: 12345-67890-123456-78901234-1" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white font-mono placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Vencimiento C.A.I.</label>
+                <input type="date" value={remitenteCaiVencimiento} onChange={(e) => setRemitenteCaiVencimiento(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none" />
+              </div>
+            </div>
+            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined, email: remitenteEmail.trim() || undefined, phone: remitentePhone.trim() || undefined, logoUrl: remitenteLogoUrl.trim() || undefined, caiRemito: remitenteCaiRemito.trim() || undefined, caiRemitoVencimiento: remitenteCaiVencimiento.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
           </div>
           <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
