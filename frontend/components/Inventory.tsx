@@ -3367,12 +3367,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </p>
                  </div>
 
+                 {/* Las dos: TIENDA NUBE | MERCADO LIBRE — lado a lado */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                  {/* Tienda Nube */}
-                 <div className="space-y-3 rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
-                       <Cloud size={12} className="text-cyan-400/80" />
-                       Tienda Nube
-                    </p>
+                 <div className="space-y-3 rounded-xl bg-slate-800/50 border border-cyan-700/40 p-4">
+                    <h4 className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center gap-2">
+                       <Cloud size={14} className="text-cyan-400" /> Tienda Nube
+                    </h4>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID del producto</label>
@@ -3422,17 +3423,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           />
                        </div>
                     </div>
-                    <p className="text-[10px] text-slate-500">Poné el ID del producto y tocá &quot;Cargar variantes&quot; para que se reconozcan por SKU.</p>
+                    <p className="text-[10px] text-slate-500">Poné el ID del producto y tocá Cargar variantes para que se reconozcan por SKU.</p>
                  </div>
 
                  {/* Mercado Libre */}
-                 <div className="space-y-3 rounded-xl bg-slate-800/30 border border-slate-700/50 p-4">
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
-                       <Zap size={12} className="text-amber-400/80" />
-                       Mercado Libre
-                    </p>
-                    <p className="text-[10px] text-slate-500">Al guardar con Item ID, se trae el stock actual de ML a tu inventario.</p>
-                    <p className="text-[10px] text-amber-400/90">Si esta variante tiene su propia publicación en ML (una por talle/color), poné solo el ID de esa publicación abajo y guardá. El stock se sincronizará con esa publicación.</p>
+                 <div className="space-y-3 rounded-xl bg-slate-800/50 border border-amber-700/40 p-4">
+                    <h4 className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
+                       <Zap size={14} className="text-amber-400" /> Mercado Libre
+                    </h4>
+                    <p className="text-[10px] text-amber-200/90 bg-amber-900/30 border border-amber-700/50 rounded-lg px-2.5 py-2">Si esta variante tiene su propia publicación en ML (una por talle/color), poné solo el ID de esa publicación abajo y guardá. El stock se sincronizará con esa publicación.</p>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID publicación (ítem) ML</label>
@@ -3487,6 +3486,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         <CheckCircle2 size={14} /> Stock traído de Mercado Libre: {linkSaveStockFromML} unidades guardadas en tu inventario.
                       </p>
                     )}
+                 </div>
                  </div>
 
                  {/* PACK (UNIDADES POR PUBLICACIÓN) - igual que la referencia */}
