@@ -3309,6 +3309,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </button>
               </div>
               <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-6 min-h-0 touch-scroll">
+                 {/* Lo que tenés que saber: explicación directa */}
+                 <div className="rounded-xl bg-amber-950/40 border-2 border-amber-600/50 p-4 space-y-3">
+                    <h4 className="text-sm font-black text-amber-200 uppercase tracking-wide flex items-center gap-2">
+                       <AlertTriangle size={18} className="shrink-0" /> Lo que tenés que saber
+                    </h4>
+                    <ul className="text-[13px] text-slate-200 space-y-2 list-none">
+                       <li className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">•</span> <strong>Tu stock está siempre en unidades</strong> (lo que tenés en depósito).</li>
+                       <li className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">•</span> Para cada publicación elegís si vendés por <strong>unidad (x1)</strong> o por <strong>pack (x2, x6, etc.)</strong>.</li>
+                       <li className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">•</span> <strong>Venta por unidad (x1):</strong> si venden 1, se descuenta <strong>1</strong> del stock.</li>
+                       <li className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">•</span> <strong>Venta por pack (x2):</strong> si venden 1 pack, se descuentan <strong>2</strong> unidades del stock.</li>
+                       <li className="flex gap-2"><span className="text-amber-400 font-bold shrink-0">•</span> La misma variante puede estar en dos publicaciones (una “por unidad” y otra “pack x2”); cada venta descuenta lo que corresponde.</li>
+                    </ul>
+                 </div>
+
                  {/* SKU unificado: inventario, ML y TN */}
                  <div className="rounded-xl bg-indigo-900/20 border border-indigo-700/50 p-4 space-y-3">
                     <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
