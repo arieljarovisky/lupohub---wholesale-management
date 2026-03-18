@@ -3367,8 +3367,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </p>
                  </div>
 
-                 {/* Las dos: TIENDA NUBE | MERCADO LIBRE — lado a lado */}
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {/* TIENDA NUBE arriba, MERCADO LIBRE abajo */}
+                 <div className="flex flex-col gap-4">
                  {/* Tienda Nube */}
                  <div className="space-y-3 rounded-xl bg-slate-800/50 border border-cyan-700/40 p-4">
                     <h4 className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center gap-2">
