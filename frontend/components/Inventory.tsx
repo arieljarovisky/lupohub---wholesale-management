@@ -1531,7 +1531,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkProduct(null);
     setLinkMlVariations(null);
     setLinkTnVariants(null);
-    const baseSkuFromProduct = (p: Product) => (p as any).base_sku != null && (p as any).base_sku !== '' ? String((p as any).base_sku) : (() => { const s = (p.sku || '').toString(); const pts = s.split('-'); if (pts.length >= 3) return pts.slice(0, -2).join('-'); if (pts.length === 2) return pts.join('-'); return s; })();
+    const baseSkuFromProduct = (p: Product) =>
+      (p as any).base_sku != null && (p as any).base_sku !== ''
+        ? String((p as any).base_sku)
+        : (() => {
+            const s = (p.sku || '').toString();
+            const pts = s.split('-');
+            if (pts.length >= 3) return pts.slice(0, -2).join('-'); // base-talle-color
+            if (pts.length === 2) return pts[0]; // a veces viene base-talle (con espacios), el padre es solo base
+            return s;
+          })();
     const groupKey = baseSkuFromProduct(product);
     if (groupKey) {
       api.getProductBySku(groupKey).then((p) => {
@@ -1590,7 +1599,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // 'groupedProducts' has the parent products from 'getProducts'.
       // So I can find the parent product using the group key (SKU base).
       
-      const getBaseSku = (p: Product) => (p as any).base_sku != null && (p as any).base_sku !== '' ? String((p as any).base_sku) : (() => { const s = (p.sku || '').toString(); const pts = s.split('-'); if (pts.length >= 3) return pts.slice(0, -2).join('-'); if (pts.length === 2) return pts.join('-'); return s; })();
+      const getBaseSku = (p: Product) =>
+        (p as any).base_sku != null && (p as any).base_sku !== ''
+          ? String((p as any).base_sku)
+          : (() => {
+              const s = (p.sku || '').toString();
+              const pts = s.split('-');
+              if (pts.length >= 3) return pts.slice(0, -2).join('-');
+              if (pts.length === 2) return pts[0];
+              return s;
+            })();
       const groupKey = getBaseSku(linkingVariant);
       const parentProduct = groupedProducts[groupKey]?.[0];
       const parentProductId = (parentProduct as any)?.product_id ?? parentProduct?.id;
@@ -1675,7 +1693,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const handleUnlinkArticle = async (platform: 'tiendanube' | 'mercadolibre' | 'both') => {
     if (!linkingVariant) return;
     try {
-      const getBaseSku = (p: Product) => (p as any).base_sku != null && (p as any).base_sku !== '' ? String((p as any).base_sku) : (() => { const s = (p.sku || '').toString(); const pts = s.split('-'); if (pts.length >= 3) return pts.slice(0, -2).join('-'); if (pts.length === 2) return pts.join('-'); return s; })();
+      const getBaseSku = (p: Product) =>
+        (p as any).base_sku != null && (p as any).base_sku !== ''
+          ? String((p as any).base_sku)
+          : (() => {
+              const s = (p.sku || '').toString();
+              const pts = s.split('-');
+              if (pts.length >= 3) return pts.slice(0, -2).join('-');
+              if (pts.length === 2) return pts[0];
+              return s;
+            })();
       const groupKey = getBaseSku(linkingVariant);
       const parentProduct = groupedProducts[groupKey]?.[0];
       const parentProductId = (parentProduct as any)?.product_id ?? parentProduct?.id;
