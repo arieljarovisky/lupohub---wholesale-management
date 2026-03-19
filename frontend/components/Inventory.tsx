@@ -1064,11 +1064,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         const val = (p as any).stock_total ?? (p as any).stock ?? 0;
         return sum + Number(val);
       }, 0);
+      const displayStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
       const category = groupVariants[0]?.category || 'General';
-      return { groupKey, groupVariants, totalStock, category };
+      return { groupKey, groupVariants, totalStock, displayStock, category };
     });
     if (hideZeroStock) {
-      groups = groups.filter(g => g.totalStock > 0);
+      groups = groups.filter(g => g.displayStock > 0);
     }
     if (filterColor !== 'ALL') {
       groups = groups.filter(g => {
@@ -1081,8 +1082,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       let cmp = 0;
       if (sortKey === 'SKU') cmp = a.groupKey.localeCompare(b.groupKey);
       else if (sortKey === 'STOCK') {
-        const sa = filterColor === 'ALL' ? a.totalStock : getGroupDisplayStock(a.groupKey, a.groupVariants);
-        const sb = filterColor === 'ALL' ? b.totalStock : getGroupDisplayStock(b.groupKey, b.groupVariants);
+        const sa = a.displayStock;
+        const sb = b.displayStock;
         cmp = sa - sb;
       }
       else if (sortKey === 'VARIANTS') cmp = a.groupVariants.length - b.groupVariants.length;
