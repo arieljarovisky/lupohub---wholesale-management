@@ -1531,30 +1531,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setLinkProduct(null);
     setLinkMlVariations(null);
     setLinkTnVariants(null);
-    const baseSkuFromProduct = (p: Product) =>
-      (p as any).base_sku != null && (p as any).base_sku !== ''
-        ? String((p as any).base_sku)
-        : (() => {
-            const s = (p.sku || '').toString();
-            const pts = s.split('-');
-            if (pts.length >= 3) return pts.slice(0, -2).join('-'); // base-talle-color
-            if (pts.length === 2) return pts[0]; // a veces viene base-talle (con espacios), el padre es solo base
-            return s;
-          })();
-    const groupKey = baseSkuFromProduct(product);
-    if (groupKey) {
+
+    // Resolver el SKU base real desde el backend para evitar 404 por parseo de SKU
+    api.getVariantById(product.id).then((v) => {
+      const groupKey = (v?.base_sku || (product as any).base_sku || '').toString().trim();
+      if (!groupKey) return;
       api.getProductBySku(groupKey).then((p) => {
         if (p) {
           setLinkProduct({ id: p.id, name: p.name, sku: p.sku, price: p.base_price, category: p.category, description: (p as any).description });
           setLinkPackMl(p.mercado_libre_pack_size ?? 1);
           setLinkPackTn(p.tienda_nube_pack_size ?? 1);
-          const variant = (p as any).variants?.find((v: any) => v.variant_id === product.id);
+          const variant = (p as any).variants?.find((x: any) => x.variant_id === product.id);
           setLinkExternalSku((variant?.external_sku ?? product.sku ?? '').toString());
         } else {
           setLinkExternalSku((product.sku ?? '').toString());
         }
       });
-    }
+    });
   };
 
   const handleSaveLink = async () => {
@@ -1599,19 +1592,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // 'groupedProducts' has the parent products from 'getProducts'.
       // So I can find the parent product using the group key (SKU base).
       
-      const getBaseSku = (p: Product) =>
-        (p as any).base_sku != null && (p as any).base_sku !== ''
-          ? String((p as any).base_sku)
-          : (() => {
-              const s = (p.sku || '').toString();
-              const pts = s.split('-');
-              if (pts.length >= 3) return pts.slice(0, -2).join('-');
-              if (pts.length === 2) return pts[0];
-              return s;
-            })();
-      const groupKey = getBaseSku(linkingVariant);
-      const parentProduct = groupedProducts[groupKey]?.[0];
-      const parentProductId = (parentProduct as any)?.product_id ?? parentProduct?.id;
+      const v = await api.getVariantById(linkingVariant.id);
+      const groupKey = (v?.base_sku || (linkingVariant as any).base_sku || '').toString().trim();
+      const parentProductId = (linkProduct?.id || '').toString().trim();
 
       if (parentProductId && linkTnId) {
         await api.updateProductExternalIds(parentProductId, {
@@ -1659,7 +1642,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
 
       // Refrescar variantes del grupo desde el servidor para que el stock (y todo) quede al día
-      api.getVariantsBySku(groupKey).then(variants => {
+      if (groupKey) api.getVariantsBySku(groupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
@@ -1693,19 +1676,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const handleUnlinkArticle = async (platform: 'tiendanube' | 'mercadolibre' | 'both') => {
     if (!linkingVariant) return;
     try {
-      const getBaseSku = (p: Product) =>
-        (p as any).base_sku != null && (p as any).base_sku !== ''
-          ? String((p as any).base_sku)
-          : (() => {
-              const s = (p.sku || '').toString();
-              const pts = s.split('-');
-              if (pts.length >= 3) return pts.slice(0, -2).join('-');
-              if (pts.length === 2) return pts[0];
-              return s;
-            })();
-      const groupKey = getBaseSku(linkingVariant);
-      const parentProduct = groupedProducts[groupKey]?.[0];
-      const parentProductId = (parentProduct as any)?.product_id ?? parentProduct?.id;
+      const v = await api.getVariantById(linkingVariant.id);
+      const groupKey = (v?.base_sku || (linkingVariant as any).base_sku || '').toString().trim();
+      const parentProductId = (linkProduct?.id || '').toString().trim();
       if (!parentProductId) {
         showToast('error', 'No se pudo resolver el ID del artículo para desvincular.');
         return;
@@ -1721,7 +1694,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       await api.unlinkProductPlatforms(parentProductId, opts);
 
       // Refrescar variantes del grupo y cerrar modal
-      api.getVariantsBySku(groupKey).then(variants => {
+      if (groupKey) api.getVariantsBySku(groupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
           sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
