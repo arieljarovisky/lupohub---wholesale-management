@@ -159,7 +159,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [filterCategory, setFilterCategory] = useState(stored.filterCategory ?? 'ALL');
   const [filterSize, setFilterSize] = useState(stored.filterSize ?? 'ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
-  const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE'>('ALL');
+  const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH'>('ALL');
   const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
@@ -520,6 +520,29 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const match = sizeOptions.find(o => (nombreTalleDesdeCodigo(o.code) || o.code).toUpperCase() === canonicalFilter);
     if (match) setFilterSize(match.code);
   }, [sizeOptions, filterSize]);
+
+  // Cuando el filtro es "ML ≠ TN": cargar stocks externos de todas las variantes visibles para poder filtrar y mostrar ML/TN
+  const MISMATCH_BATCH_SIZE = 100;
+  const MISMATCH_MAX_VARIANTS = 500;
+  useEffect(() => {
+    if (filterSync !== 'MISMATCH') return;
+    const ids = Array.from(new Set(baseSource.map((p: Product) => p.id).filter(Boolean))).slice(0, MISMATCH_MAX_VARIANTS);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    const batches: string[][] = [];
+    for (let i = 0; i < ids.length; i += MISMATCH_BATCH_SIZE) {
+      batches.push(ids.slice(i, i + MISMATCH_BATCH_SIZE));
+    }
+    Promise.all(batches.map(batch => api.getVariantExternalStocks(batch)))
+      .then(results => {
+        if (cancelled) return;
+        const merged: Record<string, { stockML?: number; stockTN?: number }> = {};
+        results.forEach(r => { if (r?.stocks) Object.assign(merged, r.stocks); });
+        setVariantExternalStocks(prev => ({ ...prev, ...merged }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [filterSync, baseSource]);
 
   // Solo al elegir un color: cargar variantes de pocos grupos para filtrar (máx 8, 2 en paralelo)
   useEffect(() => {
@@ -986,8 +1009,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
   const getGroupFilteredVariants = (groupKey: string, groupVariants: Product[]) => {
     const raw = getGroupRawVariants(groupKey, groupVariants);
-    if (filterColor === 'ALL') return raw;
-    return raw.filter(p => checkColorMatch(p, filterColor));
+    const byColor = filterColor === 'ALL' ? raw : raw.filter(p => checkColorMatch(p, filterColor));
+    if (filterSync === 'MISMATCH') {
+      return byColor.filter(p => {
+        const ext = variantExternalStocks[p.id];
+        if (!ext) return false;
+        const ml = ext.stockML;
+        const tn = ext.stockTN;
+        if (ml == null || tn == null) return false;
+        return ml !== tn;
+      });
+    }
+    return byColor;
   };
   const getGroupDisplayStock = (groupKey: string, groupVariants: Product[]) => {
     const variants = getGroupFilteredVariants(groupKey, groupVariants);
@@ -2363,6 +2396,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                      <option value="ML">Mercado Libre</option>
                      <option value="TN">Tienda Nube</option>
                      <option value="BOTH">En ambos</option>
+                  <option value="MISMATCH">ML ≠ TN</option>
                      <option value="NONE">No sincronizado</option>
                    </select>
                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={14} />

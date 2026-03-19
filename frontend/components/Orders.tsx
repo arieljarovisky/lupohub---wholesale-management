@@ -209,7 +209,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
     const rows = items.map(i => {
       const sub = i.quantity * (i.priceAtMoment ?? 0);
-      const desc = [(i.sku ?? ''), (i.productName ?? '')].filter(Boolean).join(' — ') || '—';
+      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
+      const despachoStr = despacho != null && String(despacho).trim() ? ` (Nº despacho: ${String(despacho).trim()})` : '';
+      const skuPart = (i.sku ?? '').toString().trim();
+      const prodPart = (i.productName ?? '').toString().trim() + despachoStr;
+      const desc = [skuPart, prodPart].filter(Boolean).join(' — ') || '—';
       return `<tr><td>${desc}</td><td>${i.sizeCode ?? '—'}</td><td>${i.colorName ?? '—'}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">$${sub.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
@@ -221,9 +225,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const caiFooterHtml = caiRemitoTrim
       ? `<div class="rem-cai">C.A.I. ${caiRemitoTrim}${caiVencimientoStr ? ` — Vencimiento: ${caiVencimientoStr}` : ''}</div>`
       : '';
-    const logoBlockRemito = (remitente.logoUrl && remitente.logoUrl.trim())
-      ? `<img src="${remitente.logoUrl.trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" />`
-      : `<span class="inv-logo-placeholder">${(remitente.businessName || 'Empresa').replace(/</g, '&lt;')}</span>`;
+    const logoUrlRemito = (remitente.logoUrl && remitente.logoUrl.trim()) ? remitente.logoUrl.trim() : '';
+    const logoPlaceholder = (remitente.businessName || 'Empresa').replace(/</g, '&lt;');
+    const logoBlockRemito = logoUrlRemito
+      ? `<div style="display:flex;align-items:center;gap:8px;">
+           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
+             onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
+           <span class="inv-logo-placeholder" style="display:none;">${logoPlaceholder}</span>
+         </div>`
+      : `<span class="inv-logo-placeholder">${logoPlaceholder}</span>`;
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
       * { box-sizing: border-box; }
       body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
@@ -339,14 +349,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const rows = items.map(i => {
       const base = i.quantity * (i.priceAtMoment ?? 0);
-      const desc = [(i.sku ?? ''), (i.productName ?? ''), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
+      const despachoStr = despacho != null && String(despacho).trim() ? ` (Nº despacho: ${String(despacho).trim()})` : '';
+      const prod = `${(i.productName ?? '').toString().trim()}${despachoStr}`;
+      const desc = [(i.sku ?? ''), prod, i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
       return `<tr><td>${desc}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
-    const logoUrlFactura = (remitente as any).logoUrl && String((remitente as any).logoUrl).trim();
+    const logoUrlFactura = (remitente as any).logoUrl && String((remitente as any).logoUrl).trim() ? String((remitente as any).logoUrl).trim() : '';
+    const logoPlaceholderFactura = (((remitente as any).businessName || 'Empresa') as string).replace(/</g, '&lt;');
     const logoBlockFactura = logoUrlFactura
-      ? `<img src="${logoUrlFactura}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" />`
-      : `<span class="inv-logo-placeholder">${((remitente as any).businessName || 'Empresa').replace(/</g, '&lt;')}</span>`;
+      ? `<div style="display:flex;align-items:center;gap:8px;">
+           <img src="${logoUrlFactura}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
+             onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
+           <span class="inv-logo-placeholder" style="display:none;">${logoPlaceholderFactura}</span>
+         </div>`
+      : `<span class="inv-logo-placeholder">${logoPlaceholderFactura}</span>`;
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>

@@ -314,22 +314,51 @@ export async function emitirNotaCredito(
 
   const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
   const tieneCuit = cuitCliente.length >= 10;
-  const tipoCbte = tieneCuit ? TIPO_NC_A : TIPO_NC_B;
+
+  // Tipo de nota de crédito según tipo de FACTURA original:
+  // - Factura A (1)  -> NC A (3)
+  // - Factura B (6)  -> NC B (8)
+  const tipoFacturaOriginal = facturaOriginal.cbteTipo;
+  let tipoCbte: number;
+  if (tipoFacturaOriginal === TIPO_CBTE_A) {
+    tipoCbte = TIPO_NC_A;
+  } else if (tipoFacturaOriginal === TIPO_CBTE_B) {
+    tipoCbte = TIPO_NC_B;
+  } else {
+    // Fallback: si por algún motivo viene otro tipo, usamos NC B (más permisiva) para evitar error 10040,
+    // siempre asociada al tipo real de la factura en CbtesAsoc.
+    tipoCbte = TIPO_NC_B;
+  }
+
+  // DocTipo / DocNro iguales que en factura
   const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
   const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-  // Condición IVA según tipo de comprobante (AFIP 10243: debe ser válida para la clase de comprobante; FEParamGetCondicionIvaReceptor)
-  // NC A: solo 1 (Responsable Inscripto). NC B: solo 4, 5, 7, 8, 9, 10, 15 (no 1 ni 6).
+
+  // Condición IVA según tipo de comprobante (AFIP 10243: debe ser válida para la clase de comprobante)
   const condicionIvaDesc = (customer.condicionIva ?? '').toLowerCase();
   let condicionIva: number;
   if (tipoCbte === TIPO_NC_A) {
-    condicionIva = IVA_RESPONSABLE_INSCRIPTO; // NC A siempre receptor RI
+    // NC A: receptor Responsable Inscripto, exige CUIT
+    if (!tieneCuit) {
+      throw new Error('Para Nota de Crédito A el cliente debe tener CUIT cargado.');
+    }
+    condicionIva = IVA_RESPONSABLE_INSCRIPTO;
   } else {
-    // NC B: solo condiciones válidas para comprobante clase B/C (4, 5, 7, 8, 9, 10, 15). 6 (Monotributo) y 1 (RI) no son válidas.
-    if (condicionIvaDesc.includes('exento')) condicionIva = 4; // IVA Sujeto Exento
-    else if (condicionIvaDesc.includes('no categorizado')) condicionIva = 7; // Sujeto No Categorizado
-    else if (condicionIvaDesc.includes('consumidor final')) condicionIva = CONSUMIDOR_FINAL;
-    else if (condicionIvaDesc.includes('no alcanzado')) condicionIva = 15; // IVA No Alcanzado
-    else condicionIva = CONSUMIDOR_FINAL; // Monotributo, RI y resto -> 5 (CF) para NC B
+    // NC B: solo 4, 5, 7, 8, 9, 10, 15. 1 y 6 no son válidos.
+    if (!tieneCuit) {
+      condicionIva = CONSUMIDOR_FINAL;
+    } else if (condicionIvaDesc.includes('exento')) {
+      condicionIva = 4; // IVA Sujeto Exento
+    } else if (condicionIvaDesc.includes('no categorizado')) {
+      condicionIva = 7; // Sujeto No Categorizado
+    } else if (condicionIvaDesc.includes('consumidor final')) {
+      condicionIva = CONSUMIDOR_FINAL;
+    } else if (condicionIvaDesc.includes('no alcanzado')) {
+      condicionIva = 15; // IVA No Alcanzado
+    } else {
+      // Monotributo, RI u otros: usar 5 (CF) para cumplir validación AFIP en NC B
+      condicionIva = CONSUMIDOR_FINAL;
+    }
   }
 
   const total = Number(amountToCredit) || 0;
