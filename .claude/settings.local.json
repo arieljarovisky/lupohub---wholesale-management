@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|BUG\\\\|HACK\" /c/Users/usuario/Desktop/lupohub---wholesale-management/frontend --include=*.tsx --include=*.ts)",
+      "Bash(grep -r \"console.error\\\\|console.warn\" /c/Users/usuario/Desktop/lupohub---wholesale-management/backend/src --include=*.ts)",
+      "Bash(xargs wc:*)"
+    ]
+  }
+}
