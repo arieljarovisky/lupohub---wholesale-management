@@ -34,7 +34,7 @@ interface InventoryProps {
   attributes?: Attribute[];
   role: Role;
   onCreateProducts?: (products: Product[]) => void;
-  onUpdateStock?: (productId: string, newStock: number) => void;
+  onUpdateStock?: (productId: string, newStock: number) => void | Promise<void>;
   onImportComplete?: () => void;
 }
 
@@ -63,6 +63,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [topDotsPosition, setTopDotsPosition] = useState<{ top: number; left: number } | null>(null);
   const [cardDotsOpenKey, setCardDotsOpenKey] = useState<string | null>(null);
   const cardDotsRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  /** Para hacer scroll al expandir un artículo y que se vea el “Cargando variantes…”. */
+  const groupCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  /** Stock al abrir el editor numérico (para no reenviar si no hubo cambio y para revertir si falla el API). */
+  const baselineManualStockRef = useRef<Record<string, number>>({});
   const [cardDotsPosition, setCardDotsPosition] = useState<{ top: number; left: number } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -957,6 +961,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }, 3500);
   };
 
+  /** Actualiza stock en la lista del servidor (modo paginado) sin refetch completo → no resetea página ni dispara loadData global. */
+  const patchServerItemStock = (variantId: string, newStock: number) => {
+    setServerItems(prev =>
+      prev.map(p => (p.id === variantId ? { ...p, stock_total: newStock, stock: newStock } : p))
+    );
+  };
+
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
     const newStock = Math.max(0, currentStock + delta);
@@ -972,17 +983,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
       return next;
     });
-    onUpdateStock(productId, newStock);
-    setServerListRefreshKey(k => k + 1);
-    onImportComplete?.();
+    patchServerItemStock(productId, newStock);
+    Promise.resolve(onUpdateStock(productId, newStock)).catch(() => {
+      setLoadedVariants(prev => {
+        const next = { ...prev };
+        for (const gk of Object.keys(next)) {
+          const idx = next[gk].findIndex((p: any) => p.id === productId);
+          if (idx >= 0) {
+            next[gk] = [...next[gk]];
+            (next[gk][idx] as any).stock = currentStock;
+            break;
+          }
+        }
+        return next;
+      });
+      patchServerItemStock(productId, currentStock);
+    });
     refreshExternalStocksAfterSync(productId);
   };
 
-  const handleManualStockChange = (productId: string, value: string) => {
-    if (!onUpdateStock) return;
-    const num = parseInt(value);
-    if (isNaN(num)) return;
-    const newStock = Math.max(0, num);
+  /** Solo actualiza la UI mientras editás el número (sin API). */
+  const onManualStockInputChange = (productId: string, value: string) => {
+    const v = value.trim();
+    const n = parseInt(v, 10);
+    const newStock = v === '' ? 0 : (isNaN(n) ? 0 : Math.max(0, n));
     setLoadedVariants(prev => {
       const next = { ...prev };
       for (const gk of Object.keys(next)) {
@@ -995,9 +1019,49 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
       return next;
     });
-    onUpdateStock(productId, newStock);
-    setServerListRefreshKey(k => k + 1);
-    onImportComplete?.();
+  };
+
+  /** Guarda stock manual al salir del input o al confirmar (evita doble envío). */
+  const commitManualStock = (productId: string, value: string) => {
+    if (!onUpdateStock) return;
+    const baseline = baselineManualStockRef.current[productId] ?? 0;
+    const v = value.trim();
+    const n = parseInt(v, 10);
+    const newStock = v === '' || isNaN(n) ? 0 : Math.max(0, n);
+    if (newStock === baseline) return;
+
+    setLoadedVariants(prev => {
+      const next = { ...prev };
+      for (const gk of Object.keys(next)) {
+        const idx = next[gk].findIndex((p: any) => p.id === productId);
+        if (idx >= 0) {
+          next[gk] = [...next[gk]];
+          (next[gk][idx] as any).stock = newStock;
+          break;
+        }
+      }
+      return next;
+    });
+    patchServerItemStock(productId, newStock);
+    Promise.resolve(onUpdateStock(productId, newStock))
+      .then(() => {
+        baselineManualStockRef.current[productId] = newStock;
+      })
+      .catch(() => {
+        setLoadedVariants(prev => {
+          const next = { ...prev };
+          for (const gk of Object.keys(next)) {
+            const idx = next[gk].findIndex((p: any) => p.id === productId);
+            if (idx >= 0) {
+              next[gk] = [...next[gk]];
+              (next[gk][idx] as any).stock = baseline;
+              break;
+            }
+          }
+          return next;
+        });
+        patchServerItemStock(productId, baseline);
+      });
     refreshExternalStocksAfterSync(productId);
   };
 
@@ -1136,10 +1200,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   }, [displayGroupsInfo.totalPages, currentPage]);
 
   const toggleGroup = (groupName: string) => {
+    const willExpand = !expandedGroups.includes(groupName);
     setExpandedGroups(prev => {
       const next = prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName];
       return next;
     });
+    if (willExpand) {
+      requestAnimationFrame(() => {
+        groupCardRefs.current[groupName]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      });
+    }
     if (!loadedVariants[groupName] || (loadedVariants[groupName] && loadedVariants[groupName].length === 0)) {
       setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: true }));
       api.getVariantsBySku(groupName).then(variants => {
@@ -2563,7 +2633,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const isFullyOut = displayTotalStock === 0;
 
           return (
-            <div key={groupKey} className={`bg-slate-800 rounded-xl sm:rounded-2xl border transition-all overflow-hidden ${isExpanded ? 'border-blue-500/50 shadow-lg shadow-blue-900/10' : 'border-slate-700'}`}>
+            <div
+              key={groupKey}
+              ref={(el) => { groupCardRefs.current[groupKey] = el; }}
+              className={`bg-slate-800 rounded-xl sm:rounded-2xl border transition-all overflow-hidden ${isExpanded ? 'border-blue-500/50 shadow-lg shadow-blue-900/10' : 'border-slate-700'}`}
+            >
               {/* Group Header (Clickable) */}
               <div 
                 onClick={() => toggleGroup(groupKey)}
@@ -2734,8 +2808,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       </div>
                     )}
                     {loadingVariantsByGroup[groupKey] && (
-                      <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
-                        Cargando variantes...
+                      <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm flex items-center gap-3">
+                        <Loader2 className="animate-spin text-blue-400 shrink-0" size={22} />
+                        <span>Cargando variantes…</span>
                       </div>
                     )}
                     {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock) && (
@@ -2824,7 +2899,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                         type="number" 
                                         autoFocus
                                         value={product.stock}
-                                        onChange={(e) => handleManualStockChange(product.id, e.target.value)}
+                                        onChange={(e) => onManualStockInputChange(product.id, e.target.value)}
+                                        onBlur={(e) => commitManualStock(product.id, e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            (e.target as HTMLInputElement).blur();
+                                            setEditingStockId(null);
+                                          }
+                                        }}
                                         className="w-14 sm:w-12 bg-transparent text-center font-bold text-white text-lg outline-none"
                                       />
                                       <button 
@@ -2834,8 +2916,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                         <Plus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                       <button 
+                                        type="button"
                                         onClick={() => setEditingStockId(null)}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-green-600 rounded-lg sm:rounded text-white hover:bg-green-500 active:scale-95 ml-1 touch-manipulation"
+                                        title="Listo (el stock se guarda al salir del campo)"
                                       >
                                         <Check size={18} className="sm:w-4 sm:h-4" />
                                       </button>
@@ -2894,7 +2978,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        <Ship size={16} />
                                       </button>
                                       <button 
-                                       onClick={() => setEditingStockId(product.id)}
+                                       type="button"
+                                       onClick={() => {
+                                         baselineManualStockRef.current[product.id] = Number((product as any).stock ?? (product as any).stock_total ?? 0);
+                                         setEditingStockId(product.id);
+                                       }}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors touch-manipulation"
                                       >
                                        <Edit2 size={16} />

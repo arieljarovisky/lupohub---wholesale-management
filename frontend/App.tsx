@@ -304,6 +304,7 @@ const App: React.FC = () => {
     } catch (error) {
       setProducts(previousProducts);
       showToast('error', 'Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).');
+      throw error;
     }
   };
 
@@ -714,7 +715,7 @@ const App: React.FC = () => {
       
       <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-4 pr-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios">
         {isLoading && (
-          <div className="absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)]">
+          <div className="fixed inset-0 bg-slate-950/80 z-[200] flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)] pointer-events-auto">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
              <p className="text-white font-bold">Sincronizando datos...</p>
           </div>
