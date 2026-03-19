@@ -178,11 +178,12 @@ export const api = {
     return rows.map((r: any) => api.mapProductRow(r));
   },
 
-  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
+  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
     return handleRequest(async () => {
       const syncMl = syncFilter === 'ML' || syncFilter === 'BOTH';
       const syncTn = syncFilter === 'TN' || syncFilter === 'BOTH';
       const syncNone = syncFilter === 'NONE';
+      // MISMATCH se resuelve en frontend con stocks externos; no enviamos filtro de sync al backend
       const params = new URLSearchParams({
         page: String(page),
         per_page: String(perPage),
