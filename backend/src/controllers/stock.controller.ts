@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import axios from 'axios';
 import { updateMercadoLibreStock } from './integrations.controller';
+import { tnPutWithRetry } from '../utils/tiendanubeClient';
 
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
@@ -285,18 +286,18 @@ export const updateTiendaNubeStock = async (
       return false;
     }
 
-    await withRetry429409(() =>
-      axios.put(
-        `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-        { stock },
-        {
-          headers: {
-            'Authentication': `bearer ${integration.access_token}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'LupoHub (lupohub@example.com)'
-          }
+    await tnPutWithRetry(
+      axios,
+      `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
+      { stock },
+      {
+        headers: {
+          'Authentication': `bearer ${integration.access_token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'LupoHub (lupohub@example.com)'
         }
-      )
+      },
+      { maxRetries: 4 }
     );
 
     console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
@@ -509,18 +510,18 @@ export const updateTiendaNubeSku = async (
     return false;
   }
   try {
-    await withRetry429409(() =>
-      axios.put(
-        `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-        { sku: newSku },
-        {
-          headers: {
-            'Authentication': `bearer ${integration.access_token}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'LupoHub (lupohub@example.com)'
-          }
+    await tnPutWithRetry(
+      axios,
+      `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
+      { sku: newSku },
+      {
+        headers: {
+          'Authentication': `bearer ${integration.access_token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'LupoHub (lupohub@example.com)'
         }
-      )
+      },
+      { maxRetries: 4 }
     );
     console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
     return true;

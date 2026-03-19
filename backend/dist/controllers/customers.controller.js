@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 function toCustomer(row, transportes) {
@@ -54,7 +54,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             if (transportesByCustomer[custId])
                 transportesByCustomer[custId].push({ id: link.transporteId, name: (_a = link.transporteName) !== null && _a !== void 0 ? _a : link.transporteId, address: (_b = link.transporteAddress) !== null && _b !== void 0 ? _b : undefined });
         }
-        const result = customers.map((c) => { var _a; return toCustomer(c, (_a = transportesByCustomer[c.id]) !== null && _a !== void 0 ? _a : []); });
+        const result = customers.map((c) => { var _a; return (Object.assign(Object.assign({}, c), { transportes: (_a = transportesByCustomer[c.id]) !== null && _a !== void 0 ? _a : [] })); });
         res.json(result);
     }
     catch (error) {
@@ -85,8 +85,13 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const phone = ((_h = body.phone) !== null && _h !== void 0 ? _h : '').toString().trim() || null;
         const condicionIva = ((_j = body.condicionIva) !== null && _j !== void 0 ? _j : '').toString().trim() || null;
         const priceListId = ((_k = body.priceListId) === null || _k === void 0 ? void 0 : _k.trim()) || null;
+        // Guardar nombre de contacto y razón social en columnas separadas:
+        // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
+        // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
+        const sqlName = name || null;
+        const sqlBusinessName = businessName || name || null;
         yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, name || businessName, businessName || name, email, address, city, cuit, phone, condicionIva, priceListId]);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, condicionIva, priceListId]);
         const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE id = ?`, [id]);
         const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x) => x && typeof x === 'string') : [];
         for (const tid of transporteIds) {
@@ -105,7 +110,7 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.createCustomer = createCustomer;
-/** Actualizar cliente (ej. price_list_id para clientes con acceso). */
+/** Actualizar cliente (ej. vendedor, razón social, price_list_id, etc.). */
 const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
@@ -178,6 +183,71 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.updateCustomer = updateCustomer;
+/** Crear o vincular usuario de acceso directo a un cliente (rol CUSTOMER). Solo ADMIN. */
+const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const authUser = req.user;
+        if (!authUser || authUser.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Solo administradores pueden asignar usuarios a clientes' });
+        }
+        const { id } = req.params;
+        if (!id)
+            return res.status(400).json({ message: 'ID de cliente requerido' });
+        const body = req.body;
+        const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
+        const email = ((_b = body.email) !== null && _b !== void 0 ? _b : '').toString().trim();
+        const password = ((_c = body.password) !== null && _c !== void 0 ? _c : '').toString();
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email y contraseña son requeridos para crear el usuario del cliente' });
+        }
+        const existingCustomer = yield (0, db_1.get)('SELECT id, user_id, business_name, name, email FROM customers WHERE id = ?', [id]);
+        if (!existingCustomer) {
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        }
+        // Si ya tiene user_id asociado, no creamos otro usuario
+        if (existingCustomer.user_id) {
+            return res.status(400).json({ message: 'Este cliente ya tiene un usuario asignado' });
+        }
+        // ¿Ya existe un usuario con ese email?
+        const existingUser = yield (0, db_1.get)('SELECT id, name, email, role FROM users WHERE email = ?', [email]);
+        let userId;
+        if (existingUser) {
+            // Solo permitimos vincular usuarios de rol CUSTOMER
+            if (existingUser.role !== 'CUSTOMER') {
+                return res.status(400).json({ message: 'Ya existe un usuario con ese email y no es de tipo CLIENTE' });
+            }
+            userId = existingUser.id;
+        }
+        else {
+            // Crear usuario nuevo con rol CUSTOMER
+            userId = (0, uuid_1.v4)();
+            const displayName = name ||
+                existingCustomer.business_name ||
+                existingCustomer.name ||
+                email;
+            yield (0, db_1.execute)('INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, ?, ?)', [userId, displayName, email, password, 'CUSTOMER', 0]);
+        }
+        // Vincular usuario al cliente
+        yield (0, db_1.execute)('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, condicion_iva, price_list_id FROM customers WHERE id = ?`, [id]);
+        const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
+        const transportes = (links || []).map((l) => {
+            var _a, _b;
+            return ({
+                id: l.transporteId,
+                name: (_a = l.transporteName) !== null && _a !== void 0 ? _a : l.transporteId,
+                address: (_b = l.transporteAddress) !== null && _b !== void 0 ? _b : undefined
+            });
+        });
+        return res.status(200).json(toCustomer(updated, transportes));
+    }
+    catch (error) {
+        console.error('attachUserToCustomer:', error);
+        res.status(500).json({ message: 'Error asignando usuario al cliente', detail: error === null || error === void 0 ? void 0 : error.message });
+    }
+});
+exports.attachUserToCustomer = attachUserToCustomer;
 /** Eliminar cliente. No se permite si tiene pedidos asociados. */
 const deleteCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -270,7 +340,7 @@ const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.importCustomers = importCustomers;
 /** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
 const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     try {
         const body = req.body;
         const updates = Array.isArray(body.updates) ? body.updates : [];
@@ -282,6 +352,8 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
             const cuit = ((_a = u.cuit) !== null && _a !== void 0 ? _a : '').toString().trim().replace(/\D/g, '').slice(0, 11);
             const email = ((_b = u.email) !== null && _b !== void 0 ? _b : '').toString().trim() || null;
             const businessName = ((_c = u.businessName) !== null && _c !== void 0 ? _c : '').toString().trim() || null;
+            const newBusinessName = ((_d = u.newBusinessName) !== null && _d !== void 0 ? _d : '').toString().trim() || null;
+            const condicionIva = ((_e = u.condicionIva) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
             if (!cuit) {
                 errors.push({ row: i + 1, message: 'CUIT vacío' });
                 continue;
@@ -295,13 +367,24 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 customer = yield (0, db_1.get)('SELECT id FROM customers WHERE LOWER(TRIM(email)) = LOWER(?) LIMIT 1', [email]);
             }
             if (!customer && businessName) {
-                customer = yield (0, db_1.get)('SELECT id FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
+                customer = yield (0, db_1.get)('SELECT id, business_name, condicion_iva FROM customers WHERE TRIM(business_name) = ? LIMIT 1', [businessName]);
             }
             if (!customer) {
                 notFound++;
                 continue;
             }
-            yield (0, db_1.execute)('UPDATE customers SET cuit = ? WHERE id = ?', [cuit, customer.id]);
+            const setClauses = ['cuit = ?'];
+            const params = [cuit];
+            if (newBusinessName) {
+                setClauses.push('business_name = ?');
+                params.push(newBusinessName);
+            }
+            if (condicionIva) {
+                setClauses.push('condicion_iva = ?');
+                params.push(condicionIva);
+            }
+            params.push(customer.id);
+            yield (0, db_1.execute)(`UPDATE customers SET ${setClauses.join(', ')} WHERE id = ?`, params);
             updated++;
         }
         res.json({ updated, notFound, errors });

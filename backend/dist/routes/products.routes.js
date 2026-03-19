@@ -10,6 +10,9 @@ router.get('/variants/:variantId', auth_1.authMiddleware, products_controller_1.
 // Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
 router.put('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateVariant);
 router.put('/variants/:variantId/external-ids', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateVariantExternalIds);
+router.get('/variants/:variantId/publications', auth_1.authMiddleware, products_controller_1.getVariantPublications);
+router.post('/variants/:variantId/publications', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.addVariantPublication);
+router.delete('/variants/:variantId/publications/:publicationId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteVariantPublication);
 router.delete('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteVariant);
 router.delete('/all', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteAllProducts);
 router.post('/import-tango', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.importTangoArticles);

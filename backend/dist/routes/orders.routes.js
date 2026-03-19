@@ -9,6 +9,7 @@ router.get('/', orders_controller_1.getOrders);
 router.post('/', orders_controller_1.createOrder);
 router.patch('/:id/status', orders_controller_1.updateOrderStatus);
 router.put('/:id', orders_controller_1.updateOrder);
+router.patch('/:id/archive', auth_1.authMiddleware, orders_controller_1.archiveOrder);
 router.delete('/:id', orders_controller_1.deleteOrder);
 router.get('/:id/invoice', orders_controller_1.getOrderInvoice);
 router.get('/:id/credit-notes', orders_controller_1.getOrderCreditNotes);

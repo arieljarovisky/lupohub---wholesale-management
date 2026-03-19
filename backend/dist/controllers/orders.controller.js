@@ -42,16 +42,24 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
+        const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
+        const archivedOnly = req.query.archivedOnly === 'true' || req.query.archivedOnly === '1';
+        let whereArchived = ' AND (o.archived = 0 OR o.archived IS NULL)';
+        if (archivedOnly)
+            whereArchived = ' AND o.archived = 1';
+        else if (includeArchived)
+            whereArchived = '';
         let ordersRow = yield (0, db_1.query)(`
       SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
       FROM orders o
       LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE 1=1 ${whereArchived}
       ORDER BY o.date DESC
     `);
         const user = req.user;
@@ -72,6 +80,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const placeholders = orderIds.map(() => '?').join(',');
         const itemsRows = yield (0, db_1.query)(`
       SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack,
+             COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku,
              p.name AS productName,
@@ -100,24 +110,27 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     quantity: row.quantity,
                     picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
                     priceAtMoment: Number(row.priceAtMoment),
+                    sellAsPack: !!(row.sellAsPack),
+                    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
                     sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
                     productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
                     sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
                     colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined,
-                    numeroDespacho: (_f = row.numeroDespacho) !== null && _f !== void 0 ? _f : undefined
+                    numeroDespacho: (_g = (_f = row.numeroDespacho) !== null && _f !== void 0 ? _f : row.numero_despacho) !== null && _g !== void 0 ? _g : undefined
                 });
             }
         }
-        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
+        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo, created_at FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
         const invoiceByOrderId = {};
         for (const inv of invoicesRows) {
             invoiceByOrderId[inv.order_id] = {
                 cae: inv.cae,
-                caeFchVto: (_g = inv.cae_fch_vto) !== null && _g !== void 0 ? _g : undefined,
-                puntoVta: (_h = inv.punto_venta) !== null && _h !== void 0 ? _h : undefined,
+                caeFchVto: (_h = inv.cae_fch_vto) !== null && _h !== void 0 ? _h : undefined,
+                puntoVta: (_j = inv.punto_venta) !== null && _j !== void 0 ? _j : undefined,
                 cbteDesde: inv.cbte_desde,
                 cbteHasta: inv.cbte_hasta,
-                cbteTipo: inv.cbte_tipo
+                cbteTipo: inv.cbte_tipo,
+                createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : undefined
             };
         }
         let creditNotesCountByOrderId = {};
@@ -142,6 +155,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 total: Number(order.total),
                 pickedBy: (_c = order.picked_by) !== null && _c !== void 0 ? _c : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
+                archived: !!(order.archived),
                 items: itemsByOrderId[order.id] || [],
                 invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined,
                 creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0
@@ -201,7 +215,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!variantId) {
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0]);
+            const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack]);
         }
         if (newOrder.status === 'Confirmado') {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -213,7 +228,9 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId }));
         const items = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+             pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -231,6 +248,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 quantity: row.quantity,
                 picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
                 priceAtMoment: Number(row.priceAtMoment),
+                sellAsPack: !!(row.sellAsPack),
+                mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
                 sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
                 productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
                 sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
@@ -271,8 +290,9 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 console.error('Errores descontando stock:', result.errors);
             }
         }
-        // Si se cancela un pedido confirmado, restaurar stock
-        if (previousStatus === 'Confirmado' && status === 'Cancelado') {
+        // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
+        const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+        if (status === 'Cancelado' && hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
             if (!result.success) {
@@ -280,7 +300,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
         }
         // Documentar quién prepara/despacha y cuándo
-        if (status === 'Preparación' && pickedBy) {
+        if ((status === 'Preparando' || status === 'Preparación') && pickedBy) {
             yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
         }
         else if (status === 'Despachado') {
@@ -335,13 +355,16 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!variantId) {
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
-            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment) VALUES (?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment]);
+            const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
+            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]);
         }
         const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment, pc.product_id AS productId,
+      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+             pc.product_id AS productId,
              COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -359,6 +382,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 quantity: row.quantity,
                 picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
                 priceAtMoment: Number(row.priceAtMoment),
+                sellAsPack: !!(row.sellAsPack),
+                mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
                 sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
                 productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
                 sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
@@ -383,15 +408,42 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.updateOrder = updateOrder;
+/** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
+const archiveOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const { id } = req.params;
+    const archived = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.archived) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.archived) === 1;
+    if (!id)
+        return res.status(400).json({ message: "ID de pedido inválido" });
+    try {
+        const row = yield (0, db_1.get)("SELECT id FROM orders WHERE id = ?", [id]);
+        if (!row)
+            return res.status(404).json({ message: "Pedido no encontrado" });
+        yield (0, db_1.execute)("UPDATE orders SET archived = ? WHERE id = ?", [archived ? 1 : 0, id]);
+        res.json({ id, archived });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error actualizando archivado del pedido" });
+    }
+});
+exports.archiveOrder = archiveOrder;
 const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: "ID inválido" });
     try {
+        const hasInvoice = yield (0, db_1.get)("SELECT id FROM invoices WHERE order_id = ?", [id]);
+        if (hasInvoice) {
+            return res.status(400).json({
+                message: "No se puede eliminar un pedido que tiene factura emitida. La factura sigue vigente en AFIP. Para anular el efecto fiscal emití una nota de crédito."
+            });
+        }
         const currentOrder = yield (0, db_1.get)("SELECT status FROM orders WHERE id = ?", [id]);
         const status = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
-        if (status === 'Confirmado' || status === 'Preparación') {
+        const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+        if (hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
             if (!result.success) {
@@ -438,7 +490,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -456,13 +508,15 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+        const cbteTipoFromBody = (_a = req.body) === null || _a === void 0 ? void 0 : _a.cbteTipo;
+        const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, {
             id: customerRow.id,
-            businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
+            businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '',
             cuit: customerRow.cuit,
-            condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : null
-        });
+            condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : null
+        }, forceCbteTipo);
         const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
         const invoiceId = uuidv4();
         yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
@@ -492,10 +546,10 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const rows = yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, created_at
+        const rows = yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
        FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC`, [id]);
         res.json(rows.map((r) => {
-            var _a;
+            var _a, _b, _c;
             return ({
                 id: r.id,
                 orderId: r.order_id,
@@ -507,6 +561,8 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
                 cbteDesde: r.cbte_desde,
                 cbteHasta: r.cbte_hasta,
                 amountCredited: Number(r.amount_credited),
+                scope: (_b = r.scope) !== null && _b !== void 0 ? _b : 'total',
+                itemIndex: (_c = r.item_index) !== null && _c !== void 0 ? _c : undefined,
                 createdAt: r.created_at
             });
         }));
@@ -519,7 +575,7 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getOrderCreditNotes = getOrderCreditNotes;
 /** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
 const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -538,9 +594,17 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const invRow = yield (0, db_1.get)('SELECT id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?', [id]);
         if (!invRow)
             return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
-        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+        // Validar: si ya existe NC por el total, no se permite ninguna NC más (ni total ni por ítem)
+        const existingNCs = yield (0, db_1.query)(`SELECT scope, item_index, amount_credited FROM credit_notes WHERE order_id = ?`, [id]);
+        const yaExisteNCTotal = existingNCs.some((r) => (r.scope || 'total') === 'total');
+        if (yaExisteNCTotal) {
+            return res.status(400).json({
+                message: 'Ya existe una nota de crédito por el total de este pedido. No se pueden emitir más notas de crédito.',
+            });
+        }
         let amountToCredit;
         if (tipo === 'total') {
             amountToCredit = Number(orderRow.total) || 0;
@@ -565,12 +629,23 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
             amountToCredit = Math.round(qty * price * 100) / 100;
             if (amountToCredit <= 0)
                 return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
+            const itemLineTotal = Math.round(Number(item.quantity) * price * 100) / 100;
+            const yaCreditadoItem = existingNCs
+                .filter((r) => (r.scope || '') === 'item' && r.item_index === idx)
+                .reduce((sum, r) => sum + Number(r.amount_credited || 0), 0);
+            if (yaCreditadoItem + amountToCredit > itemLineTotal + 0.01) {
+                return res.status(400).json({
+                    message: `No se puede creditar más de lo facturado para este artículo. Ya creditado: $${yaCreditadoItem.toFixed(2)}. Máximo a creditar para este ítem: $${(itemLineTotal - yaCreditadoItem).toFixed(2)}.`,
+                });
+            }
         }
         const { emitirNotaCredito: emitirNCAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit }, amountToCredit);
+        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit, condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : undefined }, amountToCredit);
         const creditNoteId = (0, uuid_1.v4)();
-        yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit]);
+        const scope = tipo;
+        const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
+        yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]);
         res.status(201).json({
             id: creditNoteId,
             orderId: id,

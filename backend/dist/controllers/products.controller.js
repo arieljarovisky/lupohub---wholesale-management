@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportInventory = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
@@ -103,6 +103,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
       SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
              p.tienda_nube_id, p.mercado_libre_id,
+             COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
              COALESCE(st.stock, 0) AS stock_total,
              c.name AS color_name, s.size_code AS size_code, s.name AS size_name
@@ -128,6 +129,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 category: r.category,
                 base_price: Number((_a = r.base_price) !== null && _a !== void 0 ? _a : 0),
                 stock_total: Number((_b = r.stock_total) !== null && _b !== void 0 ? _b : 0),
+                mayorista_pack_size: Math.max(1, Number(r.mayorista_pack_size) || 1),
                 color_name: (_c = r.color_name) !== null && _c !== void 0 ? _c : null,
                 size_code: (_d = r.size_code) !== null && _d !== void 0 ? _d : null,
                 size_name: (_e = r.size_name) !== null && _e !== void 0 ? _e : null,
@@ -328,7 +330,8 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
     try {
         const product = yield (0, db_1.get)(`SELECT id, sku, name, category, base_price, description,
               COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+              COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+              COALESCE(NULLIF(mayorista_pack_size, 0), 1) AS mayorista_pack_size
        FROM products WHERE id = ?`, [id]);
         if (!product)
             return res.status(404).json({ message: 'Producto no encontrado' });
@@ -346,13 +349,15 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
         // Buscar por SKU exacto o por SKU base (para agrupar variantes)
         let product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
               COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
        FROM products p WHERE p.sku = ?`, [sku]);
         // Si no se encuentra exacto, buscar por SKU base
         if (!product) {
             product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
                 COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
          FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`, [`${sku}-%`]);
         }
         if (!product)
@@ -415,23 +420,26 @@ const patchStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.patchStock = patchStock;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
-    const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize } = req.body;
+    const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize, mayoristaPackSize } = req.body;
     if (!id)
         return res.status(400).json({ message: 'ID inv?lido' });
     try {
         const mlPack = mercadoLibrePackSize != null ? Math.max(1, Math.floor(Number(mercadoLibrePackSize))) : null;
         const tnPack = tiendaNubePackSize != null ? Math.max(1, Math.floor(Number(tiendaNubePackSize))) : null;
+        const mayPack = mayoristaPackSize != null ? Math.max(1, Math.floor(Number(mayoristaPackSize))) : null;
         yield (0, db_1.execute)(`UPDATE products SET 
          name = COALESCE(?, name),
          category = COALESCE(?, category),
          base_price = COALESCE(?, base_price),
          description = COALESCE(?, description),
          mercado_libre_pack_size = COALESCE(?, mercado_libre_pack_size),
-         tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size)
-       WHERE id = ?`, [name !== null && name !== void 0 ? name : null, category !== null && category !== void 0 ? category : null, base_price !== null && base_price !== void 0 ? base_price : null, description !== null && description !== void 0 ? description : null, mlPack, tnPack, id]);
+         tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size),
+         mayorista_pack_size = COALESCE(?, mayorista_pack_size)
+       WHERE id = ?`, [name !== null && name !== void 0 ? name : null, category !== null && category !== void 0 ? category : null, base_price !== null && base_price !== void 0 ? base_price : null, description !== null && description !== void 0 ? description : null, mlPack, tnPack, mayPack, id]);
         const updated = yield (0, db_1.get)(`SELECT id, sku, name, category, base_price, description,
       COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-      COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size FROM products WHERE id = ?`, [id]);
+      COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+      COALESCE(NULLIF(mayorista_pack_size, 0), 1) AS mayorista_pack_size FROM products WHERE id = ?`, [id]);
         if (!updated)
             return res.status(404).json({ message: 'Producto no encontrado' });
         res.json(updated);
@@ -461,9 +469,9 @@ const updateProductExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
 });
 exports.updateProductExternalIds = updateProductExternalIds;
 const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     const { variantId } = req.params;
-    const { tiendaNubeVariantId, mercadoLibreVariantId, mercadoLibreItemId, externalSku } = req.body;
+    const { tiendaNubeVariantId, tiendaNubeProductId, mercadoLibreVariantId, mercadoLibreItemId, externalSku } = req.body;
     if (!variantId)
         return res.status(400).json({ message: 'ID de variante inválido' });
     try {
@@ -473,21 +481,41 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
          mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
          external_sku = COALESCE(?, external_sku)
        WHERE id = ?`, [tiendaNubeVariantId !== null && tiendaNubeVariantId !== void 0 ? tiendaNubeVariantId : null, mercadoLibreVariantId !== null && mercadoLibreVariantId !== void 0 ? mercadoLibreVariantId : null, mercadoLibreItemId !== null && mercadoLibreItemId !== void 0 ? mercadoLibreItemId : null, externalSku !== undefined ? externalSku : null, variantId]);
-        // Si se vinculó con una publicación de Mercado Libre, asegurarse de que el producto padre tenga el item_id guardado
-        const mlItemId = mercadoLibreItemId !== null && mercadoLibreItemId !== void 0 ? mercadoLibreItemId : null;
+        let productRow = yield (0, db_1.get)(`SELECT p.id AS product_id, p.tienda_nube_id, p.mercado_libre_id,
+              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
+              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM products p
+       JOIN product_colors pc ON pc.product_id = p.id
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       WHERE pv.id = ? LIMIT 1`, [variantId]);
+        const mlItemId = (_a = mercadoLibreItemId !== null && mercadoLibreItemId !== void 0 ? mercadoLibreItemId : productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) !== null && _a !== void 0 ? _a : null;
+        if (mlItemId && (productRow === null || productRow === void 0 ? void 0 : productRow.product_id)) {
+            yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [mlItemId, productRow.product_id]);
+        }
+        if (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '' && (productRow === null || productRow === void 0 ? void 0 : productRow.product_id)) {
+            yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [String(tiendaNubeProductId).trim(), productRow.product_id]);
+            productRow = Object.assign(Object.assign({}, productRow), { tienda_nube_id: String(tiendaNubeProductId).trim() });
+        }
+        // Registrar en variant_publications para que la sincronización de stock use esta publicación
+        const tnVariantId = (tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '') ? String(tiendaNubeVariantId).trim() : null;
+        const mlVariantId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId).trim() : '';
+        const tnProductId = ((productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '') ? String(tiendaNubeProductId).trim() : null;
+        const tnPack = (_b = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _b !== void 0 ? _b : 1;
+        const mlPack = (_c = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _c !== void 0 ? _c : 1;
+        if (tnProductId && tnVariantId) {
+            yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+         VALUES (?, ?, 'tiendanube', ?, ?, ?)
+         ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProductId, tnVariantId, tnPack]);
+        }
         if (mlItemId) {
-            const productRow = yield (0, db_1.get)(`SELECT p.id AS product_id FROM products p
-         JOIN product_colors pc ON pc.product_id = p.id
-         JOIN product_variants pv ON pv.product_color_id = pc.id
-         WHERE pv.id = ? LIMIT 1`, [variantId]);
-            if (productRow === null || productRow === void 0 ? void 0 : productRow.product_id) {
-                yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`, [mlItemId, productRow.product_id]);
-            }
+            yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+         VALUES (?, ?, 'mercadolibre', ?, ?, ?)
+         ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, mlItemId, mlVariantId, mlPack]);
         }
         // Después de vincular, usar el stock local como fuente de verdad y enviarlo a ML/TN
         try {
             const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-            const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);
+            const currentStock = Number((_d = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _d !== void 0 ? _d : 0);
             yield (0, stock_controller_1.syncStockToExternalPlatforms)(variantId, currentStock);
         }
         catch (syncErr) {
@@ -900,3 +928,70 @@ const exportInventory = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.exportInventory = exportInventory;
+/** Listar publicaciones vinculadas a una variante (variant_publications) */
+const getVariantPublications = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { variantId } = req.params;
+    if (!variantId)
+        return res.status(400).json({ message: 'variantId requerido' });
+    try {
+        const exists = yield (0, db_1.get)('SELECT id FROM product_variants WHERE id = ?', [variantId]);
+        if (!exists)
+            return res.status(404).json({ message: 'Variante no encontrada' });
+        const rows = yield (0, db_1.query)(`SELECT id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE variant_id = ? ORDER BY platform, external_product_id`, [variantId]);
+        res.json(rows || []);
+    }
+    catch (error) {
+        console.error('getVariantPublications:', error);
+        res.status(500).json({ message: 'Error listando publicaciones' });
+    }
+});
+exports.getVariantPublications = getVariantPublications;
+/** Agregar una publicación a una variante */
+const addVariantPublication = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { variantId } = req.params;
+    const { platform, externalProductId, externalVariantId, packSize } = req.body;
+    if (!variantId || !platform || !externalProductId) {
+        return res.status(400).json({ message: 'variantId, platform y externalProductId son requeridos' });
+    }
+    if (platform !== 'mercadolibre' && platform !== 'tiendanube') {
+        return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
+    }
+    const extVariantId = (externalVariantId != null && String(externalVariantId).trim() !== '') ? String(externalVariantId).trim() : '';
+    const pack = Math.max(1, Math.floor(Number(packSize) || 1));
+    try {
+        const exists = yield (0, db_1.get)('SELECT id FROM product_variants WHERE id = ?', [variantId]);
+        if (!exists)
+            return res.status(404).json({ message: 'Variante no encontrada' });
+        const id = (0, uuid_1.v4)();
+        yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size) VALUES (?, ?, ?, ?, ?, ?)`, [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]);
+        const row = yield (0, db_1.get)('SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?', [id]);
+        res.status(201).json(row);
+    }
+    catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({ message: 'Esa publicación ya está vinculada a esta variante' });
+        }
+        console.error('addVariantPublication:', error);
+        res.status(500).json({ message: 'Error agregando publicación' });
+    }
+});
+exports.addVariantPublication = addVariantPublication;
+/** Eliminar una publicación de una variante */
+const deleteVariantPublication = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { variantId, publicationId } = req.params;
+    if (!variantId || !publicationId)
+        return res.status(400).json({ message: 'variantId y publicationId requeridos' });
+    try {
+        const result = yield (0, db_1.execute)('DELETE FROM variant_publications WHERE id = ? AND variant_id = ?', [publicationId, variantId]);
+        const deleted = (result === null || result === void 0 ? void 0 : result.affectedRows) || 0;
+        if (deleted === 0) {
+            return res.status(404).json({ message: 'Publicación no encontrada o no pertenece a esta variante' });
+        }
+        res.json({ deleted: true });
+    }
+    catch (error) {
+        console.error('deleteVariantPublication:', error);
+        res.status(500).json({ message: 'Error eliminando publicación' });
+    }
+});
+exports.deleteVariantPublication = deleteVariantPublication;

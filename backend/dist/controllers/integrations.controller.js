@@ -51,6 +51,7 @@ const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const products_controller_1 = require("./products.controller");
+const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
@@ -64,23 +65,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 function putTnVariantWithRetry(url_1, body_1, headers_1) {
     return __awaiter(this, arguments, void 0, function* (url, body, headers, maxRetries = 2) {
-        var _a;
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                yield axios_1.default.put(url, body, { headers });
-                return;
-            }
-            catch (e) {
-                const is429 = ((_a = e.response) === null || _a === void 0 ? void 0 : _a.status) === 429;
-                const isNetwork = e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED';
-                if ((is429 || isNetwork) && attempt < maxRetries) {
-                    const waitMs = 2000 + attempt * 1500;
-                    yield sleep(waitMs);
-                    continue;
-                }
-                throw e;
-            }
-        }
+        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, body, { headers }, {
+            maxRetries: Math.max(0, maxRetries),
+            // minIntervalMs se resuelve dentro del helper desde env TN_RATE_LIMIT_DELAY_MS
+        });
     });
 }
 /** URL del frontend para redirigir después del OAuth (producción: tu dominio Vercel). */
@@ -906,7 +894,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.handleTiendaNubeWebhook = handleTiendaNubeWebhook;
 // Procesar orden de Tienda Nube y descontar stock
 const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
@@ -960,31 +948,45 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
                 continue;
             let variant = null;
             if (tnVariantId) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+                const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`, [tnVariantId]);
+                if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
+                    const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+                    variant = { id: fromPub.id, current_stock: Number((_c = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _c !== void 0 ? _c : 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
+                }
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && tnVariantId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE pv.tienda_nube_variant_id = ?`, [tnVariantId]);
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`, [itemSku, itemSku]);
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN products p ON p.id = (SELECT product_id FROM product_colors WHERE id = pv.product_color_id)
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`, [itemSku, `${itemSku}%`, itemSku]);
             }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
+                const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
+                const unitsToDeduct = quantity * tnPack;
                 const currentStock = Number(variant.current_stock) || 0;
-                const newStock = Math.max(0, currentStock - quantity);
+                const newStock = Math.max(0, currentStock - unitsToDeduct);
                 const ok = yield updateVariantStock(variant.id, newStock, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`, true);
                 if (ok) {
                     discountedCount++;
-                    console.log(`[TN Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+                    console.log(`[TN Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
                 }
                 else {
                     console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
@@ -1163,7 +1165,7 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
 exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken)
@@ -1182,24 +1184,37 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
         yield sendThankYouMessage(orderId, order, mlToken.access_token);
         const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         for (const item of order.order_items || []) {
-            const mlVariationId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.variation_id;
+            const mlItemId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.id;
+            const mlVariationId = (_b = item.item) === null || _b === void 0 ? void 0 : _b.variation_id;
             const quantity = item.quantity;
-            const itemSku = (((_b = item.item) === null || _b === void 0 ? void 0 : _b.sku) || item.sku || '').toString().trim();
+            const itemSku = (((_c = item.item) === null || _c === void 0 ? void 0 : _c.sku) || item.sku || '').toString().trim();
             let variant = null;
-            if (mlVariationId) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+            if (mlItemId) {
+                const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
+                const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`, [mlItemId, extVariantId]);
+                if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
+                    const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+                    variant = { id: fromPub.id, current_stock: Number((_d = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _d !== void 0 ? _d : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
+                }
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlVariationId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
            LEFT JOIN stocks s ON s.variant_id = pv.id
            WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`, [itemSku, itemSku]);
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock as current_stock
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
            LEFT JOIN stocks s ON s.variant_id = pv.id
            JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -1207,10 +1222,12 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`, [itemSku, `${itemSku}%`, itemSku]);
             }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
-                const currentStock = variant.current_stock || 0;
-                const newStock = Math.max(0, currentStock - quantity);
+                const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
+                const unitsToDeduct = quantity * mlPack;
+                const currentStock = Number(variant.current_stock) || 0;
+                const newStock = Math.max(0, currentStock - unitsToDeduct);
                 yield updateVariantStock(variant.id, newStock, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`, true);
-                console.log(`[ML Order] Descontado ${quantity} de variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+                console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
             }
             else if (mlVariationId || itemSku) {
                 console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);

@@ -31,6 +31,8 @@ function addCreditNotesTable() {
           cbte_desde INT NOT NULL,
           cbte_hasta INT NOT NULL,
           amount_credited DECIMAL(12, 2) NOT NULL,
+          scope VARCHAR(10) NOT NULL DEFAULT 'total',
+          item_index INT NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
           FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
@@ -40,6 +42,14 @@ function addCreditNotesTable() {
             }
             else {
                 console.log('[DB] Tabla credit_notes ya existe');
+            }
+            // Añadir columnas scope e item_index si no existen (migración)
+            const colScope = yield (0, db_1.get)(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'credit_notes' AND COLUMN_NAME = 'scope'`);
+            if (!colScope) {
+                yield (0, db_1.execute)(`ALTER TABLE credit_notes ADD COLUMN scope VARCHAR(10) NOT NULL DEFAULT 'total' AFTER amount_credited`);
+                yield (0, db_1.execute)(`ALTER TABLE credit_notes ADD COLUMN item_index INT NULL AFTER scope`);
+                console.log('[DB] credit_notes: columnas scope e item_index añadidas');
             }
         }
         catch (e) {

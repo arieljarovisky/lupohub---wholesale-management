@@ -12,6 +12,9 @@ var OrderStatus;
 (function (OrderStatus) {
     OrderStatus["DRAFT"] = "Borrador";
     OrderStatus["CONFIRMED"] = "Confirmado";
-    OrderStatus["PREPARATION"] = "Preparaci\u00F3n";
+    OrderStatus["PREPARING"] = "Preparando";
+    OrderStatus["PENDING_CONTROL"] = "Falta controlar";
+    OrderStatus["CONTROLLED"] = "Controlado";
     OrderStatus["DISPATCHED"] = "Despachado";
+    OrderStatus["CANCELLED"] = "Cancelado";
 })(OrderStatus || (exports.OrderStatus = OrderStatus = {}));

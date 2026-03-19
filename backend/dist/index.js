@@ -36,6 +36,8 @@ const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders"
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
 const add_pack_size_products_1 = require("./database/add_pack_size_products");
+const add_order_item_sell_as_pack_1 = require("./database/add_order_item_sell_as_pack");
+const add_variant_publications_table_1 = require("./database/add_variant_publications_table");
 const add_external_sku_1 = require("./database/add_external_sku");
 const add_mercado_libre_item_id_1 = require("./database/add_mercado_libre_item_id");
 const add_customer_direct_1 = require("./database/add_customer_direct");
@@ -44,6 +46,7 @@ const add_customer_phone_iva_1 = require("./database/add_customer_phone_iva");
 const add_transportes_tables_1 = require("./database/add_transportes_tables");
 const add_invoices_table_1 = require("./database/add_invoices_table");
 const add_credit_notes_table_1 = require("./database/add_credit_notes_table");
+const add_orders_archived_1 = require("./database/add_orders_archived");
 const add_price_lists_1 = require("./database/add_price_lists");
 const add_catalogs_table_1 = require("./database/add_catalogs_table");
 const init_schema_1 = require("./database/init_schema");
@@ -94,6 +97,12 @@ app.use('/api/price-lists', price_lists_routes_1.default);
 app.use('/api/catalogs', catalogs_routes_1.default);
 app.use('/api/afip', afip_routes_1.default);
 app.use('/api/billing', billing_routes_1.default);
+// Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
+app.use((err, _req, res, _next) => {
+    const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
+    if (!res.headersSent)
+        res.status(500).json({ error: message, message });
+});
 // Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'OK', service: 'LupoHub Backend', db: 'MySQL' });
@@ -115,6 +124,8 @@ function initDatabase() {
                 yield (0, fix_integrations_table_1.fixIntegrationsTable)();
                 yield (0, add_despachos_table_1.addDespachosTable)();
                 yield (0, add_pack_size_products_1.addPackSizeToProducts)();
+                yield (0, add_order_item_sell_as_pack_1.addOrderItemSellAsPack)();
+                yield (0, add_variant_publications_table_1.addVariantPublicationsTable)();
                 yield (0, add_external_sku_1.addExternalSkuToVariants)();
                 yield (0, add_mercado_libre_item_id_1.addMercadoLibreItemIdToVariants)();
                 yield (0, add_customer_direct_1.addCustomerDirect)();
@@ -123,6 +134,7 @@ function initDatabase() {
                 yield (0, add_transportes_tables_1.addTransportesTables)();
                 yield (0, add_invoices_table_1.addInvoicesTable)();
                 yield (0, add_credit_notes_table_1.addCreditNotesTable)();
+                yield (0, add_orders_archived_1.addOrdersArchived)();
                 yield (0, add_price_lists_1.addPriceLists)();
                 yield (0, add_catalogs_table_1.addCatalogsTable)();
                 console.log('[DB] Tablas inicializadas correctamente');

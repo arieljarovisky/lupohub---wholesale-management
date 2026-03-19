@@ -3,6 +3,7 @@ import axios from 'axios';
 import { execute, query, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
+import { tnPutWithRetry } from '../utils/tiendanubeClient';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -24,21 +25,16 @@ async function putTnVariantWithRetry(
   headers: Record<string, string>,
   maxRetries = 2
 ): Promise<void> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      await axios.put(url, body, { headers });
-      return;
-    } catch (e: any) {
-      const is429 = e.response?.status === 429;
-      const isNetwork = e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED';
-      if ((is429 || isNetwork) && attempt < maxRetries) {
-        const waitMs = 2000 + attempt * 1500;
-        await sleep(waitMs);
-        continue;
-      }
-      throw e;
+  await tnPutWithRetry(
+    axios,
+    url,
+    body,
+    { headers },
+    {
+      maxRetries: Math.max(0, maxRetries),
+      // minIntervalMs se resuelve dentro del helper desde env TN_RATE_LIMIT_DELAY_MS
     }
-  }
+  );
 }
 
 /** URL del frontend para redirigir después del OAuth (producción: tu dominio Vercel). */

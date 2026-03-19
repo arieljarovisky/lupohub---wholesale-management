@@ -52,8 +52,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isAfipConfigured = isAfipConfigured;
+exports.isAfipProduction = isAfipProduction;
+exports.getAfipIssuerData = getAfipIssuerData;
 exports.emitirFactura = emitirFactura;
 exports.emitirNotaCredito = emitirNotaCredito;
+exports.getCondicionIvaByCuit = getCondicionIvaByCuit;
+exports.consultarComprobanteAfip = consultarComprobanteAfip;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const PTO_VTA_DEFAULT = 1;
@@ -144,13 +148,34 @@ function isAfipConfigured() {
     const hasCertEnv = !!((_d = process.env.AFIP_CERT) === null || _d === void 0 ? void 0 : _d.trim()) && !!((_e = process.env.AFIP_KEY) === null || _e === void 0 ? void 0 : _e.trim());
     return hasToken && (hasCertPaths || hasCertEnv);
 }
+/** Indica si la app está configurada para facturar en producción AFIP (si no, es homologación). */
+function isAfipProduction() {
+    return process.env.AFIP_PRODUCTION === 'true' || process.env.AFIP_PRODUCTION === '1';
+}
+/** Datos del emisor para mostrar en la factura (desde env). El front puede usarlos si no tiene remitente en localStorage. */
+function getAfipIssuerData() {
+    var _a, _b, _c, _d;
+    const cuit = (_a = process.env.AFIP_CUIT) === null || _a === void 0 ? void 0 : _a.trim();
+    if (!cuit)
+        return null;
+    const cuitSolo = cuit.replace(/\D/g, '');
+    if (cuitSolo.length !== 11)
+        return null;
+    return {
+        cuit: cuitSolo,
+        businessName: ((_b = process.env.AFIP_RAZON_SOCIAL) === null || _b === void 0 ? void 0 : _b.trim()) || undefined,
+        address: ((_c = process.env.AFIP_ADDRESS) === null || _c === void 0 ? void 0 : _c.trim()) || undefined,
+        city: ((_d = process.env.AFIP_CITY) === null || _d === void 0 ? void 0 : _d.trim()) || undefined
+    };
+}
 /**
  * Emite una factura electrónica en AFIP por el pedido dado.
- * Regla:
+ * Regla (si no se fuerza tipo):
  * - Responsable Inscripto => Factura A
  * - Otros (Monotributo, Exento, CF, etc.) => Factura B
+ * @param forceCbteTipo - Si es 1 o 6, se usa ese tipo (A o B) en lugar de calcular por cliente.
  */
-function emitirFactura(order, customer) {
+function emitirFactura(order, customer, forceCbteTipo) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d;
         const config = getConfig();
@@ -159,28 +184,46 @@ function emitirFactura(order, customer) {
         const tieneCuit = cuitCliente.length >= 10; // CUIT 11 dígitos, CUIL 10–11
         const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
         const esResponsableInscripto = condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
-        const tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
-        const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
-        const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-        let condicionIva;
-        if (!tieneCuit) {
-            condicionIva = CONSUMIDOR_FINAL;
-        }
-        else if (esResponsableInscripto) {
-            condicionIva = IVA_RESPONSABLE_INSCRIPTO;
-        }
-        else if (condicionIvaDesc.includes('monotrib')) {
-            condicionIva = 6; // Responsable Monotributo
-        }
-        else if (condicionIvaDesc.includes('exento')) {
-            condicionIva = 4; // IVA Sujeto Exento
-        }
-        else if (condicionIvaDesc.includes('consumidor final')) {
-            condicionIva = CONSUMIDOR_FINAL;
+        let tipoCbte;
+        if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B) {
+            tipoCbte = forceCbteTipo;
         }
         else {
-            // Fallback genérico si no se reconoce la descripción
-            condicionIva = CONSUMIDOR_FINAL;
+            tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
+        }
+        let docTipo;
+        let docNro;
+        let condicionIva;
+        if (tipoCbte === TIPO_CBTE_A) {
+            if (!tieneCuit)
+                throw new Error('Para Factura A el cliente debe tener CUIT cargado.');
+            docTipo = DOC_TIPO_CUIT;
+            docNro = parseInt(cuitCliente, 10);
+            condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+        }
+        else {
+            // Factura B: AFIP 10243 solo acepta condiciones válidas para clase B (4, 5, 7, 8, 9, 10, 15). No 1 ni 6.
+            docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+            docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+            if (!tieneCuit) {
+                condicionIva = CONSUMIDOR_FINAL;
+            }
+            else if (condicionIvaDesc.includes('exento')) {
+                condicionIva = 4; // IVA Sujeto Exento
+            }
+            else if (condicionIvaDesc.includes('no categorizado')) {
+                condicionIva = 7; // Sujeto No Categorizado
+            }
+            else if (condicionIvaDesc.includes('consumidor final')) {
+                condicionIva = CONSUMIDOR_FINAL;
+            }
+            else if (condicionIvaDesc.includes('no alcanzado')) {
+                condicionIva = 15; // IVA No Alcanzado
+            }
+            else {
+                // Monotributo, RI y resto: para Factura B usar 5 (CF) por restricción AFIP
+                condicionIva = CONSUMIDOR_FINAL;
+            }
         }
         const total = Number(order.total) || 0;
         if (total <= 0)
@@ -188,16 +231,12 @@ function emitirFactura(order, customer) {
         // IVA 21%: neto = total / 1.21, iva = total - neto
         const impNeto = Math.round((total / 1.21) * 100) / 100;
         const impIva = Math.round((total - impNeto) * 100) / 100;
-        const dateVal = order.date;
-        const dateStr = dateVal instanceof Date
-            ? dateVal.toISOString().split('T')[0]
-            : typeof dateVal === 'string'
-                ? dateVal
-                : new Date().toISOString().split('T')[0];
+        // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
+        const dateStr = new Date().toISOString().split('T')[0];
         const fecha = dateStr.replace(/-/g, '');
         const cbteFch = parseInt(fecha, 10);
         if (isNaN(cbteFch) || fecha.length !== 8) {
-            throw new Error('Fecha del pedido inválida para AFIP.');
+            throw new Error('Fecha inválida para AFIP.');
         }
         let Afip;
         try {
@@ -217,6 +256,8 @@ function emitirFactura(order, customer) {
             afipOptions.key = config.key;
         }
         const afip = new Afip(afipOptions);
+        const ambiente = config.production ? 'producción' : 'homologación';
+        console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
         const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
         const numeroFactura = lastVoucher + 1;
         const data = {
@@ -269,15 +310,62 @@ function emitirFactura(order, customer) {
  */
 function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
+        var _a, _b, _c, _d;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
         const tieneCuit = cuitCliente.length >= 10;
-        const tipoCbte = tieneCuit ? TIPO_NC_A : TIPO_NC_B;
+        // Tipo de nota de crédito según tipo de FACTURA original:
+        // - Factura A (1)  -> NC A (3)
+        // - Factura B (6)  -> NC B (8)
+        const tipoFacturaOriginal = facturaOriginal.cbteTipo;
+        let tipoCbte;
+        if (tipoFacturaOriginal === TIPO_CBTE_A) {
+            tipoCbte = TIPO_NC_A;
+        }
+        else if (tipoFacturaOriginal === TIPO_CBTE_B) {
+            tipoCbte = TIPO_NC_B;
+        }
+        else {
+            // Fallback: si por algún motivo viene otro tipo, usamos NC B (más permisiva) para evitar error 10040,
+            // siempre asociada al tipo real de la factura en CbtesAsoc.
+            tipoCbte = TIPO_NC_B;
+        }
+        // DocTipo / DocNro iguales que en factura
         const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
         const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
-        const condicionIva = tieneCuit ? IVA_RESPONSABLE_INSCRIPTO : CONSUMIDOR_FINAL;
+        // Condición IVA según tipo de comprobante (AFIP 10243: debe ser válida para la clase de comprobante)
+        const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
+        let condicionIva;
+        if (tipoCbte === TIPO_NC_A) {
+            // NC A: receptor Responsable Inscripto, exige CUIT
+            if (!tieneCuit) {
+                throw new Error('Para Nota de Crédito A el cliente debe tener CUIT cargado.');
+            }
+            condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+        }
+        else {
+            // NC B: solo 4, 5, 7, 8, 9, 10, 15. 1 y 6 no son válidos.
+            if (!tieneCuit) {
+                condicionIva = CONSUMIDOR_FINAL;
+            }
+            else if (condicionIvaDesc.includes('exento')) {
+                condicionIva = 4; // IVA Sujeto Exento
+            }
+            else if (condicionIvaDesc.includes('no categorizado')) {
+                condicionIva = 7; // Sujeto No Categorizado
+            }
+            else if (condicionIvaDesc.includes('consumidor final')) {
+                condicionIva = CONSUMIDOR_FINAL;
+            }
+            else if (condicionIvaDesc.includes('no alcanzado')) {
+                condicionIva = 15; // IVA No Alcanzado
+            }
+            else {
+                // Monotributo, RI u otros: usar 5 (CF) para cumplir validación AFIP en NC B
+                condicionIva = CONSUMIDOR_FINAL;
+            }
+        }
         const total = Number(amountToCredit) || 0;
         if (total <= 0)
             throw new Error('El monto a creditar debe ser mayor a 0.');
@@ -290,7 +378,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
         try {
             Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
         }
-        catch (_d) {
+        catch (_e) {
             throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
         }
         const afipOptions = {
@@ -304,6 +392,8 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             afipOptions.key = config.key;
         }
         const afip = new Afip(afipOptions);
+        const ambiente = config.production ? 'producción' : 'homologación';
+        console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
         const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
         const numeroNC = lastVoucher + 1;
         const data = {
@@ -328,9 +418,10 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             MonId: 'PES',
             MonCotiz: 1,
             CondicionIVAReceptorId: condicionIva,
+            // AFIP exige tipo de comprobante asociado en formato válido (ej. "01", "06"). Código 10040 si el tipo es inválido.
             CbtesAsoc: [
                 {
-                    Tipo: facturaOriginal.cbteTipo,
+                    Tipo: String(facturaOriginal.cbteTipo).padStart(2, '0'),
                     PtoVta: facturaOriginal.puntoVta,
                     Nro: facturaOriginal.cbteDesde
                 }
@@ -340,8 +431,8 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             ]
         };
         const res = yield afip.ElectronicBilling.createVoucher(data);
-        const cae = (_a = res === null || res === void 0 ? void 0 : res.CAE) !== null && _a !== void 0 ? _a : res === null || res === void 0 ? void 0 : res.cae;
-        const caeFchVto = (_c = (_b = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _c !== void 0 ? _c : '';
+        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
+        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
             throw new Error('AFIP no devolvió CAE para la Nota de Crédito.');
         }
@@ -353,5 +444,131 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             cbteDesde: numeroNC,
             cbteHasta: numeroNC
         };
+    });
+}
+/** Mapeo idImpuesto (Padrón) → descripción condición IVA para el cliente */
+const ID_IMPUESTO_A_CONDICION_IVA = {
+    30: 'IVA Responsable Inscripto',
+    20: 'Responsable Monotributo',
+    32: 'IVA Sujeto Exento',
+    34: 'IVA No Alcanzado'
+};
+/**
+ * Obtiene la condición frente al IVA (y opcionalmente razón social y domicilio) de un CUIT
+ * consultando el Padrón Constancia de Inscripción (getPersona_v2).
+ * Requiere tener autorizado el web service "ws_sr_constancia_inscripcion" en producción
+ * (además de wsfe); en homologación suele funcionar con el mismo token/cert.
+ */
+function getCondicionIvaByCuit(cuit) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+        const config = getConfig();
+        const cuitClean = String(cuit).replace(/\D/g, '');
+        if (cuitClean.length !== 11) {
+            throw new Error('El CUIT debe tener 11 dígitos.');
+        }
+        const idPersona = parseInt(cuitClean, 10);
+        if (isNaN(idPersona))
+            throw new Error('CUIT inválido.');
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_o) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const afipOptions = {
+            CUIT: config.cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        const afip = new Afip(afipOptions);
+        const ws = afip.WebService('ws_sr_constancia_inscripcion');
+        const raw = yield ws.executeRequest('getPersona_v2', {
+            cuitRepresentada: config.cuit,
+            idPersona
+        });
+        const pr = (_a = raw === null || raw === void 0 ? void 0 : raw.personaReturn) !== null && _a !== void 0 ? _a : raw;
+        const errorConstancia = pr === null || pr === void 0 ? void 0 : pr.errorConstancia;
+        const errorRegimen = pr === null || pr === void 0 ? void 0 : pr.errorRegimenGeneral;
+        const errorMono = pr === null || pr === void 0 ? void 0 : pr.errorMonotributo;
+        if ((errorConstancia === null || errorConstancia === void 0 ? void 0 : errorConstancia.mensaje) || (Array.isArray(errorConstancia === null || errorConstancia === void 0 ? void 0 : errorConstancia.error) && errorConstancia.error.length > 0)) {
+            const msg = errorConstancia.mensaje || (errorConstancia.error && errorConstancia.error[0]) || 'CUIT no encontrado en AFIP.';
+            throw new Error(msg);
+        }
+        if ((errorRegimen === null || errorRegimen === void 0 ? void 0 : errorRegimen.mensaje) || (Array.isArray(errorRegimen === null || errorRegimen === void 0 ? void 0 : errorRegimen.error) && errorRegimen.error.length > 0)) {
+            const msg = errorRegimen.mensaje || (errorRegimen.error && errorRegimen.error[0]) || 'Error régimen general.';
+            throw new Error(msg);
+        }
+        if ((errorMono === null || errorMono === void 0 ? void 0 : errorMono.mensaje) || (Array.isArray(errorMono === null || errorMono === void 0 ? void 0 : errorMono.error) && errorMono.error.length > 0)) {
+            const msg = errorMono.mensaje || (errorMono.error && errorMono.error[0]) || 'Error monotributo.';
+            throw new Error(msg);
+        }
+        const datosGenerales = (_b = pr === null || pr === void 0 ? void 0 : pr.datosGenerales) !== null && _b !== void 0 ? _b : {};
+        const businessName = (_d = (_c = datosGenerales.razonSocial) !== null && _c !== void 0 ? _c : datosGenerales.apellido) !== null && _d !== void 0 ? _d : undefined;
+        const domicilio = (_e = datosGenerales.domicilioFiscal) !== null && _e !== void 0 ? _e : datosGenerales.dependencia;
+        const address = (_f = domicilio === null || domicilio === void 0 ? void 0 : domicilio.direccion) !== null && _f !== void 0 ? _f : undefined;
+        const city = (_h = (_g = domicilio === null || domicilio === void 0 ? void 0 : domicilio.localidad) !== null && _g !== void 0 ? _g : domicilio === null || domicilio === void 0 ? void 0 : domicilio.descripcionProvincia) !== null && _h !== void 0 ? _h : undefined;
+        let condicionIva = 'Consumidor Final';
+        const impuestosRg = (_k = (_j = pr === null || pr === void 0 ? void 0 : pr.datosRegimenGeneral) === null || _j === void 0 ? void 0 : _j.impuesto) !== null && _k !== void 0 ? _k : [];
+        const impuestosMono = (_m = (_l = pr === null || pr === void 0 ? void 0 : pr.datosMonotributo) === null || _l === void 0 ? void 0 : _l.impuesto) !== null && _m !== void 0 ? _m : [];
+        const todosImpuestos = [...impuestosRg, ...impuestosMono];
+        for (const imp of todosImpuestos) {
+            const id = imp === null || imp === void 0 ? void 0 : imp.idImpuesto;
+            if (id != null && ID_IMPUESTO_A_CONDICION_IVA[id]) {
+                condicionIva = ID_IMPUESTO_A_CONDICION_IVA[id];
+                break;
+            }
+        }
+        return { condicionIva, businessName, address, city };
+    });
+}
+/**
+ * Consulta en AFIP si un comprobante existe (FECompConsultar).
+ * Si AFIP responde con datos del comprobante → la factura está registrada.
+ * @returns Objeto con existe, datos del comprobante (si existe) y posible error de AFIP.
+ */
+function consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        const config = getConfig();
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_c) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const afipOptions = {
+            CUIT: config.cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        const afip = new Afip(afipOptions);
+        // ElectronicBilling inyecta Auth (Token, Sign, Cuit); el WebService genérico no.
+        try {
+            const resultGet = yield afip.ElectronicBilling.getVoucherInfo(cbteNro, puntoVta, cbteTipo);
+            if (resultGet && ((_a = resultGet.CodAutorizacion) !== null && _a !== void 0 ? _a : resultGet.codAutorizacion)) {
+                return { existe: true, resultado: resultGet };
+            }
+            return { existe: false, error: 'AFIP no devolvió el comprobante (no existe o no autorizado).' };
+        }
+        catch (err) {
+            const msg = (_b = err === null || err === void 0 ? void 0 : err.message) !== null && _b !== void 0 ? _b : String(err);
+            if (msg.includes('Auth') || msg.includes('mal formado')) {
+                throw new Error('AFIP: credenciales inválidas o token vencido. Reautorizá el servicio wsfe (auth-web-service-prod) en app.afipsdk.com.');
+            }
+            throw err;
+        }
     });
 }

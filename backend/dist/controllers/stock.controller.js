@@ -49,6 +49,7 @@ exports.importStockFromExcel = exports.importSalesHistory = exports.createStockS
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
 const integrations_controller_1 = require("./integrations.controller");
+const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant = {};
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -100,18 +101,28 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
     }
 });
 exports.updateVariantStock = updateVariantStock;
+// Unidades a descontar por ítem: si sell_as_pack=1, quantity está en packs → multiplicar por mayorista_pack_size
+function unitsToDeductForOrderItem(quantity, sellAsPack, mayoristaPackSize) {
+    const packSize = Math.max(1, Number(mayoristaPackSize) || 1);
+    return sellAsPack ? quantity * packSize : quantity;
+}
 // Descontar stock por pedido mayorista
 const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     const errors = [];
     try {
-        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, pv.sku, s.stock as current_stock
+        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
        FROM order_items oi
        JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`, [orderId]);
         for (const item of items) {
+            const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
             const currentStock = item.current_stock || 0;
-            const newStock = Math.max(0, currentStock - item.quantity);
+            const newStock = Math.max(0, currentStock - units);
             const success = yield (0, exports.updateVariantStock)(item.variant_id, newStock, 'PEDIDO_MAYORISTA', `Pedido: ${orderId}`);
             if (!success) {
                 errors.push(`Error actualizando stock para variante ${item.sku || item.variant_id}`);
@@ -129,14 +140,19 @@ exports.deductStockForOrder = deductStockForOrder;
 const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     const errors = [];
     try {
-        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, pv.sku, s.stock as current_stock
+        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
        FROM order_items oi
        JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`, [orderId]);
         for (const item of items) {
+            const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
             const currentStock = item.current_stock || 0;
-            const newStock = currentStock + item.quantity;
+            const newStock = currentStock + units;
             const success = yield (0, exports.updateVariantStock)(item.variant_id, newStock, 'DEVOLUCION', `Cancelación pedido: ${orderId}`);
             if (!success) {
                 errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
@@ -171,9 +187,31 @@ function scheduleSyncToExternalPlatforms(variantId, newStock) {
         }, SYNC_DEBOUNCE_MS)
     };
 }
-// Sincronizar stock a plataformas externas (TN y ML). Aplica pack size si el producto está en packs (x2, x3, etc.).
+// Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
 const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const publications = yield (0, db_1.query)(`SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`, [variantId]);
+        if (publications && publications.length > 0) {
+            for (const pub of publications) {
+                const pack = Math.max(1, Number(pub.pack_size) || 1);
+                const stockToSend = stockForPlatform(newStock, pack);
+                if (pub.platform === 'tiendanube' && pub.external_variant_id) {
+                    yield (0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend);
+                }
+                else if (pub.platform === 'mercadolibre') {
+                    const itemId = pub.external_product_id;
+                    const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
+                    if (variationId) {
+                        yield (0, exports.updateMercadoLibreStockByVariant)(itemId, variationId, stockToSend);
+                    }
+                    else {
+                        yield (0, exports.updateMercadoLibreStockByItem)(itemId, stockToSend);
+                    }
+                }
+            }
+            return;
+        }
+        // Fallback: enlaces legacy en product_variants + products
         const variant = yield (0, db_1.get)(`SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
@@ -187,11 +225,9 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
         const stockTN = stockForPlatform(newStock, variant.tn_pack);
         const stockML = stockForPlatform(newStock, variant.ml_pack);
         const skuMLTN = variant.external_sku || variant.sku;
-        // Sincronizar con Tienda Nube
         if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
             yield (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
         }
-        // Sincronizar con Mercado Libre: priorizar variación cuando exista (publicación con varias tallas/colores)
         if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
             yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
         }
@@ -216,13 +252,13 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
             console.log('[TN Stock] No hay integración configurada');
             return false;
         }
-        yield withRetry429409(() => axios_1.default.put(`https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { stock }, {
+        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { stock }, {
             headers: {
                 'Authentication': `bearer ${integration.access_token}`,
                 'Content-Type': 'application/json',
                 'User-Agent': 'LupoHub (lupohub@example.com)'
             }
-        }));
+        }, { maxRetries: 4 });
         console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
         return true;
     }
@@ -383,13 +419,13 @@ const updateTiendaNubeSku = (productId, variantId, newSku) => __awaiter(void 0, 
         return false;
     }
     try {
-        yield withRetry429409(() => axios_1.default.put(`https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { sku: newSku }, {
+        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { sku: newSku }, {
             headers: {
                 'Authentication': `bearer ${integration.access_token}`,
                 'Content-Type': 'application/json',
                 'User-Agent': 'LupoHub (lupohub@example.com)'
             }
-        }));
+        }, { maxRetries: 4 });
         console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
         return true;
     }
