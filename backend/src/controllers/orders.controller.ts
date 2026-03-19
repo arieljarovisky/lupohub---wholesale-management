@@ -29,6 +29,11 @@ export const getOrders = async (req: any, res: any) => {
       }
     }
 
+    const orderId = req.query.orderId as string | undefined;
+    if (orderId) {
+      ordersRow = ordersRow.filter((o: any) => o.id === orderId);
+    }
+
     if (ordersRow.length === 0) {
       return res.json([]);
     }

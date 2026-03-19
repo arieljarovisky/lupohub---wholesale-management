@@ -444,11 +444,12 @@ export const api = {
   },
 
   // --- ORDERS ---
-  getOrders: async (opts?: { includeArchived?: boolean; archivedOnly?: boolean }): Promise<Order[]> => {
+  getOrders: async (opts?: { includeArchived?: boolean; archivedOnly?: boolean; orderId?: string }): Promise<Order[]> => {
     return handleRequest(async () => {
       const params = new URLSearchParams();
       if (opts?.includeArchived) params.set('includeArchived', 'true');
       if (opts?.archivedOnly) params.set('archivedOnly', 'true');
+      if (opts?.orderId) params.set('orderId', opts.orderId);
       const q = params.toString();
       return await request<Order[]>(`/orders${q ? '?' + q : ''}`, 'GET');
     }, MOCK_ORDERS, 'getOrders');
