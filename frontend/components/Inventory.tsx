@@ -954,11 +954,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   // Refrescar stocks ML/TN en la UI después de que el backend sincronice (debounce ~2.8s)
   const refreshExternalStocksAfterSync = (variantId: string) => {
+    // Backend ya no debouncea 2,8s en ajuste manual; refrescar ML/TN un poco antes para alinear la UI.
     setTimeout(() => {
       api.getVariantExternalStocks([variantId]).then(res => {
         if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
       }).catch(() => {});
-    }, 3500);
+    }, 1800);
   };
 
   /** Actualiza stock en la lista del servidor (modo paginado) sin refetch completo → no resetea página ni dispara loadData global. */

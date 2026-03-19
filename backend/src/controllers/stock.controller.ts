@@ -7,6 +7,15 @@ import { tnPutWithRetry } from '../utils/tiendanubeClient';
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
 
+/** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
+function flushPendingExternalSync(variantId: string): void {
+  const prev = pendingSyncByVariant[variantId];
+  if (prev) {
+    clearTimeout(prev.timeout);
+    delete pendingSyncByVariant[variantId];
+  }
+}
+
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 async function withRetry429409<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
@@ -87,7 +96,17 @@ export const updateVariantStock = async (
     await logStockMovement(variantId, previousStock, newStock, movementType, reference);
 
     if (syncExternal) {
-      scheduleSyncToExternalPlatforms(variantId, newStock);
+      // Ajuste desde inventario: sin debounce de 2,8s (TN parecía no actualizar hasta el 2º cambio).
+      // Pedidos/importaciones masivas siguen con debounce para no saturar APIs.
+      if (movementType === 'AJUSTE_MANUAL') {
+        flushPendingExternalSync(variantId);
+        const toSync = newStock;
+        void syncStockToExternalPlatforms(variantId, toSync).catch(err =>
+          console.error('[Sync AJUSTE_MANUAL] Error:', err?.message || err)
+        );
+      } else {
+        scheduleSyncToExternalPlatforms(variantId, newStock);
+      }
     }
 
     return true;
@@ -219,21 +238,24 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
     );
 
     if (publications && (publications as any[]).length > 0) {
+      const tasks: Promise<unknown>[] = [];
       for (const pub of publications as any[]) {
         const pack = Math.max(1, Number(pub.pack_size) || 1);
         const stockToSend = stockForPlatform(newStock, pack);
         if (pub.platform === 'tiendanube' && pub.external_variant_id) {
-          await updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend);
+          tasks.push(updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend));
         } else if (pub.platform === 'mercadolibre') {
           const itemId = pub.external_product_id;
           const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
           if (variationId) {
-            await updateMercadoLibreStockByVariant(itemId, variationId, stockToSend);
+            tasks.push(updateMercadoLibreStockByVariant(itemId, variationId, stockToSend));
           } else {
-            await updateMercadoLibreStockByItem(itemId, stockToSend);
+            tasks.push(updateMercadoLibreStockByItem(itemId, stockToSend));
           }
         }
       }
+      // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
+      await Promise.all(tasks);
       return;
     }
 
