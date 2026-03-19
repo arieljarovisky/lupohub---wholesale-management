@@ -526,12 +526,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const MISMATCH_MAX_VARIANTS = 500;
   useEffect(() => {
     if (filterSync !== 'MISMATCH') return;
-    const ids = Array.from(new Set(baseSource.map((p: Product) => p.id).filter(Boolean))).slice(0, MISMATCH_MAX_VARIANTS);
-    if (ids.length === 0) return;
+    const ids = Array.from(new Set(baseSource.map((p: Product) => p.id).filter(Boolean))) as string[];
+    const idsLimited = ids.slice(0, MISMATCH_MAX_VARIANTS);
+    if (idsLimited.length === 0) return;
     let cancelled = false;
     const batches: string[][] = [];
-    for (let i = 0; i < ids.length; i += MISMATCH_BATCH_SIZE) {
-      batches.push(ids.slice(i, i + MISMATCH_BATCH_SIZE));
+    for (let i = 0; i < idsLimited.length; i += MISMATCH_BATCH_SIZE) {
+      batches.push(idsLimited.slice(i, i + MISMATCH_BATCH_SIZE));
     }
     Promise.all(batches.map(batch => api.getVariantExternalStocks(batch)))
       .then(results => {
@@ -1668,6 +1669,58 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     } catch (error) {
       console.error(error);
       showToast('error', 'Error guardando vinculación');
+    }
+  };
+
+  const handleUnlinkArticle = async (platform: 'tiendanube' | 'mercadolibre' | 'both') => {
+    if (!linkingVariant) return;
+    try {
+      const getBaseSku = (p: Product) => (p as any).base_sku != null && (p as any).base_sku !== '' ? String((p as any).base_sku) : (() => { const s = (p.sku || '').toString(); const pts = s.split('-'); if (pts.length >= 3) return pts.slice(0, -2).join('-'); if (pts.length === 2) return pts.join('-'); return s; })();
+      const groupKey = getBaseSku(linkingVariant);
+      const parentProduct = groupedProducts[groupKey]?.[0];
+      const parentProductId = (parentProduct as any)?.product_id ?? parentProduct?.id;
+      if (!parentProductId) {
+        showToast('error', 'No se pudo resolver el ID del artículo para desvincular.');
+        return;
+      }
+
+      const opts =
+        platform === 'both'
+          ? { tiendaNube: true, mercadoLibre: true, variants: true }
+          : platform === 'tiendanube'
+            ? { tiendaNube: true, mercadoLibre: false, variants: true }
+            : { tiendaNube: false, mercadoLibre: true, variants: true };
+
+      await api.unlinkProductPlatforms(parentProductId, opts);
+
+      // Refrescar variantes del grupo y cerrar modal
+      api.getVariantsBySku(groupKey).then(variants => {
+        const mapped: Product[] = variants.map((v) => ({
+          id: v.variantId,
+          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+          name: groupedProducts[groupKey]?.[0]?.name || '',
+          category: groupedProducts[groupKey]?.[0]?.category || 'General',
+          price: groupedProducts[groupKey]?.[0]?.price || 0,
+          description: '',
+          size: v.sizeCode,
+          color: v.colorName,
+          colorCode: v.colorCode,
+          stock: v.stock,
+          integrations: {
+            local: true,
+            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+            mercadoLibre: !!v.externalIds?.mercadoLibre
+          },
+          externalIds: v.externalIds
+        }));
+        setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
+      });
+
+      showToast('success', platform === 'both' ? 'Artículo desvinculado de TN y ML.' : platform === 'tiendanube' ? 'Artículo desvinculado de Tienda Nube.' : 'Artículo desvinculado de Mercado Libre.');
+      setLinkingVariant(null);
+    } catch (e: any) {
+      const msg = e?.message || 'Error al desvincular artículo.';
+      showToast('error', msg);
     }
   };
 
@@ -3641,7 +3694,33 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </div>
 
               </div>
-              <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-end gap-3 bg-slate-900/80">
+              <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-between gap-3 bg-slate-900/80">
+                 <div className="flex flex-col sm:flex-row gap-2">
+                   <button
+                     type="button"
+                     onClick={() => handleUnlinkArticle('tiendanube')}
+                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-cyan-200 bg-cyan-900/20 hover:bg-cyan-800/30 border border-cyan-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     title="Quita el vínculo del artículo y sus variantes con Tienda Nube"
+                   >
+                     Desvincular TN
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => handleUnlinkArticle('mercadolibre')}
+                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-amber-200 bg-amber-900/20 hover:bg-amber-800/30 border border-amber-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     title="Quita el vínculo del artículo y sus variantes con Mercado Libre"
+                   >
+                     Desvincular ML
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => handleUnlinkArticle('both')}
+                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-red-200 bg-red-900/20 hover:bg-red-800/30 border border-red-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     title="Quita el vínculo del artículo y sus variantes con TN y ML"
+                   >
+                     Desvincular todo
+                   </button>
+                 </div>
                  <button 
                    onClick={() => setLinkingVariant(null)}
                    className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm touch-manipulation min-h-[44px]"

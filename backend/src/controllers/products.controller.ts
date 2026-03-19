@@ -464,18 +464,24 @@ export const updateProduct = async (req: any, res: any) => {
 
 export const updateProductExternalIds = async (req: any, res: any) => {
   const { id } = req.params;
-  const { tiendaNubeId, mercadoLibreId } = req.body;
+  const body = req.body || {};
+  const hasTn = Object.prototype.hasOwnProperty.call(body, 'tiendaNubeId');
+  const hasMl = Object.prototype.hasOwnProperty.call(body, 'mercadoLibreId');
+  const tiendaNubeId = hasTn ? body.tiendaNubeId : undefined;
+  const mercadoLibreId = hasMl ? body.mercadoLibreId : undefined;
   if (!id) return res.status(400).json({ message: 'ID inv?lido' });
 
   try {
-    await execute(
-      `UPDATE products SET 
-         tienda_nube_id = COALESCE(?, tienda_nube_id),
-         mercado_libre_id = COALESCE(?, mercado_libre_id)
-       WHERE id = ?`,
-      [tiendaNubeId ?? null, mercadoLibreId ?? null, id]
-    );
-    res.json({ id, tiendaNubeId, mercadoLibreId });
+    if (!hasTn && !hasMl) return res.status(400).json({ message: 'Debe enviar tiendaNubeId y/o mercadoLibreId (pueden ser null para desvincular).' });
+
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (hasTn) { sets.push('tienda_nube_id = ?'); params.push(tiendaNubeId != null && String(tiendaNubeId).trim() !== '' ? String(tiendaNubeId).trim() : null); }
+    if (hasMl) { sets.push('mercado_libre_id = ?'); params.push(mercadoLibreId != null && String(mercadoLibreId).trim() !== '' ? String(mercadoLibreId).trim() : null); }
+    params.push(id);
+
+    await execute(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`, params);
+    res.json({ id, tiendaNubeId: hasTn ? (tiendaNubeId ?? null) : undefined, mercadoLibreId: hasMl ? (mercadoLibreId ?? null) : undefined });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando IDs externos del producto' });
@@ -484,19 +490,30 @@ export const updateProductExternalIds = async (req: any, res: any) => {
 
 export const updateVariantExternalIds = async (req: any, res: any) => {
   const { variantId } = req.params;
-  const { tiendaNubeVariantId, tiendaNubeProductId, mercadoLibreVariantId, mercadoLibreItemId, externalSku } = req.body;
+  const body = req.body || {};
+  const hasTnVar = Object.prototype.hasOwnProperty.call(body, 'tiendaNubeVariantId');
+  const hasTnProd = Object.prototype.hasOwnProperty.call(body, 'tiendaNubeProductId');
+  const hasMlVar = Object.prototype.hasOwnProperty.call(body, 'mercadoLibreVariantId');
+  const hasMlItem = Object.prototype.hasOwnProperty.call(body, 'mercadoLibreItemId');
+  const hasExternalSku = Object.prototype.hasOwnProperty.call(body, 'externalSku');
+  const tiendaNubeVariantId = hasTnVar ? body.tiendaNubeVariantId : undefined;
+  const tiendaNubeProductId = hasTnProd ? body.tiendaNubeProductId : undefined;
+  const mercadoLibreVariantId = hasMlVar ? body.mercadoLibreVariantId : undefined;
+  const mercadoLibreItemId = hasMlItem ? body.mercadoLibreItemId : undefined;
+  const externalSku = hasExternalSku ? body.externalSku : undefined;
   if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
 
   try {
-    await execute(
-      `UPDATE product_variants SET 
-         tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
-         mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
-         mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
-         external_sku = COALESCE(?, external_sku)
-       WHERE id = ?`,
-      [tiendaNubeVariantId ?? null, mercadoLibreVariantId ?? null, mercadoLibreItemId ?? null, externalSku !== undefined ? externalSku : null, variantId]
-    );
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (hasTnVar) { sets.push('tienda_nube_variant_id = ?'); params.push(tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null); }
+    if (hasMlVar) { sets.push('mercado_libre_variant_id = ?'); params.push(mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '' ? String(mercadoLibreVariantId).trim() : null); }
+    if (hasMlItem) { sets.push('mercado_libre_item_id = ?'); params.push(mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '' ? String(mercadoLibreItemId).trim() : null); }
+    if (hasExternalSku) { sets.push('external_sku = ?'); params.push(externalSku != null && String(externalSku).trim() !== '' ? String(externalSku).trim() : null); }
+    if (sets.length > 0) {
+      params.push(variantId);
+      await execute(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
+    }
 
     let productRow = await get(
       `SELECT p.id AS product_id, p.tienda_nube_id, p.mercado_libre_id,
@@ -509,27 +526,37 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       [variantId]
     );
 
-    const mlItemId = mercadoLibreItemId ?? productRow?.mercado_libre_id ?? null;
-    if (mlItemId && productRow?.product_id) {
-      await execute(
-        `UPDATE products SET mercado_libre_id = COALESCE(?, mercado_libre_id) WHERE id = ?`,
-        [mlItemId, productRow.product_id]
-      );
-    }
-    if (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '' && productRow?.product_id) {
-      await execute(
-        `UPDATE products SET tienda_nube_id = ? WHERE id = ?`,
-        [String(tiendaNubeProductId).trim(), productRow.product_id]
-      );
-      productRow = { ...productRow, tienda_nube_id: String(tiendaNubeProductId).trim() };
+    // Actualizar IDs del producto padre solo si el request lo incluye explícitamente.
+    if (productRow?.product_id) {
+      if (hasMlItem) {
+        const mlItemToSet = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
+        await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [mlItemToSet, productRow.product_id]);
+        productRow = { ...productRow, mercado_libre_id: mlItemToSet };
+      }
+      if (hasTnProd) {
+        const tnProdToSet = (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '') ? String(tiendaNubeProductId).trim() : null;
+        await execute(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [tnProdToSet, productRow.product_id]);
+        productRow = { ...productRow, tienda_nube_id: tnProdToSet };
+      }
     }
 
     // Registrar en variant_publications para que la sincronización de stock use esta publicación
     const tnVariantId = (tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '') ? String(tiendaNubeVariantId).trim() : null;
     const mlVariantId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId).trim() : '';
-    const tnProductId = (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '') ? String(tiendaNubeProductId).trim() : null;
+    const tnProductId = (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : null;
     const tnPack = productRow?.tn_pack ?? 1;
     const mlPack = productRow?.ml_pack ?? 1;
+    // Si se borró la publicación, también la borramos de variant_publications.
+    if (hasTnVar && (!tnProductId || !tnVariantId)) {
+      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
+    }
+    if (hasMlVar || hasMlItem) {
+      const hasAnyMl = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') || (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '');
+      if (!hasAnyMl) {
+        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
+      }
+    }
+
     if (tnProductId && tnVariantId) {
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
@@ -538,6 +565,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
         [uuidv4(), variantId, tnProductId, tnVariantId, tnPack]
       );
     }
+    const mlItemId = (productRow?.mercado_libre_id && String(productRow.mercado_libre_id).trim() !== '') ? String(productRow.mercado_libre_id).trim() : null;
     if (mlItemId) {
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
@@ -567,6 +595,86 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando IDs externos de variante' });
+  }
+};
+
+/** Desvincular un artículo de Tienda Nube y/o Mercado Libre (producto padre + variantes). */
+export const unlinkProductPlatforms = async (req: any, res: any) => {
+  const { id } = req.params;
+  const body = req.body || {};
+  const tiendaNube = body.tiendaNube !== false; // default true
+  const mercadoLibre = body.mercadoLibre !== false; // default true
+  const unlinkVariants = body.variants !== false; // default true
+  if (!id) return res.status(400).json({ message: 'ID inválido' });
+
+  try {
+    if (!tiendaNube && !mercadoLibre) {
+      return res.status(400).json({ message: 'Debe indicar tiendaNube y/o mercadoLibre.' });
+    }
+
+    const result: any = { productId: id, tiendaNube: false, mercadoLibre: false, variants: unlinkVariants };
+
+    if (tiendaNube) {
+      await execute(`UPDATE products SET tienda_nube_id = NULL WHERE id = ?`, [id]);
+      result.tiendaNube = true;
+      if (unlinkVariants) {
+        const rows = await query(
+          `SELECT pv.id AS variant_id
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           WHERE pc.product_id = ?`,
+          [id]
+        );
+        const variantIds = (rows || []).map((r: any) => r.variant_id).filter(Boolean);
+        await execute(
+          `UPDATE product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           SET pv.tienda_nube_variant_id = NULL
+           WHERE pc.product_id = ?`,
+          [id]
+        );
+        if (variantIds.length > 0) {
+          await execute(
+            `DELETE FROM variant_publications WHERE platform = 'tiendanube' AND variant_id IN (${variantIds.map(() => '?').join(',')})`,
+            variantIds
+          );
+        }
+      }
+    }
+
+    if (mercadoLibre) {
+      await execute(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [id]);
+      result.mercadoLibre = true;
+      if (unlinkVariants) {
+        const rows = await query(
+          `SELECT pv.id AS variant_id
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           WHERE pc.product_id = ?`,
+          [id]
+        );
+        const variantIds = (rows || []).map((r: any) => r.variant_id).filter(Boolean);
+        await execute(
+          `UPDATE product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           SET pv.mercado_libre_variant_id = NULL,
+               pv.mercado_libre_item_id = NULL
+           WHERE pc.product_id = ?`,
+          [id]
+        );
+        if (variantIds.length > 0) {
+          await execute(
+            `DELETE FROM variant_publications WHERE platform = 'mercadolibre' AND variant_id IN (${variantIds.map(() => '?').join(',')})`,
+            variantIds
+          );
+        }
+      }
+    }
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error desvinculando artículo' });
   }
 };
 

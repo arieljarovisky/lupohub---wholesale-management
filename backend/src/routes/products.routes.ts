@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -25,6 +25,7 @@ router.post('/', authMiddleware, adminOrDepositoMiddleware, createProduct);
 router.patch('/stock', authMiddleware, patchStock);
 router.put('/:id', authMiddleware, adminOrDepositoMiddleware, updateProduct);
 router.put('/:id/external-ids', authMiddleware, adminOrDepositoMiddleware, updateProductExternalIds);
+router.post('/:id/unlink', authMiddleware, adminOrDepositoMiddleware, unlinkProductPlatforms);
 router.delete('/:id', authMiddleware, adminOrDepositoMiddleware, deleteProduct);
 
 export default router;

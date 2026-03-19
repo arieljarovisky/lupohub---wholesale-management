@@ -428,6 +428,12 @@ export const api = {
     }, {}, 'updateVariantExternalIds');
   },
 
+  unlinkProductPlatforms: async (id: string, opts?: { tiendaNube?: boolean; mercadoLibre?: boolean; variants?: boolean }): Promise<{ ok: boolean } | null> => {
+    return handleRequest(async () => {
+      return await request<{ ok: boolean }>(`/products/${encodeURIComponent(id)}/unlink`, 'POST', opts || {});
+    }, null, 'unlinkProductPlatforms');
+  },
+
   bulkLinkVariants: async (payload: {
     productId?: string;
     mercadoLibreItemId?: string;
