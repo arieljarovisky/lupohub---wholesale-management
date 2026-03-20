@@ -471,67 +471,141 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const totalNota = Number(nc.amountCredited || 0);
 
-    const rows = items.map(i => {
-      const base = i.quantity * (i.priceAtMoment ?? 0);
+    const baseImponibleNc = totalNota;
+    const despachoOf = (i: OrderItem) => {
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const desc = [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
-    }).join('');
+      return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
+    };
+    const descOf = (i: OrderItem) =>
+      [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+
+    const scope = nc.scope || 'total';
+    const itemIdx = nc.itemIndex;
+    let rows: string;
+    if (scope === 'item' && typeof itemIdx === 'number' && items[itemIdx]) {
+      const i = items[itemIdx];
+      const price = Number(i.priceAtMoment ?? 0);
+      const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
+      const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
+      rows = `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${totalNota.toLocaleString('es-AR')}</td><td class="col-r">—</td><td class="col-r">$${totalNota.toLocaleString('es-AR')}</td></tr>`;
+    } else {
+      rows = items.map(i => {
+        const base = i.quantity * (i.priceAtMoment ?? 0);
+        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${base.toLocaleString('es-AR')}</td><td class="col-r">—</td><td class="col-r">$${base.toLocaleString('es-AR')}</td></tr>`;
+      }).join('');
+    }
 
     const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
 
+    const logoUrlNc = (remitente as any).logoUrl && String((remitente as any).logoUrl).trim() ? String((remitente as any).logoUrl).trim() : '';
+    const logoPlaceholderNc = (((remitente as any).businessName || 'Empresa') as string).replace(/</g, '&lt;');
+    const logoBlockNc = logoUrlNc
+      ? `<div style="display:flex;align-items:center;gap:8px;">
+           <img src="${logoUrlNc}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
+             onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
+           <span class="inv-logo-placeholder" style="display:none;">${logoPlaceholderNc}</span>
+         </div>`
+      : `<span class="inv-logo-placeholder">${logoPlaceholderNc}</span>`;
+
+    const scopeLabel = scope === 'item' ? 'Crédito por ítem' : 'Crédito total del pedido';
+
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><style>
-      @page { size: A4; margin: 15mm 15mm 20mm 15mm; }
+      @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
       * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; width: 100%; max-width: 180mm; margin: 0 auto; padding: 0; color: #111; background: #fff; font-size: 13px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 18px; border-bottom: 2px solid #111; }
-      .inv-logo-wrap { min-height: 64px; display: flex; align-items: center; }
-      .inv-logo-placeholder { font-size: 1.4rem; font-weight: 800; color: #111; letter-spacing: -0.5px; }
-      .inv-meta { text-align: right; }
-      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 700; color: #111; }
-      .inv-meta .inv-fecha { font-size: 0.85rem; color: #e05a1a; margin-top: 3px; font-weight: 600; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; padding: 14px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; line-height: 1.6; }
-      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; margin-bottom: 4px; font-weight: 700; }
-      .inv-table-wrap { margin-bottom: 20px; }
+      body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; margin: 0; padding: 24px 16px 40px; color: #111827; background: #f3f4f6; font-size: 13px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .nc-doc { width: 100%; max-width: 190mm; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(17,24,39,0.08); padding: 28px 32px 32px; }
+      .nc-badge { display: inline-block; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #92400e; background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; padding: 5px 12px; border-radius: 999px; margin-bottom: 10px; }
+      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 22px; padding-bottom: 20px; border-bottom: 3px solid #d97706; }
+      .inv-logo-wrap { min-height: 56px; display: flex; align-items: center; }
+      .inv-logo { max-height: 56px; max-width: 200px; width: auto; height: auto; object-fit: contain; display: block; }
+      .inv-logo-placeholder { font-size: 1.25rem; font-weight: 800; color: #111827; letter-spacing: -0.02em; }
+      .inv-meta { text-align: right; flex-shrink: 0; }
+      .inv-meta .inv-num { font-size: 1.15rem; font-weight: 800; color: #b45309; letter-spacing: -0.02em; }
+      .inv-meta .inv-fecha { font-size: 0.88rem; color: #6b7280; margin-top: 6px; font-weight: 600; }
+      .inv-meta .inv-scope { font-size: 0.75rem; color: #78716c; margin-top: 8px; }
+      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 28px; margin-bottom: 22px; padding: 16px 18px; background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 0.86rem; line-height: 1.55; }
+      .inv-datos strong { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 8px; font-weight: 700; }
+      .inv-table-wrap { margin-bottom: 22px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
       .inv-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-      .inv-table thead { background: #f3f4f6; }
-      .inv-table th { text-align: left; padding: 9px 10px; font-weight: 700; color: #111; border-bottom: 2px solid #d1d5db; white-space: nowrap; }
-      .inv-table th:nth-child(2) { text-align: center; }
-      .inv-table th:nth-child(3) { text-align: center; }
+      .inv-table thead { background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%); }
+      .inv-table th { text-align: left; padding: 11px 12px; font-weight: 700; color: #78350f; border-bottom: 2px solid #f59e0b; white-space: nowrap; }
+      .inv-table th:nth-child(2), .inv-table th:nth-child(3) { text-align: center; }
       .inv-table th:nth-child(n+4) { text-align: right; }
-      .inv-table td { padding: 9px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
-      .inv-table td:nth-child(2) { text-align: center; color: #6b7280; }
-      .inv-table td:nth-child(3) { text-align: center; }
-      .inv-table td:nth-child(n+4) { text-align: right; }
+      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+      .inv-table tbody tr:nth-child(even) td { background: #fafafa; }
       .inv-table tbody tr:last-child td { border-bottom: none; }
-      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 28px; }
-      .inv-summary-inner { min-width: 220px; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 24px; padding: 7px 12px; border-bottom: 1px solid #e5e7eb; }
+      .col-c { text-align: center; color: #4b5563; }
+      .col-r { text-align: right; font-variant-numeric: tabular-nums; }
+      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 24px; }
+      .inv-summary-inner { min-width: 260px; font-size: 0.86rem; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 20px; padding: 9px 14px; border-bottom: 1px solid #f3f4f6; }
       .inv-summary-inner .row:last-child { border-bottom: none; }
-      .inv-summary-inner .row.total { font-weight: 700; font-size: 1rem; background: #f3f4f6; }
-      .inv-footer { padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 0.78rem; color: #6b7280; }
-      .inv-cae { margin-bottom: 8px; color: #374151; }
-      .no-print { margin-top: 28px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } body { max-width: 100%; } .inv-table { page-break-inside: auto; } .inv-table tr { page-break-inside: avoid; } }
+      .inv-summary-inner .row.total { font-weight: 800; font-size: 1.02rem; background: linear-gradient(90deg, #fffbeb, #fef9c3); color: #92400e; border-top: 2px solid #fbbf24; }
+      .inv-footer { padding: 16px 18px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 0.78rem; color: #4b5563; }
+      .inv-cae { margin-bottom: 6px; color: #374151; font-variant-numeric: tabular-nums; }
+      .inv-cae strong { color: #111827; }
+      .no-print { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+      .no-print button { padding: 11px 22px; font-size: 0.92rem; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; transition: transform 0.12s, box-shadow 0.12s; }
+      .no-print button:first-child { background: linear-gradient(180deg, #1f2937, #111827); color: #fff; box-shadow: 0 2px 8px rgba(17,24,39,0.25); }
+      .no-print button:first-child:hover { transform: translateY(-1px); }
+      .no-print button:last-child { background: #e5e7eb; color: #374151; }
+      .no-print button:last-child:hover { background: #d1d5db; }
+      @media print {
+        .no-print { display: none !important; }
+        body { background: #fff; padding: 0; }
+        .nc-doc { box-shadow: none; border-radius: 0; border: none; max-width: 100%; padding: 0; }
+        .inv-table tbody tr:nth-child(even) td { background: transparent; }
+        .inv-datos, .inv-footer, .inv-table-wrap, .inv-summary-inner { break-inside: avoid; }
+        .inv-table tr { page-break-inside: avoid; }
+      }
     </style></head><body>
-      <div class="inv-top">
-        <div class="inv-logo-wrap">${logoBlockFactura}</div>
-        <div class="inv-meta">
-          <div class="inv-num">NOTA DE CRÉDITO Nº: ${nroNota}</div>
-          <div class="inv-fecha">Fecha: ${fechaNota}</div>
+      <div class="nc-doc">
+        <div class="nc-badge">Nota de crédito</div>
+        <div class="inv-top">
+          <div class="inv-logo-wrap">${logoBlockNc}</div>
+          <div class="inv-meta">
+            <div class="inv-num">NOTA DE CRÉDITO Nº ${nroNota}</div>
+            <div class="inv-fecha">Fecha: ${fechaNota}</div>
+            <div class="inv-scope">${scopeLabel}</div>
+          </div>
+        </div>
+        <div class="inv-datos">
+          <div>
+            <strong>Datos empresa</strong>
+            ${remitente.businessName || '—'}<br>
+            ${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}
+          </div>
+          <div>
+            <strong>Datos cliente</strong>
+            ${clienteNombre}<br>
+            ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
+          </div>
+        </div>
+        <div class="inv-table-wrap">
+          <table class="inv-table">
+            <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="inv-summary">
+          <div class="inv-summary-inner">
+            <div class="row"><span>Base imponible</span><span>$${baseImponibleNc.toLocaleString('es-AR')}</span></div>
+            <div class="row"><span>IVA 21%</span><span>—</span></div>
+            <div class="row"><span>Retención</span><span>—</span></div>
+            <div class="row total"><span>Total NC</span><span>$${totalNota.toLocaleString('es-AR')}</span></div>
+          </div>
+        </div>
+        <div class="inv-footer">
+          <div class="inv-cae"><strong>CAE:</strong> ${nc.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+          <p style="font-size: 0.72rem; margin: 8px 0 0; color: #6b7280;">Consultá en afip.gob.ar con tu CUIT, fecha ${fechaNota} y Pto. Vta. ${nc.puntoVta != null ? nc.puntoVta : ''}.</p>
         </div>
       </div>
-      <div class="inv-datos">
-        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
-        <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
+      <div class="no-print">
+        <button type="button" onclick="window.print()">Imprimir / Guardar PDF</button>
+        <button type="button" onclick="window.close()">Cerrar</button>
       </div>
-      <div class="inv-table-wrap"><table class="inv-table"><thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>—</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total NC</span><span>$${totalNota.toLocaleString('es-AR')}</span></div></div></div>
-      <div class="inv-footer"><div class="inv-cae"><strong>CAE:</strong> ${nc.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div><p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaNota} y Pto.Vta ${nc.puntoVta != null ? nc.puntoVta : ''}.</p></div>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button><button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
 
