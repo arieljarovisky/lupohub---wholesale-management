@@ -153,7 +153,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
         <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
         <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
       </div>
-      <div style="margin-bottom: 8px; font-size: 0.85rem;"><strong>Despacho(s)</strong>: ${despachoLabel}</div>
       <div class="inv-table-wrap">
         <table class="inv-table">
           <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -163,11 +162,40 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
     </body></html>`;
   };
 
+  const buildCreditNoteHtml = (order: any, nc: any) => {
+    const customer = customers.find((c) => c.id === order.customerId);
+    const remitente = getRemitente();
+    const items = order.items.map((i) => ({ ...i }));
+    const formatDateShort = (d: any) => {
+      if (!d) return '';
+      const x = new Date(d);
+      if (Number.isNaN(x.getTime())) return String(d);
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      return `${String(x.getDate()).padStart(2,'0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
+    };
+    const nroComprobante = nc.puntoVta != null ? `${String(nc.puntoVta).padStart(5,'0')}-${String(nc.cbteDesde).padStart(8,'0')}` : String(nc.cbteDesde);
+    const fecha = nc.createdAt ? formatDateShort(nc.createdAt.split('T')[0]) : formatDateShort(order.date);
+    const baseImponible = Number(nc.amountCredited || 0);
+    const rows = items.map((i: any) => {
+      const base = (i.quantity || 0) * (i.priceAtMoment || 0);
+      const despacho = i.numeroDespacho || i.numero_despacho || null;
+      const despachoCell = despacho ? String(despacho).trim() : '—';
+      const desc = [(i.sku || ''), (i.productName || '').toString().trim(), i.sizeCode || '', i.colorName || ''].filter(Boolean).join(' — ') || '—';
+      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
+    }).join('');
+    const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
+    const companyDir = [remitente.address, remitente.city].filter(Boolean).join(', ');
+    const customerDir = [customer?.address, customer?.city].filter(Boolean).join(', ');
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroComprobante}</title><style>/* ... same CSS as factura ... */</style></head><body><div><h2>NOTA DE CRÉDITO Nº ${nroComprobante}</h2><p>Fecha: ${fecha}</p></div><div><strong>Datos cliente:</strong> ${customer?.businessName || customer?.name || ''}</div><div>...</div><table><thead><tr><th>Producto</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div>Total: $${baseImponible.toLocaleString('es-AR')}</div><div>CAE: ${nc.cae || '—'} Vto CAE: ${vtoCae}</div><div><button onclick="window.print()">Imprimir / Guardar PDF</button><button onclick="window.close()">Cerrar</button></div></body></html>`;
+  };
+
   const handleVer = async (item: any) => {
     if (!item?.orderId) {
-      showToast('error', 'No se encontró el pedido para esta factura');
+      showToast('error', 'No se encontró el pedido para este comprobante');
       return;
     }
+
     try {
       const orders = await api.getOrders({ includeArchived: true, orderId: item.orderId });
       const order = orders.find(o => o.id === item.orderId);
@@ -175,6 +203,32 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
         showToast('error', 'Pedido no encontrado');
         return;
       }
+
+      if (item.tipo === 'NC' || item.cbteTipo === 3 || item.cbteTipo === 8) {
+        const notes = await api.getOrderCreditNotes(order.id);
+        const nc = notes.find((n: any) => String(n.cbteDesde) === String(item.cbteDesde) && String(n.puntoVta) === String(item.puntoVta)) || notes[0];
+        if (!nc) {
+          showToast('error', 'No se encontró la nota de crédito correspondiente');
+          return;
+        }
+
+        const html = buildCreditNoteHtml(order, nc);
+        if (!html) {
+          showToast('error', 'No se pudo generar la vista previa de la nota de crédito');
+          return;
+        }
+
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+        } else {
+          showToast('error', 'No se pudo abrir la ventana de vista previa (bloqueador de popups?)');
+        }
+
+        return;
+      }
+
       if (!order.invoice) {
         showToast('error', 'Este pedido no tiene factura AFIP');
         return;
@@ -185,6 +239,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
         showToast('error', 'No se pudo generar la vista previa de factura');
         return;
       }
+
       const w = window.open('', '_blank');
       if (w) {
         w.document.write(html);
@@ -194,7 +249,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
       }
     } catch (err: any) {
       console.error('Error cargando orden para vista previa', err);
-      showToast('error', err?.message || 'Error cargando vista previa de factura');
+      showToast('error', err?.message || 'Error cargando vista previa de comprobante');
     }
   };
 

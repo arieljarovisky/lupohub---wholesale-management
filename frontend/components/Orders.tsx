@@ -450,6 +450,91 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     </body></html>`;
   };
 
+  const buildCreditNoteHtml = (order: Order, nc: CreditNote) => {
+    const customer = customers.find(c => c.id === order.customerId);
+    const localRemitente = getRemitente();
+    const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
+      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
+      : localRemitente;
+    const items = order.items.map(enrichItem);
+    const formatDateShort = (d: string) => {
+      const x = new Date(d);
+      if (isNaN(x.getTime())) return d;
+      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const day = x.getDate();
+      const month = meses[x.getMonth()];
+      const year = x.getFullYear();
+      return `${String(day).padStart(2,'0')} ${month} ${year}`;
+    };
+    const nroNota = nc.puntoVta != null ? `${String(nc.puntoVta).padStart(5,'0')}-${String(nc.cbteDesde).padStart(8,'0')}` : String(nc.cbteDesde);
+    const fechaNota = nc.createdAt ? formatDateShort(nc.createdAt.split('T')[0]) : formatDateShort(order.date);
+    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+    const totalNota = Number(nc.amountCredited || 0);
+
+    const rows = items.map(i => {
+      const base = i.quantity * (i.priceAtMoment ?? 0);
+      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
+      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
+      const desc = [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
+    }).join('');
+
+    const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
+    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
+    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><style>
+      @page { size: A4; margin: 15mm 15mm 20mm 15mm; }
+      * { box-sizing: border-box; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; width: 100%; max-width: 180mm; margin: 0 auto; padding: 0; color: #111; background: #fff; font-size: 13px; }
+      .inv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 18px; border-bottom: 2px solid #111; }
+      .inv-logo-wrap { min-height: 64px; display: flex; align-items: center; }
+      .inv-logo-placeholder { font-size: 1.4rem; font-weight: 800; color: #111; letter-spacing: -0.5px; }
+      .inv-meta { text-align: right; }
+      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 700; color: #111; }
+      .inv-meta .inv-fecha { font-size: 0.85rem; color: #e05a1a; margin-top: 3px; font-weight: 600; }
+      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; padding: 14px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; line-height: 1.6; }
+      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; margin-bottom: 4px; font-weight: 700; }
+      .inv-table-wrap { margin-bottom: 20px; }
+      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+      .inv-table thead { background: #f3f4f6; }
+      .inv-table th { text-align: left; padding: 9px 10px; font-weight: 700; color: #111; border-bottom: 2px solid #d1d5db; white-space: nowrap; }
+      .inv-table th:nth-child(2) { text-align: center; }
+      .inv-table th:nth-child(3) { text-align: center; }
+      .inv-table th:nth-child(n+4) { text-align: right; }
+      .inv-table td { padding: 9px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+      .inv-table td:nth-child(2) { text-align: center; color: #6b7280; }
+      .inv-table td:nth-child(3) { text-align: center; }
+      .inv-table td:nth-child(n+4) { text-align: right; }
+      .inv-table tbody tr:last-child td { border-bottom: none; }
+      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 28px; }
+      .inv-summary-inner { min-width: 220px; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
+      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 24px; padding: 7px 12px; border-bottom: 1px solid #e5e7eb; }
+      .inv-summary-inner .row:last-child { border-bottom: none; }
+      .inv-summary-inner .row.total { font-weight: 700; font-size: 1rem; background: #f3f4f6; }
+      .inv-footer { padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 0.78rem; color: #6b7280; }
+      .inv-cae { margin-bottom: 8px; color: #374151; }
+      .no-print { margin-top: 28px; display: flex; gap: 10px; }
+      @media print { .no-print { display: none !important; } body { max-width: 100%; } .inv-table { page-break-inside: auto; } .inv-table tr { page-break-inside: avoid; } }
+    </style></head><body>
+      <div class="inv-top">
+        <div class="inv-logo-wrap">${logoBlockFactura}</div>
+        <div class="inv-meta">
+          <div class="inv-num">NOTA DE CRÉDITO Nº: ${nroNota}</div>
+          <div class="inv-fecha">Fecha: ${fechaNota}</div>
+        </div>
+      </div>
+      <div class="inv-datos">
+        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
+        <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
+      </div>
+      <div class="inv-table-wrap"><table class="inv-table"><thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>—</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total NC</span><span>$${totalNota.toLocaleString('es-AR')}</span></div></div></div>
+      <div class="inv-footer"><div class="inv-cae"><strong>CAE:</strong> ${nc.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div><p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaNota} y Pto.Vta ${nc.puntoVta != null ? nc.puntoVta : ''}.</p></div>
+      <div class="no-print"><button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button><button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
+    </body></html>`;
+  };
+
   const openFactura = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!order.invoice) return;
@@ -462,7 +547,30 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
-  /** Genera una hoja en formato planilla para un pedido: encabezado (Pedido, Fecha, Cliente, Estado, Total) + tabla de ítems, igual que la plantilla en la web. */
+  const openNotaCredito = async (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const notes = await api.getOrderCreditNotes(order.id);
+      if (!notes || notes.length === 0) {
+        showToast('info', 'No hay notas de crédito para este pedido');
+        return;
+      }
+      const nc = notes[0];
+      const html = buildCreditNoteHtml(order, nc);
+      if (!html) {
+        showToast('error', 'No se pudo generar la nota de crédito');
+        return;
+      }
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error obteniendo notas de crédito');
+    }
+  };
+
   const buildOrderSheet = (order: Order) => {
     const customerName = getCustomerName(order);
     const itemHeaders = ['SKU', 'Producto', 'Talle', 'Color', 'Cantidad', 'Precio unit.', 'Subtotal'];
@@ -730,6 +838,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       title="Ver factura AFIP emitida / Descargar PDF"
                     >
                       <Receipt size={16} />
+                    </button>
+                  )}
+                  {order.creditNotesCount && order.creditNotesCount > 0 && (
+                    <button
+                      onClick={(e) => openNotaCredito(order, e)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-violet-400 hover:bg-slate-700/50 transition"
+                      title="Ver nota(s) de crédito / Descargar PDF"
+                    >
+                      <FileMinus size={16} />
                     </button>
                   )}
                   {order.invoice && afipConfigured && (
