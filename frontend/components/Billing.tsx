@@ -110,38 +110,40 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
-      @page { size: A4; margin: 15mm 15mm 20mm 15mm; }
+      @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
       * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; width: 100%; max-width: 180mm; margin: 0 auto; padding: 0; color: #111; background: #fff; font-size: 13px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 18px; border-bottom: 2px solid #111; }
-      .inv-logo-wrap { min-height: 64px; display: flex; align-items: center; }
-      .inv-logo-placeholder { font-size: 1.4rem; font-weight: 800; color: #111; letter-spacing: -0.5px; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 24px 16px 40px; color: #000000; background: #ffffff; font-size: 13px; line-height: 1.4; }
+      .inv-doc { width: 100%; max-width: 190mm; margin: 0 auto; background: #ffffff; border: 1px solid #6b99de; border-radius: 12px; padding: 28px 32px 32px; }
+      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #6b99de; }
+      .inv-logo-wrap { min-height: 56px; display: flex; align-items: center; }
+      .inv-logo-placeholder { font-size: 1.3rem; font-weight: 700; color: #000000; }
       .inv-meta { text-align: right; }
-      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 700; color: #111; }
-      .inv-meta .inv-fecha { font-size: 0.85rem; color: #e05a1a; margin-top: 3px; font-weight: 600; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; padding: 14px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; line-height: 1.6; }
-      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; margin-bottom: 4px; font-weight: 700; }
-      .inv-table-wrap { margin-bottom: 20px; }
-      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-      .inv-table thead { background: #f3f4f6; }
-      .inv-table th { text-align: left; padding: 9px 10px; font-weight: 700; color: #111; border-bottom: 2px solid #d1d5db; white-space: nowrap; }
-      .inv-table th:nth-child(2) { text-align: center; }
-      .inv-table th:nth-child(3) { text-align: center; }
+      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 800; color: #6b99de; }
+      .inv-meta .inv-fecha { font-size: 0.85rem; color: #000000; margin-top: 4px; font-weight: 700; }
+      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 22px; padding: 14px; background: #f5f8ff; border: 1px solid #dbe7ff; border-radius: 8px; }
+      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #000000; margin-bottom: 6px; font-weight: 700; }
+      .inv-table-wrap { margin-bottom: 22px; border: 1px solid #dbe7ff; border-radius: 8px; overflow: hidden; }
+      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.79rem; }
+      .inv-table thead { background: linear-gradient(180deg, #dbe7ff 0%, #f5f8ff 100%); }
+      .inv-table th { text-align: left; padding: 11px 12px; font-weight: 700; color: #000000; border-bottom: 2px solid #6b99de; }
+      .inv-table th:nth-child(2), .inv-table th:nth-child(3) { text-align: center; }
       .inv-table th:nth-child(n+4) { text-align: right; }
-      .inv-table td { padding: 9px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
-      .inv-table td:nth-child(2) { text-align: center; color: #6b7280; }
-      .inv-table td:nth-child(3) { text-align: center; }
-      .inv-table td:nth-child(n+4) { text-align: right; }
+      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #e6edff; vertical-align: middle; }
+      .inv-table tbody tr:nth-child(even) td { background: #f8fbff; }
       .inv-table tbody tr:last-child td { border-bottom: none; }
-      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 28px; }
-      .inv-summary-inner { min-width: 220px; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 24px; padding: 7px 12px; border-bottom: 1px solid #e5e7eb; }
-      .inv-summary-inner .row:last-child { border-bottom: none; }
-      .inv-summary-inner .row.total { font-weight: 700; font-size: 1rem; background: #f3f4f6; }
-      .inv-footer { padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 0.78rem; color: #6b7280; }
-      .inv-cae { margin-bottom: 8px; color: #374151; }
-      .no-print { margin-top: 28px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } body { max-width: 100%; } .inv-table { page-break-inside: auto; } .inv-table tr { page-break-inside: avoid; } }
+      .col-c { text-align: center; color: #000000; }
+      .col-r { text-align: right; }
+      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 24px; }
+      .inv-summary-inner { min-width: 260px; font-size: 0.88rem; border: 1px solid #dbe7ff; border-radius: 8px; overflow: hidden; }
+      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 20px; padding: 10px 14px; border-bottom: 1px solid #e6edff; }
+      .inv-summary-inner .row.total { font-weight: 800; font-size: 1rem; background: #eaf2ff; color: #000000; }
+      .inv-footer { padding: 14px 18px; background: #f5f8ff; border: 1px solid #dbe7ff; border-radius: 8px; font-size: 0.78rem; color: #000000; }
+      .inv-cae { margin-bottom: 6px; font-weight: 600; }
+      .no-print { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+      .no-print button { padding: 10px 22px; font-size: 0.95rem; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; }
+      .no-print button:first-child { background: #6b99de; color: #ffffff; }
+      .no-print button:last-child { background: #000000; color: #ffffff; }
+      @media print { .no-print { display: none !important; } .inv-doc { border: none; box-shadow: none; } }
     </style></head><body>
       <div class="inv-top">
         <div class="inv-logo-wrap"><span class="inv-logo-placeholder">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span></div>

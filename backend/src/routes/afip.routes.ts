@@ -26,6 +26,9 @@ router.get('/issuer', (_req, res) => {
   });
 });
 
+router.get('/remitente', authMiddleware, getRemitente);
+router.put('/remitente', authMiddleware, saveRemitente);
+
 /** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
 router.get('/condicion-iva', authMiddleware, async (req: Request, res: Response) => {
   const cuit = (req.query.cuit as string)?.trim();
