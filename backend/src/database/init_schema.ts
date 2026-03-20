@@ -159,5 +159,23 @@ export async function initSchema(): Promise<void> {
     )
   `);
 
+  // 13. remitente_config (datos del remitente para remitos/facturas)
+  await execute(`
+    CREATE TABLE IF NOT EXISTS remitente_config (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      business_name VARCHAR(255) NULL,
+      cuit VARCHAR(20) NULL,
+      address VARCHAR(255) NULL,
+      city VARCHAR(100) NULL,
+      email VARCHAR(255) NULL,
+      phone VARCHAR(50) NULL,
+      logo_url TEXT NULL,
+      cai_remito VARCHAR(100) NULL,
+      cai_remito_vencimiento DATE NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
   console.log('[DB] Esquema base listo');
 }

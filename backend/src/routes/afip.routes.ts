@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit, consultarComprobanteAfip } from '../services/afip.service';
+import { getRemitente, saveRemitente } from '../controllers/remitente.controller';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
 const router = Router();
