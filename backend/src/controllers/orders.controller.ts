@@ -102,13 +102,23 @@ export const getOrders = async (req: any, res: any) => {
     }
 
     let creditNotesCountByOrderId: Record<string, number> = {};
+    let creditNotesTotalByOrderId: Record<string, number> = {};
+    let creditNotesItemByOrderId: Record<string, number> = {};
     try {
       const cnRows = await query(
-        `SELECT order_id, COUNT(*) as cnt FROM credit_notes WHERE order_id IN (${placeholders}) GROUP BY order_id`,
+        `SELECT order_id,
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN scope = 'total' THEN 1 ELSE 0 END) AS total_cnt,
+                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt
+         FROM credit_notes
+         WHERE order_id IN (${placeholders})
+         GROUP BY order_id`,
         orderIds
       );
       for (const r of cnRows as any[]) {
         creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
+        creditNotesTotalByOrderId[r.order_id] = Number(r.total_cnt) || 0;
+        creditNotesItemByOrderId[r.order_id] = Number(r.item_cnt) || 0;
       }
     } catch (_) {
       // Tabla credit_notes puede no existir en DB antiguas
@@ -127,7 +137,9 @@ export const getOrders = async (req: any, res: any) => {
       archived: !!(order.archived),
       items: itemsByOrderId[order.id] || [],
       invoice: invoiceByOrderId[order.id] ?? undefined,
-      creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0
+      creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
+      creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
+      creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0
     }));
 
     res.json(ordersFull);

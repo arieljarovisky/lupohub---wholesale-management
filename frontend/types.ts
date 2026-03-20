@@ -159,6 +159,10 @@ export interface Order {
   invoice?: OrderInvoice;
   /** Cantidad de notas de crédito emitidas para este pedido (desde backend) */
   creditNotesCount?: number;
+  /** Nota de crédito emitida sobre el total del pedido */
+  creditNotesTotalCount?: number;
+  /** Nota de crédito emitida sobre ítems (parcial) */
+  creditNotesItemCount?: number;
   /** Si está archivado (oculto de la lista por defecto) */
   archived?: boolean;
 }

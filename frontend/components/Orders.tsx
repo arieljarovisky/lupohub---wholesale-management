@@ -662,6 +662,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
+                    {order.creditNotesTotalCount && order.creditNotesTotalCount > 0 && (
+                      <span className="bg-violet-900/30 text-violet-300 border border-violet-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                        <FileMinus size={10} /> N.C. TOTAL ({order.creditNotesTotalCount})
+                      </span>
+                    )}
+                    {(!order.creditNotesTotalCount || order.creditNotesTotalCount === 0) && order.creditNotesItemCount && order.creditNotesItemCount > 0 && (
+                      <span className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                        <FileMinus size={10} /> N.C. PARCIAL ({order.creditNotesItemCount})
+                      </span>
+                    )}
                   </div>
                   {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
                     <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
