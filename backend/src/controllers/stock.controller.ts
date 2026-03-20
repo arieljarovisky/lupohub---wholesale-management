@@ -206,6 +206,60 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
   }
 };
 
+// Restaurar stock para un item particular del pedido (NC parcial)
+export const restoreStockForOrderItem = async (orderId: string, itemIndex: number, quantity?: number): Promise<{ success: boolean; errors: string[] }> => {
+  const errors: string[] = [];
+  try {
+    const items = await query(
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
+       FROM order_items oi
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = oi.variant_id
+       WHERE oi.order_id = ?
+       ORDER BY oi.id`,
+      [orderId]
+    );
+
+    if (!items || (items as any[]).length === 0) {
+      return { success: false, errors: ['No hay ítems para este pedido.'] };
+    }
+
+    if (itemIndex < 0 || itemIndex >= (items as any[]).length) {
+      return { success: false, errors: ['itemIndex inválido para este pedido.'] };
+    }
+
+    const item = (items as any[])[itemIndex];
+    const qty = quantity != null ? quantity : Number(item.quantity || 0);
+    if (isNaN(qty) || qty <= 0 || qty > Number(item.quantity || 0)) {
+      return { success: false, errors: [`quantity inválida. Debe ser 1..${item.quantity}`] };
+    }
+
+    const units = unitsToDeductForOrderItem(qty, item.sell_as_pack, item.mayorista_pack_size);
+    const currentStock = Number(item.current_stock || 0);
+    const newStock = currentStock + units;
+
+    const success = await updateVariantStock(
+      item.variant_id,
+      newStock,
+      'DEVOLUCION',
+      `Nota de crédito pedido: ${orderId}`
+    );
+
+    if (!success) {
+      errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
+    }
+
+    return { success: errors.length === 0, errors };
+  } catch (error: any) {
+    console.error('Error restoring stock for order item:', error);
+    return { success: false, errors: [error.message] };
+  }
+};
+
 // Aplicar pack size: stock en app es por unidad; en ML/TN puede ser por pack (ej. pack x2 → enviar stock/2).
 function stockForPlatform(localStock: number, packSize: number | null | undefined): number {
   const n = Math.max(0, Number(packSize) || 1);

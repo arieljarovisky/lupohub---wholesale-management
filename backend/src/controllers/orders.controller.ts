@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Order, OrderItem } from '../types';
+import { restoreStockForOrder, restoreStockForOrderItem } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
 export const getOrders = async (req: any, res: any) => {
@@ -610,6 +611,8 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     }
 
     let amountToCredit: number;
+    let creditNoteItemQuantity: number | null = null;
+
     if (tipo === 'total') {
       amountToCredit = Number(orderRow.total) || 0;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
@@ -629,6 +632,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       if (isNaN(qty) || qty <= 0 || qty > item.quantity) {
         return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para este ítem` });
       }
+      creditNoteItemQuantity = qty;
       const price = Number(item.price_at_moment) || 0;
       amountToCredit = Math.round(qty * price * 100) / 100;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
@@ -658,6 +662,18 @@ export const emitirNotaCredito = async (req: any, res: any) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]
     );
+
+    if (scope === 'total') {
+      const stockResult = await restoreStockForOrder(id);
+      if (!stockResult.success) {
+        return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito total', errors: stockResult.errors });
+      }
+    } else if (scope === 'item' && typeof itemIndexVal === 'number') {
+      const stockResult = await restoreStockForOrderItem(id, itemIndexVal, creditNoteItemQuantity ?? undefined);
+      if (!stockResult.success) {
+        return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial', errors: stockResult.errors });
+      }
+    }
 
     res.status(201).json({
       id: creditNoteId,
