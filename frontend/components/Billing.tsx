@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
+import { getRemitente } from '../services/apiIntegration';
 import { Customer, Role } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
