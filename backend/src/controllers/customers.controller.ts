@@ -422,3 +422,186 @@ export const bulkUpdateCuit = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error actualizando CUIT en lote' });
   }
 };
+
+function roleCanViewSaldos(role: string | undefined): boolean {
+  return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
+}
+
+/** Lista saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+export const getSaldosPendientes = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  if (!user || !roleCanViewSaldos(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para ver saldos' });
+  }
+  const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+  const params: any[] = user.role === 'SELLER' ? [user.id] : [];
+
+  const mapRows = (rows: any[]) =>
+    rows.map((r) => ({
+      customerId: r.customerId,
+      businessName: r.businessName ?? '',
+      contactName: r.contactName ?? '',
+      cuit: r.cuit ?? '',
+      city: r.city ?? '',
+      email: r.email ?? '',
+      saldoPendiente: Number(r.saldoPendiente) || 0,
+      pedidosPendientes: Number(r.pedidosPendientes) || 0
+    }));
+
+  const sqlWithNc = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    LEFT JOIN (
+      SELECT order_id, SUM(amount_credited) AS cn_total
+      FROM credit_notes
+      GROUP BY order_id
+    ) cn ON cn.order_id = o.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  const sqlSimple = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(o.total) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(o.total) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  try {
+    const rows = await query(sqlWithNc, params);
+    return res.json(mapRows(rows as any[]));
+  } catch (e: any) {
+    console.warn('[saldos] consulta con NC falló, reintentando sin NC:', e?.message);
+    try {
+      const rows = await query(sqlSimple, params);
+      return res.json(mapRows(rows as any[]));
+    } catch (e2: any) {
+      console.error('getSaldosPendientes:', e2);
+      return res.status(500).json({ message: 'Error listando saldos pendientes' });
+    }
+  }
+};
+
+/** Exporta saldos pendientes en CSV (UTF-8 con BOM para Excel). */
+export const exportSaldosPendientesCsv = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  if (!user || !roleCanViewSaldos(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+  }
+  const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+  const params: any[] = user.role === 'SELLER' ? [user.id] : [];
+
+  const sqlWithNc = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    LEFT JOIN (
+      SELECT order_id, SUM(amount_credited) AS cn_total
+      FROM credit_notes
+      GROUP BY order_id
+    ) cn ON cn.order_id = o.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  const sqlSimple = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(o.total) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(o.total) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  let rows: any[];
+  try {
+    rows = (await query(sqlWithNc, params)) as any[];
+  } catch {
+    rows = (await query(sqlSimple, params)) as any[];
+  }
+
+  const header = [
+    'id_cliente',
+    'razon_social',
+    'contacto',
+    'cuit',
+    'ciudad',
+    'email',
+    'pedidos_impagos',
+    'saldo_pendiente'
+  ];
+  const lines = [header.join(';')];
+  for (const r of rows) {
+    const esc = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+    lines.push(
+      [
+        r.customerId,
+        esc(r.businessName ?? ''),
+        esc(r.contactName ?? ''),
+        r.cuit ?? '',
+        esc(r.city ?? ''),
+        esc(r.email ?? ''),
+        Number(r.pedidosPendientes) || 0,
+        (Number(r.saldoPendiente) || 0).toFixed(2).replace('.', ',')
+      ].join(';')
+    );
+  }
+  const csv = lines.join('\r\n');
+  const filename = `saldos_pendientes_${new Date().toISOString().slice(0, 10)}.csv`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send('\uFEFF' + csv);
+};

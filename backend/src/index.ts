@@ -37,6 +37,7 @@ import { addOrdersArchived } from './database/add_orders_archived';
 import { addPriceLists } from './database/add_price_lists';
 import { addCatalogsTable } from './database/add_catalogs_table';
 import { addRemitenteTable } from './database/add_remitente_table';
+import { addPaymentStatusToOrders } from './database/add_payment_status_orders';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -130,6 +131,7 @@ async function initDatabase() {
       await addPriceLists();
       await addCatalogsTable();
       await addRemitenteTable();
+      await addPaymentStatusToOrders();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

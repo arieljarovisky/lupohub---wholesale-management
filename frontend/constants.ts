@@ -63,6 +63,7 @@ export const MOCK_ORDERS: Order[] = [
     date: '2023-10-25', 
     status: OrderStatus.CONFIRMED, 
     total: 45000,
+    paymentStatus: 'pagado',
     items: [{ productId: 'p1', quantity: 10, picked: 0, priceAtMoment: 4500 }] 
   },
   { 
@@ -73,6 +74,7 @@ export const MOCK_ORDERS: Order[] = [
     date: '2023-10-26', 
     status: OrderStatus.PREPARING, 
     total: 16400,
+    paymentStatus: 'pendiente',
     items: [{ productId: 'p4', quantity: 2, picked: 2, priceAtMoment: 8200 }] 
   },
   { 
@@ -83,6 +85,7 @@ export const MOCK_ORDERS: Order[] = [
     date: '2023-10-27', 
     status: OrderStatus.DISPATCHED, 
     total: 150000,
+    paymentStatus: 'pagado',
     items: [{ productId: 'p6', quantity: 50, picked: 50, priceAtMoment: 3000 }] 
   },
   { 
@@ -92,6 +95,7 @@ export const MOCK_ORDERS: Order[] = [
     date: '2023-10-28', 
     status: OrderStatus.DRAFT, 
     total: 0,
+    paymentStatus: 'pagado',
     items: [] 
   },
 ];

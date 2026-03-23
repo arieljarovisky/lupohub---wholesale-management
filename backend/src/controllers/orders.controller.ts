@@ -4,6 +4,10 @@ import { Order, OrderItem } from '../types';
 import { restoreStockForOrder, restoreStockForOrderItem } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
+function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
+  return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
+}
+
 export const getOrders = async (req: any, res: any) => {
   try {
     const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
@@ -140,7 +144,8 @@ export const getOrders = async (req: any, res: any) => {
       invoice: invoiceByOrderId[order.id] ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
       creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
-      creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0
+      creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0,
+      paymentStatus: mapPaymentStatus(order)
     }));
 
     res.json(ordersFull);
@@ -181,9 +186,11 @@ export const createOrder = async (req: any, res: any) => {
       }
     };
     const sqlDate = toSqlDate(newOrder.date);
+    const paymentStatus =
+      (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     await execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total) VALUES (?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -217,8 +224,11 @@ export const createOrder = async (req: any, res: any) => {
       if (!result.success) console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
     }
 
-    const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [orderId]);
-    if (!created) return res.status(201).json({ ...newOrder, id: orderId });
+    const created = await get(
+      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?',
+      [orderId]
+    );
+    if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
     const items = await query(`
       SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -254,7 +264,8 @@ export const createOrder = async (req: any, res: any) => {
       total: Number(created.total),
       pickedBy: created.picked_by ?? undefined,
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-      items: itemsMapped
+      items: itemsMapped,
+      paymentStatus: mapPaymentStatus(created)
     };
     res.status(201).json(orderResponse);
   } catch (error) {
@@ -329,9 +340,11 @@ export const updateOrder = async (req: any, res: any) => {
     };
     const sqlDate = toSqlDate(updated.date);
     const sellerId = updated.sellerId ?? null;
+    const paymentStatus =
+      (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     await execute(
-      "UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ? WHERE id = ?",
-      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, id]
+      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ? WHERE id = ?',
+      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
     for (const item of updated.items as any[]) {
@@ -358,7 +371,10 @@ export const updateOrder = async (req: any, res: any) => {
         [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]
       );
     }
-    const created = await get('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
+    const created = await get(
+      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?',
+      [id]
+    );
     if (!created) return res.json({ ...updated, id });
     const itemsRows = await query(`
       SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
@@ -395,13 +411,44 @@ export const updateOrder = async (req: any, res: any) => {
       total: Number(created.total),
       pickedBy: created.picked_by ?? undefined,
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-      items: itemsMapped
+      items: itemsMapped,
+      paymentStatus: mapPaymentStatus(created)
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error actualizando pedido" });
   }
 }
+
+/** Marca cobro del pedido (pendiente / pagado) sin reenviar ítems. */
+export const patchOrderPaymentStatus = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para modificar cobranza' });
+  }
+  const raw = req.body?.paymentStatus ?? req.body?.payment_status;
+  const paymentStatus = raw === 'pagado' || raw === 'PAGADO' ? 'pagado' : 'pendiente';
+  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  try {
+    const row = await get('SELECT id FROM orders WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (user.role === 'SELLER') {
+      const ord = await get('SELECT customer_id FROM orders WHERE id = ?', [id]);
+      const cust = ord?.customer_id
+        ? await get('SELECT seller_id FROM customers WHERE id = ?', [ord.customer_id])
+        : null;
+      if (cust?.seller_id && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+      }
+    }
+    await execute('UPDATE orders SET payment_status = ? WHERE id = ?', [paymentStatus, id]);
+    res.json({ id, paymentStatus });
+  } catch (error) {
+    console.error('patchOrderPaymentStatus:', error);
+    res.status(500).json({ message: 'Error actualizando estado de cobro' });
+  }
+};
 
 /** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
 export const archiveOrder = async (req: any, res: any) => {

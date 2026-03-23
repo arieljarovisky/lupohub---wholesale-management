@@ -484,6 +484,10 @@ export const api = {
     }, undefined, 'updateOrderStatus');
   },
 
+  patchOrderPaymentStatus: async (orderId: string, paymentStatus: 'pendiente' | 'pagado'): Promise<{ id: string; paymentStatus: string }> => {
+    return await request<{ id: string; paymentStatus: string }>(`/orders/${orderId}/payment-status`, 'PATCH', { paymentStatus });
+  },
+
   /** Indica si AFIP está configurado en el servidor (para mostrar botón Emitir factura). */
   getAfipStatus: async (): Promise<{ configured: boolean; production?: boolean }> => {
     const res = await request<{ configured: boolean; production?: boolean }>('/afip/status', 'GET');
@@ -582,6 +586,32 @@ export const api = {
         priceListId: r.priceListId ?? r.price_list_id ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');
+  },
+
+  /** Saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+  getSaldosPendientes: async (): Promise<Array<{
+    customerId: string;
+    businessName: string;
+    contactName: string;
+    cuit: string;
+    city: string;
+    email: string;
+    saldoPendiente: number;
+    pedidosPendientes: number;
+  }>> => {
+    return await request('/customers/saldos-pendientes', 'GET');
+  },
+
+  exportSaldosPendientes: async (): Promise<void> => {
+    const blob = await getBlob('/customers/saldos-pendientes/export');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saldos_pendientes_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   },
 
   /** Perfil del cliente directo (solo cuando el usuario tiene rol CUSTOMER). */

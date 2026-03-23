@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -843,6 +843,42 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       >
                         <Receipt size={10} /> FACTURADO
                       </span>
+                    )}
+                    {role !== Role.CUSTOMER && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const current = order.paymentStatus ?? 'pagado';
+                          const next: 'pendiente' | 'pagado' = current === 'pendiente' ? 'pagado' : 'pendiente';
+                          showConfirm({
+                            title: 'Cobranza del pedido',
+                            message:
+                              next === 'pagado'
+                                ? '¿Marcar este pedido como cobrado? Dejará de sumar al saldo pendiente del cliente.'
+                                : '¿Marcar como pendiente de cobro? Sumará al saldo pendiente del cliente.',
+                            confirmLabel: next === 'pagado' ? 'Marcar cobrado' : 'Marcar pendiente',
+                            onConfirm: () => {
+                              api
+                                .patchOrderPaymentStatus(order.id, next)
+                                .then(() => {
+                                  showToast('success', next === 'pagado' ? 'Pedido marcado como cobrado.' : 'Pedido marcado como pendiente de cobro.');
+                                  refreshOrders?.();
+                                })
+                                .catch((err: any) => showToast('error', err?.message || 'No se pudo actualizar el cobro.'));
+                            }
+                          });
+                        }}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 border transition touch-manipulation ${
+                          (order.paymentStatus ?? 'pagado') === 'pendiente'
+                            ? 'bg-amber-900/40 text-amber-200 border-amber-700/50 hover:bg-amber-900/60'
+                            : 'bg-emerald-900/25 text-emerald-300/90 border-emerald-800/40 hover:bg-emerald-900/40'
+                        }`}
+                        title="Tocá para cambiar pendiente / cobrado (cuenta corriente)"
+                      >
+                        <Wallet size={10} />
+                        {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'PENDIENTE COBRO' : 'COBRADO'}
+                      </button>
                     )}
                     {order.creditNotesTotalCount && order.creditNotesTotalCount > 0 && (
                       <span className="bg-violet-900/30 text-violet-300 border border-violet-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">

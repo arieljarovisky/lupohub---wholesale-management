@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, importCustomers, bulkUpdateCuit, attachUserToCustomer } from '../controllers/customers.controller';
+import { getCustomers, createCustomer, updateCustomer, deleteCustomer, importCustomers, bulkUpdateCuit, attachUserToCustomer, getSaldosPendientes, exportSaldosPendientesCsv } from '../controllers/customers.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
+router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
+router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
 router.get('/', authMiddleware as any, getCustomers as any);
 router.post('/', authMiddleware as any, createCustomer as any);
 router.post('/import', authMiddleware as any, importCustomers as any);

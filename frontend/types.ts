@@ -165,6 +165,8 @@ export interface Order {
   creditNotesItemCount?: number;
   /** Si está archivado (oculto de la lista por defecto) */
   archived?: boolean;
+  /** Cobro del pedido mayorista (cuenta corriente / saldos pendientes) */
+  paymentStatus?: 'pendiente' | 'pagado';
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

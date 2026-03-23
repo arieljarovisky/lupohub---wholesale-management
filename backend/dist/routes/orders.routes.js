@@ -7,6 +7,7 @@ const router = (0, express_1.Router)();
 router.use(auth_1.optionalAuthMiddleware);
 router.get('/', orders_controller_1.getOrders);
 router.post('/', orders_controller_1.createOrder);
+router.patch('/:id/payment-status', auth_1.authMiddleware, orders_controller_1.patchOrderPaymentStatus);
 router.patch('/:id/status', orders_controller_1.updateOrderStatus);
 router.put('/:id', orders_controller_1.updateOrder);
 router.patch('/:id/archive', auth_1.authMiddleware, orders_controller_1.archiveOrder);

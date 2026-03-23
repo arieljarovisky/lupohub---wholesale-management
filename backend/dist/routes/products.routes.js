@@ -24,5 +24,6 @@ router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, produc
 router.patch('/stock', auth_1.authMiddleware, products_controller_1.patchStock);
 router.put('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateProduct);
 router.put('/:id/external-ids', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateProductExternalIds);
+router.post('/:id/unlink', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.unlinkProductPlatforms);
 router.delete('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteProduct);
 exports.default = router;

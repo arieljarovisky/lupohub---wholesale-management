@@ -4,6 +4,8 @@ const express_1 = require("express");
 const customers_controller_1 = require("../controllers/customers.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
+router.get('/saldos-pendientes/export', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesCsv);
+router.get('/saldos-pendientes', auth_1.authMiddleware, customers_controller_1.getSaldosPendientes);
 router.get('/', auth_1.authMiddleware, customers_controller_1.getCustomers);
 router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);
 router.post('/import', auth_1.authMiddleware, customers_controller_1.importCustomers);

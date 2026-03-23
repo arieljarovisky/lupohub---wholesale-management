@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const afip_service_1 = require("../services/afip.service");
+const remitente_controller_1 = require("../controllers/remitente.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.optionalAuthMiddleware);
@@ -34,6 +35,8 @@ router.get('/issuer', (_req, res) => {
         city: (_c = data.city) !== null && _c !== void 0 ? _c : ''
     });
 });
+router.get('/remitente', auth_1.authMiddleware, remitente_controller_1.getRemitente);
+router.put('/remitente', auth_1.authMiddleware, remitente_controller_1.saveRemitente);
 /** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
 router.get('/condicion-iva', auth_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;

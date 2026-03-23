@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 function toCustomer(row, transportes) {
@@ -395,3 +395,181 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.bulkUpdateCuit = bulkUpdateCuit;
+function roleCanViewSaldos(role) {
+    return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
+}
+/** Lista saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = req.user;
+    if (!user || !roleCanViewSaldos(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para ver saldos' });
+    }
+    const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const params = user.role === 'SELLER' ? [user.id] : [];
+    const mapRows = (rows) => rows.map((r) => {
+        var _a, _b, _c, _d, _e;
+        return ({
+            customerId: r.customerId,
+            businessName: (_a = r.businessName) !== null && _a !== void 0 ? _a : '',
+            contactName: (_b = r.contactName) !== null && _b !== void 0 ? _b : '',
+            cuit: (_c = r.cuit) !== null && _c !== void 0 ? _c : '',
+            city: (_d = r.city) !== null && _d !== void 0 ? _d : '',
+            email: (_e = r.email) !== null && _e !== void 0 ? _e : '',
+            saldoPendiente: Number(r.saldoPendiente) || 0,
+            pedidosPendientes: Number(r.pedidosPendientes) || 0
+        });
+    });
+    const sqlWithNc = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    LEFT JOIN (
+      SELECT order_id, SUM(amount_credited) AS cn_total
+      FROM credit_notes
+      GROUP BY order_id
+    ) cn ON cn.order_id = o.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+    const sqlSimple = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(o.total) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(o.total) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+    try {
+        const rows = yield (0, db_1.query)(sqlWithNc, params);
+        return res.json(mapRows(rows));
+    }
+    catch (e) {
+        console.warn('[saldos] consulta con NC falló, reintentando sin NC:', e === null || e === void 0 ? void 0 : e.message);
+        try {
+            const rows = yield (0, db_1.query)(sqlSimple, params);
+            return res.json(mapRows(rows));
+        }
+        catch (e2) {
+            console.error('getSaldosPendientes:', e2);
+            return res.status(500).json({ message: 'Error listando saldos pendientes' });
+        }
+    }
+});
+exports.getSaldosPendientes = getSaldosPendientes;
+/** Exporta saldos pendientes en CSV (UTF-8 con BOM para Excel). */
+const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    const user = req.user;
+    if (!user || !roleCanViewSaldos(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+    }
+    const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const params = user.role === 'SELLER' ? [user.id] : [];
+    const sqlWithNc = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    LEFT JOIN (
+      SELECT order_id, SUM(amount_credited) AS cn_total
+      FROM credit_notes
+      GROUP BY order_id
+    ) cn ON cn.order_id = o.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+    const sqlSimple = `
+    SELECT
+      c.id AS customerId,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      c.city,
+      c.email,
+      SUM(o.total) AS saldoPendiente,
+      COUNT(DISTINCT o.id) AS pedidosPendientes
+    FROM customers c
+    INNER JOIN orders o ON o.customer_id = c.id
+    WHERE o.payment_status = 'pendiente'
+      AND o.status NOT IN ('Cancelado', 'Borrador')
+      AND (o.archived = 0 OR o.archived IS NULL)
+      ${sellerFilter}
+    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    HAVING SUM(o.total) > 0.01
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+    let rows;
+    try {
+        rows = (yield (0, db_1.query)(sqlWithNc, params));
+    }
+    catch (_f) {
+        rows = (yield (0, db_1.query)(sqlSimple, params));
+    }
+    const header = [
+        'id_cliente',
+        'razon_social',
+        'contacto',
+        'cuit',
+        'ciudad',
+        'email',
+        'pedidos_impagos',
+        'saldo_pendiente'
+    ];
+    const lines = [header.join(';')];
+    for (const r of rows) {
+        const esc = (s) => `"${String(s !== null && s !== void 0 ? s : '').replace(/"/g, '""')}"`;
+        lines.push([
+            r.customerId,
+            esc((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
+            esc((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
+            (_c = r.cuit) !== null && _c !== void 0 ? _c : '',
+            esc((_d = r.city) !== null && _d !== void 0 ? _d : ''),
+            esc((_e = r.email) !== null && _e !== void 0 ? _e : ''),
+            Number(r.pedidosPendientes) || 0,
+            (Number(r.saldoPendiente) || 0).toFixed(2).replace('.', ',')
+        ].join(';'));
+    }
+    const csv = lines.join('\r\n');
+    const filename = `saldos_pendientes_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv);
+});
+exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;

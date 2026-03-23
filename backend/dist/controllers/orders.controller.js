@@ -42,9 +42,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
+const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
+function mapPaymentStatus(row) {
+    return (row === null || row === void 0 ? void 0 : row.payment_status) === 'pendiente' ? 'pendiente' : 'pagado';
+}
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
@@ -72,6 +76,10 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             else {
                 ordersRow = [];
             }
+        }
+        const orderId = req.query.orderId;
+        if (orderId) {
+            ordersRow = ordersRow.filter((o) => o.id === orderId);
         }
         if (ordersRow.length === 0) {
             return res.json([]);
@@ -134,17 +142,27 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             };
         }
         let creditNotesCountByOrderId = {};
+        let creditNotesTotalByOrderId = {};
+        let creditNotesItemByOrderId = {};
         try {
-            const cnRows = yield (0, db_1.query)(`SELECT order_id, COUNT(*) as cnt FROM credit_notes WHERE order_id IN (${placeholders}) GROUP BY order_id`, orderIds);
+            const cnRows = yield (0, db_1.query)(`SELECT order_id,
+                COUNT(*) AS cnt,
+                SUM(CASE WHEN scope = 'total' THEN 1 ELSE 0 END) AS total_cnt,
+                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt
+         FROM credit_notes
+         WHERE order_id IN (${placeholders})
+         GROUP BY order_id`, orderIds);
             for (const r of cnRows) {
                 creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
+                creditNotesTotalByOrderId[r.order_id] = Number(r.total_cnt) || 0;
+                creditNotesItemByOrderId[r.order_id] = Number(r.item_cnt) || 0;
             }
         }
         catch (_) {
             // Tabla credit_notes puede no existir en DB antiguas
         }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f, _g;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
@@ -158,7 +176,10 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 archived: !!(order.archived),
                 items: itemsByOrderId[order.id] || [],
                 invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined,
-                creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0
+                creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0,
+                creditNotesTotalCount: (_f = creditNotesTotalByOrderId[order.id]) !== null && _f !== void 0 ? _f : 0,
+                creditNotesItemCount: (_g = creditNotesItemByOrderId[order.id]) !== null && _g !== void 0 ? _g : 0,
+                paymentStatus: mapPaymentStatus(order)
             });
         });
         res.json(ordersFull);
@@ -199,7 +220,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         };
         const sqlDate = toSqlDate(newOrder.date);
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total) VALUES (?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total]);
+        const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -224,9 +246,9 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!result.success)
                 console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [orderId]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?', [orderId]);
         if (!created)
-            return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId }));
+            return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
         const items = yield (0, db_1.query)(`
       SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -265,7 +287,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             total: Number(created.total),
             pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-            items: itemsMapped
+            items: itemsMapped,
+            paymentStatus: mapPaymentStatus(created)
         };
         res.status(201).json(orderResponse);
     }
@@ -338,7 +361,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         };
         const sqlDate = toSqlDate(updated.date);
         const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
-        yield (0, db_1.execute)("UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ? WHERE id = ?", [updated.customerId, sellerId, sqlDate, updated.status, updated.total, id]);
+        const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         for (const item of updated.items) {
             let variantId = item.variantId;
@@ -358,7 +382,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at FROM orders WHERE id = ?', [id]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?', [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
@@ -399,7 +423,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             total: Number(created.total),
             pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-            items: itemsMapped
+            items: itemsMapped,
+            paymentStatus: mapPaymentStatus(created)
         });
     }
     catch (error) {
@@ -408,6 +433,40 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.updateOrder = updateOrder;
+/** Marca cobro del pedido (pendiente / pagado) sin reenviar ítems. */
+const patchOrderPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para modificar cobranza' });
+    }
+    const raw = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.paymentStatus) !== null && _b !== void 0 ? _b : (_c = req.body) === null || _c === void 0 ? void 0 : _c.payment_status;
+    const paymentStatus = raw === 'pagado' || raw === 'PAGADO' ? 'pagado' : 'pendiente';
+    if (!id)
+        return res.status(400).json({ message: 'ID inválido' });
+    try {
+        const row = yield (0, db_1.get)('SELECT id FROM orders WHERE id = ?', [id]);
+        if (!row)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        if (user.role === 'SELLER') {
+            const ord = yield (0, db_1.get)('SELECT customer_id FROM orders WHERE id = ?', [id]);
+            const cust = (ord === null || ord === void 0 ? void 0 : ord.customer_id)
+                ? yield (0, db_1.get)('SELECT seller_id FROM customers WHERE id = ?', [ord.customer_id])
+                : null;
+            if ((cust === null || cust === void 0 ? void 0 : cust.seller_id) && cust.seller_id !== user.id) {
+                return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+            }
+        }
+        yield (0, db_1.execute)('UPDATE orders SET payment_status = ? WHERE id = ?', [paymentStatus, id]);
+        res.json({ id, paymentStatus });
+    }
+    catch (error) {
+        console.error('patchOrderPaymentStatus:', error);
+        res.status(500).json({ message: 'Error actualizando estado de cobro' });
+    }
+});
+exports.patchOrderPaymentStatus = patchOrderPaymentStatus;
 /** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
 const archiveOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -606,6 +665,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
             });
         }
         let amountToCredit;
+        let creditNoteItemQuantity = null;
         if (tipo === 'total') {
             amountToCredit = Number(orderRow.total) || 0;
             if (amountToCredit <= 0)
@@ -625,6 +685,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
             if (isNaN(qty) || qty <= 0 || qty > item.quantity) {
                 return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para este ítem` });
             }
+            creditNoteItemQuantity = qty;
             const price = Number(item.price_at_moment) || 0;
             amountToCredit = Math.round(qty * price * 100) / 100;
             if (amountToCredit <= 0)
@@ -646,6 +707,18 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
         yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]);
+        if (scope === 'total') {
+            const stockResult = yield (0, stock_controller_1.restoreStockForOrder)(id);
+            if (!stockResult.success) {
+                return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito total', errors: stockResult.errors });
+            }
+        }
+        else if (scope === 'item' && typeof itemIndexVal === 'number') {
+            const stockResult = yield (0, stock_controller_1.restoreStockForOrderItem)(id, itemIndexVal, creditNoteItemQuantity !== null && creditNoteItemQuantity !== void 0 ? creditNoteItemQuantity : undefined);
+            if (!stockResult.success) {
+                return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial', errors: stockResult.errors });
+            }
+        }
         res.status(201).json({
             id: creditNoteId,
             orderId: id,

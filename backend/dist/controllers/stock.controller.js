@@ -45,13 +45,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
 const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant = {};
+/** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
+function flushPendingExternalSync(variantId) {
+    const prev = pendingSyncByVariant[variantId];
+    if (prev) {
+        clearTimeout(prev.timeout);
+        delete pendingSyncByVariant[variantId];
+    }
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function withRetry429409(fn_1) {
     return __awaiter(this, arguments, void 0, function* (fn, retries = 2) {
@@ -91,7 +99,16 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
        ON DUPLICATE KEY UPDATE stock = ?`, [variantId, newStock, newStock]);
         yield (0, exports.logStockMovement)(variantId, previousStock, newStock, movementType, reference);
         if (syncExternal) {
-            scheduleSyncToExternalPlatforms(variantId, newStock);
+            // Ajuste desde inventario: sin debounce de 2,8s (TN parecía no actualizar hasta el 2º cambio).
+            // Pedidos/importaciones masivas siguen con debounce para no saturar APIs.
+            if (movementType === 'AJUSTE_MANUAL') {
+                flushPendingExternalSync(variantId);
+                const toSync = newStock;
+                void (0, exports.syncStockToExternalPlatforms)(variantId, toSync).catch(err => console.error('[Sync AJUSTE_MANUAL] Error:', (err === null || err === void 0 ? void 0 : err.message) || err));
+            }
+            else {
+                scheduleSyncToExternalPlatforms(variantId, newStock);
+            }
         }
         return true;
     }
@@ -166,6 +183,46 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.restoreStockForOrder = restoreStockForOrder;
+// Restaurar stock para un item particular del pedido (NC parcial)
+const restoreStockForOrderItem = (orderId, itemIndex, quantity) => __awaiter(void 0, void 0, void 0, function* () {
+    const errors = [];
+    try {
+        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
+              s.stock AS current_stock
+       FROM order_items oi
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = oi.variant_id
+       WHERE oi.order_id = ?
+       ORDER BY oi.id`, [orderId]);
+        if (!items || items.length === 0) {
+            return { success: false, errors: ['No hay ítems para este pedido.'] };
+        }
+        if (itemIndex < 0 || itemIndex >= items.length) {
+            return { success: false, errors: ['itemIndex inválido para este pedido.'] };
+        }
+        const item = items[itemIndex];
+        const qty = quantity != null ? quantity : Number(item.quantity || 0);
+        if (isNaN(qty) || qty <= 0 || qty > Number(item.quantity || 0)) {
+            return { success: false, errors: [`quantity inválida. Debe ser 1..${item.quantity}`] };
+        }
+        const units = unitsToDeductForOrderItem(qty, item.sell_as_pack, item.mayorista_pack_size);
+        const currentStock = Number(item.current_stock || 0);
+        const newStock = currentStock + units;
+        const success = yield (0, exports.updateVariantStock)(item.variant_id, newStock, 'DEVOLUCION', `Nota de crédito pedido: ${orderId}`);
+        if (!success) {
+            errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
+        }
+        return { success: errors.length === 0, errors };
+    }
+    catch (error) {
+        console.error('Error restoring stock for order item:', error);
+        return { success: false, errors: [error.message] };
+    }
+});
+exports.restoreStockForOrderItem = restoreStockForOrderItem;
 // Aplicar pack size: stock en app es por unidad; en ML/TN puede ser por pack (ej. pack x2 → enviar stock/2).
 function stockForPlatform(localStock, packSize) {
     const n = Math.max(0, Number(packSize) || 1);
@@ -192,23 +249,26 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
     try {
         const publications = yield (0, db_1.query)(`SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`, [variantId]);
         if (publications && publications.length > 0) {
+            const tasks = [];
             for (const pub of publications) {
                 const pack = Math.max(1, Number(pub.pack_size) || 1);
                 const stockToSend = stockForPlatform(newStock, pack);
                 if (pub.platform === 'tiendanube' && pub.external_variant_id) {
-                    yield (0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend);
+                    tasks.push((0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend));
                 }
                 else if (pub.platform === 'mercadolibre') {
                     const itemId = pub.external_product_id;
                     const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
                     if (variationId) {
-                        yield (0, exports.updateMercadoLibreStockByVariant)(itemId, variationId, stockToSend);
+                        tasks.push((0, exports.updateMercadoLibreStockByVariant)(itemId, variationId, stockToSend));
                     }
                     else {
-                        yield (0, exports.updateMercadoLibreStockByItem)(itemId, stockToSend);
+                        tasks.push((0, exports.updateMercadoLibreStockByItem)(itemId, stockToSend));
                     }
                 }
             }
+            // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
+            yield Promise.all(tasks);
             return;
         }
         // Fallback: enlaces legacy en product_variants + products

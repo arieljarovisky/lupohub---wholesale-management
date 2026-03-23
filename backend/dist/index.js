@@ -49,6 +49,8 @@ const add_credit_notes_table_1 = require("./database/add_credit_notes_table");
 const add_orders_archived_1 = require("./database/add_orders_archived");
 const add_price_lists_1 = require("./database/add_price_lists");
 const add_catalogs_table_1 = require("./database/add_catalogs_table");
+const add_remitente_table_1 = require("./database/add_remitente_table");
+const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -137,6 +139,8 @@ function initDatabase() {
                 yield (0, add_orders_archived_1.addOrdersArchived)();
                 yield (0, add_price_lists_1.addPriceLists)();
                 yield (0, add_catalogs_table_1.addCatalogsTable)();
+                yield (0, add_remitente_table_1.addRemitenteTable)();
+                yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOrders, createOrder, updateOrderStatus, updateOrder, deleteOrder, archiveOrder, getOrderInvoice, emitirFactura, getOrderCreditNotes, emitirNotaCredito } from '../controllers/orders.controller';
+import { getOrders, createOrder, updateOrderStatus, updateOrder, deleteOrder, archiveOrder, getOrderInvoice, emitirFactura, getOrderCreditNotes, emitirNotaCredito, patchOrderPaymentStatus } from '../controllers/orders.controller';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -7,6 +7,7 @@ router.use(optionalAuthMiddleware);
 
 router.get('/', getOrders);
 router.post('/', createOrder);
+router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
 router.patch('/:id/status', updateOrderStatus);
 router.put('/:id', updateOrder);
 router.patch('/:id/archive', authMiddleware, archiveOrder);

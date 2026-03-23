@@ -247,7 +247,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       })),
       total,
       status: initialOrder?.status ?? OrderStatus.CONFIRMED,
-      date: orderDate
+      date: orderDate,
+      paymentStatus: initialOrder?.paymentStatus ?? 'pendiente'
     });
   };
 
