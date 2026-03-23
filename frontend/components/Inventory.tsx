@@ -3478,7 +3478,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       {/* LINK EXTERNAL IDS MODAL */}
       {linkingVariant && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
-           <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] sm:max-h-[90vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
+           <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-2xl flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] sm:max-h-[90vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
               <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700/80 flex justify-between items-center">
                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2 min-w-0">
                     <span className="p-1.5 rounded-lg bg-indigo-500/20 shrink-0"><Link size={18} className="text-indigo-400" /></span>
@@ -3783,12 +3783,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  </div>
 
               </div>
-              <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 flex flex-col-reverse sm:flex-row justify-between gap-3 bg-slate-900/80">
-                 <div className="flex flex-col sm:flex-row gap-2">
+              <div className="shrink-0 p-4 sm:p-5 border-t border-slate-700/80 bg-slate-900/80 space-y-3 min-w-0">
+                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Desvincular</p>
+                 <div className="flex flex-wrap gap-2">
                    <button
                      type="button"
                      onClick={() => handleUnlinkArticle('tiendanube')}
-                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-cyan-200 bg-cyan-900/20 hover:bg-cyan-800/30 border border-cyan-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 sm:flex-initial px-3 sm:px-4 py-2.5 rounded-xl font-semibold text-cyan-200 bg-cyan-900/20 hover:bg-cyan-800/30 border border-cyan-700/30 transition text-xs sm:text-sm touch-manipulation min-h-[44px]"
                      title="Quita el vínculo del artículo y sus variantes con Tienda Nube"
                    >
                      Desvincular TN
@@ -3796,7 +3797,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <button
                      type="button"
                      onClick={() => handleUnlinkArticle('mercadolibre')}
-                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-amber-200 bg-amber-900/20 hover:bg-amber-800/30 border border-amber-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 sm:flex-initial px-3 sm:px-4 py-2.5 rounded-xl font-semibold text-amber-200 bg-amber-900/20 hover:bg-amber-800/30 border border-amber-700/30 transition text-xs sm:text-sm touch-manipulation min-h-[44px]"
                      title="Quita el vínculo del artículo y sus variantes con Mercado Libre"
                    >
                      Desvincular ML
@@ -3804,25 +3805,29 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    <button
                      type="button"
                      onClick={() => handleUnlinkArticle('both')}
-                     className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-red-200 bg-red-900/20 hover:bg-red-800/30 border border-red-700/30 transition text-sm touch-manipulation min-h-[44px]"
+                     className="w-full sm:w-auto px-3 sm:px-4 py-2.5 rounded-xl font-semibold text-red-200 bg-red-900/20 hover:bg-red-800/30 border border-red-700/30 transition text-xs sm:text-sm touch-manipulation min-h-[44px]"
                      title="Quita el vínculo del artículo y sus variantes con TN y ML"
                    >
                      Desvincular todo
                    </button>
                  </div>
-                 <button 
-                   onClick={() => setLinkingVariant(null)}
-                   className="px-4 py-3 sm:py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm touch-manipulation min-h-[44px]"
-                 >
-                   Cancelar
-                 </button>
-                 <button 
-                   onClick={handleSaveLink}
-                   className="px-5 py-3 sm:py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98] transition flex items-center justify-center gap-2 text-sm touch-manipulation min-h-[44px]"
-                 >
-                   <CheckCircle2 size={16} />
-                   Guardar vínculos
-                 </button>
+                 <div className="flex flex-col sm:flex-row gap-2 sm:justify-end sm:items-center pt-1 border-t border-slate-700/50">
+                   <button
+                     type="button"
+                     onClick={() => setLinkingVariant(null)}
+                     className="w-full sm:w-auto px-4 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 transition text-sm touch-manipulation min-h-[44px]"
+                   >
+                     Cancelar
+                   </button>
+                   <button
+                     type="button"
+                     onClick={handleSaveLink}
+                     className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/30 active:scale-[0.98] transition flex items-center justify-center gap-2 text-sm touch-manipulation min-h-[44px]"
+                   >
+                     <CheckCircle2 size={16} className="shrink-0" />
+                     Guardar vínculos
+                   </button>
+                 </div>
               </div>
            </div>
         </div>
