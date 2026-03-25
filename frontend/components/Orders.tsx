@@ -353,8 +353,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const importe = Math.round(qty * unit * 100) / 100;
       const sku = (i.sku ?? '').toString().trim();
       const name = (i.productName ?? '').toString().trim();
+      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
+      const despachoStr = despacho != null && String(despacho).trim() ? ` — Desp. ${String(despacho).trim()}` : '';
       const talleColor = [i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ');
-      const desc = [name, talleColor].filter(Boolean).join(' — ') || '—';
+      const desc = ([name, talleColor].filter(Boolean).join(' — ') || '—') + despachoStr;
       return `<tr>
         <td class="col-c">${qty.toLocaleString('es-AR')}</td>
         <td class="col-c col-code">${sku || '—'}</td>
