@@ -229,9 +229,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const logoPlaceholder = (remitente.businessName || 'Empresa').replace(/</g, '&lt;');
     const logoBlockRemito = logoUrlRemito
       ? `<div style="display:flex;align-items:center;gap:8px;">
-           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
-             onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
-           <span class="inv-logo-placeholder" style="display:none;">${logoPlaceholder}</span>
+           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:52px;max-width:190px;width:auto;height:auto;object-fit:contain;display:block;" />
          </div>`
       : `<span class="inv-logo-placeholder">${logoPlaceholder}</span>`;
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
@@ -370,9 +368,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const logoPlaceholderFactura = (((remitente as any).businessName || 'Empresa') as string).replace(/</g, '&lt;');
     const logoBlockFactura = logoUrlFactura
       ? `<div style="display:flex;align-items:center;gap:8px;">
-           <img src="${logoUrlFactura}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
-             onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
-           <span class="inv-logo-placeholder" style="display:none;">${logoPlaceholderFactura}</span>
+           <img src="${logoUrlFactura}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />
          </div>`
       : `<span class="inv-logo-placeholder">${logoPlaceholderFactura}</span>`;
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';

@@ -179,9 +179,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       <div class="inv-top">
         <div class="inv-logo-wrap">${
           (remitente.logoUrl && String(remitente.logoUrl).trim())
-            ? `<img src="${String(remitente.logoUrl).trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
-                 onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
-               <span class="inv-logo-placeholder" style="display:none;">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span>`
+            ? `<img src="${String(remitente.logoUrl).trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />`
             : `<span class="inv-logo-placeholder">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span>`
         }</div>
         <div class="inv-meta">

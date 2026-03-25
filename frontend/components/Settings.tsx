@@ -477,6 +477,21 @@ const Settings: React.FC<SettingsProps> = ({
   const [editingPriceList, setEditingPriceList] = useState<PriceList | null>(null);
   const [priceListItems, setPriceListItems] = useState<{ productId: string; price: number; sku?: string; name?: string }[]>([]);
   const [productsForPriceList, setProductsForPriceList] = useState<{ id: string; sku: string; name: string; base_price?: number }[]>([]);
+  const [priceListFilter, setPriceListFilter] = useState<'ALL' | 'WITH_PRICE' | 'WITHOUT_PRICE'>('ALL');
+  const [priceListSearch, setPriceListSearch] = useState('');
+
+  const upsertPriceListItem = (productId: string, price: number | null, meta?: { sku?: string; name?: string }) => {
+    setPriceListItems(prev => {
+      const idx = prev.findIndex(x => x.productId === productId);
+      if (price == null || Number.isNaN(price)) {
+        if (idx === -1) return prev;
+        return prev.filter((_, i) => i !== idx);
+      }
+      const nextVal = price >= 0 ? price : 0;
+      if (idx === -1) return [...prev, { productId, price: nextVal, sku: meta?.sku, name: meta?.name }];
+      return prev.map((x, i) => i === idx ? { ...x, price: nextVal, sku: x.sku ?? meta?.sku, name: x.name ?? meta?.name } : x);
+    });
+  };
 
   // Transportes (express) - solo ADMIN
   const [newTransporteName, setNewTransporteName] = useState('');
@@ -913,6 +928,8 @@ const Settings: React.FC<SettingsProps> = ({
                       <button
                         onClick={async () => {
                           setEditingPriceList(pl);
+                          setPriceListFilter('ALL');
+                          setPriceListSearch('');
                           try {
                             const [items, res] = await Promise.all([
                               api.getPriceListItems(pl.id),
@@ -1206,10 +1223,59 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-400">Ítems en la lista: <strong className="text-slate-200">{priceListItems.length}</strong></p>
-            </div>
-            {priceListItems.map((item, idx) => (
+            {(() => {
+              const byId = new Map(priceListItems.map(i => [i.productId, i]));
+              const merged = productsForPriceList.map(p => {
+                const item = byId.get(p.id);
+                return {
+                  productId: p.id,
+                  sku: item?.sku ?? p.sku,
+                  name: item?.name ?? p.name,
+                  price: item?.price,
+                  hasPrice: item?.price != null
+                };
+              });
+              const search = priceListSearch.trim().toLowerCase();
+              const filtered = merged.filter(r => {
+                if (priceListFilter === 'WITH_PRICE' && !r.hasPrice) return false;
+                if (priceListFilter === 'WITHOUT_PRICE' && r.hasPrice) return false;
+                if (!search) return true;
+                return (r.sku || '').toLowerCase().includes(search) || (r.name || '').toLowerCase().includes(search);
+              });
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Buscar artículo</label>
+                      <input
+                        type="text"
+                        value={priceListSearch}
+                        onChange={(e) => setPriceListSearch(e.target.value)}
+                        placeholder="SKU o nombre..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Filtro de precio</label>
+                      <select
+                        value={priceListFilter}
+                        onChange={(e) => setPriceListFilter(e.target.value as any)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm"
+                      >
+                        <option value="ALL">Todos</option>
+                        <option value="WITH_PRICE">Con precio</option>
+                        <option value="WITHOUT_PRICE">Sin precio</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-400">
+                      Mostrando <strong className="text-slate-200">{filtered.length}</strong> de <strong className="text-slate-200">{merged.length}</strong> artículos.
+                    </p>
+                  </div>
+
+                  {filtered.map((item) => (
               <div key={item.productId} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-800 rounded-2xl p-4 border border-slate-700">
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-mono text-slate-400 truncate">{item.sku || item.productId}</div>
@@ -1219,18 +1285,21 @@ const Settings: React.FC<SettingsProps> = ({
                   type="number"
                   step="0.01"
                   min="0"
-                  value={item.price}
+                  value={item.price ?? ''}
                   onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v) && v >= 0) {
-                      setPriceListItems(prev => prev.map((x, i) => i === idx ? { ...x, price: v } : x));
+                    const raw = e.target.value;
+                    if (raw === '') {
+                      upsertPriceListItem(item.productId, null);
+                      return;
                     }
+                    const v = parseFloat(raw);
+                    if (!isNaN(v) && v >= 0) upsertPriceListItem(item.productId, v, { sku: item.sku, name: item.name });
                   }}
                   className="w-full sm:w-44 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-base"
                 />
                 <button
                   type="button"
-                  onClick={() => setPriceListItems(prev => prev.filter((_, i) => i !== idx))}
+                  onClick={() => upsertPriceListItem(item.productId, null)}
                   className="px-4 py-2 rounded-xl bg-red-900/40 hover:bg-red-900/60 text-red-200 text-sm font-bold inline-flex items-center gap-2"
                   aria-label="Quitar"
                 >
@@ -1238,6 +1307,9 @@ const Settings: React.FC<SettingsProps> = ({
                 </button>
               </div>
             ))}
+                </>
+              );
+            })()}
             <div className="flex gap-2 flex-wrap items-center border-t border-slate-700 pt-4">
               <select
                 id="add-product-select"
@@ -1265,7 +1337,7 @@ const Settings: React.FC<SettingsProps> = ({
                   const price = parseFloat(priceInput?.value || '0');
                   if (!productId || isNaN(price) || price < 0) return;
                   const prod = productsForPriceList.find(p => p.id === productId);
-                  setPriceListItems(prev => [...prev, { productId, price, sku: prod?.sku, name: prod?.name }]);
+                  upsertPriceListItem(productId, price, { sku: prod?.sku, name: prod?.name });
                   sel.value = '';
                   priceInput.value = '';
                 }}
