@@ -124,14 +124,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : order.items.reduce((s: number, i: any) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
 
-    const despachoUnicos = Array.from(new Set(order.items.map((i: any) => (i.numeroDespacho || i.numero_despacho || '').trim()).filter(Boolean)));
-    const despachoLabel = despachoUnicos.length ? despachoUnicos.join(', ') : '—';
-
     const rows = order.items.map((i: any) => {
       const base = i.quantity * (i.priceAtMoment ?? 0);
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const desc = [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+      const desc = ((i.productName ?? '').toString().trim()) || '—';
       return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
 
@@ -188,8 +185,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
         </div>
       </div>
       <div class="inv-datos">
-        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
-        <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
+        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).ingresosBrutos ? 'Ingresos Brutos ' + (remitente as any).ingresosBrutos + '<br>' : ''}${(remitente as any).inicioActividad ? 'Inicio de actividad ' + (remitente as any).inicioActividad + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
+        <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.transportNumber ? 'N° Transporte ' + customer.transportNumber + '<br>' : ''}${customer?.remitoNumber ? 'N° Remito ' + customer.remitoNumber + '<br>' : ''}${customer?.saleCondition ? 'Condición de venta ' + customer.saleCondition + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
       </div>
       <div class="inv-table-wrap">
         <table class="inv-table">

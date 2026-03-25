@@ -88,6 +88,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newCity, setNewCity] = useState('');
   const [newCuit, setNewCuit] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newTransportNumber, setNewTransportNumber] = useState('');
+  const [newRemitoNumber, setNewRemitoNumber] = useState('');
+  const [newSaleCondition, setNewSaleCondition] = useState('');
   const [newCondicionIva, setNewCondicionIva] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
 
@@ -132,6 +135,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         city: newCity || undefined,
         cuit: newCuit || undefined,
         phone: newPhone || undefined,
+        transportNumber: newTransportNumber || undefined,
+        remitoNumber: newRemitoNumber || undefined,
+        saleCondition: newSaleCondition || undefined,
         condicionIva: newCondicionIva || undefined,
         transporteIds: selectedTransporteIds
       };
@@ -145,6 +151,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewCity('');
         setNewCuit('');
         setNewPhone('');
+        setNewTransportNumber('');
+        setNewRemitoNumber('');
+        setNewSaleCondition('');
         setNewCondicionIva('');
         setSelectedTransporteIds([]);
       }).catch(() => {});
@@ -161,6 +170,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       city: newCity,
       cuit: newCuit || undefined,
       phone: newPhone || undefined,
+      transportNumber: newTransportNumber || undefined,
+      remitoNumber: newRemitoNumber || undefined,
+      saleCondition: newSaleCondition || undefined,
       condicionIva: newCondicionIva || undefined,
       transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' }))
     };
@@ -174,6 +186,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setNewCity('');
     setNewCuit('');
     setNewPhone('');
+    setNewTransportNumber('');
+    setNewRemitoNumber('');
+    setNewSaleCondition('');
     setNewCondicionIva('');
     setSelectedTransporteIds([]);
   };
@@ -296,7 +311,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
             <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
             <button
-              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
               className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
             >
               <X size={20} />
@@ -322,6 +337,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Teléfono</label>
               <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Ej: 11 1234-5678" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">N° Transporte</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newTransportNumber} onChange={(e) => setNewTransportNumber(e.target.value)} placeholder="Ej: 12345" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">N° Remito</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newRemitoNumber} onChange={(e) => setNewRemitoNumber(e.target.value)} placeholder="Ej: R-0001-00001234" />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de venta</label>
+              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newSaleCondition} onChange={(e) => setNewSaleCondition(e.target.value)} placeholder="Ej: Cuenta corriente / Contado" />
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
@@ -360,7 +387,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
           </div>
           <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
-            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
+            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
             <button onClick={handleSave} disabled={!newBusinessName || !newEmail} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all">
               <Save size={18} />
               {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
@@ -425,6 +452,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewCity(selectedCustomer.city || '');
                  setNewCuit(selectedCustomer.cuit || '');
                  setNewPhone(selectedCustomer.phone || '');
+                 setNewTransportNumber(selectedCustomer.transportNumber || '');
+                 setNewRemitoNumber(selectedCustomer.remitoNumber || '');
+                 setNewSaleCondition(selectedCustomer.saleCondition || '');
                  setNewCondicionIva(selectedCustomer.condicionIva || '');
                  setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
                  setEditingCustomer(selectedCustomer);
@@ -904,7 +934,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <span>{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
           </button>
           <button 
-            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium"
           >
             <Plus size={18} />
@@ -1112,7 +1142,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -1170,6 +1200,36 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   placeholder="Ej: 11 1234-5678"
                 />
               </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">N° Transporte</label>
+                  <input
+                    type="text"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    value={newTransportNumber}
+                    onChange={(e) => setNewTransportNumber(e.target.value)}
+                    placeholder="Ej: 12345"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">N° Remito</label>
+                  <input
+                    type="text"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    value={newRemitoNumber}
+                    onChange={(e) => setNewRemitoNumber(e.target.value)}
+                    placeholder="Ej: R-0001-00001234"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de venta</label>
+                  <input
+                    type="text"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                    value={newSaleCondition}
+                    onChange={(e) => setNewSaleCondition(e.target.value)}
+                    placeholder="Ej: Cuenta corriente / Contado"
+                  />
+                </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
                 <select
@@ -1233,7 +1293,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar

@@ -352,13 +352,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const sku = (i.sku ?? '').toString().trim();
       const name = (i.productName ?? '').toString().trim();
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoStr = despacho != null && String(despacho).trim() ? ` — Desp. ${String(despacho).trim()}` : '';
-      const talleColor = [i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ');
-      const desc = ([name, talleColor].filter(Boolean).join(' — ') || '—') + despachoStr;
+      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
+      const desc = name || '—';
       return `<tr>
         <td class="col-c">${qty.toLocaleString('es-AR')}</td>
         <td class="col-c col-code">${sku || '—'}</td>
         <td class="col-desc">${desc}</td>
+        <td class="col-c">${despachoCell}</td>
         <td class="col-r">$${unit.toLocaleString('es-AR')}</td>
         <td class="col-r">$${importe.toLocaleString('es-AR')}</td>
       </tr>`;
@@ -376,11 +376,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     // Formato tipo "Tango" (como la imagen): A4 + cajas + tabla (Cantidad / Código / Descripción / P.Unitario / Importe)
     const razonEmpresa = (remitente.businessName || '—').toString();
     const cuitEmpresa = ((remitente as any).cuit || '').toString();
+    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '').toString();
+    const inicioActividadEmpresa = ((remitente as any).inicioActividad || '13/06/2005').toString();
     const emailEmpresa = ((remitente as any).email || '').toString();
     const telEmpresa = ((remitente as any).phone || '').toString();
     const dirEmpresa = empresaDir || '';
     const razonCliente = clienteNombre || 'Cliente';
     const cuitCliente = (customer?.cuit || '').toString();
+    const transportNumber = (customer?.transportNumber || '').toString();
+    const remitoNumber = (customer?.remitoNumber || '').toString();
+    const saleCondition = (customer?.saleCondition || '').toString();
     const dirCliente = clienteDir || '';
 
     const total = Math.round(baseImponible * 100) / 100;
@@ -441,6 +446,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div><strong>${razonEmpresa}</strong></div>
             ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
             ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+            ${ingresosBrutosEmpresa ? `<div>Ingresos Brutos: ${ingresosBrutosEmpresa}</div>` : ''}
+            ${inicioActividadEmpresa ? `<div>Inicio de actividad: ${inicioActividadEmpresa}</div>` : ''}
             ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
             ${telEmpresa ? `<div>Tel: ${telEmpresa}</div>` : ''}
           </div>
@@ -456,7 +463,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
           </div>
           <div class="block">
-            <div><strong>Pedido:</strong> ${order.id}</div>
+            ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
+            ${remitoNumber ? `<div><strong>N° Remito:</strong> ${remitoNumber}</div>` : ''}
+            ${saleCondition ? `<div><strong>Condición de venta:</strong> ${saleCondition}</div>` : ''}
           </div>
         </div>
 
@@ -466,6 +475,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <th class="col-c" style="width: 52px;">CANT.</th>
               <th class="col-c" style="width: 110px;">CÓDIGO</th>
               <th>DESCRIPCIÓN</th>
+              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
               <th class="col-r" style="width: 88px;">P. UNITARIO</th>
               <th class="col-r" style="width: 92px;">IMPORTE</th>
             </tr>

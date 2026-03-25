@@ -504,6 +504,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [remitenteAddress, setRemitenteAddress] = useState('');
   const [remitenteCity, setRemitenteCity] = useState('');
   const [remitenteCuit, setRemitenteCuit] = useState('');
+  const [remitenteIngresosBrutos, setRemitenteIngresosBrutos] = useState('');
+  const [remitenteInicioActividad, setRemitenteInicioActividad] = useState('13/06/2005');
   const [remitenteLogoUrl, setRemitenteLogoUrl] = useState('');
   const [remitenteCaiRemito, setRemitenteCaiRemito] = useState('');
   const [remitenteCaiVencimiento, setRemitenteCaiVencimiento] = useState('');
@@ -526,6 +528,8 @@ const Settings: React.FC<SettingsProps> = ({
       setRemitenteAddress(r.address ?? '');
       setRemitenteCity(r.city ?? '');
       setRemitenteCuit(r.cuit ?? '');
+      setRemitenteIngresosBrutos(r.ingresosBrutos ?? '');
+      setRemitenteInicioActividad(r.inicioActividad ?? '13/06/2005');
       setRemitenteLogoUrl(r.logoUrl ?? '');
       setRemitenteCaiRemito(r.caiRemito ?? '');
       setRemitenteCaiVencimiento(r.caiRemitoVencimiento ?? '');
@@ -1830,6 +1834,14 @@ const Settings: React.FC<SettingsProps> = ({
                 <input type="text" value={remitenteCuit} onChange={(e) => setRemitenteCuit(e.target.value.replace(/\D/g, '').slice(0, 11))} placeholder="20-12345678-9" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white font-mono placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Ingresos Brutos</label>
+                <input type="text" value={remitenteIngresosBrutos} onChange={(e) => setRemitenteIngresosBrutos(e.target.value)} placeholder="N° de Ingresos Brutos" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Inicio de Actividad</label>
+                <input type="text" value={remitenteInicioActividad} onChange={(e) => setRemitenteInicioActividad(e.target.value)} placeholder="13/06/2005" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Domicilio</label>
                 <input type="text" value={remitenteAddress} onChange={(e) => setRemitenteAddress(e.target.value)} placeholder="Calle y número" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
@@ -1857,7 +1869,7 @@ const Settings: React.FC<SettingsProps> = ({
                 <input type="date" value={remitenteCaiVencimiento} onChange={(e) => setRemitenteCaiVencimiento(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none" />
               </div>
             </div>
-            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined, email: remitenteEmail.trim() || undefined, phone: remitentePhone.trim() || undefined, logoUrl: remitenteLogoUrl.trim() || undefined, caiRemito: remitenteCaiRemito.trim() || undefined, caiRemitoVencimiento: remitenteCaiVencimiento.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
+            <button type="button" onClick={() => { saveRemitente({ businessName: remitenteBusinessName.trim(), address: remitenteAddress.trim() || undefined, city: remitenteCity.trim() || undefined, cuit: remitenteCuit.trim() || undefined, ingresosBrutos: remitenteIngresosBrutos.trim() || undefined, inicioActividad: remitenteInicioActividad.trim() || undefined, email: remitenteEmail.trim() || undefined, phone: remitentePhone.trim() || undefined, logoUrl: remitenteLogoUrl.trim() || undefined, caiRemito: remitenteCaiRemito.trim() || undefined, caiRemitoVencimiento: remitenteCaiVencimiento.trim() || undefined }); showToast('success', 'Datos del remitente guardados.'); }} className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"><Save size={16} /> Guardar</button>
           </div>
           <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">

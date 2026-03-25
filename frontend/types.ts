@@ -81,6 +81,8 @@ export interface RemitenteConfig {
   address?: string;
   city?: string;
   cuit?: string;
+  ingresosBrutos?: string;
+  inicioActividad?: string;
   email?: string;
   phone?: string;
   /** URL del logo de la empresa (para factura/remito) */
@@ -104,6 +106,12 @@ export interface Customer {
   cuit?: string;
   /** Teléfono (empresa o contacto) */
   phone?: string;
+  /** Número de transporte para facturación */
+  transportNumber?: string;
+  /** Número de remito por cliente */
+  remitoNumber?: string;
+  /** Condición de venta (ej. cuenta corriente, contado) */
+  saleCondition?: string;
   /** Condición de IVA (ej. Responsable Inscripto, Monotributo, Consumidor Final) */
   condicionIva?: string;
   /** Transportes (express) asignados para despachar pedidos a este cliente */

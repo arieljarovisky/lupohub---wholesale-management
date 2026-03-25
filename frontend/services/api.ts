@@ -581,6 +581,9 @@ export const api = {
         city: r.city ?? '',
         cuit: r.cuit ?? undefined,
         phone: r.phone ?? undefined,
+        transportNumber: r.transportNumber ?? r.transport_number ?? undefined,
+        remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
+        saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
         condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
         transportes: r.transportes ?? [],
         priceListId: r.priceListId ?? r.price_list_id ?? undefined
@@ -628,6 +631,9 @@ export const api = {
         city: r.city ?? '',
         cuit: r.cuit ?? undefined,
         phone: r.phone ?? undefined,
+        transportNumber: r.transportNumber ?? r.transport_number ?? undefined,
+        remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
+        saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
         condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
         priceListId: r.priceListId ?? undefined
       } as Customer;
@@ -648,6 +654,9 @@ export const api = {
         city: customer.city,
         cuit: customer.cuit,
         phone: customer.phone,
+        transportNumber: customer.transportNumber,
+        remitoNumber: customer.remitoNumber,
+        saleCondition: customer.saleCondition,
         condicionIva: customer.condicionIva,
         transporteIds: customer.transportes?.map(t => t.id) ?? [],
         priceListId: customer.priceListId
@@ -662,6 +671,9 @@ export const api = {
         city: created.city ?? '',
         cuit: created.cuit ?? undefined,
         phone: created.phone ?? undefined,
+        transportNumber: created.transportNumber ?? created.transport_number ?? undefined,
+        remitoNumber: created.remitoNumber ?? created.remito_number ?? undefined,
+        saleCondition: created.saleCondition ?? created.sale_condition ?? undefined,
         condicionIva: created.condicionIva ?? created.condicion_iva ?? undefined,
         transportes: created.transportes ?? [],
         priceListId: created.priceListId ?? created.price_list_id ?? undefined
@@ -679,7 +691,7 @@ export const api = {
     return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
   },
 
-  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
+  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; transportNumber?: string; remitoNumber?: string; saleCondition?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
     return {
       id: updated.id,
@@ -691,6 +703,9 @@ export const api = {
       city: updated.city ?? '',
       cuit: updated.cuit ?? undefined,
       phone: updated.phone ?? undefined,
+      transportNumber: updated.transportNumber ?? updated.transport_number ?? undefined,
+      remitoNumber: updated.remitoNumber ?? updated.remito_number ?? undefined,
+      saleCondition: updated.saleCondition ?? updated.sale_condition ?? undefined,
       condicionIva: updated.condicionIva ?? updated.condicion_iva ?? undefined,
       transportes: updated.transportes ?? [],
       priceListId: updated.priceListId ?? updated.price_list_id ?? undefined

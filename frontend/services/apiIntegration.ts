@@ -17,7 +17,20 @@ const REMITENTE_KEY = 'lupo_remitente';
 
 export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
-  return s ? JSON.parse(s) : { businessName: '' };
+  const parsed = s ? JSON.parse(s) : {};
+  return {
+    businessName: parsed.businessName ?? '',
+    address: parsed.address ?? '',
+    city: parsed.city ?? '',
+    cuit: parsed.cuit ?? '',
+    ingresosBrutos: parsed.ingresosBrutos ?? '',
+    inicioActividad: parsed.inicioActividad ?? '13/06/2005',
+    email: parsed.email ?? '',
+    phone: parsed.phone ?? '',
+    logoUrl: parsed.logoUrl ?? '',
+    caiRemito: parsed.caiRemito ?? '',
+    caiRemitoVencimiento: parsed.caiRemitoVencimiento ?? ''
+  };
 };
 
 export const saveRemitente = (config: RemitenteConfig) => {
