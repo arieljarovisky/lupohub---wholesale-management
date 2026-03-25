@@ -348,11 +348,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const rows = items.map(i => {
-      const base = i.quantity * (i.priceAtMoment ?? 0);
-      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const desc = [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
+      const qty = Number(i.quantity || 0);
+      const unit = Number(i.priceAtMoment ?? 0);
+      const importe = Math.round(qty * unit * 100) / 100;
+      const sku = (i.sku ?? '').toString().trim();
+      const name = (i.productName ?? '').toString().trim();
+      const talleColor = [i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ');
+      const desc = [name, talleColor].filter(Boolean).join(' — ') || '—';
+      return `<tr>
+        <td class="col-c">${qty.toLocaleString('es-AR')}</td>
+        <td class="col-c col-code">${sku || '—'}</td>
+        <td class="col-desc">${desc}</td>
+        <td class="col-r">$${unit.toLocaleString('es-AR')}</td>
+        <td class="col-r">$${importe.toLocaleString('es-AR')}</td>
+      </tr>`;
     }).join('');
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
     const logoUrlFactura = (remitente as any).logoUrl && String((remitente as any).logoUrl).trim() ? String((remitente as any).logoUrl).trim() : '';
@@ -366,86 +375,126 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       : `<span class="inv-logo-placeholder">${logoPlaceholderFactura}</span>`;
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+    // Formato tipo "Tango" (como la imagen): A4 + cajas + tabla (Cantidad / Código / Descripción / P.Unitario / Importe)
+    const razonEmpresa = (remitente.businessName || '—').toString();
+    const cuitEmpresa = ((remitente as any).cuit || '').toString();
+    const emailEmpresa = ((remitente as any).email || '').toString();
+    const telEmpresa = ((remitente as any).phone || '').toString();
+    const dirEmpresa = empresaDir || '';
+    const razonCliente = clienteNombre || 'Cliente';
+    const cuitCliente = (customer?.cuit || '').toString();
+    const dirCliente = clienteDir || '';
+
+    const total = Math.round(baseImponible * 100) / 100;
+    const subtotalBruto = total; // hoy usamos total como bruto (el sistema no separa bonificación/impuestos en el HTML)
+
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
-      @page { size: A4; margin: 15mm 15mm 20mm 15mm; }
+      @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; width: 100%; max-width: 180mm; margin: 0 auto; padding: 0; color: #111; background: #fff; font-size: 13px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 18px; border-bottom: 2px solid #111; }
-      .inv-logo-wrap { min-height: 64px; display: flex; align-items: center; }
-      .inv-logo { max-height: 64px; max-width: 200px; width: auto; height: auto; object-fit: contain; display: block; }
-      .inv-logo-placeholder { font-size: 1.4rem; font-weight: 800; color: #111; letter-spacing: -0.5px; }
-      .inv-meta { text-align: right; }
-      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 700; color: #111; }
-      .inv-meta .inv-fecha { font-size: 0.85rem; color: #e05a1a; margin-top: 3px; font-weight: 600; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; padding: 14px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; line-height: 1.6; }
-      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #374151; margin-bottom: 4px; font-weight: 700; }
-      .inv-table-wrap { margin-bottom: 20px; }
-      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-      .inv-table thead { background: #f3f4f6; }
-      .inv-table th { text-align: left; padding: 9px 10px; font-weight: 700; color: #111; border-bottom: 2px solid #d1d5db; white-space: nowrap; }
-      .inv-table th:nth-child(2) { text-align: center; }
-      .inv-table th:nth-child(3) { text-align: center; }
-      .inv-table th:nth-child(n+4) { text-align: right; }
-      .inv-table td { padding: 9px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
-      .inv-table td:nth-child(2) { text-align: center; color: #6b7280; }
-      .inv-table td:nth-child(3) { text-align: center; }
-      .inv-table td:nth-child(n+4) { text-align: right; }
-      .inv-table tbody tr:last-child td { border-bottom: none; }
-      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 28px; }
-      .inv-summary-inner { min-width: 220px; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 24px; padding: 7px 12px; border-bottom: 1px solid #e5e7eb; }
-      .inv-summary-inner .row:last-child { border-bottom: none; }
-      .inv-summary-inner .row.total { font-weight: 700; font-size: 1rem; background: #f3f4f6; }
-      .inv-footer { padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 0.78rem; color: #6b7280; }
-      .inv-cae { margin-bottom: 8px; color: #374151; }
-      .no-print { margin-top: 28px; display: flex; gap: 10px; }
-      @media print {
-        .no-print { display: none !important; }
-        body { max-width: 100%; }
-        .inv-table { page-break-inside: auto; }
-        .inv-table tr { page-break-inside: avoid; }
-      }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+      .topbar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: start; margin-bottom: 6px; }
+      .logo { min-height: 42px; display: flex; align-items: center; }
+      .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
+      .codebox { border: 1px solid #111; padding: 6px 8px; text-align: center; }
+      .codebox .code { font-weight: 700; letter-spacing: 0.08em; }
+      .codebox .num { margin-top: 6px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
+      .title { text-align: center; font-weight: 700; letter-spacing: 0.06em; margin: 4px 0 8px; }
+      .hr { border-top: 1px solid #111; margin: 6px 0 10px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .block { padding: 6px 8px; border: 1px solid #111; min-height: 58px; }
+      .muted { color: #333; }
+      .line { display: flex; gap: 8px; }
+      .line .k { width: 78px; color: #333; }
+      .line .v { flex: 1; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 10px; margin-top: 8px; }
+      .boxrow .block { min-height: 46px; }
+
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
+      tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+      tfoot td { padding: 6px; }
+      .col-c { text-align: center; }
+      .col-r { text-align: right; }
+      .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
+      .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; }
+      .totals { border: 1px solid #111; }
+      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+      .totals .r:last-child { border-bottom: none; font-weight: 700; }
+      .footer { margin-top: 12px; font-size: 10px; }
+      .no-print { margin-top: 14px; display: flex; gap: 10px; }
+      @media print { .no-print { display: none !important; } }
     </style></head><body>
-      <div class="inv-top">
-        <div class="inv-logo-wrap">${logoBlockFactura}</div>
-        <div class="inv-meta">
-          <div class="inv-num">FACTURA Nº: ${nroComprobante}</div>
-          <div class="inv-fecha">Fecha: ${fechaComprobante}</div>
+      <div class="sheet">
+        <div class="topbar">
+          <div class="logo">${logoBlockFactura}</div>
+          <div class="codebox">
+            <div class="code">CÓDIGO<br>001</div>
+            <div class="num">${nroComprobante}</div>
+            <div style="margin-top:6px;" class="muted">Fecha: ${fechaComprobante}</div>
+          </div>
         </div>
-      </div>
-      <div class="inv-datos">
-        <div>
-          <strong>Datos empresa</strong>
-          ${remitente.businessName || '—'}<br>
-          ${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}
+
+        <div class="hr"></div>
+
+        <div class="grid2">
+          <div>
+            <div><strong>${razonEmpresa}</strong></div>
+            ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
+            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+            ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
+            ${telEmpresa ? `<div>Tel: ${telEmpresa}</div>` : ''}
+          </div>
+          <div>
+            ${cuitEmpresa ? `<div class="line"><div class="k">C.U.I.T.:</div><div class="v">${cuitEmpresa}</div></div>` : ''}
+          </div>
         </div>
-        <div>
-          <strong>Datos cliente</strong>
-          ${clienteNombre}<br>
-          ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
+
+        <div class="boxrow">
+          <div class="block">
+            <div><strong>Sr./es:</strong> ${razonCliente}</div>
+            ${dirCliente ? `<div>${dirCliente}</div>` : ''}
+            ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
+          </div>
+          <div class="block">
+            <div><strong>Pedido:</strong> ${order.id}</div>
+          </div>
         </div>
-      </div>
-      <div class="inv-table-wrap">
-        <table class="inv-table">
-          <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead>
-          <tbody>${rows}</tbody>
+
+        <table>
+          <thead>
+            <tr>
+              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 110px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
+              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 92px;">IMPORTE</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
         </table>
-      </div>
-      <div class="inv-summary">
-        <div class="inv-summary-inner">
-          <div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div>
-          <div class="row"><span>IVA 21%</span><span>—</span></div>
-          <div class="row"><span>Retención</span><span>—</span></div>
-          <div class="row total"><span>Total</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div>
+
+        <div class="summary">
+          <div></div>
+          <div class="totals">
+            <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Bonificación</span><span>$0</span></div>
+            <div class="r"><span>Subtotal Neto</span><span>$${total.toLocaleString('es-AR')}</span></div>
+          </div>
         </div>
-      </div>
-      <div class="inv-footer">
-        <div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-        <p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p>
-      </div>
-      <div class="no-print">
-        <button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button>
-        <button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button>
+
+        <div class="footer">
+          <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+          <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
+        </div>
+
+        <div class="no-print">
+          <button onclick="window.print()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 6px; font-weight: 700;">Descargar PDF / Imprimir</button>
+          <button onclick="window.close()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 6px;">Cerrar</button>
+        </div>
       </div>
     </body></html>`;
   };

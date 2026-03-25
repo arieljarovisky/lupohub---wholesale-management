@@ -58,11 +58,31 @@ async function parsePriceListExcel(file: File): Promise<{ sku: string; price: nu
   return items;
 }
 
-const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode; footer?: React.ReactNode }) => {
+const Modal = ({
+  isOpen,
+  onClose,
+  title,
+  children,
+  footer,
+  size = 'md',
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  size?: 'md' | 'lg' | 'xl';
+}) => {
   if (!isOpen) return null;
+  const maxW =
+    size === 'xl'
+      ? 'sm:max-w-5xl'
+      : size === 'lg'
+        ? 'sm:max-w-3xl'
+        : 'sm:max-w-md';
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto pt-[env(safe-area-inset-top)] sm:pt-0">
-      <div className="bg-slate-900 border-0 sm:border border-slate-700 rounded-none sm:rounded-3xl w-full max-w-md min-h-[100dvh] sm:min-h-0 max-h-[100dvh] sm:max-h-[90vh] shadow-2xl overflow-hidden animate-slide-up flex flex-col my-0 sm:my-4">
+      <div className={`bg-slate-900 border-0 sm:border border-slate-700 rounded-none sm:rounded-3xl w-full ${maxW} min-h-[100dvh] sm:min-h-0 max-h-[100dvh] sm:max-h-[90vh] shadow-2xl overflow-hidden animate-slide-up flex flex-col my-0 sm:my-4`}>
         <div className="p-4 sm:p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
           <h3 className="font-bold text-white text-lg truncate pr-2">{title}</h3>
           <button onClick={onClose} className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-white transition-colors touch-manipulation rounded-xl -mr-2" aria-label="Cerrar">
@@ -1041,6 +1061,7 @@ const Settings: React.FC<SettingsProps> = ({
           isOpen={!!editingPriceList}
           onClose={() => { setEditingPriceList(null); setPriceListItems([]); }}
           title={`Precios: ${editingPriceList.name}`}
+          size="xl"
           footer={
             <div className="flex gap-2 w-full">
               <button onClick={() => setEditingPriceList(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-bold text-sm">Cerrar</button>
@@ -1062,21 +1083,21 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           }
         >
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-            <p className="text-slate-400 text-xs">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
+          <div className="space-y-5 max-h-[75vh] overflow-y-auto">
+            <p className="text-slate-300 text-sm">Productos con precio en esta lista. Para agregar, elegí un producto y un precio.</p>
             {/* Acciones masivas */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
-                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Rellenar desde catálogo</p>
-                <p className="text-slate-500 text-xs mb-2">Todos los productos con precio base. Opcional: multiplicador (ej. 0.9 = 10% descuento).</p>
-                <div className="flex gap-2 items-center flex-wrap">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="bg-slate-800/80 rounded-2xl p-4 border border-slate-700">
+                <p className="text-sm font-black text-slate-200 mb-2">Rellenar desde catálogo</p>
+                <p className="text-slate-400 text-sm mb-3">Todos los productos con precio base. Opcional: multiplicador (ej. 0.9 = 10% descuento).</p>
+                <div className="flex gap-3 items-center flex-wrap">
                   <input
                     type="number"
                     step="0.01"
                     min="0.01"
                     placeholder="1"
                     id="fill-multiplier"
-                    className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm"
+                    className="w-28 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm"
                   />
                   <button
                     type="button"
@@ -1093,16 +1114,16 @@ const Settings: React.FC<SettingsProps> = ({
                         showToast('error', (err as any)?.message || 'Error');
                       }
                     }}
-                    className="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                    className="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-xl text-sm font-bold"
                   >
                     Rellenar
                   </button>
                 </div>
               </div>
-              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
-                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Importar por CSV</p>
-                <p className="text-slate-500 text-xs mb-2">Archivo con líneas: SKU;precio o SKU,precio. Reemplaza los precios de esos SKU.</p>
-                <label className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+              <div className="bg-slate-800/80 rounded-2xl p-4 border border-slate-700">
+                <p className="text-sm font-black text-slate-200 mb-2">Importar por CSV</p>
+                <p className="text-slate-400 text-sm mb-3">Archivo con líneas: SKU;precio o SKU,precio. Reemplaza los precios de esos SKU.</p>
+                <label className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-xl text-sm font-bold cursor-pointer">
                   <FileUp size={14} /> Elegir archivo
                   <input
                     type="file"
@@ -1137,14 +1158,14 @@ const Settings: React.FC<SettingsProps> = ({
                   />
                 </label>
               </div>
-              <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700">
-                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Exportar / Importar Excel</p>
-                <p className="text-slate-500 text-xs mb-2">Mismo formato: columnas Código y Precio. Plantilla con todos los artículos para completar precios e importar.</p>
-                <div className="flex flex-wrap gap-2">
+              <div className="bg-slate-800/80 rounded-2xl p-4 border border-slate-700">
+                <p className="text-sm font-black text-slate-200 mb-2">Exportar / Importar Excel</p>
+                <p className="text-slate-400 text-sm mb-3">Mismo formato: columnas Código y Precio. Plantilla con todos los artículos para completar precios e importar.</p>
+                <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={() => downloadPriceListTemplate(productsForPriceList)}
-                    className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                    className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-bold"
                     title="Descarga un Excel con todos los artículos del catálogo y columna Precio vacía para completar"
                   >
                     <FileUp size={14} /> Descargar plantilla (todos los artículos)
@@ -1152,11 +1173,11 @@ const Settings: React.FC<SettingsProps> = ({
                   <button
                     type="button"
                     onClick={() => exportPriceListExcel(priceListItems, editingPriceList?.name ?? '')}
-                    className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                    className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-xl text-sm font-bold"
                   >
                     <Download size={14} /> Exportar Excel
                   </button>
-                  <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">
+                  <label className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold cursor-pointer">
                     <FileSpreadsheet size={14} /> Importar Excel
                     <input
                     type="file"
@@ -1185,10 +1206,15 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
             </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-slate-400">Ítems en la lista: <strong className="text-slate-200">{priceListItems.length}</strong></p>
+            </div>
             {priceListItems.map((item, idx) => (
-              <div key={item.productId} className="flex items-center gap-3 bg-slate-800 rounded-xl p-3 border border-slate-700">
-                <span className="text-xs font-mono text-slate-500 flex-1 truncate">{item.sku || item.productId}</span>
-                <span className="text-sm text-white truncate flex-1">{item.name || 'Producto'}</span>
+              <div key={item.productId} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-mono text-slate-400 truncate">{item.sku || item.productId}</div>
+                  <div className="text-base font-bold text-white truncate">{item.name || 'Producto'}</div>
+                </div>
                 <input
                   type="number"
                   step="0.01"
@@ -1200,22 +1226,22 @@ const Settings: React.FC<SettingsProps> = ({
                       setPriceListItems(prev => prev.map((x, i) => i === idx ? { ...x, price: v } : x));
                     }
                   }}
-                  className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm"
+                  className="w-full sm:w-44 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-base"
                 />
                 <button
                   type="button"
                   onClick={() => setPriceListItems(prev => prev.filter((_, i) => i !== idx))}
-                  className="p-1.5 text-slate-500 hover:text-red-400"
+                  className="px-4 py-2 rounded-xl bg-red-900/40 hover:bg-red-900/60 text-red-200 text-sm font-bold inline-flex items-center gap-2"
                   aria-label="Quitar"
                 >
-                  <Trash2 size={16} />
+                  <Trash2 size={16} /> Quitar
                 </button>
               </div>
             ))}
             <div className="flex gap-2 flex-wrap items-center border-t border-slate-700 pt-4">
               <select
                 id="add-product-select"
-                className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm min-w-[180px]"
+                className="bg-slate-900 border border-slate-600 rounded-xl px-3 py-2.5 text-white text-base min-w-[220px]"
               >
                 <option value="">Agregar producto...</option>
                 {productsForPriceList.filter(p => !priceListItems.some(i => i.productId === p.id)).map(p => (
@@ -1228,7 +1254,7 @@ const Settings: React.FC<SettingsProps> = ({
                 min="0"
                 id="add-product-price"
                 placeholder="Precio"
-                className="w-24 bg-slate-900 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm"
+                className="w-32 bg-slate-900 border border-slate-600 rounded-xl px-3 py-2.5 text-white text-base"
               />
               <button
                 type="button"
@@ -1243,7 +1269,7 @@ const Settings: React.FC<SettingsProps> = ({
                   sel.value = '';
                   priceInput.value = '';
                 }}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-base font-black"
               >
                 <Plus size={16} className="inline mr-1" /> Agregar
               </button>
@@ -1657,9 +1683,71 @@ const Settings: React.FC<SettingsProps> = ({
             </h3>
             <p className="text-sm text-slate-400 mb-4">Estos datos aparecen en remitos y en la factura AFIP (ver factura desde Pedidos). El logo se muestra en el encabezado de la factura.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div className="md:col-span-2">
-                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">URL del logo (Lupo Argentina)</label>
-                <input type="url" value={remitenteLogoUrl} onChange={(e) => setRemitenteLogoUrl(e.target.value)} placeholder="https://... (imagen del logo para factura)" className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" />
+              <div className="md:col-span-2 space-y-2">
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Logo de la empresa</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                  <div className="md:col-span-2">
+                    <input
+                      type="url"
+                      value={remitenteLogoUrl}
+                      onChange={(e) => setRemitenteLogoUrl(e.target.value)}
+                      placeholder="https://... (URL de imagen) o subí un archivo"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer hover:bg-slate-800 transition">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const dataUrl = String(reader.result || '');
+                              if (dataUrl.startsWith('data:image/')) {
+                                setRemitenteLogoUrl(dataUrl);
+                                showToast('success', 'Logo cargado. Guardá para aplicarlo en facturas/remitos.');
+                              } else {
+                                showToast('error', 'Archivo inválido. Usá una imagen (PNG/JPG/SVG).');
+                              }
+                            };
+                            reader.onerror = () => showToast('error', 'No se pudo leer el archivo.');
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                        Subir logo
+                      </label>
+                      {remitenteLogoUrl?.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setRemitenteLogoUrl('')}
+                          className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 text-xs font-bold hover:bg-slate-800 transition"
+                        >
+                          Quitar
+                        </button>
+                      )}
+                      <span className="text-[11px] text-slate-500">
+                        Recomendado: PNG/JPG, ancho ~400px. Si usás URL, que sea pública.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl p-3 flex items-center justify-center min-h-[92px]">
+                    {remitenteLogoUrl?.trim() ? (
+                      <img
+                        src={remitenteLogoUrl.trim()}
+                        alt="Logo"
+                        className="max-h-[72px] max-w-full object-contain"
+                        onError={(ev) => {
+                          (ev.currentTarget as any).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-500 text-center">Sin logo</span>
+                    )}
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Razón social</label>
