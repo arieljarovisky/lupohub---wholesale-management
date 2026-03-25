@@ -214,3 +214,20 @@ export interface PriceList {
   createdAt?: string;
   updatedAt?: string;
 }
+
+/** Pago / recibo cargado para un cliente (cuenta corriente). */
+export interface Payment {
+  id: string;
+  customerId: string;
+  customerBusinessName?: string;
+  sellerId?: string;
+  sellerName?: string;
+  orderId?: string;
+  invoiceId?: string;
+  receiptNumber: string;
+  date: string; // YYYY-MM-DD
+  amount: number;
+  notes?: string;
+  createdAt?: string;
+  invoice?: { puntoVta?: number; cbteTipo?: number; cbteDesde?: number };
+}

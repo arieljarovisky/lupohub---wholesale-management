@@ -1082,6 +1082,32 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  // ============ PAGOS (recibos) ============
+
+  getPayments: async (params?: { customerId?: string; invoiceId?: string; orderId?: string; desde?: string; hasta?: string }): Promise<import('../types').Payment[]> => {
+    const queryParams = new URLSearchParams();
+    if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.invoiceId) queryParams.append('invoiceId', params.invoiceId);
+    if (params?.orderId) queryParams.append('orderId', params.orderId);
+    if (params?.desde) queryParams.append('desde', params.desde);
+    if (params?.hasta) queryParams.append('hasta', params.hasta);
+    const qs = queryParams.toString();
+    return await request<any[]>(`/payments${qs ? '?' + qs : ''}`, 'GET') as any;
+  },
+
+  createPayment: async (payload: {
+    customerId: string;
+    sellerId?: string | null;
+    orderId?: string | null;
+    invoiceId?: string | null;
+    receiptNumber: string;
+    date: string;
+    amount: number;
+    notes?: string;
+  }): Promise<import('../types').Payment> => {
+    return await request<any>(`/payments`, 'POST', payload) as any;
+  },
+
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {
     const rows = await request<any[]>('/catalogs', 'GET');

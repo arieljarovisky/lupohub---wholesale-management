@@ -1688,7 +1688,7 @@ const Settings: React.FC<SettingsProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
                   <div className="md:col-span-2">
                     <input
-                      type="url"
+                      type="text"
                       value={remitenteLogoUrl}
                       onChange={(e) => setRemitenteLogoUrl(e.target.value)}
                       placeholder="https://... (URL de imagen) o subí un archivo"

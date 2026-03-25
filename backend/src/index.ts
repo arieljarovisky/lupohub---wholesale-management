@@ -17,6 +17,7 @@ import priceListsRoutes from './routes/price_lists.routes';
 import catalogsRoutes from './routes/catalogs.routes';
 import billingRoutes from './routes/billing.routes';
 import afipRoutes from './routes/afip.routes';
+import paymentsRoutes from './routes/payments.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
@@ -38,6 +39,7 @@ import { addPriceLists } from './database/add_price_lists';
 import { addCatalogsTable } from './database/add_catalogs_table';
 import { addRemitenteTable } from './database/add_remitente_table';
 import { addPaymentStatusToOrders } from './database/add_payment_status_orders';
+import { addPaymentsTable } from './database/add_payments_table';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -89,6 +91,7 @@ app.use('/api/price-lists', priceListsRoutes);
 app.use('/api/catalogs', catalogsRoutes);
 app.use('/api/afip', afipRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -132,6 +135,7 @@ async function initDatabase() {
       await addCatalogsTable();
       await addRemitenteTable();
       await addPaymentStatusToOrders();
+      await addPaymentsTable();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

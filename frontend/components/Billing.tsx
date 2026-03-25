@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
-import { Customer, Role } from '../types';
+import { Customer, Payment, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 
 interface BillingProps {
   role: Role;
   customers: Customer[];
+  users?: User[];
 }
 
-const Billing: React.FC<BillingProps> = ({ role, customers }) => {
+const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
   const { showToast } = useNotification();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,6 +19,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
   const [hasta, setHasta] = useState<string>('');
   const [customerId, setCustomerId] = useState<string>('ALL');
   const [tipo, setTipo] = useState<'ALL' | 'FACTURA' | 'NC'>('ALL');
+
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [payReceipt, setPayReceipt] = useState('');
+  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
+  const [payInvoiceId, setPayInvoiceId] = useState<string>('');
+  const [paySellerId, setPaySellerId] = useState<string>('');
+  const [payAmount, setPayAmount] = useState<string>('');
+  const [payNotes, setPayNotes] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
@@ -35,8 +47,24 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
     setLoading(false);
   };
 
+  const loadPayments = async () => {
+    setLoadingPayments(true);
+    try {
+      const rows = await api.getPayments({
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        customerId: customerId !== 'ALL' ? customerId : undefined,
+      });
+      setPayments(Array.isArray(rows) ? (rows as any) : []);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error cargando pagos');
+    }
+    setLoadingPayments(false);
+  };
+
   useEffect(() => {
     load();
+    loadPayments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -53,6 +81,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
       showToast('error', err?.message || 'Error exportando facturación');
     }
   };
+
+  const facturaOptions = items
+    .filter((x) => x?.tipo === 'FACTURA')
+    .map((x) => ({
+      invoiceId: x.id,
+      label: `${x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : ''} ${String(x.puntoVta).padStart(5, '0')}-${String(x.numeroDesde).padStart(8, '0')} — ${x.customerBusinessName || ''}`.trim(),
+      customerId: x.customerId,
+    }));
 
   const formatDate = (d: any) => {
     if (!d) return '';
@@ -71,13 +107,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
     if (!order?.invoice) return '';
 
     const customer = customers.find(c => c.id === order.customerId);
-    const remitente = {
-      businessName: 'Mi Empresa',
-      address: '',
-      city: '',
-      email: '',
-      phone: ''
-    };
+    const remitente = getRemitente();
     const inv = order.invoice;
 
     const formatDateShort = (d: any) => {
@@ -116,6 +146,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
       .inv-doc { width: 100%; max-width: 190mm; margin: 0 auto; background: #ffffff; border: 1px solid #6b99de; border-radius: 12px; padding: 28px 32px 32px; }
       .inv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #6b99de; }
       .inv-logo-wrap { min-height: 56px; display: flex; align-items: center; }
+      .inv-logo { max-height: 56px; max-width: 220px; width: auto; height: auto; object-fit: contain; display: block; }
       .inv-logo-placeholder { font-size: 1.3rem; font-weight: 700; color: #000000; }
       .inv-meta { text-align: right; }
       .inv-meta .inv-num { font-size: 1.05rem; font-weight: 800; color: #6b99de; }
@@ -146,7 +177,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
       @media print { .no-print { display: none !important; } .inv-doc { border: none; box-shadow: none; } }
     </style></head><body>
       <div class="inv-top">
-        <div class="inv-logo-wrap"><span class="inv-logo-placeholder">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span></div>
+        <div class="inv-logo-wrap">${
+          (remitente.logoUrl && String(remitente.logoUrl).trim())
+            ? `<img src="${String(remitente.logoUrl).trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer"
+                 onerror="this.style.display='none'; var ph=this.parentElement.querySelector('.inv-logo-placeholder'); if(ph) ph.style.display='inline-block';" />
+               <span class="inv-logo-placeholder" style="display:none;">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span>`
+            : `<span class="inv-logo-placeholder">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span>`
+        }</div>
         <div class="inv-meta">
           <div class="inv-num">FACTURA Nº: ${nroComprobante}</div>
           <div class="inv-fecha">Fecha: ${fechaComprobante}</div>
@@ -279,6 +316,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setShowPaymentModal(true);
+              setPayReceipt('');
+              setPayAmount('');
+              setPayNotes('');
+              setPayInvoiceId('');
+              setPaySellerId('');
+              setPayCustomerId(customerId !== 'ALL' ? customerId : 'ALL');
+              setPayDate(new Date().toISOString().slice(0, 10));
+            }}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700"
+          >
+            Cargar pago
+          </button>
+          <button
+            type="button"
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
           >
@@ -396,6 +449,148 @@ const Billing: React.FC<BillingProps> = ({ role, customers }) => {
           </table>
         </div>
       </div>
+
+      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-white font-black">Pagos / Recibos</div>
+          <button
+            type="button"
+            onClick={loadPayments}
+            className="px-3 py-2 rounded-xl bg-slate-800 text-slate-100 text-sm font-medium border border-slate-700 hover:bg-slate-700"
+          >
+            {loadingPayments ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
+            Actualizar pagos
+          </button>
+        </div>
+        {loadingPayments ? (
+          <div className="py-6 text-center text-slate-400">Cargando pagos…</div>
+        ) : payments.length === 0 ? (
+          <div className="py-4 text-slate-500 text-sm">No hay pagos cargados para el filtro actual.</div>
+        ) : (
+          <div className="space-y-2">
+            {payments.slice(0, 25).map((p) => (
+              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3">
+                <div className="min-w-0">
+                  <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
+                  <div className="text-xs text-slate-400">
+                    Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
+                  </div>
+                </div>
+                <div className="text-sm font-black text-emerald-300">${Number(p.amount || 0).toLocaleString('es-AR')}</div>
+              </div>
+            ))}
+            {payments.length > 25 && (
+              <div className="text-xs text-slate-500 pt-1">Mostrando 25 de {payments.length}.</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <h3 className="text-white font-black text-lg">Cargar pago</h3>
+              <button onClick={() => setShowPaymentModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Nº Recibo</label>
+                  <input value={payReceipt} onChange={(e) => setPayReceipt(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="R0001-00001234" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Fecha</label>
+                  <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cliente</label>
+                  <select value={payCustomerId} onChange={(e) => setPayCustomerId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none">
+                    <option value="ALL">Seleccionar…</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>{c.businessName || c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Factura</label>
+                  <select
+                    value={payInvoiceId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPayInvoiceId(val);
+                      const opt = facturaOptions.find((x) => x.invoiceId === val);
+                      if (opt?.customerId && payCustomerId === 'ALL') setPayCustomerId(opt.customerId);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                  >
+                    <option value="">(Opcional) Seleccionar factura…</option>
+                    {facturaOptions.map((f) => (
+                      <option key={f.invoiceId} value={f.invoiceId}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Vendedor</label>
+                  <select value={paySellerId} onChange={(e) => setPaySellerId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none">
+                    <option value="">(Opcional) —</option>
+                    {users.filter(u => u.role === 'SELLER').map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe</label>
+                  <input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="0" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
+                <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y" />
+              </div>
+            </div>
+            <div className="p-5 border-t border-slate-800 flex gap-2">
+              <button onClick={() => setShowPaymentModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl font-bold">Cancelar</button>
+              <button
+                onClick={async () => {
+                  try {
+                    const amount = parseFloat(String(payAmount || '0').replace(',', '.'));
+                    if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
+                    if (!payDate) { showToast('error', 'Falta fecha'); return; }
+                    if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
+                    if (Number.isNaN(amount) || amount < 0) { showToast('error', 'Importe inválido'); return; }
+                    await api.createPayment({
+                      customerId: payCustomerId,
+                      receiptNumber: payReceipt.trim(),
+                      date: payDate,
+                      amount,
+                      notes: payNotes?.trim() || undefined,
+                      sellerId: paySellerId || null,
+                      invoiceId: payInvoiceId || null,
+                      orderId: null,
+                    });
+                    showToast('success', 'Pago cargado.');
+                    setShowPaymentModal(false);
+                    loadPayments();
+                  } catch (err: any) {
+                    showToast('error', err?.response?.data?.message || err?.message || 'Error cargando pago');
+                  }
+                }}
+                className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black"
+              >
+                Guardar pago
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
