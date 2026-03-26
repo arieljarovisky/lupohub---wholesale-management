@@ -877,14 +877,15 @@ export const syncProductsFromMercadoLibre = async (req: Request, res: Response) 
 // Webhook de Tienda Nube para órdenes/ventas
 export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
   try {
-    const { event, store_id } = req.body;
-    console.log(`[TN Webhook] Evento: ${event}, Store: ${store_id}`);
+    const event = (req.body?.event ?? req.headers['x-linkedstore-topic'] ?? req.headers['x-tiendanube-topic'] ?? '').toString();
+    const storeIdFromReq = (req.body?.store_id ?? req.headers['x-linkedstore-id'] ?? req.headers['x-tiendanube-store-id'] ?? '').toString();
+    console.log(`[TN Webhook] Evento: ${event}, Store: ${storeIdFromReq || '-'}`);
     
     // Verificar que el store_id coincide (comparar como string por si viene número de la DB o del body)
     const integration = await get(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
     const storedStoreId = (integration?.store_id ?? integration?.user_id)?.toString();
-    if (!integration || storedStoreId !== (store_id != null ? String(store_id) : '')) {
-      console.log('[TN Webhook] Store ID no coincide (recibido:', store_id, ', guardado:', storedStoreId, '), ignorando');
+    if (!integration || storedStoreId !== storeIdFromReq) {
+      console.log('[TN Webhook] Store ID no coincide (recibido:', storeIdFromReq, ', guardado:', storedStoreId, '), ignorando');
       return res.status(200).json({ received: true, ignored: true });
     }
 
@@ -1226,20 +1227,32 @@ export const syncTiendaNubeOrdersFromDate = async (req: Request, res: Response) 
 // Webhook de Mercado Libre para órdenes/ventas
 export const handleMercadoLibreWebhook = async (req: Request, res: Response) => {
   try {
-    const { topic, resource, user_id } = req.body;
-    console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resource}`);
+    const topic = (req.body?.topic ?? req.query?.topic ?? '').toString();
+    const resourceRaw = (req.body?.resource ?? req.query?.resource ?? '').toString();
+    const userIdRaw = (req.body?.user_id ?? req.query?.user_id ?? '').toString();
+    console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resourceRaw}, User: ${userIdRaw || '-'}`);
 
     // Verificar que el user_id coincide
     const integration = await get(`SELECT user_id FROM integrations WHERE platform = 'mercadolibre'`);
-    if (!integration || integration.user_id !== user_id?.toString()) {
+    if (!integration || integration.user_id?.toString() !== userIdRaw) {
       console.log('[ML Webhook] User ID no coincide, ignorando');
       return res.status(200).json({ received: true, ignored: true });
     }
 
     // Procesar según el tipo de notificación
-    if (topic === 'orders_v2') {
-      const orderId = resource.replace('/orders/', '');
-      await processMercadoLibreOrder(orderId);
+    if (topic === 'orders_v2' || topic === 'orders') {
+      const orderId = (() => {
+        if (!resourceRaw) return '';
+        const m = resourceRaw.match(/\/orders\/(\d+)/);
+        if (m?.[1]) return m[1];
+        const parts = resourceRaw.split('/').filter(Boolean);
+        return parts.length > 0 ? parts[parts.length - 1] : '';
+      })();
+      if (orderId) {
+        await processMercadoLibreOrder(orderId);
+      } else {
+        console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
+      }
     }
 
     res.status(200).json({ received: true });
@@ -1252,6 +1265,16 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = async (orderId: string) => {
   try {
+    // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
+    const alreadyProcessed = await get(
+      `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`,
+      [`Orden ML: ${orderId}`]
+    );
+    if (alreadyProcessed) {
+      console.log(`[ML Order] Orden ${orderId} ya procesada, omitiendo`);
+      return;
+    }
+
     const mlToken = await getValidMLToken();
     if (!mlToken) return;
 
