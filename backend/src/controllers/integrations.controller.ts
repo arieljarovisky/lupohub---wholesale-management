@@ -55,6 +55,9 @@ function mercadoLibreItemIdCandidates(raw: unknown): string[] {
     const num = m[2];
     // Formato canónico ML + 1 letra de sitio (MLA, MLB, MLU, ...)
     if (prefix.length > 3) out.push(`${prefix.slice(0, 3)}${num}`);
+    // Si vino con un prefijo "expandido" de 4+ letras, probar también ML + última letra.
+    // Ej: MLAU123 -> MLU123 (caso real detectado en producción).
+    if (prefix.length > 3) out.push(`ML${prefix[prefix.length - 1]}${num}`);
     // Caso visto en producción: MLAU######## -> MLA########
     if (prefix === 'MLAU') out.push(`MLA${num}`);
   }
