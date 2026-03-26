@@ -87,9 +87,7 @@ function normalizeMercadoLibreItemId(raw) {
     const legacy = s.match(/^ML-(\d+)$/);
     if (legacy)
         s = `MLA${legacy[1]}`;
-    // Solo números -> asumimos sitio AR por compatibilidad previa
-    if (/^\d+$/.test(s))
-        s = `MLA${s}`;
+    // Solo números: se resolverá en candidates con múltiples sitios.
     return s;
 }
 /** Genera candidatos de itemId para tolerar formatos no estándar (ej. MLAU... -> MLA...). */
@@ -97,6 +95,11 @@ function mercadoLibreItemIdCandidates(raw) {
     const base = normalizeMercadoLibreItemId(raw);
     if (!base)
         return [];
+    // Si llega solo el número, intentar los sitios más comunes.
+    if (/^\d+$/.test(base)) {
+        const sites = ['MLU', 'MLA', 'MLB', 'MLM', 'MCO', 'MLC', 'MPE', 'MEC', 'MLV'];
+        return sites.map((site) => `${site}${base}`);
+    }
     const out = [base];
     const m = base.match(/^(ML[A-Z]{2,6})(\d+)$/);
     if (m) {
