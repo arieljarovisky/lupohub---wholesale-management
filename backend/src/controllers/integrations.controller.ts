@@ -64,6 +64,43 @@ function mercadoLibreItemIdCandidates(raw: unknown): string[] {
   return Array.from(new Set(out.filter(Boolean)));
 }
 
+/** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
+async function resolveMercadoLibreCatalogProductItems(productId: string, accessToken: string): Promise<string[]> {
+  try {
+    const res = await axios.get(
+      `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`,
+      {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        validateStatus: () => true
+      }
+    );
+    if (res.status >= 400 || !res.data) return [];
+
+    const data = res.data as any;
+    const rows: any[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.results)
+        ? data.results
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+    const itemIds = rows
+      .map((row: any) => {
+        if (typeof row === 'string') return row;
+        if (row?.id) return row.id;
+        if (row?.item_id) return row.item_id;
+        if (row?.item?.id) return row.item.id;
+        return '';
+      })
+      .filter(Boolean);
+
+    return Array.from(new Set(itemIds.flatMap((id: string) => mercadoLibreItemIdCandidates(id))));
+  } catch {
+    return [];
+  }
+}
+
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 async function putTnVariantWithRetry(
   url: string,
@@ -3065,6 +3102,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
     let item: any = null;
     let resolvedItemId = '';
+    const triedCandidates = [...candidates];
     for (const candidate of candidates) {
       try {
         const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
@@ -3079,8 +3117,27 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         // probar siguiente candidato
       }
     }
+    // Si no se encontró como item directo, intentar tratarlo como product/catalog ID (/p/MLA...).
     if (!item || item.error) {
-      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: candidates });
+      const catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
+      for (const candidate of catalogItemCandidates) {
+        if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          if (itemRes?.data && !itemRes.data.error) {
+            item = itemRes.data;
+            resolvedItemId = candidate;
+            break;
+          }
+        } catch {
+          // probar siguiente candidato
+        }
+      }
+    }
+    if (!item || item.error) {
+      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
     }
     if (item.variations && item.variations.length > 0) {
       const variations = item.variations.map((v: any) => {
