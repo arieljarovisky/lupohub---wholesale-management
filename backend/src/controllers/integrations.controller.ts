@@ -18,6 +18,32 @@ const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DE
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+/** Normaliza entradas de publicación ML (ID directo, URL o formato con guion, ej. MLAU-123). */
+function normalizeMercadoLibreItemId(raw: unknown): string {
+  let s = (raw ?? '').toString().trim();
+  if (!s) return '';
+  try { s = decodeURIComponent(s); } catch {}
+  s = s.replace(/\s+/g, '');
+
+  // Si pegan URL, extraer token tipo MLA123 / MLAU-123
+  if (/^https?:\/\//i.test(s)) {
+    const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+    if (m?.[1]) s = m[1];
+  }
+
+  s = s.toUpperCase();
+  // Permitir "MLAU-123456" -> "MLAU123456"
+  const mDash = s.match(/^(ML[A-Z]{0,5})-(\d+)$/);
+  if (mDash) s = `${mDash[1]}${mDash[2]}`;
+  // Compat histórico: "ML-123456" -> "MLA123456"
+  const legacy = s.match(/^ML-(\d+)$/);
+  if (legacy) s = `MLA${legacy[1]}`;
+  // Solo números -> asumimos sitio AR por compatibilidad previa
+  if (/^\d+$/.test(s)) s = `MLA${s}`;
+
+  return s;
+}
+
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 async function putTnVariantWithRetry(
   url: string,
@@ -3010,8 +3036,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     if (!itemId) {
       return res.status(400).json({ message: 'Falta itemId' });
     }
-    itemId = String(itemId).trim();
-    if (/^ML\-/i.test(itemId)) itemId = itemId.replace(/^ML\-/i, '');
+    itemId = normalizeMercadoLibreItemId(itemId);
     if (!itemId) return res.status(400).json({ message: 'ID de publicación ML inválido' });
 
     const mlToken = await getValidMLToken();
@@ -3174,8 +3199,8 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
   try {
     const { itemId, itemIds } = req.body || {};
     const idsToImport: string[] = Array.isArray(itemIds) && itemIds.length > 0
-      ? itemIds.map((id: any) => String(id).trim()).filter(Boolean)
-      : itemId != null && itemId !== '' ? [String(itemId).trim()] : [];
+      ? itemIds.map((id: any) => normalizeMercadoLibreItemId(id)).filter(Boolean)
+      : itemId != null && itemId !== '' ? [normalizeMercadoLibreItemId(itemId)] : [];
     if (idsToImport.length === 0) return res.status(400).json({ message: 'Falta itemId o itemIds' });
 
     const mlToken = await getValidMLToken();
