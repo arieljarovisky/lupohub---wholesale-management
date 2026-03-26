@@ -2886,7 +2886,14 @@ function mlNormalizeTitle(title: string): string {
 
 /** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
 function mlBaseTitle(title: string): string {
-  const t = mlNormalizeTitle(title);
+  let t = mlNormalizeTitle(title);
+  // Algunos títulos traen sufijos de publicación (p.ej. "Sin cuotas") que rompen el
+  // agrupado por color/talle. Esto los elimina para recuperar el "título base".
+  t = t
+    .replace(/(?:^|\s)(?:sin|s\/c)\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .replace(/(?:^|\s)con\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .replace(/(?:^|\s)\d+\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .trim();
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length <= 1) return t;
   const last = words[words.length - 1];
@@ -2904,13 +2911,24 @@ function mlBaseTitle(title: string): string {
 
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title: string): { color: string; size: string } {
-  const words = mlNormalizeTitle(title).split(/\s+/).filter(Boolean);
+  let t = mlNormalizeTitle(title);
+  t = t
+    .replace(/(?:^|\s)(?:sin|s\/c)\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .replace(/(?:^|\s)con\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .replace(/(?:^|\s)\d+\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
+    .trim();
+
+  const words = t.split(/\s+/).filter(Boolean);
   const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
   const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
   if (words.length >= 2 && sizeLike.test(words[words.length - 1])) {
     const size = words[words.length - 1];
     const color = colorLike.test(words[words.length - 2]) ? words[words.length - 2] : '';
     return { color, size };
+  }
+  // Si el último token es color pero no hay talle, devolver color y un talle vacío.
+  if (words.length >= 1 && colorLike.test(words[words.length - 1])) {
+    return { color: words[words.length - 1] || '', size: '' };
   }
   if (words.length >= 1) return { color: '', size: words[words.length - 1] || '' };
   return { color: '', size: '' };
