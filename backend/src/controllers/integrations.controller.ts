@@ -3102,6 +3102,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
     let item: any = null;
     let resolvedItemId = '';
+    let catalogItemCandidates: string[] = [];
     const triedCandidates = [...candidates];
     for (const candidate of candidates) {
       try {
@@ -3119,7 +3120,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
     // Si no se encontró como item directo, intentar tratarlo como product/catalog ID (/p/MLA...).
     if (!item || item.error) {
-      const catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
+      catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
       for (const candidate of catalogItemCandidates) {
         if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
         try {
@@ -3161,6 +3162,50 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         };
       });
       return res.json({ variations, singleProduct: false, itemId: item.id, requestedItemId: String(req.params.itemId || ''), resolvedItemId });
+    }
+    // Caso catálogo: no hay item.variations pero sí múltiples items hijos (cada uno una "variante").
+    if (catalogItemCandidates.length > 1) {
+      const toAttrArray = (x: any) => (Array.isArray(x) ? x : []);
+      const fromAttrs = (attrs: any[], ids: string[]) => {
+        const wanted = ids.map(v => v.toUpperCase());
+        const hit = attrs.find((a: any) => wanted.includes((a?.id || '').toString().toUpperCase()));
+        return (hit?.value_name ?? hit?.value ?? '').toString().trim();
+      };
+      const byItemId: Record<string, any> = {};
+      for (const candidate of catalogItemCandidates.slice(0, 120)) {
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          const d = itemRes?.data;
+          if (d?.id && !byItemId[d.id]) byItemId[d.id] = d;
+        } catch {
+          // ignorar item inválido y seguir
+        }
+      }
+      const catalogVariations = Object.values(byItemId).map((it: any) => {
+        const attrs = toAttrArray(it.attributes);
+        const sku = (it.seller_sku ?? it.seller_custom_field ?? fromAttrs(attrs, ['SELLER_SKU'])).toString().trim();
+        const color = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
+        const size = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+        return {
+          variationId: it.id,
+          sku,
+          color,
+          size,
+          stock: it.available_quantity || 0
+        };
+      });
+      if (catalogVariations.length > 1) {
+        return res.json({
+          variations: catalogVariations,
+          singleProduct: false,
+          itemId: item.id,
+          requestedItemId: String(req.params.itemId || ''),
+          resolvedItemId,
+          resolvedFromCatalog: true
+        });
+      }
     }
     // Sin variaciones: producto único
     return res.json({
