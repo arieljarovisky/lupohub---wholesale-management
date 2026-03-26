@@ -44,6 +44,23 @@ function normalizeMercadoLibreItemId(raw: unknown): string {
   return s;
 }
 
+/** Genera candidatos de itemId para tolerar formatos no estándar (ej. MLAU... -> MLA...). */
+function mercadoLibreItemIdCandidates(raw: unknown): string[] {
+  const base = normalizeMercadoLibreItemId(raw);
+  if (!base) return [];
+  const out: string[] = [base];
+  const m = base.match(/^(ML[A-Z]{2,6})(\d+)$/);
+  if (m) {
+    const prefix = m[1];
+    const num = m[2];
+    // Formato canónico ML + 1 letra de sitio (MLA, MLB, MLU, ...)
+    if (prefix.length > 3) out.push(`${prefix.slice(0, 3)}${num}`);
+    // Caso visto en producción: MLAU######## -> MLA########
+    if (prefix === 'MLAU') out.push(`MLA${num}`);
+  }
+  return Array.from(new Set(out.filter(Boolean)));
+}
+
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 async function putTnVariantWithRetry(
   url: string,
@@ -3036,19 +3053,31 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     if (!itemId) {
       return res.status(400).json({ message: 'Falta itemId' });
     }
-    itemId = normalizeMercadoLibreItemId(itemId);
-    if (!itemId) return res.status(400).json({ message: 'ID de publicación ML inválido' });
+    const candidates = mercadoLibreItemIdCandidates(itemId);
+    if (candidates.length === 0) return res.status(400).json({ message: 'ID de publicación ML inválido' });
 
     const mlToken = await getValidMLToken();
     if (!mlToken) {
       return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
     }
-    const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
-      headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-    });
-    const item = itemRes.data;
+    let item: any = null;
+    let resolvedItemId = '';
+    for (const candidate of candidates) {
+      try {
+        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        });
+        if (itemRes?.data && !itemRes.data.error) {
+          item = itemRes.data;
+          resolvedItemId = candidate;
+          break;
+        }
+      } catch {
+        // probar siguiente candidato
+      }
+    }
     if (!item || item.error) {
-      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: candidates });
     }
     if (item.variations && item.variations.length > 0) {
       const variations = item.variations.map((v: any) => {
@@ -3071,7 +3100,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
           stock: v.available_quantity || 0
         };
       });
-      return res.json({ variations, singleProduct: false, itemId: item.id });
+      return res.json({ variations, singleProduct: false, itemId: item.id, requestedItemId: String(req.params.itemId || ''), resolvedItemId });
     }
     // Sin variaciones: producto único
     return res.json({
@@ -3083,7 +3112,9 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         stock: item.available_quantity || 0
       }],
       singleProduct: true,
-      itemId: item.id
+      itemId: item.id,
+      requestedItemId: String(req.params.itemId || ''),
+      resolvedItemId
     });
   } catch (error: any) {
     const status = error.response?.status;
@@ -3199,8 +3230,8 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
   try {
     const { itemId, itemIds } = req.body || {};
     const idsToImport: string[] = Array.isArray(itemIds) && itemIds.length > 0
-      ? itemIds.map((id: any) => normalizeMercadoLibreItemId(id)).filter(Boolean)
-      : itemId != null && itemId !== '' ? [normalizeMercadoLibreItemId(itemId)] : [];
+      ? itemIds.flatMap((id: any) => mercadoLibreItemIdCandidates(id)).filter(Boolean)
+      : itemId != null && itemId !== '' ? mercadoLibreItemIdCandidates(itemId) : [];
     if (idsToImport.length === 0) return res.status(400).json({ message: 'Falta itemId o itemIds' });
 
     const mlToken = await getValidMLToken();
@@ -3218,19 +3249,17 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
       }
     }
 
-    const fetchOne = async (itemIdToFetch: string): Promise<any> => {
-      let itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
-        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-      }).catch(() => null);
-      if ((!itemRes || itemRes.status !== 200) && /^\d+$/.test(itemIdToFetch)) {
-        itemIdToFetch = `MLA${itemIdToFetch}`;
-        itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
+    const fetchOne = async (rawItemId: string): Promise<any> => {
+      const candidates = mercadoLibreItemIdCandidates(rawItemId);
+      for (const itemIdToFetch of candidates) {
+        const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
           headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
         }).catch(() => null);
+        if (itemRes && itemRes.status === 200 && itemRes.data && !itemRes.data.error) {
+          return itemRes.data;
+        }
       }
-      if (!itemRes || itemRes.status !== 200) return null;
-      const item = itemRes.data;
-      return item?.error ? null : item;
+      return null;
     };
 
     if (isMultiItem) {
