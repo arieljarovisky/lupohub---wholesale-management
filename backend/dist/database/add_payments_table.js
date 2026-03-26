@@ -1,0 +1,50 @@
+"use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.addPaymentsTable = addPaymentsTable;
+const db_1 = require("./db");
+/** Tabla de pagos/recibos de clientes (cuenta corriente). */
+function addPaymentsTable() {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log('[DB] Verificando tabla payments...');
+        try {
+            const row = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'payments'`);
+            const exists = Number((row === null || row === void 0 ? void 0 : row.cnt) || 0) > 0;
+            if (exists) {
+                console.log('[DB] payments ya existe');
+                return;
+            }
+            yield (0, db_1.execute)(`
+      CREATE TABLE payments (
+        id VARCHAR(36) PRIMARY KEY,
+        customer_id VARCHAR(36) NOT NULL,
+        seller_id VARCHAR(36) NULL,
+        order_id VARCHAR(36) NULL,
+        invoice_id VARCHAR(36) NULL,
+        receipt_number VARCHAR(100) NOT NULL,
+        date DATE NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        notes TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_payments_customer_date (customer_id, date),
+        INDEX idx_payments_invoice (invoice_id),
+        INDEX idx_payments_order (order_id),
+        INDEX idx_payments_seller (seller_id)
+      )
+    `);
+            console.log('[DB] Tabla payments creada');
+        }
+        catch (e) {
+            console.error('[DB] Error creando tabla payments:', e === null || e === void 0 ? void 0 : e.message);
+        }
+    });
+}

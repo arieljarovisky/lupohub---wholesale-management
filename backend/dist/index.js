@@ -31,6 +31,7 @@ const price_lists_routes_1 = __importDefault(require("./routes/price_lists.route
 const catalogs_routes_1 = __importDefault(require("./routes/catalogs.routes"));
 const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
 const afip_routes_1 = __importDefault(require("./routes/afip.routes"));
+const payments_routes_1 = __importDefault(require("./routes/payments.routes"));
 const add_stock_movements_table_1 = require("./database/add_stock_movements_table");
 const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
@@ -51,6 +52,8 @@ const add_price_lists_1 = require("./database/add_price_lists");
 const add_catalogs_table_1 = require("./database/add_catalogs_table");
 const add_remitente_table_1 = require("./database/add_remitente_table");
 const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
+const add_payments_table_1 = require("./database/add_payments_table");
+const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -99,6 +102,7 @@ app.use('/api/price-lists', price_lists_routes_1.default);
 app.use('/api/catalogs', catalogs_routes_1.default);
 app.use('/api/afip', afip_routes_1.default);
 app.use('/api/billing', billing_routes_1.default);
+app.use('/api/payments', payments_routes_1.default);
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err, _req, res, _next) => {
     const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
@@ -141,6 +145,8 @@ function initDatabase() {
                 yield (0, add_catalogs_table_1.addCatalogsTable)();
                 yield (0, add_remitente_table_1.addRemitenteTable)();
                 yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
+                yield (0, add_payments_table_1.addPaymentsTable)();
+                yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

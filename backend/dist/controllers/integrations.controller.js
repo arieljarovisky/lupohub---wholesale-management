@@ -62,6 +62,98 @@ const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DE
 /** Máximo de publicaciones a traer al sincronizar con Mercado Libre (evitar timeout). Configurable con ML_SYNC_MAX_ITEMS (default 5000). */
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** Normaliza entradas de publicación ML (ID directo, URL o formato con guion, ej. MLAU-123). */
+function normalizeMercadoLibreItemId(raw) {
+    let s = (raw !== null && raw !== void 0 ? raw : '').toString().trim();
+    if (!s)
+        return '';
+    try {
+        s = decodeURIComponent(s);
+    }
+    catch (_a) { }
+    s = s.replace(/\s+/g, '');
+    // Si pegan URL, extraer token tipo MLA123 / MLAU-123
+    if (/^https?:\/\//i.test(s)) {
+        const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+        if (m === null || m === void 0 ? void 0 : m[1])
+            s = m[1];
+    }
+    s = s.toUpperCase();
+    // Permitir "MLAU-123456" -> "MLAU123456"
+    const mDash = s.match(/^(ML[A-Z]{0,5})-(\d+)$/);
+    if (mDash)
+        s = `${mDash[1]}${mDash[2]}`;
+    // Compat histórico: "ML-123456" -> "MLA123456"
+    const legacy = s.match(/^ML-(\d+)$/);
+    if (legacy)
+        s = `MLA${legacy[1]}`;
+    // Solo números -> asumimos sitio AR por compatibilidad previa
+    if (/^\d+$/.test(s))
+        s = `MLA${s}`;
+    return s;
+}
+/** Genera candidatos de itemId para tolerar formatos no estándar (ej. MLAU... -> MLA...). */
+function mercadoLibreItemIdCandidates(raw) {
+    const base = normalizeMercadoLibreItemId(raw);
+    if (!base)
+        return [];
+    const out = [base];
+    const m = base.match(/^(ML[A-Z]{2,6})(\d+)$/);
+    if (m) {
+        const prefix = m[1];
+        const num = m[2];
+        // Formato canónico ML + 1 letra de sitio (MLA, MLB, MLU, ...)
+        if (prefix.length > 3)
+            out.push(`${prefix.slice(0, 3)}${num}`);
+        // Si vino con un prefijo "expandido" de 4+ letras, probar también ML + última letra.
+        // Ej: MLAU123 -> MLU123 (caso real detectado en producción).
+        if (prefix.length > 3)
+            out.push(`ML${prefix[prefix.length - 1]}${num}`);
+        // Caso visto en producción: MLAU######## -> MLA########
+        if (prefix === 'MLAU')
+            out.push(`MLA${num}`);
+    }
+    return Array.from(new Set(out.filter(Boolean)));
+}
+/** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
+function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const res = yield axios_1.default.get(`https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+                validateStatus: () => true
+            });
+            if (res.status >= 400 || !res.data)
+                return [];
+            const data = res.data;
+            const rows = Array.isArray(data)
+                ? data
+                : Array.isArray(data === null || data === void 0 ? void 0 : data.results)
+                    ? data.results
+                    : Array.isArray(data === null || data === void 0 ? void 0 : data.items)
+                        ? data.items
+                        : [];
+            const itemIds = rows
+                .map((row) => {
+                var _a;
+                if (typeof row === 'string')
+                    return row;
+                if (row === null || row === void 0 ? void 0 : row.id)
+                    return row.id;
+                if (row === null || row === void 0 ? void 0 : row.item_id)
+                    return row.item_id;
+                if ((_a = row === null || row === void 0 ? void 0 : row.item) === null || _a === void 0 ? void 0 : _a.id)
+                    return row.item.id;
+                return '';
+            })
+                .filter(Boolean);
+            return Array.from(new Set(itemIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
+        }
+        catch (_a) {
+            return [];
+        }
+    });
+}
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 function putTnVariantWithRetry(url_1, body_1, headers_1) {
     return __awaiter(this, arguments, void 0, function* (url, body, headers, maxRetries = 2) {
@@ -853,20 +945,21 @@ exports.syncProductsFromMercadoLibre = syncProductsFromMercadoLibre;
 // ==================== WEBHOOKS ====================
 // Webhook de Tienda Nube para órdenes/ventas
 const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
     try {
-        const { event, store_id } = req.body;
-        console.log(`[TN Webhook] Evento: ${event}, Store: ${store_id}`);
+        const event = ((_d = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.event) !== null && _b !== void 0 ? _b : req.headers['x-linkedstore-topic']) !== null && _c !== void 0 ? _c : req.headers['x-tiendanube-topic']) !== null && _d !== void 0 ? _d : '').toString();
+        const storeIdFromReq = ((_h = (_g = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.store_id) !== null && _f !== void 0 ? _f : req.headers['x-linkedstore-id']) !== null && _g !== void 0 ? _g : req.headers['x-tiendanube-store-id']) !== null && _h !== void 0 ? _h : '').toString();
+        console.log(`[TN Webhook] Evento: ${event}, Store: ${storeIdFromReq || '-'}`);
         // Verificar que el store_id coincide (comparar como string por si viene número de la DB o del body)
         const integration = yield (0, db_1.get)(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
-        const storedStoreId = (_b = ((_a = integration === null || integration === void 0 ? void 0 : integration.store_id) !== null && _a !== void 0 ? _a : integration === null || integration === void 0 ? void 0 : integration.user_id)) === null || _b === void 0 ? void 0 : _b.toString();
-        if (!integration || storedStoreId !== (store_id != null ? String(store_id) : '')) {
-            console.log('[TN Webhook] Store ID no coincide (recibido:', store_id, ', guardado:', storedStoreId, '), ignorando');
+        const storedStoreId = (_k = ((_j = integration === null || integration === void 0 ? void 0 : integration.store_id) !== null && _j !== void 0 ? _j : integration === null || integration === void 0 ? void 0 : integration.user_id)) === null || _k === void 0 ? void 0 : _k.toString();
+        if (!integration || storedStoreId !== storeIdFromReq) {
+            console.log('[TN Webhook] Store ID no coincide (recibido:', storeIdFromReq, ', guardado:', storedStoreId, '), ignorando');
             return res.status(200).json({ received: true, ignored: true });
         }
         // Procesar solo cuando la orden se paga (descontar stock). Responder 200 enseguida: TN tiene timeout de 3s y reintentos si no hay 2XX.
         if (event === 'order/paid') {
-            const orderId = (_h = (_f = (_d = (_c = req.body.id) !== null && _c !== void 0 ? _c : req.body.order_id) !== null && _d !== void 0 ? _d : (_e = req.body.order) === null || _e === void 0 ? void 0 : _e.id) !== null && _f !== void 0 ? _f : (_g = req.body.data) === null || _g === void 0 ? void 0 : _g.id) !== null && _h !== void 0 ? _h : (_j = req.body.data) === null || _j === void 0 ? void 0 : _j.order_id;
+            const orderId = (_r = (_p = (_m = (_l = req.body.id) !== null && _l !== void 0 ? _l : req.body.order_id) !== null && _m !== void 0 ? _m : (_o = req.body.order) === null || _o === void 0 ? void 0 : _o.id) !== null && _p !== void 0 ? _p : (_q = req.body.data) === null || _q === void 0 ? void 0 : _q.id) !== null && _r !== void 0 ? _r : (_s = req.body.data) === null || _s === void 0 ? void 0 : _s.order_id;
             if (orderId) {
                 processTiendaNubeOrder(String(orderId)).catch((err) => console.error('[TN Order] Error procesando orden en background:', (err === null || err === void 0 ? void 0 : err.message) || err));
             }
@@ -876,7 +969,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         // Al cancelar una orden, restaurar el stock que se había descontado
         if (event === 'order/cancelled') {
-            const orderId = (_q = (_o = (_l = (_k = req.body.id) !== null && _k !== void 0 ? _k : req.body.order_id) !== null && _l !== void 0 ? _l : (_m = req.body.order) === null || _m === void 0 ? void 0 : _m.id) !== null && _o !== void 0 ? _o : (_p = req.body.data) === null || _p === void 0 ? void 0 : _p.id) !== null && _q !== void 0 ? _q : (_r = req.body.data) === null || _r === void 0 ? void 0 : _r.order_id;
+            const orderId = (_y = (_w = (_u = (_t = req.body.id) !== null && _t !== void 0 ? _t : req.body.order_id) !== null && _u !== void 0 ? _u : (_v = req.body.order) === null || _v === void 0 ? void 0 : _v.id) !== null && _w !== void 0 ? _w : (_x = req.body.data) === null || _x === void 0 ? void 0 : _x.id) !== null && _y !== void 0 ? _y : (_z = req.body.data) === null || _z === void 0 ? void 0 : _z.order_id;
             if (orderId) {
                 processTiendaNubeOrderCancelled(String(orderId)).catch((err) => console.error('[TN Order] Error restaurando stock por cancelación:', (err === null || err === void 0 ? void 0 : err.message) || err));
             }
@@ -1141,19 +1234,35 @@ const syncTiendaNubeOrdersFromDate = (req, res) => __awaiter(void 0, void 0, voi
 exports.syncTiendaNubeOrdersFromDate = syncTiendaNubeOrdersFromDate;
 // Webhook de Mercado Libre para órdenes/ventas
 const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     try {
-        const { topic, resource, user_id } = req.body;
-        console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resource}`);
+        const topic = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.topic) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.topic) !== null && _d !== void 0 ? _d : '').toString();
+        const resourceRaw = ((_h = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.resource) !== null && _f !== void 0 ? _f : (_g = req.query) === null || _g === void 0 ? void 0 : _g.resource) !== null && _h !== void 0 ? _h : '').toString();
+        const userIdRaw = ((_m = (_k = (_j = req.body) === null || _j === void 0 ? void 0 : _j.user_id) !== null && _k !== void 0 ? _k : (_l = req.query) === null || _l === void 0 ? void 0 : _l.user_id) !== null && _m !== void 0 ? _m : '').toString();
+        console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resourceRaw}, User: ${userIdRaw || '-'}`);
         // Verificar que el user_id coincide
         const integration = yield (0, db_1.get)(`SELECT user_id FROM integrations WHERE platform = 'mercadolibre'`);
-        if (!integration || integration.user_id !== (user_id === null || user_id === void 0 ? void 0 : user_id.toString())) {
+        if (!integration || ((_o = integration.user_id) === null || _o === void 0 ? void 0 : _o.toString()) !== userIdRaw) {
             console.log('[ML Webhook] User ID no coincide, ignorando');
             return res.status(200).json({ received: true, ignored: true });
         }
         // Procesar según el tipo de notificación
-        if (topic === 'orders_v2') {
-            const orderId = resource.replace('/orders/', '');
-            yield processMercadoLibreOrder(orderId);
+        if (topic === 'orders_v2' || topic === 'orders') {
+            const orderId = (() => {
+                if (!resourceRaw)
+                    return '';
+                const m = resourceRaw.match(/\/orders\/(\d+)/);
+                if (m === null || m === void 0 ? void 0 : m[1])
+                    return m[1];
+                const parts = resourceRaw.split('/').filter(Boolean);
+                return parts.length > 0 ? parts[parts.length - 1] : '';
+            })();
+            if (orderId) {
+                yield processMercadoLibreOrder(orderId);
+            }
+            else {
+                console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
+            }
         }
         res.status(200).json({ received: true });
     }
@@ -1167,6 +1276,12 @@ exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
     try {
+        // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
+        const alreadyProcessed = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`, [`Orden ML: ${orderId}`]);
+        if (alreadyProcessed) {
+            console.log(`[ML Order] Orden ${orderId} ya procesada, omitiendo`);
+            return;
+        }
         const mlToken = yield getValidMLToken();
         if (!mlToken)
             return;
@@ -2841,21 +2956,55 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         if (!itemId) {
             return res.status(400).json({ message: 'Falta itemId' });
         }
-        itemId = String(itemId).trim();
-        if (/^ML\-/i.test(itemId))
-            itemId = itemId.replace(/^ML\-/i, '');
-        if (!itemId)
+        const candidates = mercadoLibreItemIdCandidates(itemId);
+        if (candidates.length === 0)
             return res.status(400).json({ message: 'ID de publicación ML inválido' });
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre' });
         }
-        const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
-            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        });
-        const item = itemRes.data;
+        let item = null;
+        let resolvedItemId = '';
+        let catalogItemCandidates = [];
+        const triedCandidates = [...candidates];
+        for (const candidate of candidates) {
+            try {
+                const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+                    headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                });
+                if ((itemRes === null || itemRes === void 0 ? void 0 : itemRes.data) && !itemRes.data.error) {
+                    item = itemRes.data;
+                    resolvedItemId = candidate;
+                    break;
+                }
+            }
+            catch (_f) {
+                // probar siguiente candidato
+            }
+        }
+        // Si no se encontró como item directo, intentar tratarlo como product/catalog ID (/p/MLA...).
         if (!item || item.error) {
-            return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre' });
+            catalogItemCandidates = yield resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
+            for (const candidate of catalogItemCandidates) {
+                if (!triedCandidates.includes(candidate))
+                    triedCandidates.push(candidate);
+                try {
+                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+                        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                    });
+                    if ((itemRes === null || itemRes === void 0 ? void 0 : itemRes.data) && !itemRes.data.error) {
+                        item = itemRes.data;
+                        resolvedItemId = candidate;
+                        break;
+                    }
+                }
+                catch (_g) {
+                    // probar siguiente candidato
+                }
+            }
+        }
+        if (!item || item.error) {
+            return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
         }
         if (item.variations && item.variations.length > 0) {
             const variations = item.variations.map((v) => {
@@ -2881,7 +3030,55 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     stock: v.available_quantity || 0
                 };
             });
-            return res.json({ variations, singleProduct: false, itemId: item.id });
+            return res.json({ variations, singleProduct: false, itemId: item.id, requestedItemId: String(req.params.itemId || ''), resolvedItemId });
+        }
+        // Caso catálogo: no hay item.variations pero sí múltiples items hijos (cada uno una "variante").
+        if (catalogItemCandidates.length > 1) {
+            const toAttrArray = (x) => (Array.isArray(x) ? x : []);
+            const fromAttrs = (attrs, ids) => {
+                var _a, _b;
+                const wanted = ids.map(v => v.toUpperCase());
+                const hit = attrs.find((a) => wanted.includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
+                return ((_b = (_a = hit === null || hit === void 0 ? void 0 : hit.value_name) !== null && _a !== void 0 ? _a : hit === null || hit === void 0 ? void 0 : hit.value) !== null && _b !== void 0 ? _b : '').toString().trim();
+            };
+            const byItemId = {};
+            for (const candidate of catalogItemCandidates.slice(0, 120)) {
+                try {
+                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+                        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                    });
+                    const d = itemRes === null || itemRes === void 0 ? void 0 : itemRes.data;
+                    if ((d === null || d === void 0 ? void 0 : d.id) && !byItemId[d.id])
+                        byItemId[d.id] = d;
+                }
+                catch (_h) {
+                    // ignorar item inválido y seguir
+                }
+            }
+            const catalogVariations = Object.values(byItemId).map((it) => {
+                var _a, _b;
+                const attrs = toAttrArray(it.attributes);
+                const sku = ((_b = (_a = it.seller_sku) !== null && _a !== void 0 ? _a : it.seller_custom_field) !== null && _b !== void 0 ? _b : fromAttrs(attrs, ['SELLER_SKU'])).toString().trim();
+                const color = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
+                const size = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+                return {
+                    variationId: it.id,
+                    sku,
+                    color,
+                    size,
+                    stock: it.available_quantity || 0
+                };
+            });
+            if (catalogVariations.length > 1) {
+                return res.json({
+                    variations: catalogVariations,
+                    singleProduct: false,
+                    itemId: item.id,
+                    requestedItemId: String(req.params.itemId || ''),
+                    resolvedItemId,
+                    resolvedFromCatalog: true
+                });
+            }
         }
         // Sin variaciones: producto único
         return res.json({
@@ -2893,7 +3090,9 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     stock: item.available_quantity || 0
                 }],
             singleProduct: true,
-            itemId: item.id
+            itemId: item.id,
+            requestedItemId: String(req.params.itemId || ''),
+            resolvedItemId
         });
     }
     catch (error) {
@@ -3018,8 +3217,8 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
     try {
         const { itemId, itemIds } = req.body || {};
         const idsToImport = Array.isArray(itemIds) && itemIds.length > 0
-            ? itemIds.map((id) => String(id).trim()).filter(Boolean)
-            : itemId != null && itemId !== '' ? [String(itemId).trim()] : [];
+            ? itemIds.flatMap((id) => mercadoLibreItemIdCandidates(id)).filter(Boolean)
+            : itemId != null && itemId !== '' ? mercadoLibreItemIdCandidates(itemId) : [];
         if (idsToImport.length === 0)
             return res.status(400).json({ message: 'Falta itemId o itemIds' });
         const mlToken = yield getValidMLToken();
@@ -3035,20 +3234,17 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
                 }
             }
         }
-        const fetchOne = (itemIdToFetch) => __awaiter(void 0, void 0, void 0, function* () {
-            let itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
-                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-            }).catch(() => null);
-            if ((!itemRes || itemRes.status !== 200) && /^\d+$/.test(itemIdToFetch)) {
-                itemIdToFetch = `MLA${itemIdToFetch}`;
-                itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
+        const fetchOne = (rawItemId) => __awaiter(void 0, void 0, void 0, function* () {
+            const candidates = mercadoLibreItemIdCandidates(rawItemId);
+            for (const itemIdToFetch of candidates) {
+                const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemIdToFetch}?include_attributes=all`, {
                     headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
                 }).catch(() => null);
+                if (itemRes && itemRes.status === 200 && itemRes.data && !itemRes.data.error) {
+                    return itemRes.data;
+                }
             }
-            if (!itemRes || itemRes.status !== 200)
-                return null;
-            const item = itemRes.data;
-            return (item === null || item === void 0 ? void 0 : item.error) ? null : item;
+            return null;
         });
         if (isMultiItem) {
             const items = yield Promise.all(idsToImport.map(id => fetchOne(id)));
