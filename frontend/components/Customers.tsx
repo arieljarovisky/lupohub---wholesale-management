@@ -39,6 +39,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [onlyPendingDispatchInCustomer, setOnlyPendingDispatchInCustomer] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [importingExcel, setImportingExcel] = useState(false);
   const [updatingCuit, setUpdatingCuit] = useState(false);
@@ -121,6 +122,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       case OrderStatus.CANCELLED: return 'bg-red-900/40 text-red-300 border border-red-800';
       default: return 'bg-slate-700 text-slate-400';
     }
+  };
+
+  const getPendingUnitsForOrder = (order: Order) => {
+    return (order.items || []).reduce((sum, item) => {
+      const qty = Number(item.quantity || 0);
+      const picked = Number(item.picked || 0);
+      const pending = Math.max(0, qty - picked);
+      return sum + pending;
+    }, 0);
   };
 
   const handleSave = () => {
@@ -304,6 +314,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   // 2. Customer Detail View (Drill down Level 1)
   if (selectedCustomer) {
     const stats = getCustomerStats(selectedCustomer.id);
+    const visibleOrders = onlyPendingDispatchInCustomer
+      ? stats.orders.filter(o => getPendingUnitsForOrder(o) > 0)
+      : stats.orders;
 
     const editModal = (isCreating || editingCustomer) && (
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -770,15 +783,56 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         {/* Orders List Section */}
         <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-white flex items-center gap-2">
-                 <ShoppingBag size={20} className="text-blue-500"/> Historial de Pedidos
-              </h3>
-              <span className="text-xs font-bold text-slate-500 bg-slate-800 px-3 py-1 rounded-full">{stats.orders.length} pedidos</span>
+              <div className="flex items-center gap-3">
+                <h3 className="font-bold text-white flex items-center gap-2">
+                   <ShoppingBag size={20} className="text-blue-500"/> Historial de Pedidos
+                </h3>
+                <span className="text-xs font-bold text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
+                  {visibleOrders.length} / {stats.orders.length} pedidos
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOnlyPendingDispatchInCustomer(v => !v)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${
+                    onlyPendingDispatchInCustomer
+                      ? 'bg-blue-700/30 border-blue-600/50 text-blue-200'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="Filtrar pedidos que todavía tienen unidades pendientes de envío"
+                >
+                  {onlyPendingDispatchInCustomer ? 'Solo con pendientes' : 'Filtrar pendientes'}
+                </button>
+                {(role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedCustomer) return;
+                      try {
+                        const res = await api.clearCustomerDispatchedPendings(selectedCustomer.id);
+                        if ((res.ordersUpdated || 0) > 0 || (res.itemsAdjusted || 0) > 0 || (res.itemsRemoved || 0) > 0) {
+                          showToast('success', `Listo. Pedidos ajustados: ${res.ordersUpdated}. Ítems ajustados: ${res.itemsAdjusted}.`);
+                        } else {
+                          showToast('info', 'No había pendientes para quitar en pedidos despachados.');
+                        }
+                        await onRefreshData?.();
+                      } catch (e: any) {
+                        showToast('error', e?.message || 'No se pudieron quitar pendientes');
+                      }
+                    }}
+                    className="px-3 py-2 bg-amber-700/30 border border-amber-600/50 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-700/50 transition"
+                    title="Quitar pendientes de pedidos despachados de este cliente (deja solo lo efectivamente enviado)"
+                  >
+                    Quitar pendientes despachados
+                  </button>
+                )}
+              </div>
            </div>
            
-           {stats.orders.length > 0 ? (
+           {visibleOrders.length > 0 ? (
              <div className="divide-y divide-slate-800">
-               {stats.orders.map(order => (
+               {visibleOrders.map(order => (
                  <div 
                    key={order.id} 
                    onClick={() => setSelectedOrder(order)}
@@ -799,6 +853,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                              <span className="flex items-center gap-1"><Calendar size={12}/> {order.date}</span>
                              <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
                              <span>{order.items.reduce((a,b) => a + b.quantity, 0)} items</span>
+                             {getPendingUnitsForOrder(order) > 0 && (
+                               <>
+                                 <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
+                                 <span className="text-amber-400 font-bold">{getPendingUnitsForOrder(order)} pendiente(s)</span>
+                               </>
+                             )}
                           </div>
                        </div>
                     </div>

@@ -620,3 +620,91 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send('\uFEFF' + csv);
 };
+
+/** Quita pendientes de pedidos ya despachados para un cliente:
+ *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
+ *  - Elimina renglones con quantity <= 0
+ *  - Recalcula total del pedido
+ */
+export const clearDispatchedPendingsForCustomer = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Sin permisos para quitar pendientes' });
+    }
+
+    const { id: customerId } = req.params;
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const customer = await get('SELECT id, seller_id FROM customers WHERE id = ?', [customerId]);
+    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    if (authUser.role === 'SELLER' && customer.seller_id && customer.seller_id !== authUser.id) {
+      return res.status(403).json({ message: 'Solo podés operar sobre tus clientes' });
+    }
+
+    const dispatchedOrders = await query(
+      `SELECT id FROM orders
+       WHERE customer_id = ?
+         AND status IN ('Despachado', 'DISPATCHED')`,
+      [customerId]
+    );
+    const orderIds = (dispatchedOrders || []).map((o: any) => o.id).filter(Boolean);
+    if (orderIds.length === 0) {
+      return res.json({ message: 'No hay pedidos despachados para ajustar', ordersUpdated: 0, itemsAdjusted: 0, itemsRemoved: 0 });
+    }
+
+    let itemsAdjusted = 0;
+    let itemsRemoved = 0;
+    let ordersUpdated = 0;
+
+    for (const orderId of orderIds) {
+      const beforeAdjust = await get(
+        `SELECT COUNT(*) AS cnt
+         FROM order_items
+         WHERE order_id = ? AND quantity > COALESCE(picked, 0)`,
+        [orderId]
+      );
+      const toAdjust = Number(beforeAdjust?.cnt || 0);
+
+      if (toAdjust > 0) {
+        await execute(
+          `UPDATE order_items
+           SET quantity = COALESCE(picked, 0)
+           WHERE order_id = ? AND quantity > COALESCE(picked, 0)`,
+          [orderId]
+        );
+        itemsAdjusted += toAdjust;
+      }
+
+      const beforeDelete = await get(
+        `SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ? AND quantity <= 0`,
+        [orderId]
+      );
+      const toDelete = Number(beforeDelete?.cnt || 0);
+      if (toDelete > 0) {
+        await execute(`DELETE FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+        itemsRemoved += toDelete;
+      }
+
+      const totalRow = await get(
+        `SELECT COALESCE(SUM(quantity * price_at_moment), 0) AS total
+         FROM order_items
+         WHERE order_id = ?`,
+        [orderId]
+      );
+      await execute(`UPDATE orders SET total = ? WHERE id = ?`, [Number(totalRow?.total || 0), orderId]);
+      if (toAdjust > 0 || toDelete > 0) ordersUpdated++;
+    }
+
+    return res.json({
+      message: 'Pendientes de pedidos despachados ajustados',
+      ordersUpdated,
+      itemsAdjusted,
+      itemsRemoved
+    });
+  } catch (error: any) {
+    console.error('clearDispatchedPendingsForCustomer:', error);
+    res.status(500).json({ message: 'Error quitando pendientes de pedidos despachados' });
+  }
+};

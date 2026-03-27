@@ -256,22 +256,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const updateQuantity = (rowId: string, sizeCode: string, value: number) => {
     setRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
-      const maxQty = r.stockBySize?.[sizeCode];
       let n = Math.max(0, Math.floor(Number(value)) || 0);
-      if (maxQty != null) n = Math.min(n, maxQty);
       return { ...r, quantitiesBySize: { ...r.quantitiesBySize, [sizeCode]: n } };
     }));
   };
 
-  /** Aplicar la misma cantidad a todos los talles de la fila (respetando stock por talle). */
+  /** Aplicar la misma cantidad a todos los talles de la fila. */
   const setRowAllQuantities = (rowId: string, value: number) => {
     const num = Math.max(0, Math.floor(Number(value)) || 0);
     setRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
       const next: Record<string, number> = {};
       for (const sizeCode of Object.keys(r.quantitiesBySize)) {
-        const maxQty = r.stockBySize?.[sizeCode];
-        next[sizeCode] = maxQty != null ? Math.min(num, maxQty) : num;
+        next[sizeCode] = num;
       }
       return { ...r, quantitiesBySize: next };
     }));
@@ -385,18 +382,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const buildOrderPayload = (asDraft: boolean): Order | null => {
     if (!selectedCustomerId || rows.length === 0) return null;
-    const items: Array<{ variantId: string; quantity: number; priceAtMoment: number }> = [];
+    const items: Array<{ variantId: string; quantity: number; priceAtMoment: number; isBackorder: boolean }> = [];
     for (const r of rows) {
       for (const [sizeCode, qty] of Object.entries(r.quantitiesBySize)) {
         if (qty <= 0 || !r.variantBySize[sizeCode]) continue;
-        if (!asDraft) {
-          const stock = r.stockBySize?.[sizeCode];
-          if (stock != null && qty > stock) return null; // validación de stock solo al confirmar
-        }
+        const stock = Number(r.stockBySize?.[sizeCode] ?? 0);
         items.push({
           variantId: r.variantBySize[sizeCode],
           quantity: qty,
-          priceAtMoment: r.price
+          priceAtMoment: r.price,
+          isBackorder: qty > stock
         });
       }
     }
@@ -405,7 +400,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       id: `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
       sellerId: sellerId ?? null,
-      items: items.map(i => ({ ...i, productId: undefined, isBackorder: false })),
+      items: items.map(i => ({ ...i, productId: undefined })),
       total,
       status: asDraft ? OrderStatus.DRAFT : OrderStatus.CONFIRMED,
       date: orderDate
@@ -415,19 +410,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const handleSave = () => {
     const order = buildOrderPayload(false);
     if (!order) {
-      const firstOver = rows.find(r =>
-        Object.entries(r.quantitiesBySize).some(([sizeCode, qty]) => {
-          const stock = r.stockBySize?.[sizeCode];
-          return qty > 0 && stock != null && qty > stock;
-        })
-      );
-      if (firstOver) {
-        const [sizeCode, qty] = Object.entries(firstOver.quantitiesBySize).find(([, q]) => q > 0) || [];
-        const stock = sizeCode ? firstOver.stockBySize?.[sizeCode] : null;
-        showToast('error', `Sin stock suficiente en ${firstOver.productCode} ${firstOver.colorName}${sizeCode ? ` talle ${labelTalle(sizeCode) || sizeCode}. Máx: ${stock}` : ''}`);
-      } else {
-        showToast('error', 'Agregá al menos una cantidad en algún talle.');
-      }
+      showToast('error', 'Agregá al menos una cantidad en algún talle.');
       return;
     }
     onSave(order);
@@ -450,7 +433,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return n;
   }, [rows]);
 
-  /** True si alguna fila pide más de lo que hay en stock (bloquea confirmar). */
+  /** True si alguna fila pide más de lo que hay en stock (se carga como pendiente). */
   const hasExceededStock = useMemo(() => {
     return rows.some(r =>
       Object.entries(r.quantitiesBySize).some(([sizeCode, qty]) => {
@@ -462,11 +445,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const handleSaveRef = useRef<() => void>(() => {});
   handleSaveRef.current = handleSave;
-  /** Atajo: Ctrl+Enter confirma el pedido (solo si no hay cantidades por encima del stock). */
+  /** Atajo: Ctrl+Enter confirma el pedido. */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        if (rows.length > 0 && selectedCustomerId && totalUnits > 0 && !hasExceededStock) {
+        if (rows.length > 0 && selectedCustomerId && totalUnits > 0) {
           e.preventDefault();
           handleSaveRef.current();
         }
@@ -754,7 +737,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               const hasVariant = !!row.variantBySize[s.code];
                               const stock = row.stockBySize?.[s.code];
                               const noStock = stock != null && stock <= 0;
-                              const disabled = !hasVariant || noStock;
+                              const qtyVal = row.quantitiesBySize[s.code] ?? 0;
+                              const exceeds = stock != null && qtyVal > stock;
+                              const disabled = !hasVariant;
                               return (
                                 <td key={s.code} className="py-2 px-1.5">
                                   {disabled ? (
@@ -765,11 +750,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                     <input
                                       type="number"
                                       min={0}
-                                      max={stock != null ? stock : undefined}
                                       value={row.quantitiesBySize[s.code] ?? ''}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
-                                      className="w-full max-w-[52px] h-9 mx-auto block bg-slate-700/80 border border-slate-600 rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
-                                      title={stock != null ? `Máx. ${stock} un.` : undefined}
+                                      className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${
+                                        noStock || exceeds
+                                          ? 'bg-red-950/30 border-red-700/70'
+                                          : 'bg-slate-700/80 border-slate-600'
+                                      }`}
+                                      title={stock != null ? `Stock: ${stock}. Si cargás más, queda pendiente.` : undefined}
                                     />
                                   )}
                                 </td>
@@ -834,7 +822,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
           </div>
           {hasExceededStock && (
-            <p className="text-xs text-amber-400 mb-3">Alguna cantidad supera el stock. Reducí cantidades para confirmar.</p>
+            <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
           )}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
@@ -846,7 +834,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               <FileEdit size={20} /> Guardar borrador
             </button>
             <button
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || hasExceededStock}
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0}
               onClick={handleSave}
               className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
             >

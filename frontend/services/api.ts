@@ -617,6 +617,11 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Quita pendientes de pedidos ya despachados para un cliente (ajusta quantity a picked). */
+  clearCustomerDispatchedPendings: async (customerId: string): Promise<{ message: string; ordersUpdated: number; itemsAdjusted: number; itemsRemoved: number }> => {
+    return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');
+  },
+
   /** Perfil del cliente directo (solo cuando el usuario tiene rol CUSTOMER). */
   getMyCustomer: async (): Promise<Customer | null> => {
     try {
