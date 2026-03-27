@@ -996,6 +996,31 @@ export const api = {
     }, { message: 'Error', totalImported: 0, logs: [] }, 'importSalesHistory');
   },
 
+  // Reprocesar ventas pagadas desde fecha (descuenta stock local de forma idempotente)
+  syncTiendaNubeOrdersFromDate: async (fromDate: string): Promise<{ message: string; fromDate: string; totalOrders: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; fromDate: string; totalOrders: number }>(
+        '/integrations/tiendanube/sync-orders-from-date',
+        'POST',
+        { fromDate },
+        undefined,
+        180000
+      );
+    }, { message: 'Error', fromDate, totalOrders: 0 }, 'syncTiendaNubeOrdersFromDate');
+  },
+
+  syncMercadoLibreOrdersFromDate: async (fromDate: string): Promise<{ message: string; fromDate: string; totalOrders: number }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; fromDate: string; totalOrders: number }>(
+        '/integrations/mercadolibre/sync-orders-from-date',
+        'POST',
+        { fromDate },
+        undefined,
+        180000
+      );
+    }, { message: 'Error', fromDate, totalOrders: 0 }, 'syncMercadoLibreOrdersFromDate');
+  },
+
   // ============ DESPACHOS DE IMPORTACIÓN ============
 
   getDespachos: async (params?: { estado?: string; desde?: string; hasta?: string; limit?: number; offset?: number }): Promise<{ despachos: any[]; total: number }> => {

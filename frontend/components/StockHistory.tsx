@@ -87,6 +87,8 @@ const StockHistory: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [limit, setLimit] = useState(50);
+  const [syncFromDate, setSyncFromDate] = useState('');
+  const [syncingFromDate, setSyncingFromDate] = useState<null | 'ml' | 'tn'>(null);
   const restoreScrollYRef = useRef<number | null>(null);
 
   const fetchMovements = React.useCallback(async (abort?: { current: boolean }) => {
@@ -220,6 +222,31 @@ const StockHistory: React.FC = () => {
     setFilterType('');
     setDateFrom('');
     setDateTo('');
+  };
+
+  const handleSyncOrdersFromDate = async (platform: 'ml' | 'tn') => {
+    const fromDateValue = (syncFromDate || dateFrom || '').trim();
+    if (!fromDateValue || !/^\d{4}-\d{2}-\d{2}$/.test(fromDateValue)) {
+      showToast('error', 'Elegí una fecha válida (YYYY-MM-DD) para reprocesar ventas.');
+      return;
+    }
+
+    setSyncingFromDate(platform);
+    try {
+      const result = platform === 'ml'
+        ? await api.syncMercadoLibreOrdersFromDate(fromDateValue)
+        : await api.syncTiendaNubeOrdersFromDate(fromDateValue);
+
+      showToast(
+        'success',
+        `${platform === 'ml' ? 'Mercado Libre' : 'Tienda Nube'}: ${result.message} Órdenes evaluadas: ${result.totalOrders}.`
+      );
+      fetchMovements();
+    } catch (error: any) {
+      showToast('error', error?.message || 'No se pudo reprocesar ventas desde fecha.');
+    } finally {
+      setSyncingFromDate(null);
+    }
   };
 
   return (
@@ -407,6 +434,38 @@ const StockHistory: React.FC = () => {
               onChange={(e) => setDateTo(e.target.value)}
               className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500/50 transition-colors"
             />
+          </div>
+        </div>
+
+        {/* Reprocesar ventas pagadas desde fecha */}
+        <div className="pt-2 border-t border-slate-700/30">
+          <p className="text-slate-400 text-xs mb-2">
+            Si faltan descuentos, podés reprocesar ventas pagadas desde una fecha (idempotente: no duplica movimientos ya registrados).
+          </p>
+          <div className="flex flex-col md:flex-row md:items-center gap-2">
+            <input
+              type="date"
+              value={syncFromDate}
+              onChange={(e) => setSyncFromDate(e.target.value)}
+              className="bg-slate-900/50 border border-slate-700/50 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500/50 transition-colors"
+              aria-label="Fecha desde para reprocesar ventas"
+            />
+            <button
+              type="button"
+              onClick={() => handleSyncOrdersFromDate('ml')}
+              disabled={syncingFromDate !== null}
+              className="px-3 py-2.5 bg-yellow-600/80 hover:bg-yellow-500 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-50"
+            >
+              {syncingFromDate === 'ml' ? 'Reprocesando ML...' : 'Reprocesar ML'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSyncOrdersFromDate('tn')}
+              disabled={syncingFromDate !== null}
+              className="px-3 py-2.5 bg-cyan-600/80 hover:bg-cyan-500 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-50"
+            >
+              {syncingFromDate === 'tn' ? 'Reprocesando TN...' : 'Reprocesar TN'}
+            </button>
           </div>
         </div>
       </div>
