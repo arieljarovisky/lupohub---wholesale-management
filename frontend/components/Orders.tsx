@@ -55,6 +55,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
+  const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>>({});
 
   useEffect(() => {
     if (!ncOrder) {
@@ -323,7 +324,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   };
 
   /** Genera el HTML de la factura AFIP. Estilo limpio: logo izq, nº y fecha der, Datos empresa / Datos cliente, tabla Base/IVA/Total, resumen y CAE en pie. */
-  const buildFacturaHtml = (order: Order) => {
+  const buildFacturaHtml = (order: Order, manual?: { remitoNumber?: string; transportNumber?: string; saleCondition?: string }) => {
     if (!order.invoice) return '';
     const inv = order.invoice;
     const customer = customers.find(c => c.id === order.customerId);
@@ -383,9 +384,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const dirEmpresa = empresaDir || '';
     const razonCliente = clienteNombre || 'Cliente';
     const cuitCliente = (customer?.cuit || '').toString();
-    const transportNumber = (customer?.transportNumber || '').toString();
-    const remitoNumber = (customer?.remitoNumber || '').toString();
-    const saleCondition = (customer?.saleCondition || '').toString();
+    const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
+    const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
+    const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim();
     const dirCliente = clienteDir || '';
 
     const total = Math.round(baseImponible * 100) / 100;
@@ -669,7 +670,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const openFactura = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!order.invoice) return;
-    const html = buildFacturaHtml(order);
+    const customer = customers.find(c => c.id === order.customerId);
+    const prev = manualFacturaDataByOrder[order.id] || {};
+    const transportInit = (prev.transportNumber ?? customer?.transportNumber ?? '').toString();
+    const remitoInit = (prev.remitoNumber ?? customer?.remitoNumber ?? '').toString();
+    const saleInit = (prev.saleCondition ?? customer?.saleCondition ?? '').toString();
+
+    const transportNumber = window.prompt('Transporte (manual para esta factura):', transportInit);
+    if (transportNumber === null) return;
+    const remitoNumber = window.prompt('N° de remito (manual para esta factura):', remitoInit);
+    if (remitoNumber === null) return;
+    const saleCondition = window.prompt('Condición de venta (manual para esta factura):', saleInit);
+    if (saleCondition === null) return;
+
+    const manual = {
+      transportNumber: transportNumber.trim(),
+      remitoNumber: remitoNumber.trim(),
+      saleCondition: saleCondition.trim(),
+    };
+    setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [order.id]: manual }));
+
+    const html = buildFacturaHtml(order, manual);
     if (!html) return;
     const w = window.open('', '_blank');
     if (w) {

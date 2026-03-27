@@ -7,6 +7,8 @@ interface TiendaNubeOrder {
   number: number;
   status: string;
   paymentStatus: string;
+  paymentStatusRaw?: string | null;
+  isPaid?: boolean;
   shippingStatus: string;
   total: string;
   currency: string;
@@ -34,17 +36,24 @@ interface TiendaNubeOrder {
 }
 
 const TiendaNubeOrders: React.FC = () => {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const twoDaysAgoIso = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 2);
+    return d.toISOString().split('T')[0];
+  })();
   const [orders, setOrders] = useState<TiendaNubeOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [filterStatus, setFilterStatus] = useState<string>('');
-  const [showAllOrders, setShowAllOrders] = useState(false); // por defecto solo pagados y por enviar
+  const [showAllOrders, setShowAllOrders] = useState(true); // por defecto: todos los pedidos
+  const [onlyUnpaid, setOnlyUnpaid] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [showDateFilter, setShowDateFilter] = useState(false);
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<string>(twoDaysAgoIso);
+  const [dateTo, setDateTo] = useState<string>(todayIso);
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -77,7 +86,7 @@ const TiendaNubeOrders: React.FC = () => {
   };
 
   const paymentStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
-    paid: { label: 'Pagado', color: 'text-green-400', bg: 'bg-green-500/10' },
+    paid: { label: 'PAGADO', color: 'text-green-400', bg: 'bg-green-500/10' },
     pending: { label: 'Pendiente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
     refunded: { label: 'Reembolsado', color: 'text-red-400', bg: 'bg-red-500/10' },
     voided: { label: 'Anulado', color: 'text-slate-400', bg: 'bg-slate-500/10' },
@@ -97,6 +106,7 @@ const TiendaNubeOrders: React.FC = () => {
   };
 
   const filteredOrders = orders.filter(order => {
+    if (onlyUnpaid && (order.isPaid === true || order.paymentStatus === 'paid')) return false;
     if (!searchTerm) return true;
     const search = searchTerm.toLowerCase();
     return (
@@ -111,9 +121,9 @@ const TiendaNubeOrders: React.FC = () => {
 
   const stats = {
     total: orders.length,
-    paid: orders.filter(o => o.paymentStatus === 'paid').length,
-    pending: orders.filter(o => o.paymentStatus === 'pending').length,
-    porDespachar: orders.filter(o => o.paymentStatus === 'paid' && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered').length
+    paid: orders.filter(o => o.isPaid === true || o.paymentStatus === 'paid').length,
+    pending: orders.filter(o => !(o.isPaid === true || o.paymentStatus === 'paid')).length,
+    porDespachar: orders.filter(o => (o.isPaid === true || o.paymentStatus === 'paid') && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered').length
   };
 
   const setQuickDate = (days: number) => {
@@ -248,6 +258,17 @@ const TiendaNubeOrders: React.FC = () => {
           {/* Status Filter */}
           <div className="flex gap-2 flex-wrap items-center">
             <button
+              type="button"
+              onClick={() => { setOnlyUnpaid(v => !v); setPage(1); }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                onlyUnpaid
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/30'
+                  : 'bg-slate-800/50 text-slate-300 hover:bg-slate-700/50 border border-slate-700/50'
+              }`}
+            >
+              {onlyUnpaid ? 'Solo no pagados' : 'Ver solo no pagados'}
+            </button>
+            <button
               onClick={() => { setShowAllOrders(!showAllOrders); setPage(1); }}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
                 showAllOrders
@@ -286,6 +307,13 @@ const TiendaNubeOrders: React.FC = () => {
               <div className="flex-1">
                 <p className="text-xs text-slate-500 font-bold uppercase mb-2">Filtros rápidos</p>
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickDate(2)}
+                    className="px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-cyan-900/30"
+                  >
+                    Últimos 2 días
+                  </button>
                   <button
                     onClick={() => setQuickDate(7)}
                     className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
@@ -378,7 +406,8 @@ const TiendaNubeOrders: React.FC = () => {
         <div className="space-y-3">
           {filteredOrders.map((order) => {
             const status = statusConfig[order.status] || statusConfig.open;
-            const payment = paymentStatusConfig[order.paymentStatus] || paymentStatusConfig.pending;
+            const normalizedPayment = (order.isPaid === true ? 'paid' : order.paymentStatus) || 'pending';
+            const payment = paymentStatusConfig[normalizedPayment] || paymentStatusConfig.pending;
             const dateInfo = formatDate(order.createdAt);
             const isExpanded = expandedOrder === order.id;
 
@@ -411,6 +440,11 @@ const TiendaNubeOrders: React.FC = () => {
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${payment.bg} ${payment.color}`}>
                             {payment.label}
                           </span>
+                          {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
+                            <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700/40 text-slate-300">
+                              TN: {order.paymentStatusRaw}
+                            </span>
+                          )}
                         </div>
                         <p className="text-slate-400 text-sm mt-0.5">
                           <User size={12} className="inline mr-1" />

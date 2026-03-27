@@ -2845,6 +2845,18 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
     });
 
     let orders = ordersRes.data.map((order: any) => {
+      const rawPaymentStatus = (order.payment_status ?? '').toString().trim().toLowerCase();
+      const paymentDetails = Array.isArray(order.payment_details) ? order.payment_details : [];
+      const detailStates = paymentDetails
+        .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
+        .filter(Boolean);
+      const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
+      const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
+      const looksPaid = rawPaymentStatus === 'paid'
+        || !!order.paid_at
+        || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
+      const normalizedPaymentStatus = looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+
       // Extraer nombre del cliente de diferentes fuentes
       let customerName = 'Sin nombre';
       if (order.customer) {
@@ -2869,7 +2881,9 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       id: order.id,
       number: order.number,
       status: order.status,
-      paymentStatus: order.payment_status,
+      paymentStatus: normalizedPaymentStatus,
+      paymentStatusRaw: rawPaymentStatus || null,
+      isPaid: normalizedPaymentStatus === 'paid',
       shippingStatus: order.shipping_status,
       total: order.total,
       currency: order.currency,
@@ -2898,7 +2912,7 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
 
     if (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') {
       orders = orders.filter((o: any) =>
-        o.paymentStatus === 'paid' &&
+        o.isPaid === true &&
         o.shippingStatus !== 'shipped' &&
         o.shippingStatus !== 'delivered'
       );

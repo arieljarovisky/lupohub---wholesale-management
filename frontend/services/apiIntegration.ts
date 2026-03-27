@@ -1,4 +1,5 @@
 import { Product, ApiConfig, RemitenteConfig } from '../types';
+import DEFAULT_COMPANY_LOGO_URL from '../Lupo_logo.svg (1).png?inline';
 
 // Helper to get config from localStorage (in a real app, this might come from a secure backend or context)
 export const getApiConfig = (): ApiConfig => {
@@ -14,11 +15,12 @@ export const saveApiConfig = (config: ApiConfig) => {
 };
 
 const REMITENTE_KEY = 'lupo_remitente';
-const DEFAULT_COMPANY_LOGO_URL = new URL('../Lupo_logo.svg (1).png', import.meta.url).href;
 
 export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
   const parsed = s ? JSON.parse(s) : {};
+  const rawLogo = (parsed.logoUrl ?? '').toString().trim();
+  const safeLogo = rawLogo && rawLogo !== 'undefined' && rawLogo !== 'null' ? rawLogo : DEFAULT_COMPANY_LOGO_URL;
   return {
     businessName: parsed.businessName ?? '',
     address: parsed.address ?? '',
@@ -28,7 +30,7 @@ export const getRemitente = (): RemitenteConfig => {
     inicioActividad: parsed.inicioActividad ?? '13/06/2005',
     email: parsed.email ?? '',
     phone: parsed.phone ?? '',
-    logoUrl: (parsed.logoUrl ?? '').toString().trim() || DEFAULT_COMPANY_LOGO_URL,
+    logoUrl: safeLogo,
     caiRemito: parsed.caiRemito ?? '',
     caiRemitoVencimiento: parsed.caiRemitoVencimiento ?? ''
   };
