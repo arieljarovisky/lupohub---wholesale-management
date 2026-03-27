@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
@@ -1321,6 +1321,40 @@ const syncMercadoLibreOrdersFromDate = (req, res) => __awaiter(void 0, void 0, v
     }
 });
 exports.syncMercadoLibreOrdersFromDate = syncMercadoLibreOrdersFromDate;
+/** Prueba manual: procesar una orden de Mercado Libre por ID (mismo flujo que el webhook). */
+const testMercadoLibreOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        const orderId = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.orderId) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.orderId) !== null && _d !== void 0 ? _d : '').toString().trim();
+        if (!orderId) {
+            return res.status(400).json({
+                message: 'Falta orderId. Ejemplo: POST con body { "orderId": "2000015720058034" } o GET ?orderId=2000015720058034'
+            });
+        }
+        const ref = `Orden ML: ${orderId}`;
+        const before = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
+        yield processMercadoLibreOrder(orderId);
+        const after = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
+        const beforeN = Number((_e = before === null || before === void 0 ? void 0 : before.n) !== null && _e !== void 0 ? _e : 0);
+        const afterN = Number((_f = after === null || after === void 0 ? void 0 : after.n) !== null && _f !== void 0 ? _f : 0);
+        const created = Math.max(0, afterN - beforeN);
+        return res.json({
+            orderId,
+            movementReference: ref,
+            movementsBefore: beforeN,
+            movementsAfter: afterN,
+            createdMovements: created,
+            message: created > 0
+                ? `OK: se crearon ${created} movimiento(s) VENTA_MERCADO_LIBRE.`
+                : 'No se crearon movimientos nuevos. Revisá vínculos de la variante (item_id/variation_id/SKU) y logs de backend para este orderId.'
+        });
+    }
+    catch (error) {
+        console.error('[ML Test Order]', error === null || error === void 0 ? void 0 : error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error al procesar orden de prueba de Mercado Libre' });
+    }
+});
+exports.testMercadoLibreOrder = testMercadoLibreOrder;
 // Webhook de Mercado Libre para órdenes/ventas
 const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;

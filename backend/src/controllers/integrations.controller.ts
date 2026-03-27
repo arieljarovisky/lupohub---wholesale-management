@@ -1407,6 +1407,49 @@ export const syncMercadoLibreOrdersFromDate = async (req: Request, res: Response
   }
 };
 
+/** Prueba manual: procesar una orden de Mercado Libre por ID (mismo flujo que el webhook). */
+export const testMercadoLibreOrder = async (req: Request, res: Response) => {
+  try {
+    const orderId = (req.body?.orderId ?? req.query?.orderId ?? '').toString().trim();
+    if (!orderId) {
+      return res.status(400).json({
+        message: 'Falta orderId. Ejemplo: POST con body { "orderId": "2000015720058034" } o GET ?orderId=2000015720058034'
+      });
+    }
+
+    const ref = `Orden ML: ${orderId}`;
+    const before = await get(
+      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`,
+      [ref]
+    );
+
+    await processMercadoLibreOrder(orderId);
+
+    const after = await get(
+      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`,
+      [ref]
+    );
+
+    const beforeN = Number((before as any)?.n ?? 0);
+    const afterN = Number((after as any)?.n ?? 0);
+    const created = Math.max(0, afterN - beforeN);
+
+    return res.json({
+      orderId,
+      movementReference: ref,
+      movementsBefore: beforeN,
+      movementsAfter: afterN,
+      createdMovements: created,
+      message: created > 0
+        ? `OK: se crearon ${created} movimiento(s) VENTA_MERCADO_LIBRE.`
+        : 'No se crearon movimientos nuevos. Revisá vínculos de la variante (item_id/variation_id/SKU) y logs de backend para este orderId.'
+    });
+  } catch (error: any) {
+    console.error('[ML Test Order]', error?.message);
+    res.status(500).json({ message: error?.message || 'Error al procesar orden de prueba de Mercado Libre' });
+  }
+};
+
 // Webhook de Mercado Libre para órdenes/ventas
 export const handleMercadoLibreWebhook = async (req: Request, res: Response) => {
   try {

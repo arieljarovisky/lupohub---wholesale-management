@@ -28,6 +28,9 @@ router.post('/mercadolibre/webhook', integrations_controller_1.handleMercadoLibr
 /** Descontar stock de ventas ML desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
 router.post('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncMercadoLibreOrdersFromDate);
 router.get('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncMercadoLibreOrdersFromDate);
+/** Probar descuento de stock por una orden ML: POST { "orderId": "200..." } o GET ?orderId=200... (requiere login) */
+router.post('/mercadolibre/test-order', auth_1.authMiddleware, integrations_controller_1.testMercadoLibreOrder);
+router.get('/mercadolibre/test-order', auth_1.authMiddleware, integrations_controller_1.testMercadoLibreOrder);
 // Tienda Nube
 router.get('/tiendanube/auth', integrations_controller_1.getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCallback);
