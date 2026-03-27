@@ -3209,7 +3209,7 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getMercadoLibreStock = getMercadoLibreStock;
 // Obtener variaciones de un ítem de Mercado Libre por ID (para vincular por ID padre)
 const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         let { itemId } = req.params;
         if (!itemId) {
@@ -3237,7 +3237,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     break;
                 }
             }
-            catch (_f) {
+            catch (_h) {
                 // probar siguiente candidato
             }
         }
@@ -3257,7 +3257,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                         break;
                     }
                 }
-                catch (_g) {
+                catch (_j) {
                     // probar siguiente candidato
                 }
             }
@@ -3310,7 +3310,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     if ((d === null || d === void 0 ? void 0 : d.id) && !byItemId[d.id])
                         byItemId[d.id] = d;
                 }
-                catch (_h) {
+                catch (_k) {
                     // ignorar item inválido y seguir
                 }
             }
@@ -3344,10 +3344,15 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         }
         // Sin variaciones: producto único
         const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
+        let singleSku = ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim();
+        if (!singleSku && Array.isArray(item.attributes)) {
+            const skuAttr = item.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+            singleSku = (skuAttr ? ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '') : '').toString().trim();
+        }
         return res.json({
             variations: [{
                     variationId: item.id,
-                    sku: ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim(),
+                    sku: singleSku,
                     color: parsed.color || '',
                     size: parsed.size || '',
                     stock: item.available_quantity || 0
@@ -3359,8 +3364,8 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         });
     }
     catch (error) {
-        const status = (_c = error.response) === null || _c === void 0 ? void 0 : _c.status;
-        const detail = ((_e = (_d = error.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.message) || error.message;
+        const status = (_e = error.response) === null || _e === void 0 ? void 0 : _e.status;
+        const detail = ((_g = (_f = error.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.message) || error.message;
         console.error('Error fetching ML item variations:', detail);
         res.status(status === 404 ? 404 : 500).json({ message: 'Error obteniendo variaciones de Mercado Libre', detail });
     }

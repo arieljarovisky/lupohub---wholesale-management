@@ -3509,10 +3509,15 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
     // Sin variaciones: producto único
     const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
+    let singleSku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+    if (!singleSku && Array.isArray(item.attributes)) {
+      const skuAttr = item.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+      singleSku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '').toString().trim();
+    }
     return res.json({
       variations: [{
         variationId: item.id,
-        sku: (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim(),
+        sku: singleSku,
         color: parsed.color || '',
         size: parsed.size || '',
         stock: item.available_quantity || 0
