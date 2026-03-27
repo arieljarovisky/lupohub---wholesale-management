@@ -14,6 +14,7 @@ export const saveApiConfig = (config: ApiConfig) => {
 };
 
 const REMITENTE_KEY = 'lupo_remitente';
+const DEFAULT_COMPANY_LOGO_URL = new URL('../Lupo_logo.svg (1).png', import.meta.url).href;
 
 export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
@@ -27,7 +28,7 @@ export const getRemitente = (): RemitenteConfig => {
     inicioActividad: parsed.inicioActividad ?? '13/06/2005',
     email: parsed.email ?? '',
     phone: parsed.phone ?? '',
-    logoUrl: parsed.logoUrl ?? '',
+    logoUrl: (parsed.logoUrl ?? '').toString().trim() || DEFAULT_COMPANY_LOGO_URL,
     caiRemito: parsed.caiRemito ?? '',
     caiRemitoVencimiento: parsed.caiRemitoVencimiento ?? ''
   };
