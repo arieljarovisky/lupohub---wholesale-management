@@ -68,6 +68,15 @@ function mercadoLibreItemIdCandidates(raw: unknown): string[] {
   return Array.from(new Set(out.filter(Boolean)));
 }
 
+/** Normaliza SKU para matching flexible entre canales (quita separadores y mayúsculas). */
+function normalizeSkuForMatch(raw: unknown): string {
+  return (raw ?? '')
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/[\s\-\/]/g, '');
+}
+
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 async function resolveMercadoLibreCatalogProductItems(productId: string, accessToken: string): Promise<string[]> {
   try {
@@ -1131,6 +1140,27 @@ const processTiendaNubeOrder = async (orderId: string) => {
           [itemSku, `${itemSku}%`, itemSku]
         );
       }
+      if (!variant?.id && itemSku) {
+        const skuNorm = normalizeSkuForMatch(itemSku);
+        const skuNormNoZero = skuNorm.replace(/^0+/, '');
+        if (skuNorm) {
+          variant = await get(
+            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+             FROM product_variants pv
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             JOIN product_colors pc ON pc.id = pv.product_color_id
+             JOIN products p ON p.id = pc.product_id
+             WHERE (
+               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+             )
+             LIMIT 1`,
+            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
+          );
+        }
+      }
 
       if (variant?.id) {
         const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
@@ -1508,6 +1538,27 @@ const processMercadoLibreOrder = async (orderId: string) => {
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
           [itemSku, `${itemSku}%`, itemSku]
         );
+      }
+      if (!variant?.id && itemSku) {
+        const skuNorm = normalizeSkuForMatch(itemSku);
+        const skuNormNoZero = skuNorm.replace(/^0+/, '');
+        if (skuNorm) {
+          variant = await get(
+            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM product_variants pv
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             JOIN product_colors pc ON pc.id = pv.product_color_id
+             JOIN products p ON p.id = pc.product_id
+             WHERE (
+               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+             )
+             LIMIT 1`,
+            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
+          );
+        }
       }
 
       if (variant?.id) {

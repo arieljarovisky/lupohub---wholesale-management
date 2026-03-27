@@ -118,6 +118,14 @@ function mercadoLibreItemIdCandidates(raw) {
     }
     return Array.from(new Set(out.filter(Boolean)));
 }
+/** Normaliza SKU para matching flexible entre canales (quita separadores y mayúsculas). */
+function normalizeSkuForMatch(raw) {
+    return (raw !== null && raw !== void 0 ? raw : '')
+        .toString()
+        .trim()
+        .toUpperCase()
+        .replace(/[\s\-\/]/g, '');
+}
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -1079,6 +1087,24 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
            JOIN products p ON p.id = pc.product_id
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`, [itemSku, `${itemSku}%`, itemSku]);
             }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                const skuNorm = normalizeSkuForMatch(itemSku);
+                const skuNormNoZero = skuNorm.replace(/^0+/, '');
+                if (skuNorm) {
+                    variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+             FROM product_variants pv
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             JOIN product_colors pc ON pc.id = pv.product_color_id
+             JOIN products p ON p.id = pc.product_id
+             WHERE (
+               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+             )
+             LIMIT 1`, [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]);
+                }
+            }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                 const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
                 const unitsToDeduct = quantity * tnPack;
@@ -1404,6 +1430,24 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
            JOIN product_colors pc ON pc.id = pv.product_color_id
            JOIN products p ON p.id = pc.product_id
            WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`, [itemSku, `${itemSku}%`, itemSku]);
+            }
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
+                const skuNorm = normalizeSkuForMatch(itemSku);
+                const skuNormNoZero = skuNorm.replace(/^0+/, '');
+                if (skuNorm) {
+                    variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM product_variants pv
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             JOIN product_colors pc ON pc.id = pv.product_color_id
+             JOIN products p ON p.id = pc.product_id
+             WHERE (
+               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+             )
+             LIMIT 1`, [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]);
+                }
             }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                 const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
