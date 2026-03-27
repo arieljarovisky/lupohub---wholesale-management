@@ -25,6 +25,9 @@ router.post('/mercadolibre/import-stock', integrations_controller_1.importStockF
 router.post('/mercadolibre/import-product', integrations_controller_1.importProductFromMercadoLibre);
 router.post('/mercadolibre/sync-ml-to-tn', (req, res) => (0, integrations_controller_1.runAutoSyncMLtoTN)().then(r => res.json(Object.assign({ message: 'ML → TN ejecutado' }, r))).catch(e => res.status(500).json({ message: e.message })));
 router.post('/mercadolibre/webhook', integrations_controller_1.handleMercadoLibreWebhook);
+/** Descontar stock de ventas ML desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
+router.post('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncMercadoLibreOrdersFromDate);
+router.get('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncMercadoLibreOrdersFromDate);
 // Tienda Nube
 router.get('/tiendanube/auth', integrations_controller_1.getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCallback);

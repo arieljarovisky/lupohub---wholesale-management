@@ -1316,6 +1316,67 @@ export const syncTiendaNubeOrdersFromDate = async (req: Request, res: Response) 
   }
 };
 
+/** Descontar stock de todas las ventas pagadas de Mercado Libre desde una fecha.
+ * Idempotente: órdenes ya procesadas se omiten por movimiento VENTA_MERCADO_LIBRE.
+ */
+export const syncMercadoLibreOrdersFromDate = async (req: Request, res: Response) => {
+  try {
+    const fromParam = (req.body?.fromDate ?? req.query?.fromDate ?? '2026-03-09').toString().trim();
+    const fromDate = fromParam.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+      return res.status(400).json({ message: 'fromDate debe ser YYYY-MM-DD (ej. 2026-03-09)' });
+    }
+
+    const mlToken = await getValidMLToken();
+    if (!mlToken?.access_token || !mlToken?.user_id) {
+      return res.status(400).json({ message: 'No estás conectado a Mercado Libre' });
+    }
+
+    let totalOrders = 0;
+    let offset = 0;
+    const limit = 50;
+    let keepGoing = true;
+
+    while (keepGoing && offset < 5000) {
+      const searchRes = await axios.get(
+        `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&order.status=paid&order.date_created.from=${fromDate}T00:00:00.000-03:00&offset=${offset}&limit=${limit}&sort=date_desc`,
+        { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true }
+      );
+
+      if (searchRes.status !== 200) {
+        const errMsg =
+          searchRes.data?.message ||
+          searchRes.data?.error ||
+          JSON.stringify(searchRes.data);
+        return res.status(searchRes.status === 403 ? 403 : 500).json({
+          message: `Error al listar órdenes de Mercado Libre: ${errMsg}`,
+          hint: searchRes.status === 403 ? 'Reconectá Mercado Libre.' : undefined
+        });
+      }
+
+      const results = Array.isArray(searchRes.data?.results) ? searchRes.data.results : [];
+      for (const row of results) {
+        const orderId = row?.id != null ? String(row.id) : '';
+        if (!orderId) continue;
+        await processMercadoLibreOrder(orderId);
+        totalOrders++;
+      }
+
+      if (results.length < limit) keepGoing = false;
+      else offset += limit;
+    }
+
+    res.json({
+      message: `Se procesaron las órdenes pagadas de Mercado Libre desde el ${fromDate}. Las que ya tenían stock descontado se omitieron.`,
+      fromDate,
+      totalOrders,
+    });
+  } catch (error: any) {
+    console.error('[ML Sync From Date]', error?.message);
+    res.status(500).json({ message: error?.message || 'Error al sincronizar órdenes de Mercado Libre desde fecha' });
+  }
+};
+
 // Webhook de Mercado Libre para órdenes/ventas
 export const handleMercadoLibreWebhook = async (req: Request, res: Response) => {
   try {

@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
@@ -1240,6 +1240,61 @@ const syncTiendaNubeOrdersFromDate = (req, res) => __awaiter(void 0, void 0, voi
     }
 });
 exports.syncTiendaNubeOrdersFromDate = syncTiendaNubeOrdersFromDate;
+/** Descontar stock de todas las ventas pagadas de Mercado Libre desde una fecha.
+ * Idempotente: órdenes ya procesadas se omiten por movimiento VENTA_MERCADO_LIBRE.
+ */
+const syncMercadoLibreOrdersFromDate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const fromParam = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.fromDate) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.fromDate) !== null && _d !== void 0 ? _d : '2026-03-09').toString().trim();
+        const fromDate = fromParam.slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
+            return res.status(400).json({ message: 'fromDate debe ser YYYY-MM-DD (ej. 2026-03-09)' });
+        }
+        const mlToken = yield getValidMLToken();
+        if (!(mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) || !(mlToken === null || mlToken === void 0 ? void 0 : mlToken.user_id)) {
+            return res.status(400).json({ message: 'No estás conectado a Mercado Libre' });
+        }
+        let totalOrders = 0;
+        let offset = 0;
+        const limit = 50;
+        let keepGoing = true;
+        while (keepGoing && offset < 5000) {
+            const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&order.status=paid&order.date_created.from=${fromDate}T00:00:00.000-03:00&offset=${offset}&limit=${limit}&sort=date_desc`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true });
+            if (searchRes.status !== 200) {
+                const errMsg = ((_e = searchRes.data) === null || _e === void 0 ? void 0 : _e.message) ||
+                    ((_f = searchRes.data) === null || _f === void 0 ? void 0 : _f.error) ||
+                    JSON.stringify(searchRes.data);
+                return res.status(searchRes.status === 403 ? 403 : 500).json({
+                    message: `Error al listar órdenes de Mercado Libre: ${errMsg}`,
+                    hint: searchRes.status === 403 ? 'Reconectá Mercado Libre.' : undefined
+                });
+            }
+            const results = Array.isArray((_g = searchRes.data) === null || _g === void 0 ? void 0 : _g.results) ? searchRes.data.results : [];
+            for (const row of results) {
+                const orderId = (row === null || row === void 0 ? void 0 : row.id) != null ? String(row.id) : '';
+                if (!orderId)
+                    continue;
+                yield processMercadoLibreOrder(orderId);
+                totalOrders++;
+            }
+            if (results.length < limit)
+                keepGoing = false;
+            else
+                offset += limit;
+        }
+        res.json({
+            message: `Se procesaron las órdenes pagadas de Mercado Libre desde el ${fromDate}. Las que ya tenían stock descontado se omitieron.`,
+            fromDate,
+            totalOrders,
+        });
+    }
+    catch (error) {
+        console.error('[ML Sync From Date]', error === null || error === void 0 ? void 0 : error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error al sincronizar órdenes de Mercado Libre desde fecha' });
+    }
+});
+exports.syncMercadoLibreOrdersFromDate = syncMercadoLibreOrdersFromDate;
 // Webhook de Mercado Libre para órdenes/ventas
 const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
