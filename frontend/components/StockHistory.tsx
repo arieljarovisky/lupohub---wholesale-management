@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, ArrowUpCircle, ArrowDownCircle, RotateCcw, ShoppingCart, Store, Zap, Download, Camera, CheckCircle, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -87,6 +87,7 @@ const StockHistory: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [limit, setLimit] = useState(50);
+  const restoreScrollYRef = useRef<number | null>(null);
 
   const fetchMovements = React.useCallback(async (abort?: { current: boolean }) => {
     setLoading(true);
@@ -104,6 +105,11 @@ const StockHistory: React.FC = () => {
       console.error('Error fetching stock movements:', error);
       setMovements([]);
     } finally {
+      if (restoreScrollYRef.current != null && !abort?.current) {
+        const y = restoreScrollYRef.current;
+        restoreScrollYRef.current = null;
+        requestAnimationFrame(() => window.scrollTo({ top: y }));
+      }
       if (!abort?.current) setLoading(false);
     }
   }, [filterType, dateFrom, dateTo, limit]);
@@ -492,7 +498,11 @@ const StockHistory: React.FC = () => {
           {filteredMovements.length >= limit && (
             <div className="p-4 border-t border-slate-700/30 text-center">
               <button
-                onClick={() => setLimit(l => l + 100)}
+                type="button"
+                onClick={() => {
+                  restoreScrollYRef.current = window.scrollY;
+                  setLimit(l => l + 100);
+                }}
                 className="px-4 py-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg text-sm font-bold text-slate-300 transition-colors"
               >
                 Cargar más movimientos
