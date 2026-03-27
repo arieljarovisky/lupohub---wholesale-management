@@ -1610,6 +1610,54 @@ const processMercadoLibreOrder = async (orderId: string) => {
           [mlItemId]
         );
       }
+      // Fallback por producto padre ML: cuando el vínculo está en products.mercado_libre_id
+      // y la venta viene sin variation_id.
+      if (!variant?.id && mlItemId) {
+        if (itemSku) {
+          const skuNorm = normalizeSkuForMatch(itemSku);
+          const skuNormNoZero = skuNorm.replace(/^0+/, '');
+          variant = await get(
+            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             WHERE p.mercado_libre_id = ?
+               AND (
+                 REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+                 OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               )
+             LIMIT 1`,
+            [mlItemId, skuNorm, skuNormNoZero]
+          );
+        }
+        // Si sigue sin match y el artículo local tiene una sola variante, usarla
+        if (!variant?.id) {
+          variant = await get(
+            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             WHERE p.mercado_libre_id = ?
+             GROUP BY pv.id, s.stock, p.mercado_libre_pack_size
+             ORDER BY pv.id
+             LIMIT 1`,
+            [mlItemId]
+          );
+          const countRow = await get(
+            `SELECT COUNT(*) AS n
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             WHERE p.mercado_libre_id = ?`,
+            [mlItemId]
+          );
+          if (Number(countRow?.n || 0) !== 1) {
+            variant = null;
+          }
+        }
+      }
       if (!variant?.id && mlVariationId) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
@@ -3435,8 +3483,11 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       const catalogVariations = Object.values(byItemId).map((it: any) => {
         const attrs = toAttrArray(it.attributes);
         const sku = (it.seller_sku ?? it.seller_custom_field ?? fromAttrs(attrs, ['SELLER_SKU'])).toString().trim();
-        const color = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
-        const size = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+        const colorFromAttr = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
+        const sizeFromAttr = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+        const titleParsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+        const color = colorFromAttr || titleParsed.color || '';
+        const size = sizeFromAttr || titleParsed.size || '';
         return {
           variationId: it.id,
           sku,
@@ -3457,12 +3508,13 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       }
     }
     // Sin variaciones: producto único
+    const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
     return res.json({
       variations: [{
         variationId: item.id,
         sku: (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim(),
-        color: '',
-        size: '',
+        color: parsed.color || '',
+        size: parsed.size || '',
         stock: item.available_quantity || 0
       }],
       singleProduct: true,

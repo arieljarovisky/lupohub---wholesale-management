@@ -1497,6 +1497,45 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
            WHERE pv.mercado_libre_item_id = ?
            LIMIT 1`, [mlItemId]);
             }
+            // Fallback por producto padre ML: cuando el vínculo está en products.mercado_libre_id
+            // y la venta viene sin variation_id.
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlItemId) {
+                if (itemSku) {
+                    const skuNorm = normalizeSkuForMatch(itemSku);
+                    const skuNormNoZero = skuNorm.replace(/^0+/, '');
+                    variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             WHERE p.mercado_libre_id = ?
+               AND (
+                 REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+                 OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+               )
+             LIMIT 1`, [mlItemId, skuNorm, skuNormNoZero]);
+                }
+                // Si sigue sin match y el artículo local tiene una sola variante, usarla
+                if (!(variant === null || variant === void 0 ? void 0 : variant.id)) {
+                    variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             LEFT JOIN stocks s ON s.variant_id = pv.id
+             WHERE p.mercado_libre_id = ?
+             GROUP BY pv.id, s.stock, p.mercado_libre_pack_size
+             ORDER BY pv.id
+             LIMIT 1`, [mlItemId]);
+                    const countRow = yield (0, db_1.get)(`SELECT COUNT(*) AS n
+             FROM products p
+             JOIN product_colors pc ON pc.product_id = p.id
+             JOIN product_variants pv ON pv.product_color_id = pc.id
+             WHERE p.mercado_libre_id = ?`, [mlItemId]);
+                    if (Number((countRow === null || countRow === void 0 ? void 0 : countRow.n) || 0) !== 1) {
+                        variant = null;
+                    }
+                }
+            }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlVariationId) {
                 variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
@@ -3279,8 +3318,11 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 var _a, _b;
                 const attrs = toAttrArray(it.attributes);
                 const sku = ((_b = (_a = it.seller_sku) !== null && _a !== void 0 ? _a : it.seller_custom_field) !== null && _b !== void 0 ? _b : fromAttrs(attrs, ['SELLER_SKU'])).toString().trim();
-                const color = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
-                const size = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+                const colorFromAttr = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
+                const sizeFromAttr = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+                const titleParsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+                const color = colorFromAttr || titleParsed.color || '';
+                const size = sizeFromAttr || titleParsed.size || '';
                 return {
                     variationId: it.id,
                     sku,
@@ -3301,12 +3343,13 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
             }
         }
         // Sin variaciones: producto único
+        const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
         return res.json({
             variations: [{
                     variationId: item.id,
                     sku: ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim(),
-                    color: '',
-                    size: '',
+                    color: parsed.color || '',
+                    size: parsed.size || '',
                     stock: item.available_quantity || 0
                 }],
             singleProduct: true,
