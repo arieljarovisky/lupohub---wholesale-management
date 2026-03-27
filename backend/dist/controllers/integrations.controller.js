@@ -126,6 +126,49 @@ function normalizeSkuForMatch(raw) {
         .toUpperCase()
         .replace(/[\s\-\/]/g, '');
 }
+/** Obtiene SKU desde la API de ML cuando en la orden no viene claro. */
+function resolveMlOrderItemSku(accessToken, mlItemId, mlVariationId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h;
+        try {
+            if (!mlItemId)
+                return '';
+            const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${encodeURIComponent(String(mlItemId))}?include_attributes=all`, { headers: { 'Authorization': `Bearer ${accessToken}` }, validateStatus: () => true });
+            if (itemRes.status !== 200 || !itemRes.data)
+                return '';
+            const item = itemRes.data;
+            // 1) Si hay variación, priorizar SKU de esa variación
+            if (mlVariationId && Array.isArray(item.variations)) {
+                const v = item.variations.find((x) => String(x === null || x === void 0 ? void 0 : x.id) === String(mlVariationId));
+                if (v) {
+                    const skuAttr = Array.isArray(v.attributes)
+                        ? v.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU')
+                        : null;
+                    const fromVariation = (skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '') : ((_d = (_c = v.seller_sku) !== null && _c !== void 0 ? _c : v.seller_custom_field) !== null && _d !== void 0 ? _d : ''))
+                        .toString()
+                        .trim();
+                    if (fromVariation)
+                        return fromVariation;
+                }
+            }
+            // 2) SKU a nivel item
+            let sku = ((_f = (_e = item.seller_sku) !== null && _e !== void 0 ? _e : item.seller_custom_field) !== null && _f !== void 0 ? _f : '').toString().trim();
+            if (sku)
+                return sku;
+            // 3) SELLER_SKU en attributes del item
+            if (Array.isArray(item.attributes)) {
+                const skuAttr = item.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+                sku = (skuAttr ? ((_h = (_g = skuAttr.value_name) !== null && _g !== void 0 ? _g : skuAttr.value) !== null && _h !== void 0 ? _h : '') : '').toString().trim();
+                if (sku)
+                    return sku;
+            }
+        }
+        catch (_j) {
+            // ignore: se mantiene fallback actual
+        }
+        return '';
+    });
+}
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -1431,7 +1474,10 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
             const mlItemId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.id;
             const mlVariationId = (_b = item.item) === null || _b === void 0 ? void 0 : _b.variation_id;
             const quantity = item.quantity;
-            const itemSku = (((_c = item.item) === null || _c === void 0 ? void 0 : _c.sku) || item.sku || '').toString().trim();
+            let itemSku = (((_c = item.item) === null || _c === void 0 ? void 0 : _c.sku) || item.sku || '').toString().trim();
+            if (!itemSku) {
+                itemSku = yield resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
+            }
             let variant = null;
             if (mlItemId) {
                 const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';

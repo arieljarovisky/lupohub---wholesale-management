@@ -77,6 +77,51 @@ function normalizeSkuForMatch(raw: unknown): string {
     .replace(/[\s\-\/]/g, '');
 }
 
+/** Obtiene SKU desde la API de ML cuando en la orden no viene claro. */
+async function resolveMlOrderItemSku(
+  accessToken: string,
+  mlItemId?: string | number,
+  mlVariationId?: string | number
+): Promise<string> {
+  try {
+    if (!mlItemId) return '';
+    const itemRes = await axios.get(
+      `https://api.mercadolibre.com/items/${encodeURIComponent(String(mlItemId))}?include_attributes=all`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` }, validateStatus: () => true }
+    );
+    if (itemRes.status !== 200 || !itemRes.data) return '';
+    const item = itemRes.data;
+
+    // 1) Si hay variación, priorizar SKU de esa variación
+    if (mlVariationId && Array.isArray(item.variations)) {
+      const v = item.variations.find((x: any) => String(x?.id) === String(mlVariationId));
+      if (v) {
+        const skuAttr = Array.isArray(v.attributes)
+          ? v.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU')
+          : null;
+        const fromVariation = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : (v.seller_sku ?? v.seller_custom_field ?? ''))
+          .toString()
+          .trim();
+        if (fromVariation) return fromVariation;
+      }
+    }
+
+    // 2) SKU a nivel item
+    let sku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
+    if (sku) return sku;
+
+    // 3) SELLER_SKU en attributes del item
+    if (Array.isArray(item.attributes)) {
+      const skuAttr = item.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+      sku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '').toString().trim();
+      if (sku) return sku;
+    }
+  } catch {
+    // ignore: se mantiene fallback actual
+  }
+  return '';
+}
+
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 async function resolveMercadoLibreCatalogProductItems(productId: string, accessToken: string): Promise<string[]> {
   try {
@@ -1535,7 +1580,10 @@ const processMercadoLibreOrder = async (orderId: string) => {
       const mlItemId = item.item?.id;
       const mlVariationId = item.item?.variation_id;
       const quantity = item.quantity;
-      const itemSku = (item.item?.sku || item.sku || '').toString().trim();
+      let itemSku = (item.item?.sku || item.sku || '').toString().trim();
+      if (!itemSku) {
+        itemSku = await resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
+      }
 
       let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
       if (mlItemId) {
