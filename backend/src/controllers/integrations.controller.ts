@@ -3521,6 +3521,65 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         });
       }
     }
+    // Caso "una publicación por variante" sin catálogo explícito:
+    // buscar publicaciones hermanas del mismo vendedor por título base.
+    if (!item.variations || item.variations.length === 0) {
+      const baseTitle = mlBaseTitle((item.title || '').toString().trim());
+      if (baseTitle) {
+        const searchRes = await axios.get(
+          `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`,
+          {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
+            params: { q: baseTitle, limit: 50, offset: 0 },
+            validateStatus: () => true
+          }
+        );
+        const siblingIds: string[] = searchRes.status === 200 && Array.isArray(searchRes.data?.results)
+          ? searchRes.data.results.map((x: any) => String(x || '').trim()).filter(Boolean)
+          : [];
+        const uniqueSiblingIds = Array.from(new Set(siblingIds)).slice(0, 50);
+        if (uniqueSiblingIds.length > 1) {
+          const siblings = await Promise.all(uniqueSiblingIds.map(async (sid) => {
+            try {
+              const r = await axios.get(`https://api.mercadolibre.com/items/${sid}?include_attributes=all`, {
+                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+              });
+              return r.data;
+            } catch {
+              return null;
+            }
+          }));
+          const siblingVariations = (siblings || [])
+            .filter((it: any) => it && !it.error && (!it.variations || it.variations.length === 0))
+            .filter((it: any) => mlBaseTitle((it.title || '').toString().trim()) === baseTitle)
+            .map((it: any) => {
+              const attrs = Array.isArray(it.attributes) ? it.attributes : [];
+              const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+              const sku = (it.seller_sku ?? it.seller_custom_field ?? (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '')).toString().trim();
+              const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
+              const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
+              const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+              return {
+                variationId: it.id,
+                sku,
+                color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
+                size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
+                stock: it.available_quantity || 0
+              };
+            });
+          if (siblingVariations.length > 1) {
+            return res.json({
+              variations: siblingVariations,
+              singleProduct: false,
+              itemId: item.id,
+              requestedItemId: String(req.params.itemId || ''),
+              resolvedItemId,
+              resolvedFromSiblingSearch: true
+            });
+          }
+        }
+      }
+    }
     // Sin variaciones: producto único
     const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
     let singleSku = (item.seller_sku ?? item.seller_custom_field ?? '').toString().trim();
