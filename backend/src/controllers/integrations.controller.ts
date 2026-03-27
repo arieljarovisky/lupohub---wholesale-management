@@ -1506,6 +1506,19 @@ const processMercadoLibreOrder = async (orderId: string) => {
           variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
         }
       }
+      // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
+      if (!variant?.id && mlItemId) {
+        variant = await get(
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.mercado_libre_item_id = ?
+           LIMIT 1`,
+          [mlItemId]
+        );
+      }
       if (!variant?.id && mlVariationId) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
@@ -1575,7 +1588,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
         );
         console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
       } else if (mlVariationId || itemSku) {
-        console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);
+        console.log(`[ML Order] Variante no encontrada para ML item_id=${mlItemId} variation_id=${mlVariationId} sku=${itemSku}`);
       }
     }
   } catch (error: any) {

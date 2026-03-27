@@ -1407,6 +1407,16 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                     variant = { id: fromPub.id, current_stock: Number((_d = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _d !== void 0 ? _d : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
                 }
             }
+            // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlItemId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.mercado_libre_item_id = ?
+           LIMIT 1`, [mlItemId]);
+            }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlVariationId) {
                 variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
@@ -1458,7 +1468,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                 console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
             }
             else if (mlVariationId || itemSku) {
-                console.log(`[ML Order] Variante no encontrada para ML variation_id=${mlVariationId} sku=${itemSku}`);
+                console.log(`[ML Order] Variante no encontrada para ML item_id=${mlItemId} variation_id=${mlVariationId} sku=${itemSku}`);
             }
         }
     }
