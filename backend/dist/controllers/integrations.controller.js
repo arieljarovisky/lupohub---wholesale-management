@@ -953,10 +953,15 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
         const event = ((_d = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.event) !== null && _b !== void 0 ? _b : req.headers['x-linkedstore-topic']) !== null && _c !== void 0 ? _c : req.headers['x-tiendanube-topic']) !== null && _d !== void 0 ? _d : '').toString();
         const storeIdFromReq = ((_h = (_g = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.store_id) !== null && _f !== void 0 ? _f : req.headers['x-linkedstore-id']) !== null && _g !== void 0 ? _g : req.headers['x-tiendanube-store-id']) !== null && _h !== void 0 ? _h : '').toString();
         console.log(`[TN Webhook] Evento: ${event}, Store: ${storeIdFromReq || '-'}`);
-        // Verificar que el store_id coincide (comparar como string por si viene número de la DB o del body)
+        // Verificar store_id solo cuando viene en el webhook.
+        // En algunos eventos/proveedores no llega este dato y antes se ignoraba todo por error.
         const integration = yield (0, db_1.get)(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         const storedStoreId = (_k = ((_j = integration === null || integration === void 0 ? void 0 : integration.store_id) !== null && _j !== void 0 ? _j : integration === null || integration === void 0 ? void 0 : integration.user_id)) === null || _k === void 0 ? void 0 : _k.toString();
-        if (!integration || storedStoreId !== storeIdFromReq) {
+        if (!integration) {
+            console.log('[TN Webhook] No hay integración de Tienda Nube, ignorando');
+            return res.status(200).json({ received: true, ignored: true });
+        }
+        if (storeIdFromReq && storedStoreId && storedStoreId !== storeIdFromReq) {
             console.log('[TN Webhook] Store ID no coincide (recibido:', storeIdFromReq, ', guardado:', storedStoreId, '), ignorando');
             return res.status(200).json({ received: true, ignored: true });
         }
@@ -1243,9 +1248,15 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
         const resourceRaw = ((_h = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.resource) !== null && _f !== void 0 ? _f : (_g = req.query) === null || _g === void 0 ? void 0 : _g.resource) !== null && _h !== void 0 ? _h : '').toString();
         const userIdRaw = ((_m = (_k = (_j = req.body) === null || _j === void 0 ? void 0 : _j.user_id) !== null && _k !== void 0 ? _k : (_l = req.query) === null || _l === void 0 ? void 0 : _l.user_id) !== null && _m !== void 0 ? _m : '').toString();
         console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resourceRaw}, User: ${userIdRaw || '-'}`);
-        // Verificar que el user_id coincide
+        // Verificar user_id solo cuando viene en el webhook.
+        // Mercado Libre a veces no lo envía y eso hacía que nunca se procese la orden.
         const integration = yield (0, db_1.get)(`SELECT user_id FROM integrations WHERE platform = 'mercadolibre'`);
-        if (!integration || ((_o = integration.user_id) === null || _o === void 0 ? void 0 : _o.toString()) !== userIdRaw) {
+        const storedUserId = (_o = integration === null || integration === void 0 ? void 0 : integration.user_id) === null || _o === void 0 ? void 0 : _o.toString();
+        if (!integration) {
+            console.log('[ML Webhook] No hay integración de Mercado Libre, ignorando');
+            return res.status(200).json({ received: true, ignored: true });
+        }
+        if (userIdRaw && storedUserId && storedUserId !== userIdRaw) {
             console.log('[ML Webhook] User ID no coincide, ignorando');
             return res.status(200).json({ received: true, ignored: true });
         }

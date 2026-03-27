@@ -968,10 +968,15 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
     const storeIdFromReq = (req.body?.store_id ?? req.headers['x-linkedstore-id'] ?? req.headers['x-tiendanube-store-id'] ?? '').toString();
     console.log(`[TN Webhook] Evento: ${event}, Store: ${storeIdFromReq || '-'}`);
     
-    // Verificar que el store_id coincide (comparar como string por si viene número de la DB o del body)
+    // Verificar store_id solo cuando viene en el webhook.
+    // En algunos eventos/proveedores no llega este dato y antes se ignoraba todo por error.
     const integration = await get(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
     const storedStoreId = (integration?.store_id ?? integration?.user_id)?.toString();
-    if (!integration || storedStoreId !== storeIdFromReq) {
+    if (!integration) {
+      console.log('[TN Webhook] No hay integración de Tienda Nube, ignorando');
+      return res.status(200).json({ received: true, ignored: true });
+    }
+    if (storeIdFromReq && storedStoreId && storedStoreId !== storeIdFromReq) {
       console.log('[TN Webhook] Store ID no coincide (recibido:', storeIdFromReq, ', guardado:', storedStoreId, '), ignorando');
       return res.status(200).json({ received: true, ignored: true });
     }
@@ -1319,9 +1324,15 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
     const userIdRaw = (req.body?.user_id ?? req.query?.user_id ?? '').toString();
     console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resourceRaw}, User: ${userIdRaw || '-'}`);
 
-    // Verificar que el user_id coincide
+    // Verificar user_id solo cuando viene en el webhook.
+    // Mercado Libre a veces no lo envía y eso hacía que nunca se procese la orden.
     const integration = await get(`SELECT user_id FROM integrations WHERE platform = 'mercadolibre'`);
-    if (!integration || integration.user_id?.toString() !== userIdRaw) {
+    const storedUserId = integration?.user_id?.toString();
+    if (!integration) {
+      console.log('[ML Webhook] No hay integración de Mercado Libre, ignorando');
+      return res.status(200).json({ received: true, ignored: true });
+    }
+    if (userIdRaw && storedUserId && storedUserId !== userIdRaw) {
       console.log('[ML Webhook] User ID no coincide, ignorando');
       return res.status(200).json({ received: true, ignored: true });
     }

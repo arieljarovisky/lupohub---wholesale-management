@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
 import { api } from '../services/api';
+import { mercadoLibreItemIdsMatch } from '../utils/mercadoLibreItemId';
 
 interface MLStockItem {
   id: string;
@@ -149,11 +150,21 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
   const filteredItems = (searchTerm.trim() ? (allItemsForSearch ?? []) : items)
     .filter(item => {
       if (!searchTerm) return true;
-      const search = searchTerm.toLowerCase();
+      const search = searchTerm.trim().toLowerCase();
+      const raw = searchTerm.trim();
       return (
         item.id.toLowerCase().includes(search) ||
+        mercadoLibreItemIdsMatch(raw, item.id) ||
         item.title.toLowerCase().includes(search) ||
-        item.variations.some(v => v.sku?.toLowerCase().includes(search))
+        item.variations.some(v => {
+          const skuHit = v.sku?.toLowerCase().includes(search);
+          const vid = String(v.variationId ?? '');
+          return (
+            skuHit ||
+            vid.toLowerCase().includes(search) ||
+            mercadoLibreItemIdsMatch(raw, vid)
+          );
+        })
       );
     })
     .sort((a, b) => {
