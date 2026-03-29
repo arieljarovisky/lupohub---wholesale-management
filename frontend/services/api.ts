@@ -958,39 +958,6 @@ export const api = {
     }, { success: false }, 'saveMLAutoMessageConfig');
   },
 
-  /** Webhooks propios de marketing ML → n8n (requiere sesión ADMIN / depósito). */
-  getMLMarketingWebhookConfig: async (): Promise<{
-    inboundUrl: string;
-    n8nForwardUrl: string;
-    forwardMlNotifications: boolean;
-    hint?: string;
-  }> => {
-    return await request<{
-      inboundUrl: string;
-      n8nForwardUrl: string;
-      forwardMlNotifications: boolean;
-      hint?: string;
-    }>('/integrations/mercadolibre/marketing-webhook', 'GET');
-  },
-
-  putMLMarketingWebhookConfig: async (body: {
-    n8nForwardUrl?: string;
-    forwardMlNotifications?: boolean;
-    regenerateSecret?: boolean;
-  }): Promise<{
-    success: boolean;
-    inboundUrl: string;
-    n8nForwardUrl: string;
-    forwardMlNotifications: boolean;
-  }> => {
-    return await request<{
-      success: boolean;
-      inboundUrl: string;
-      n8nForwardUrl: string;
-      forwardMlNotifications: boolean;
-    }>('/integrations/mercadolibre/marketing-webhook', 'PUT', body);
-  },
-
   // Historial de movimientos de stock
   getStockMovements: async (params?: { 
     variantId?: string; 

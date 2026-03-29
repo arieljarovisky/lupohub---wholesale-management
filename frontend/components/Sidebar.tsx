@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign } from 'lucide-react';
 import { Role } from '../types';
 
 interface SidebarProps {
@@ -32,7 +32,6 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       items: [
         { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
         { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
-        { id: 'mercadolibre_marketing', label: 'Marketing ML', icon: Megaphone, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'orange' },
       ]
     },
     {
@@ -58,7 +57,6 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       if (item.color === 'purple') return 'bg-purple-600 text-white shadow-lg shadow-purple-900/50';
       if (item.color === 'indigo') return 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50';
       if (item.color === 'emerald') return 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/50';
-      if (item.color === 'orange') return 'bg-orange-600 text-white shadow-lg shadow-orange-900/50';
       return 'bg-blue-600 text-white shadow-lg shadow-blue-900/50';
     }
     return 'text-slate-400 hover:bg-slate-800/50 hover:text-white';
@@ -71,7 +69,6 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     if (item.color === 'purple') return 'text-purple-400';
     if (item.color === 'indigo') return 'text-indigo-400';
     if (item.color === 'emerald') return 'text-emerald-400';
-    if (item.color === 'orange') return 'text-orange-400';
     return '';
   };
 

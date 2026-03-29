@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import { execute, query, get } from '../database/db';
-import { forwardMercadoLibreNotificationToN8n } from './mlMarketingWebhook.controller';
 import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
@@ -1532,8 +1531,6 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
         console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
       }
     }
-
-    void forwardMercadoLibreNotificationToN8n(req);
 
     res.status(200).json({ received: true });
   } catch (error: any) {
