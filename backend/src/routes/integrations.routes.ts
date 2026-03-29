@@ -38,11 +38,21 @@ import {
   syncMercadoLibreOrdersFromDate,
   testMercadoLibreOrder
 } from '../controllers/integrations.controller';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
+import {
+  getMLMarketingWebhookConfig,
+  putMLMarketingWebhookConfig,
+  handleMarketingInboundWebhook,
+} from '../controllers/mlMarketingWebhook.controller';
 
 const router = Router();
 
 router.get('/status', getIntegrationStatus);
+
+// Mercado Libre — marketing / n8n (webhook público con secreto; config con JWT)
+router.post('/mercadolibre/marketing/inbound/:secret', handleMarketingInboundWebhook);
+router.get('/mercadolibre/marketing-webhook', authMiddleware, adminOrDepositoMiddleware, getMLMarketingWebhookConfig);
+router.put('/mercadolibre/marketing-webhook', authMiddleware, adminOrDepositoMiddleware, putMLMarketingWebhookConfig);
 
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);
