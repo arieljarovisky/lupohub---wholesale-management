@@ -290,6 +290,31 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
+    const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
+    const fechaQr = !isNaN(fechaQrBase.getTime())
+      ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
+      : '';
+    const cuitEmisorNum = Number(String(cuitEmpresa).replace(/\D/g, '')) || 0;
+    const cuitReceptorDigits = String(cuitCliente).replace(/\D/g, '');
+    const tipoDocRec = cuitReceptorDigits.length === 11 ? 80 : cuitReceptorDigits.length >= 7 ? 96 : 99;
+    const nroDocRec = cuitReceptorDigits ? Number(cuitReceptorDigits) : 0;
+    const qrPayload = {
+      ver: 1,
+      fecha: fechaQr,
+      cuit: cuitEmisorNum,
+      ptoVta: Number(inv.puntoVta ?? 0),
+      tipoCmp: Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo ?? 0),
+      nroCmp: Number(inv.cbteDesde ?? 0),
+      importe: Number(total.toFixed(2)),
+      moneda: 'PES',
+      ctz: 1,
+      tipoDocRec,
+      nroDocRec,
+      tipoCodAut: 'E',
+      codAut: Number(String(inv.cae || '').replace(/\D/g, '')) || 0
+    };
+    const afipQrUrl = `https://www.afip.gob.ar/fe/qr/?p=${btoa(unescape(encodeURIComponent(JSON.stringify(qrPayload))))}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(afipQrUrl)}`;
 
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -551,7 +576,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
       .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
       .head-right { padding: 8px 10px; }
-      .issuer-title { font-size: 20px; font-weight: 700; margin: 2px 0 8px; letter-spacing: 0.02em; }
+      .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
       .mini { font-size: 10px; }
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
@@ -585,6 +610,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
       .footer { margin-top: 12px; font-size: 10px; }
+      .footer-grid { display: grid; grid-template-columns: 1fr 126px; gap: 10px; align-items: end; }
+      .qr-wrap { border: 1px solid #111; padding: 4px; text-align: center; }
+      .qr-wrap img { width: 110px; height: 110px; display: block; margin: 0 auto; }
+      .qr-label { margin-top: 4px; font-size: 9px; line-height: 1.2; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       @media print { .no-print { display: none !important; } }
     </style></head><body>
@@ -666,8 +695,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
 
         <div class="footer">
-          <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-          <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
+          <div class="footer-grid">
+            <div>
+              <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+              <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
+            </div>
+            <div class="qr-wrap">
+              <img src="${qrImageUrl}" alt="QR AFIP" />
+              <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
+            </div>
+          </div>
         </div>
 
         <div class="no-print">

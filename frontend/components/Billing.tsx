@@ -120,7 +120,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
 
     const formatoNumero = (n: any) => (n != null ? String(n) : '');
     const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
-    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt.split('T')[0]) : formatDateShort(order.date);
+    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : order.items.reduce((s: number, i: any) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const iva21 = Math.round(Number(baseImponible) * 0.21 * 100) / 100;
@@ -139,6 +139,30 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+    const cuitEmpresaDigits = String((remitente as any).cuit || '').replace(/\D/g, '');
+    const cuitClienteDigits = String(customer?.cuit || '').replace(/\D/g, '');
+    const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
+    const fechaQr = !isNaN(fechaQrBase.getTime())
+      ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
+      : '';
+    const tipoDocRec = cuitClienteDigits.length === 11 ? 80 : cuitClienteDigits.length >= 7 ? 96 : 99;
+    const qrPayload = {
+      ver: 1,
+      fecha: fechaQr,
+      cuit: Number(cuitEmpresaDigits) || 0,
+      ptoVta: Number(inv.puntoVta ?? 0),
+      tipoCmp: Number(inv.cbteTipo ?? 0),
+      nroCmp: Number(inv.cbteDesde ?? 0),
+      importe: Number(totalComprobante.toFixed(2)),
+      moneda: 'PES',
+      ctz: 1,
+      tipoDocRec,
+      nroDocRec: cuitClienteDigits ? Number(cuitClienteDigits) : 0,
+      tipoCodAut: 'E',
+      codAut: Number(String(inv.cae || '').replace(/\D/g, '')) || 0
+    };
+    const afipQrUrl = `https://www.afip.gob.ar/fe/qr/?p=${btoa(unescape(encodeURIComponent(JSON.stringify(qrPayload))))}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(afipQrUrl)}`;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
       @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
@@ -171,6 +195,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       .inv-summary-inner .row.total { font-weight: 800; font-size: 1rem; background: #eaf2ff; color: #000000; }
       .inv-footer { padding: 14px 18px; background: #f5f8ff; border: 1px solid #dbe7ff; border-radius: 8px; font-size: 0.78rem; color: #000000; }
       .inv-cae { margin-bottom: 6px; font-weight: 600; }
+      .inv-footer-grid { display: grid; grid-template-columns: 1fr 128px; gap: 12px; align-items: end; }
+      .inv-qr { border: 1px solid #9db7e6; border-radius: 6px; padding: 4px; text-align: center; background: #ffffff; }
+      .inv-qr img { width: 112px; height: 112px; display: block; margin: 0 auto; }
+      .inv-qr small { display: block; margin-top: 4px; font-size: 9px; line-height: 1.1; }
       .no-print { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
       .no-print button { padding: 10px 22px; font-size: 0.95rem; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; }
       .no-print button:first-child { background: #6b99de; color: #ffffff; }
@@ -196,7 +224,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
         <table class="inv-table">
           <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${totalComprobante.toLocaleString('es-AR')}</span></div></div></div>
-      <div class="inv-footer"><div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div><p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p></div>
+      <div class="inv-footer">
+        <div class="inv-footer-grid">
+          <div>
+            <div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+            <p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p>
+          </div>
+          <div class="inv-qr">
+            <img src="${qrImageUrl}" alt="QR AFIP" />
+            <small>Comprobante autorizado<br/>AFIP</small>
+          </div>
+        </div>
+      </div>
       <div class="no-print"><button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button><button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
