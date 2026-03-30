@@ -675,24 +675,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     e.stopPropagation();
     if (!order.invoice) return;
     const customer = customers.find(c => c.id === order.customerId);
-    const prev = manualFacturaDataByOrder[order.id] || {};
-    const transportInit = (prev.transportNumber ?? customer?.transportNumber ?? '').toString();
-    const remitoInit = (prev.remitoNumber ?? customer?.remitoNumber ?? '').toString();
-    const saleInit = (prev.saleCondition ?? customer?.saleCondition ?? '').toString();
-
-    const transportNumber = window.prompt('Transporte (manual para esta factura):', transportInit);
-    if (transportNumber === null) return;
-    const remitoNumber = window.prompt('N° de remito (manual para esta factura):', remitoInit);
-    if (remitoNumber === null) return;
-    const saleCondition = window.prompt('Condición de venta (manual para esta factura):', saleInit);
-    if (saleCondition === null) return;
-
-    const manual = {
-      transportNumber: transportNumber.trim(),
-      remitoNumber: remitoNumber.trim(),
-      saleCondition: saleCondition.trim(),
+    const prev = manualFacturaDataByOrder[order.id];
+    const manual = prev ?? {
+      transportNumber: (customer?.transportNumber ?? '').toString().trim(),
+      remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
+      saleCondition: (customer?.saleCondition ?? '').toString().trim(),
     };
-    setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [order.id]: manual }));
+    if (!prev) {
+      setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [order.id]: manual }));
+    }
 
     const html = buildFacturaHtml(order, manual);
     if (!html) return;
