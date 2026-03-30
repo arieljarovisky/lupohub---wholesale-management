@@ -350,7 +350,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const qty = Number(i.quantity || 0);
       const unit = Number(i.priceAtMoment ?? 0);
       const importe = Math.round(qty * unit * 100) / 100;
-      const sku = (i.sku ?? '').toString().trim();
+      const variantId = i.variantId ?? i.productId;
+      const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+      const sku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
       const name = (i.productName ?? '').toString().trim();
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
@@ -538,8 +540,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
       return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
     };
-    const descOf = (i: OrderItem) =>
-      [(i.sku ?? ''), (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+    const descOf = (i: OrderItem) => {
+      const variantId = i.variantId ?? i.productId;
+      const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+      const localSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
+      return [localSku, (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+    };
 
     const scope = nc.scope || 'total';
     const itemIdx = nc.itemIndex;
