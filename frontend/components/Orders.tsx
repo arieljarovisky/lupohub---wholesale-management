@@ -551,7 +551,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
       .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
       .head-right { padding: 8px 10px; }
-      .issuer-title { font-size: 30px; font-weight: 800; margin: 2px 0 10px; letter-spacing: 0.04em; }
+      .issuer-title { font-size: 20px; font-weight: 700; margin: 2px 0 8px; letter-spacing: 0.02em; }
       .mini { font-size: 10px; }
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
