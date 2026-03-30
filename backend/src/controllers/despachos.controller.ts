@@ -282,11 +282,6 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
 
     const fecha = fecha_despacho || new Date().toISOString().split('T')[0];
 
-    const existing = await get(`SELECT id FROM despachos WHERE numero_despacho = ?`, [numero_despacho]);
-    if (existing) {
-      return res.status(400).json({ message: 'Ya existe un despacho con ese número' });
-    }
-
     const productos = await query(`
       SELECT 
         p.id, 
@@ -309,24 +304,48 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
       });
     }
 
-    const despachoId = uuidv4();
-    await execute(`
-      INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas)
-      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'USD', 'despachado', ?)
-    `, [despachoId, numero_despacho, fecha, pais_origen, proveedor || null, descripcion || null, notas || null]);
+    const despachoExistente = await get(`SELECT id, pais_origen FROM despachos WHERE numero_despacho = ?`, [numero_despacho]);
+    let despachoId: string;
+    let creadoNuevo = false;
+
+    if (despachoExistente?.id) {
+      despachoId = despachoExistente.id;
+    } else {
+      despachoId = uuidv4();
+      creadoNuevo = true;
+      await execute(`
+        INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'USD', 'despachado', ?)
+      `, [despachoId, numero_despacho, fecha, pais_origen, proveedor || null, descripcion || null, notas || null]);
+    }
+
+    const paisParaProductos =
+      (despachoExistente?.pais_origen && String(despachoExistente.pais_origen).trim()) || pais_origen;
 
     for (const p of productos as any[]) {
-      const itemId = uuidv4();
-      const cantidad = Number(p.stock_total) || 0;
-      await execute(`
-        INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
-      VALUES (?, ?, ?, NULL, ?, NULL, ?)
-    `, [itemId, despachoId, p.id, cantidad, `${p.name} - ${p.sku || ''}`.trim()]);
-      await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, p.id]);
+      const yaEnDespacho = await get(
+        `SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`,
+        [despachoId, p.id]
+      );
+      if (!yaEnDespacho) {
+        const itemId = uuidv4();
+        const cantidad = Number(p.stock_total) || 0;
+        await execute(`
+          INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
+          VALUES (?, ?, ?, NULL, ?, NULL, ?)
+        `, [itemId, despachoId, p.id, cantidad, `${p.name} - ${p.sku || ''}`.trim()]);
+      }
+      await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
+        despachoId,
+        paisParaProductos,
+        p.id
+      ]);
     }
 
     res.status(201).json({
-      message: `Se creó el despacho "${numero_despacho}" y se asignó a ${productos.length} producto(s).`,
+      message: creadoNuevo
+        ? `Se creó el despacho "${numero_despacho}" y se asignó a ${productos.length} producto(s).`
+        : `Se usó el despacho existente "${numero_despacho}" y se asignó a ${productos.length} producto(s) sin despacho.`,
       id: despachoId,
       numero_despacho,
       total_asignados: productos.length
