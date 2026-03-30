@@ -68,6 +68,10 @@ const Despachos: React.FC = () => {
   const [savingAsignarTodos, setSavingAsignarTodos] = useState(false);
   const [productosSinDespachoCount, setProductosSinDespachoCount] = useState<number | null>(null);
 
+  const [showAsignarUnoModal, setShowAsignarUnoModal] = useState(false);
+  const [asignarUnoForm, setAsignarUnoForm] = useState({ numero_despacho: '', sku: '' });
+  const [savingAsignarUno, setSavingAsignarUno] = useState(false);
+
   // Form state
   const [form, setForm] = useState({
     numero_despacho: '',
@@ -320,6 +324,17 @@ const Despachos: React.FC = () => {
           >
             <Package size={18} />
             Asignar Nº a todos los artículos
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowAsignarUnoModal(true);
+              setAsignarUnoForm({ numero_despacho: '', sku: '' });
+            }}
+            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm border border-slate-600"
+          >
+            <FileText size={18} />
+            Un artículo por código
           </button>
           <button
             onClick={() => handleOpenModal()}
@@ -928,7 +943,7 @@ const Despachos: React.FC = () => {
             <div className="p-6 space-y-4">
               {productosSinDespachoCount !== null && (
                 <p className="text-slate-400 text-sm">
-                  Hay <strong className="text-white">{productosSinDespachoCount}</strong> producto(s) sin número de despacho. Se creará un despacho con el número que indiques y se les asignará a todos.
+                  Hay <strong className="text-white">{productosSinDespachoCount}</strong> producto(s) sin número de despacho. Si el número no existe, se crea el despacho; si ya existe, se reutiliza y se asigna a esos productos.
                 </p>
               )}
               <div>
@@ -993,6 +1008,85 @@ const Despachos: React.FC = () => {
               >
                 {savingAsignarTodos ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
                 Asignar a todos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: asignar un despacho existente a un producto por SKU / código de variante */}
+      {showAsignarUnoModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="font-bold text-white text-lg flex items-center gap-2">
+                <FileText size={20} className="text-indigo-400" />
+                Asignar despacho a un artículo
+              </h3>
+              <button type="button" onClick={() => setShowAsignarUnoModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-400 text-sm">
+                El número de despacho tiene que existir en el listado (o crealo con &quot;Nuevo Despacho&quot;). Podés usar el SKU del modelo (ej. <span className="text-slate-300">QE5546</span>) o el código completo de la factura (ej. <span className="text-slate-300">QE5546-158-614</span>).
+              </p>
+              <div>
+                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Número de despacho *</label>
+                <input
+                  type="text"
+                  value={asignarUnoForm.numero_despacho}
+                  onChange={(e) => setAsignarUnoForm({ ...asignarUnoForm, numero_despacho: e.target.value })}
+                  placeholder="Ej: 26001IC04049980C"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Código del producto *</label>
+                <input
+                  type="text"
+                  value={asignarUnoForm.sku}
+                  onChange={(e) => setAsignarUnoForm({ ...asignarUnoForm, sku: e.target.value })}
+                  placeholder="Ej: QE5546 o QE5546-158-614"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="p-6 pt-0 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAsignarUnoModal(false)}
+                className="px-4 py-2 text-slate-400 hover:text-white font-bold transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!asignarUnoForm.numero_despacho.trim() || !asignarUnoForm.sku.trim()) {
+                    showToast('info', 'Completá número de despacho y código del producto');
+                    return;
+                  }
+                  setSavingAsignarUno(true);
+                  try {
+                    const res = await api.asignarDespachoAProducto({
+                      numero_despacho: asignarUnoForm.numero_despacho.trim(),
+                      sku: asignarUnoForm.sku.trim()
+                    });
+                    setShowAsignarUnoModal(false);
+                    showToast('success', res.message || 'Despacho asignado');
+                    fetchDespachos();
+                  } catch (err: any) {
+                    showToast('error', err?.message || 'No se pudo asignar');
+                  } finally {
+                    setSavingAsignarUno(false);
+                  }
+                }}
+                disabled={savingAsignarUno || !asignarUnoForm.numero_despacho.trim() || !asignarUnoForm.sku.trim()}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {savingAsignarUno ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                Asignar
               </button>
             </div>
           </div>

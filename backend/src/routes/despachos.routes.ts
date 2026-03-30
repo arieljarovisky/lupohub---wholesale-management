@@ -9,7 +9,8 @@ import {
   removeDespachoItem,
   getProductosSinDespacho,
   getDespachoStats,
-  asignarDespachoATodos
+  asignarDespachoATodos,
+  asignarDespachoAProducto
 } from '../controllers/despachos.controller';
 
 const router = Router();
@@ -22,6 +23,8 @@ router.get('/productos-sin-despacho', getProductosSinDespacho);
 
 // Asignar un número de despacho a todos los productos que no tienen despacho (debe ir antes de /:id)
 router.post('/asignar-todos', asignarDespachoATodos);
+// Asignar un despacho existente a un solo producto por código (SKU base o variante)
+router.post('/asignar-a-producto', asignarDespachoAProducto);
 
 // CRUD de despachos
 router.get('/', getDespachos);

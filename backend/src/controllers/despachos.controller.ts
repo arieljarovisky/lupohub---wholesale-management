@@ -264,6 +264,96 @@ export const removeDespachoItem = async (req: Request, res: Response) => {
   }
 };
 
+/** Busca producto por SKU base o código de variante (ej. QE5546 o QE5546-158-614). */
+async function findProductBySkuInput(skuRaw: string): Promise<{ id: string; sku: string; name: string } | null> {
+  const skuTrim = String(skuRaw || '').trim();
+  if (!skuTrim) return null;
+  let row = await get(`SELECT id, sku, name FROM products WHERE sku = ?`, [skuTrim]);
+  if (row) return row as any;
+  const base = skuTrim.split('-')[0];
+  if (base && base !== skuTrim) {
+    row = await get(`SELECT id, sku, name FROM products WHERE sku = ?`, [base]);
+    if (row) return row as any;
+  }
+  row = await get(
+    `SELECT id, sku, name FROM products WHERE ? LIKE CONCAT(sku, '-%') ORDER BY CHAR_LENGTH(sku) DESC LIMIT 1`,
+    [skuTrim]
+  );
+  return (row as any) || null;
+}
+
+/** Asigna un despacho ya existente (por número) a un solo producto por código de modelo / variante. */
+export const asignarDespachoAProducto = async (req: Request, res: Response) => {
+  try {
+    const { numero_despacho, sku } = req.body || {};
+    if (!numero_despacho || !String(numero_despacho).trim()) {
+      return res.status(400).json({ message: 'numero_despacho es requerido' });
+    }
+    if (!sku || !String(sku).trim()) {
+      return res.status(400).json({ message: 'sku es requerido (código de modelo o variante, ej. QE5546 o QE5546-158-614)' });
+    }
+
+    const despacho = await get(`SELECT id, pais_origen, numero_despacho FROM despachos WHERE numero_despacho = ?`, [
+      String(numero_despacho).trim()
+    ]);
+    if (!despacho?.id) {
+      return res.status(404).json({
+        message: `No existe un despacho con el número "${String(numero_despacho).trim()}". Crealo primero o verificá el número.`
+      });
+    }
+
+    const product = await findProductBySkuInput(String(sku));
+    if (!product) {
+      return res.status(404).json({
+        message: `No se encontró un producto con código "${String(sku).trim()}". Probá con el SKU del modelo (ej. QE5546).`
+      });
+    }
+
+    const stockRow = await get(
+      `SELECT COALESCE(SUM(s.stock), 0) AS stock_total
+       FROM product_colors pc
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pc.product_id = ?`,
+      [product.id]
+    );
+    const cantidad = Number((stockRow as any)?.stock_total) || 0;
+
+    const yaEnDespacho = await get(
+      `SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`,
+      [despacho.id, product.id]
+    );
+    if (!yaEnDespacho) {
+      const itemId = uuidv4();
+      await execute(
+        `INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
+         VALUES (?, ?, ?, NULL, ?, NULL, ?)`,
+        [itemId, despacho.id, product.id, cantidad, `${product.name} - ${product.sku || ''}`.trim()]
+      );
+    }
+
+    const pais = (despacho as any).pais_origen && String((despacho as any).pais_origen).trim()
+      ? (despacho as any).pais_origen
+      : 'Brasil';
+    await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
+      despacho.id,
+      pais,
+      product.id
+    ]);
+
+    res.status(201).json({
+      message: `Se asignó el despacho ${despacho.numero_despacho} al producto "${product.name}" (${product.sku}).`,
+      despachoId: despacho.id,
+      numero_despacho: despacho.numero_despacho,
+      productId: product.id,
+      sku: product.sku
+    });
+  } catch (error: any) {
+    console.error('asignarDespachoAProducto:', error);
+    res.status(500).json({ message: 'Error al asignar despacho al producto', error: error.message });
+  }
+};
+
 // Asignar un número de despacho a todos los productos que aún no tienen despacho
 export const asignarDespachoATodos = async (req: Request, res: Response) => {
   try {

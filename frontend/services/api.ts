@@ -1171,6 +1171,12 @@ export const api = {
     }, { message: 'Error', id: '', numero_despacho: '', total_asignados: 0 }, 'asignarDespachoATodos');
   },
 
+  asignarDespachoAProducto: async (data: { numero_despacho: string; sku: string }): Promise<{ message: string; despachoId: string; numero_despacho: string; productId: string; sku: string }> => {
+    return handleRequest(async () => {
+      return await request<{ message: string; despachoId: string; numero_despacho: string; productId: string; sku: string }>('/despachos/asignar-a-producto', 'POST', data);
+    }, { message: 'Error', despachoId: '', numero_despacho: '', productId: '', sku: '' }, 'asignarDespachoAProducto');
+  },
+
   // ============ FACTURACIÓN (Facturas + Notas de crédito) ============
 
   getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
