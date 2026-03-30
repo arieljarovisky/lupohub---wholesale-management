@@ -177,6 +177,48 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     };
   };
 
+  /** Orden estable de ítems para impresión (artículo base -> SKU local -> talle -> color). */
+  const sortOrderItemsForPrint = (items: OrderItem[]): OrderItem[] => {
+    const baseArticleCode = (skuRaw: string): string => {
+      const sku = (skuRaw || '').trim();
+      if (!sku) return '';
+      const match = sku.match(/\d{5,}/);
+      if (match) return match[0].slice(0, 5);
+      return sku.slice(0, 5);
+    };
+
+    return [...items].sort((a, b) => {
+      const aVariantId = a.variantId ?? a.productId;
+      const bVariantId = b.variantId ?? b.productId;
+      const aLocal = aVariantId ? products.find((p: Product) => p.id === aVariantId) : undefined;
+      const bLocal = bVariantId ? products.find((p: Product) => p.id === bVariantId) : undefined;
+
+      const aSku = (aLocal?.sku ?? a.sku ?? '').toString().trim();
+      const bSku = (bLocal?.sku ?? b.sku ?? '').toString().trim();
+      const aBase = baseArticleCode(aSku);
+      const bBase = baseArticleCode(bSku);
+      const byBase = aBase.localeCompare(bBase, 'es', { numeric: true, sensitivity: 'base' });
+      if (byBase !== 0) return byBase;
+
+      const bySku = aSku.localeCompare(bSku, 'es', { numeric: true, sensitivity: 'base' });
+      if (bySku !== 0) return bySku;
+
+      const aName = (a.productName ?? '').toString().trim();
+      const bName = (b.productName ?? '').toString().trim();
+      const byName = aName.localeCompare(bName, 'es', { numeric: true, sensitivity: 'base' });
+      if (byName !== 0) return byName;
+
+      const aSize = (a.sizeCode ?? '').toString().trim();
+      const bSize = (b.sizeCode ?? '').toString().trim();
+      const bySize = aSize.localeCompare(bSize, 'es', { numeric: true, sensitivity: 'base' });
+      if (bySize !== 0) return bySize;
+
+      const aColor = (a.colorName ?? '').toString().trim();
+      const bColor = (b.colorName ?? '').toString().trim();
+      return aColor.localeCompare(bColor, 'es', { numeric: true, sensitivity: 'base' });
+    });
+  };
+
   /** Abre el modal para elegir transporte, bultos y descripción (para expreso al interior) y luego genera el remito. */
   const openRemitoModal = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -192,7 +234,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const buildRemitoHtml = (order: Order, transporteName: string, bultos?: number | string | null, descripcion?: string | null) => {
     const customer = customers.find(c => c.id === order.customerId);
     const remitente = getRemitente();
-    const items = order.items.map(enrichItem);
+    const items = sortOrderItemsForPrint(order.items.map(enrichItem));
     const formatDateShort = (d: string) => {
       const x = new Date(d);
       if (isNaN(x.getTime())) return d;
@@ -332,7 +374,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
       ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
       : localRemitente;
-    const items = order.items.map(enrichItem);
+    const items = sortOrderItemsForPrint(order.items.map(enrichItem));
     const formatDateShort = (d: string) => {
       const x = new Date(d);
       if (isNaN(x.getTime())) return d;
@@ -520,7 +562,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
       ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
       : localRemitente;
-    const items = order.items.map(enrichItem);
+    const items = sortOrderItemsForPrint(order.items.map(enrichItem));
     const formatDateShort = (d: string) => {
       const x = new Date(d);
       if (isNaN(x.getTime())) return d;
