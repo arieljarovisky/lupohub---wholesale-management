@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Loader2, FileText } from 'lucide-react';
+import { RefreshCw, Loader2, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import TiendaNubeOrders from './TiendaNubeOrders';
 import MercadoLibreOrders from './MercadoLibreOrders';
 import { api } from '../services/api';
@@ -25,15 +25,20 @@ const BulkInvoicing: React.FC = () => {
   const [historySource, setHistorySource] = useState<SourceFilter>('ALL');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [history, setHistory] = useState<ExternalInvoiceRow[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const historyLimit = 20;
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
       const source: 'TIENDANUBE' | 'MERCADOLIBRE' | undefined = historySource === 'ALL' ? undefined : historySource;
-      const res = await api.getExternalInvoicesHistory({ source, limit: 200 });
+      const res = await api.getExternalInvoicesHistory({ source, limit: historyLimit, offset: historyOffset });
+      setHistoryTotal(Number(res.total || 0));
       setHistory(res.invoices || []);
     } catch (error) {
       console.error('Error loading external invoices history:', error);
+      setHistoryTotal(0);
       setHistory([]);
     } finally {
       setLoadingHistory(false);
@@ -41,8 +46,21 @@ const BulkInvoicing: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchHistory();
+    setHistoryOffset(0);
   }, [historySource]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [historySource, historyOffset]);
+
+  useEffect(() => {
+    if (historyOffset > 0 && history.length === 0 && historyTotal > 0) {
+      setHistoryOffset((prev) => Math.max(0, prev - historyLimit));
+    }
+  }, [history.length, historyOffset, historyTotal]);
+
+  const historyPage = Math.floor(historyOffset / historyLimit) + 1;
+  const historyPages = Math.max(1, Math.ceil(historyTotal / historyLimit));
 
   const stats = useMemo(() => {
     const total = history.length;
@@ -111,7 +129,7 @@ const BulkInvoicing: React.FC = () => {
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2">
             <p className="text-xs text-slate-500">Total</p>
-            <p className="text-white font-black text-lg">{stats.total}</p>
+            <p className="text-white font-black text-lg">{historyTotal}</p>
           </div>
           <div className="bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2">
             <p className="text-xs text-slate-500">TN</p>
@@ -163,6 +181,48 @@ const BulkInvoicing: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {historyPages > 1 && (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setHistoryOffset(0)}
+              disabled={historyOffset === 0}
+              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            >
+              <ChevronLeft size={16} className="text-white" />
+              <ChevronLeft size={16} className="text-white -ml-2" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryOffset((v) => Math.max(0, v - historyLimit))}
+              disabled={historyOffset === 0}
+              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            >
+              <ChevronLeft size={16} className="text-white" />
+            </button>
+            <span className="px-3 text-sm text-slate-300">
+              Página {historyPage} de {historyPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setHistoryOffset((v) => v + historyLimit)}
+              disabled={historyPage >= historyPages}
+              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            >
+              <ChevronRight size={16} className="text-white" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryOffset((historyPages - 1) * historyLimit)}
+              disabled={historyPage >= historyPages}
+              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            >
+              <ChevronRight size={16} className="text-white" />
+              <ChevronRight size={16} className="text-white -ml-2" />
+            </button>
           </div>
         )}
       </div>

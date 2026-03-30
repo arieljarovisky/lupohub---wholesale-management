@@ -3256,7 +3256,8 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
     }
     const sourceRaw = String(req.query?.source || '').trim().toUpperCase();
     const source = sourceRaw === 'TIENDANUBE' || sourceRaw === 'MERCADOLIBRE' ? sourceRaw : '';
-    const limitNum = Math.min(500, Math.max(1, parseInt(String(req.query?.limit || '100'), 10) || 100));
+    const limitNum = Math.min(500, Math.max(1, parseInt(String(req.query?.limit || '50'), 10) || 50));
+    const offsetNum = Math.max(0, parseInt(String(req.query?.offset || '0'), 10) || 0);
 
     const where: string[] = [];
     const params: any[] = [];
@@ -3265,17 +3266,28 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
       params.push(source);
     }
 
+    const countRow = await get(
+      `SELECT COUNT(*) AS cnt
+       FROM external_invoices
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`,
+      params
+    ) as any;
+    const total = Number(countRow?.cnt || 0);
+
     const rows = await query(
       `SELECT id, source, external_order_id, order_number, customer_name, total,
               cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
        FROM external_invoices
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY created_at DESC
-       LIMIT ${limitNum}`,
+       LIMIT ${limitNum} OFFSET ${offsetNum}`,
       params
     ) as any[];
 
     res.json({
+      total,
+      offset: offsetNum,
+      limit: limitNum,
       invoices: rows.map((r) => ({
         id: r.id,
         source: r.source,

@@ -930,7 +930,10 @@ export const api = {
     }, 'invoiceMercadoLibreOrdersBulk');
   },
 
-  getExternalInvoicesHistory: async (params?: { source?: 'TIENDANUBE' | 'MERCADOLIBRE'; limit?: number }): Promise<{
+  getExternalInvoicesHistory: async (params?: { source?: 'TIENDANUBE' | 'MERCADOLIBRE'; limit?: number; offset?: number }): Promise<{
+    total: number;
+    offset: number;
+    limit: number;
     invoices: Array<{
       id: string;
       source: string;
@@ -951,9 +954,10 @@ export const api = {
       const queryParams = new URLSearchParams();
       if (params?.source) queryParams.append('source', params.source);
       if (params?.limit) queryParams.append('limit', String(params.limit));
+      if (params?.offset != null) queryParams.append('offset', String(params.offset));
       const queryString = queryParams.toString();
       return await request(`/integrations/invoices/external${queryString ? '?' + queryString : ''}`, 'GET');
-    }, { invoices: [] }, 'getExternalInvoicesHistory');
+    }, { total: 0, offset: 0, limit: params?.limit || 50, invoices: [] }, 'getExternalInvoicesHistory');
   },
 
   // Stock de Tienda Nube (publicaciones con stock)

@@ -56,6 +56,7 @@ const TiendaNubeOrders: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>(todayIso);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
   const [bulkInvoicing, setBulkInvoicing] = useState(false);
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const perPage = 15;
 
@@ -158,6 +159,42 @@ const TiendaNubeOrders: React.FC = () => {
 
   const clearSelection = () => setSelectedOrderIds([]);
 
+  const selectAllFilteredPaid = async () => {
+    setSelectingAllFiltered(true);
+    try {
+      const perPageFetch = 100;
+      let currentPage = 1;
+      const allPaidIds: number[] = [];
+
+      while (true) {
+        const params: any = { page: currentPage, per_page: perPageFetch };
+        if (!showAllOrders) params.only_paid_pending_shipment = true;
+        if (filterStatus) params.status = filterStatus;
+        if (dateFrom) params.created_at_min = dateFrom;
+        if (dateTo) params.created_at_max = dateTo;
+
+        const res = await api.getTiendaNubeOrders(params);
+        const batch = (res.orders || [])
+          .filter((o: any) => o.isPaid === true || o.paymentStatus === 'paid')
+          .map((o: any) => Number(o.id))
+          .filter((id: number) => Number.isFinite(id));
+        allPaidIds.push(...batch);
+
+        if (!res.orders || res.orders.length < perPageFetch) break;
+        currentPage += 1;
+        if (currentPage > 500) break;
+      }
+
+      const unique = Array.from(new Set(allPaidIds));
+      setSelectedOrderIds(unique);
+      window.alert(`Se seleccionaron ${unique.length} ventas pagadas del filtro actual.`);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudieron seleccionar todas las ventas pagadas');
+    } finally {
+      setSelectingAllFiltered(false);
+    }
+  };
+
   const handleBulkInvoice = async () => {
     if (selectedOrderIds.length === 0) {
       window.alert('Seleccioná al menos una orden para facturar.');
@@ -167,16 +204,23 @@ const TiendaNubeOrders: React.FC = () => {
     setBulkInvoicing(true);
     try {
       const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : undefined;
-      const res = await api.invoiceTiendaNubeOrdersBulk({
-        orderIds: selectedOrderIds,
-        cbteTipo
-      });
+      const ids = Array.from(new Set(selectedOrderIds));
+      const chunkSize = 100;
+      const summary = { invoiced: 0, alreadyInvoiced: 0, skippedUnpaid: 0, errors: 0 };
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const res = await api.invoiceTiendaNubeOrdersBulk({ orderIds: chunk, cbteTipo });
+        summary.invoiced += Number(res.summary?.invoiced || 0);
+        summary.alreadyInvoiced += Number(res.summary?.alreadyInvoiced || 0);
+        summary.skippedUnpaid += Number(res.summary?.skippedUnpaid || 0);
+        summary.errors += Number(res.summary?.errors || 0);
+      }
       window.alert(
         `Facturación masiva finalizada.\n\n` +
-        `Facturadas: ${res.summary.invoiced}\n` +
-        `Ya facturadas: ${res.summary.alreadyInvoiced}\n` +
-        `No pagadas (omitidas): ${res.summary.skippedUnpaid}\n` +
-        `Errores: ${res.summary.errors}`
+        `Facturadas: ${summary.invoiced}\n` +
+        `Ya facturadas: ${summary.alreadyInvoiced}\n` +
+        `No pagadas (omitidas): ${summary.skippedUnpaid}\n` +
+        `Errores: ${summary.errors}`
       );
       fetchOrders();
     } catch (error: any) {
@@ -218,6 +262,14 @@ const TiendaNubeOrders: React.FC = () => {
             className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
           >
             Seleccionar pagadas
+          </button>
+          <button
+            onClick={selectAllFilteredPaid}
+            disabled={loading || selectingAllFiltered}
+            className="bg-cyan-700/40 border border-cyan-600/40 text-cyan-100 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+            title="Selecciona todas las ventas pagadas según el filtro actual, incluyendo todas las páginas"
+          >
+            {selectingAllFiltered ? 'Seleccionando...' : 'Seleccionar todas (filtro)'}
           </button>
           <button
             onClick={clearSelection}

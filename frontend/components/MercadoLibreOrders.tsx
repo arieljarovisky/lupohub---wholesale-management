@@ -45,6 +45,7 @@ const MercadoLibreOrders: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>('');
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
   const [bulkInvoicing, setBulkInvoicing] = useState(false);
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const limit = 15;
 
@@ -175,6 +176,45 @@ const MercadoLibreOrders: React.FC = () => {
 
   const clearSelection = () => setSelectedOrderIds([]);
 
+  const selectAllFilteredPaid = async () => {
+    setSelectingAllFiltered(true);
+    try {
+      const limitFetch = 50;
+      let currentOffset = 0;
+      const allPaidIds: number[] = [];
+
+      while (true) {
+        const params: any = { offset: currentOffset, limit: limitFetch };
+        if (!showAllSales) params.only_pending_shipment_and_cancelled = true;
+        if (filterStatus) params.status = filterStatus;
+        if (dateFrom) params.date_from = dateFrom;
+        if (dateTo) params.date_to = dateTo;
+
+        const res = await api.getMercadoLibreOrders(params);
+        const batchOrders = res.orders || [];
+        for (const o of batchOrders as any[]) {
+          if (o.status !== 'paid') continue;
+          const ids = (Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id])
+            .map((id: any) => Number(id))
+            .filter((id: number) => Number.isFinite(id));
+          allPaidIds.push(...ids);
+        }
+
+        currentOffset += limitFetch;
+        if (currentOffset >= Number(res.total || 0)) break;
+        if (currentOffset > 50000) break;
+      }
+
+      const unique = Array.from(new Set(allPaidIds));
+      setSelectedOrderIds(unique);
+      window.alert(`Se seleccionaron ${unique.length} ventas pagadas del filtro actual.`);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudieron seleccionar todas las ventas pagadas');
+    } finally {
+      setSelectingAllFiltered(false);
+    }
+  };
+
   const handleBulkInvoice = async () => {
     if (selectedOrderIds.length === 0) {
       window.alert('Seleccioná al menos una orden para facturar.');
@@ -184,13 +224,23 @@ const MercadoLibreOrders: React.FC = () => {
     setBulkInvoicing(true);
     try {
       const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : undefined;
-      const res = await api.invoiceMercadoLibreOrdersBulk({ orderIds: selectedOrderIds, cbteTipo });
+      const ids = Array.from(new Set(selectedOrderIds));
+      const chunkSize = 100;
+      const summary = { invoiced: 0, alreadyInvoiced: 0, skippedUnpaid: 0, errors: 0 };
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const res = await api.invoiceMercadoLibreOrdersBulk({ orderIds: chunk, cbteTipo });
+        summary.invoiced += Number(res.summary?.invoiced || 0);
+        summary.alreadyInvoiced += Number(res.summary?.alreadyInvoiced || 0);
+        summary.skippedUnpaid += Number(res.summary?.skippedUnpaid || 0);
+        summary.errors += Number(res.summary?.errors || 0);
+      }
       window.alert(
         `Facturación masiva finalizada.\n\n` +
-        `Facturadas: ${res.summary.invoiced}\n` +
-        `Ya facturadas: ${res.summary.alreadyInvoiced}\n` +
-        `No pagadas (omitidas): ${res.summary.skippedUnpaid}\n` +
-        `Errores: ${res.summary.errors}`
+        `Facturadas: ${summary.invoiced}\n` +
+        `Ya facturadas: ${summary.alreadyInvoiced}\n` +
+        `No pagadas (omitidas): ${summary.skippedUnpaid}\n` +
+        `Errores: ${summary.errors}`
       );
       fetchOrders();
     } catch (error: any) {
@@ -232,6 +282,14 @@ const MercadoLibreOrders: React.FC = () => {
             className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
           >
             Seleccionar pagadas
+          </button>
+          <button
+            onClick={selectAllFilteredPaid}
+            disabled={loading || selectingAllFiltered}
+            className="bg-yellow-700/40 border border-yellow-600/40 text-yellow-100 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+            title="Selecciona todas las ventas pagadas según el filtro actual, incluyendo todas las páginas"
+          >
+            {selectingAllFiltered ? 'Seleccionando...' : 'Seleccionar todas (filtro)'}
           </button>
           <button
             onClick={clearSelection}
