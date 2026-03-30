@@ -1,5 +1,5 @@
 import { Product, ApiConfig, RemitenteConfig } from '../types';
-import FIXED_COMPANY_LOGO_URL from '../dist/assets/Lupo_logo.svg?inline';
+import FIXED_COMPANY_LOGO_URL from '../Lupo_logo.svg (1).png?inline';
 
 // Helper to get config from localStorage (in a real app, this might come from a secure backend or context)
 export const getApiConfig = (): ApiConfig => {
