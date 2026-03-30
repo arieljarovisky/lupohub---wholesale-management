@@ -472,7 +472,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const year = x.getFullYear();
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
-    const tipoFactura = Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo) === 1 ? 'A' : 'B';
+    const cbteTipoNum = Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo);
+    const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
+    const codigoComprobante = cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
     const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(4,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
     const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -526,6 +528,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
     const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim();
     const dirCliente = clienteDir || '';
+    const ptoVta = String(inv.puntoVta ?? '').padStart(4, '0');
+    const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');
+    const periodDate = new Date(order.date);
+    const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
+    const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
+    const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
 
     const neto = Math.round(baseImponible * 100) / 100;
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
@@ -537,22 +545,32 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
-      .topbar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: start; margin-bottom: 6px; }
+      .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
       .logo { min-height: 42px; display: flex; align-items: center; }
       .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
-      .codebox { border: 1px solid #111; padding: 6px 8px; text-align: center; }
-      .codebox .code { font-weight: 700; letter-spacing: 0.08em; }
-      .codebox .num { margin-top: 6px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
-      .title { text-align: center; font-weight: 700; letter-spacing: 0.06em; margin: 4px 0 8px; }
-      .hr { border-top: 1px solid #111; margin: 6px 0 10px; }
+      .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
+      .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
+      .head-right { padding: 8px 10px; }
+      .issuer-title { font-size: 30px; font-weight: 800; margin: 2px 0 10px; letter-spacing: 0.04em; }
+      .mini { font-size: 10px; }
+      .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
+      .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
+      .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
+      .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
+      .fact-title { font-size: 40px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 4px; }
+      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta div { margin-bottom: 4px; }
+      .hr { border-top: 1px solid #111; margin: 0 0 0; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-      .block { padding: 6px 8px; border: 1px solid #111; min-height: 58px; }
+      .block { padding: 8px 10px; border: 1px solid #111; min-height: 58px; }
       .muted { color: #333; }
       .line { display: flex; gap: 8px; }
       .line .k { width: 78px; color: #333; }
       .line .v { flex: 1; }
-      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 10px; margin-top: 8px; }
-      .boxrow .block { min-height: 46px; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; }
+      .boxrow .block { min-height: 46px; border-top: 0; }
+      .period-row { border: 1px solid #111; border-top: 0; padding: 6px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-weight: 700; }
+      .period-row span { font-weight: 400; }
 
       table { width: 100%; border-collapse: collapse; margin-top: 10px; }
       thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
@@ -571,32 +589,39 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       @media print { .no-print { display: none !important; } }
     </style></head><body>
       <div class="sheet">
+        <div class="original">ORIGINAL</div>
         <div class="topbar">
-          <div class="logo">${logoBlockFactura}</div>
-          <div class="codebox">
-            <div class="code">CÓDIGO<br>001</div>
-            <div class="num">${nroComprobante}</div>
-            <div style="margin-top:6px;" class="muted">Fecha: ${fechaComprobante}</div>
+          <div class="head-left">
+            <div class="logo">${logoBlockFactura}</div>
+            <div class="issuer-title">${razonEmpresa}</div>
+            ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
+            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+            ${condicionIvaEmisor ? `<div><strong>Condición frente al IVA:</strong> ${condicionIvaEmisor}</div>` : ''}
+          </div>
+          <div class="head-right">
+            <div class="fact-row">
+              <div class="letter-box">
+                <div class="l">${tipoFactura}</div>
+                <div class="mini">COD. ${codigoComprobante}</div>
+              </div>
+              <div>
+                <div class="fact-title">FACTURA</div>
+                <div class="fact-meta">
+                  <div><strong>Punto de Venta:</strong> ${ptoVta} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNro}</div>
+                  <div><strong>Fecha de Emisión:</strong> ${fechaComprobante}</div>
+                </div>
+              </div>
+            </div>
+            ${cuitEmpresa ? `<div><strong>CUIT:</strong> ${cuitEmpresa}</div>` : ''}
+            ${ingresosBrutosEmpresa ? `<div><strong>Ingresos Brutos:</strong> ${ingresosBrutosEmpresa}</div>` : ''}
+            ${inicioActividadEmpresa ? `<div><strong>Fecha de Inicio de Actividades:</strong> ${inicioActividadEmpresa}</div>` : ''}
           </div>
         </div>
 
-        <div class="title">FACTURA ${tipoFactura}</div>
-        <div class="hr"></div>
-
-        <div class="grid2">
-          <div>
-            <div><strong>${razonEmpresa}</strong></div>
-            ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
-            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
-            ${condicionIvaEmisor ? `<div>Condición IVA: ${condicionIvaEmisor}</div>` : ''}
-            ${ingresosBrutosEmpresa ? `<div>Ingresos Brutos: ${ingresosBrutosEmpresa}</div>` : ''}
-            ${inicioActividadEmpresa ? `<div>Inicio de actividad: ${inicioActividadEmpresa}</div>` : ''}
-            ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
-            ${telEmpresa ? `<div>Tel: ${telEmpresa}</div>` : ''}
-          </div>
-          <div>
-            ${cuitEmpresa ? `<div class="line"><div class="k">C.U.I.T.:</div><div class="v">${cuitEmpresa}</div></div>` : ''}
-          </div>
+        <div class="period-row">
+          <div>Período Facturado Desde: <span>${periodFrom}</span></div>
+          <div>Hasta: <span>${periodTo}</span></div>
+          <div>Fecha de Vto. para el pago: <span>${fechaComprobante}</span></div>
         </div>
 
         <div class="boxrow">
@@ -604,7 +629,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div><strong>Sr./es:</strong> ${razonCliente}</div>
             ${dirCliente ? `<div>${dirCliente}</div>` : ''}
             ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
-            ${condicionIvaReceptor ? `<div>Condición IVA: ${condicionIvaReceptor}</div>` : ''}
+            ${condicionIvaReceptor ? `<div><strong>Condición frente al IVA:</strong> ${condicionIvaReceptor}</div>` : ''}
           </div>
           <div class="block">
             ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
