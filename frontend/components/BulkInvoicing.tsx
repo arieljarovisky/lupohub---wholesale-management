@@ -27,6 +27,7 @@ const BulkInvoicing: React.FC = () => {
   const [history, setHistory] = useState<ExternalInvoiceRow[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyOffset, setHistoryOffset] = useState(0);
+  const [selectedInvoice, setSelectedInvoice] = useState<ExternalInvoiceRow | null>(null);
   const historyLimit = 20;
 
   const fetchHistory = async () => {
@@ -161,6 +162,7 @@ const BulkInvoicing: React.FC = () => {
                   <th className="text-right p-3 text-slate-500">Total</th>
                   <th className="text-left p-3 text-slate-500">Comprobante</th>
                   <th className="text-left p-3 text-slate-500">CAE</th>
+                  <th className="text-left p-3 text-slate-500">Detalle</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,6 +179,15 @@ const BulkInvoicing: React.FC = () => {
                     <td className="p-3 text-right text-slate-200">${Number(h.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</td>
                     <td className="p-3 text-slate-300">{h.cbteTipo} - {h.cbteDesde}</td>
                     <td className="p-3 text-emerald-300 font-mono">{h.cae}</td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoice(h)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700/70"
+                      >
+                        Ver
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -226,6 +237,26 @@ const BulkInvoicing: React.FC = () => {
           </div>
         )}
       </div>
+
+      {selectedInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-lg font-black text-white">Detalle de factura externa</h4>
+              <button onClick={() => setSelectedInvoice(null)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="text-slate-400">Canal</div><div className="text-white font-semibold">{selectedInvoice.source}</div>
+              <div className="text-slate-400">Orden</div><div className="text-white font-semibold">#{selectedInvoice.orderNumber || selectedInvoice.externalOrderId}</div>
+              <div className="text-slate-400">Cliente</div><div className="text-white font-semibold">{selectedInvoice.customerName || '-'}</div>
+              <div className="text-slate-400">Total</div><div className="text-white font-semibold">${Number(selectedInvoice.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</div>
+              <div className="text-slate-400">Comprobante</div><div className="text-white font-semibold">{selectedInvoice.cbteTipo} - {selectedInvoice.cbteDesde}</div>
+              <div className="text-slate-400">CAE</div><div className="text-emerald-300 font-mono">{selectedInvoice.cae}</div>
+              <div className="text-slate-400">Fecha</div><div className="text-white">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString('es-AR') : '-'}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

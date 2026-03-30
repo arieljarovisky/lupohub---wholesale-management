@@ -33,6 +33,14 @@ interface TiendaNubeOrder {
   } | null;
   createdAt: string;
   updatedAt: string;
+  invoiced?: boolean;
+  invoice?: {
+    id: string;
+    cae: string;
+    cbteTipo: number;
+    cbteDesde: number;
+    createdAt?: string;
+  };
 }
 
 const TiendaNubeOrders: React.FC = () => {
@@ -518,6 +526,9 @@ const TiendaNubeOrders: React.FC = () => {
                           </span>
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${payment.bg} ${payment.color}`}>
                             {payment.label}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300' : 'bg-slate-700/40 text-slate-300'}`}>
+                            {order.invoiced ? 'FACTURADA' : 'SIN FACTURA'}
                           </span>
                           {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
                             <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700/40 text-slate-300">

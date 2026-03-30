@@ -2918,6 +2918,34 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       );
     }
 
+    // Marcar si cada orden TN ya fue facturada en facturación masiva externa.
+    const tnExternalIds = Array.from(new Set((orders as any[]).map((o: any) => String(o.id)).filter(Boolean)));
+    if (tnExternalIds.length > 0) {
+      const placeholders = tnExternalIds.map(() => '?').join(', ');
+      const invoicedRows = await query(
+        `SELECT id, external_order_id, cae, cbte_tipo, cbte_desde, created_at
+         FROM external_invoices
+         WHERE source = 'TIENDANUBE' AND external_order_id IN (${placeholders})`,
+        tnExternalIds
+      ) as any[];
+      const byExternalId = new Map<string, any>();
+      for (const row of invoicedRows) byExternalId.set(String(row.external_order_id), row);
+      orders = (orders as any[]).map((o: any) => {
+        const inv = byExternalId.get(String(o.id));
+        return {
+          ...o,
+          invoiced: !!inv,
+          invoice: inv ? {
+            id: inv.id,
+            cae: inv.cae,
+            cbteTipo: inv.cbte_tipo,
+            cbteDesde: inv.cbte_desde,
+            createdAt: inv.created_at
+          } : undefined
+        };
+      });
+    }
+
     res.json({
       orders,
       page: pageNum,
@@ -3484,6 +3512,42 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       const raw = ordersRes.data.results || [];
       total = ordersRes.data.paging?.total ?? raw.length;
       orders = raw.map(mapOrder);
+    }
+
+    // Marcar si las órdenes ML del response ya están facturadas.
+    const externalIdsFlat = Array.from(new Set((orders as any[]).flatMap((o: any) => {
+      const ids = Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id];
+      return (ids || []).map((id: any) => String(id)).filter(Boolean);
+    })));
+    if (externalIdsFlat.length > 0) {
+      const placeholders = externalIdsFlat.map(() => '?').join(', ');
+      const invoicedRows = await query(
+        `SELECT id, external_order_id, cae, cbte_tipo, cbte_desde, created_at
+         FROM external_invoices
+         WHERE source = 'MERCADOLIBRE' AND external_order_id IN (${placeholders})`,
+        externalIdsFlat
+      ) as any[];
+      const byExternalId = new Map<string, any>();
+      for (const row of invoicedRows) byExternalId.set(String(row.external_order_id), row);
+      orders = (orders as any[]).map((o: any) => {
+        const ids = Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id];
+        const invMatches = ids.map((id: any) => byExternalId.get(String(id))).filter(Boolean);
+        const fullyInvoiced = ids.length > 0 && invMatches.length === ids.length;
+        const inv = invMatches[0];
+        return {
+          ...o,
+          invoiced: fullyInvoiced,
+          invoicedCount: invMatches.length,
+          totalOrderIds: ids.length,
+          invoice: inv ? {
+            id: inv.id,
+            cae: inv.cae,
+            cbteTipo: inv.cbte_tipo,
+            cbteDesde: inv.cbte_desde,
+            createdAt: inv.created_at
+          } : undefined
+        };
+      });
     }
 
     res.json({

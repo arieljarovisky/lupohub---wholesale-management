@@ -29,6 +29,16 @@ interface MercadoLibreOrder {
   } | null;
   dateCreated: string;
   dateClosed: string;
+  invoiced?: boolean;
+  invoicedCount?: number;
+  totalOrderIds?: number;
+  invoice?: {
+    id: string;
+    cae: string;
+    cbteTipo: number;
+    cbteDesde: number;
+    createdAt?: string;
+  };
 }
 
 const MercadoLibreOrders: React.FC = () => {
@@ -529,6 +539,12 @@ const MercadoLibreOrders: React.FC = () => {
                           )}
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${status.bg} ${status.color}`}>
                             {status.label.toUpperCase()}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300' : 'bg-slate-700/40 text-slate-300'}`}>
+                            {order.invoiced ? 'FACTURADA' : 'SIN FACTURA'}
+                            {typeof order.invoicedCount === 'number' && typeof order.totalOrderIds === 'number' && order.totalOrderIds > 1
+                              ? ` (${order.invoicedCount}/${order.totalOrderIds})`
+                              : ''}
                           </span>
                           {shipping && order.status !== 'cancelled' && (
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-700/50 ${shipping.color} flex items-center gap-1`}>
