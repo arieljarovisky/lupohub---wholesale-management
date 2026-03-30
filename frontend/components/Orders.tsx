@@ -5,6 +5,7 @@ import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvo
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
 import { api } from '../services/api';
+import { formatMoneyAr } from '../utils/moneyFormat';
 
 interface OrdersProps {
   orders: Order[];
@@ -306,8 +307,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         <td class="col-c col-code">${sku || '—'}</td>
         <td class="col-desc">${desc}</td>
         <td class="col-c">${despachoCell}</td>
-        <td class="col-r">$${unit.toLocaleString('es-AR')}</td>
-        <td class="col-r">$${importe.toLocaleString('es-AR')}</td>
+        <td class="col-r">$${formatMoneyAr(unit)}</td>
+        <td class="col-r">$${formatMoneyAr(importe)}</td>
       </tr>`;
     }).join('');
 
@@ -410,11 +411,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         ${isLast ? `<div class="summary">
           <div></div>
           <div class="totals">
-            <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>Bonificación</span><span>$0</span></div>
-            <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+            <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
+            <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(neto)}</span></div>
+            <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+            <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
           </div>
         </div>` : ''}
         <div class="footer">
@@ -526,8 +527,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         <td class="col-c col-code">${sku || '—'}</td>
         <td class="col-desc">${desc}</td>
         <td class="col-c">${despachoCell}</td>
-        <td class="col-r">$${unit.toLocaleString('es-AR')}</td>
-        <td class="col-r">$${importe.toLocaleString('es-AR')}</td>
+        <td class="col-r">$${formatMoneyAr(unit)}</td>
+        <td class="col-r">$${formatMoneyAr(importe)}</td>
       </tr>`;
     }).join('');
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
@@ -721,11 +722,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
             </div>
             <div class="totals">
-              <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
-              <div class="r"><span>Bonificación</span><span>$0</span></div>
-              <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
-              <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
-              <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
+              <div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+              <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
+              <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(neto)}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+              <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
             </div>
           </div>
           <div class="footer">
@@ -783,11 +784,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const price = Number(i.priceAtMoment ?? 0);
       const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
       const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
-      rows = `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${totalNota.toLocaleString('es-AR')}</td><td class="col-r">—</td><td class="col-r">$${totalNota.toLocaleString('es-AR')}</td></tr>`;
+      rows = `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(totalNota)}</td><td class="col-r">—</td><td class="col-r">$${formatMoneyAr(totalNota)}</td></tr>`;
     } else {
       rows = items.map(i => {
         const base = i.quantity * (i.priceAtMoment ?? 0);
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${base.toLocaleString('es-AR')}</td><td class="col-r">—</td><td class="col-r">$${base.toLocaleString('es-AR')}</td></tr>`;
+        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${formatMoneyAr(base)}</td><td class="col-r">—</td><td class="col-r">$${formatMoneyAr(base)}</td></tr>`;
       }).join('');
     }
 
@@ -887,10 +888,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
         <div class="inv-summary">
           <div class="inv-summary-inner">
-            <div class="row"><span>Base imponible</span><span>$${baseImponibleNc.toLocaleString('es-AR')}</span></div>
+            <div class="row"><span>Base imponible</span><span>$${formatMoneyAr(baseImponibleNc)}</span></div>
             <div class="row"><span>IVA 21%</span><span>—</span></div>
             <div class="row"><span>Retención</span><span>—</span></div>
-            <div class="row total"><span>Total NC</span><span>$${totalNota.toLocaleString('es-AR')}</span></div>
+            <div class="row total"><span>Total NC</span><span>$${formatMoneyAr(totalNota)}</span></div>
           </div>
         </div>
         <div class="inv-footer">
@@ -1420,7 +1421,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className="text-lg font-black text-blue-400">${order.total.toLocaleString()}</div>
+                   <div className="text-lg font-black text-blue-400">${formatMoneyAr(order.total)}</div>
                 </div>
               </div>
             </div>
@@ -1665,12 +1666,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
                       const cred = creditedByItemIndex[i] ?? 0;
                       const lineTotal = (item.quantity * Number(item.priceAtMoment ?? 0));
-                      const yaCred = cred > 0 ? ` — Ya creditado $${cred.toLocaleString()}` : '';
-                      return <option key={i} value={i}>{label} — {item.quantity} u × ${Number(item.priceAtMoment).toLocaleString()}{yaCred}</option>;
+                      const yaCred = cred > 0 ? ` — Ya creditado $${formatMoneyAr(cred)}` : '';
+                      return <option key={i} value={i}>{label} — {item.quantity} u × ${formatMoneyAr(Number(item.priceAtMoment))}{yaCred}</option>;
                     })}
                   </select>
                   {creditedItem > 0 && (
-                    <p className="text-xs text-amber-400">Ya creditado para este ítem: ${creditedItem.toLocaleString()}. Máximo a creditar: ${remainingCredit.toLocaleString()} ({maxQtyRemaining} u)</p>
+                    <p className="text-xs text-amber-400">Ya creditado para este ítem: ${formatMoneyAr(creditedItem)}. Máximo a creditar: ${formatMoneyAr(remainingCredit)} ({maxQtyRemaining} u)</p>
                   )}
                   <label className="block text-xs font-semibold text-slate-400 uppercase">Cantidad a creditar</label>
                   <input
@@ -1685,12 +1686,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <p className="text-xs text-amber-400">No queda monto a creditar para este ítem.</p>
                   )}
                   <p className="text-xs text-slate-500">
-                    Monto a creditar: ${((ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0))).toLocaleString()}
+                    Monto a creditar: ${formatMoneyAr(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0))}
                   </p>
                 </div>
               )}
               {ncTipo === 'total' && (
-                <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${ncOrder.total.toLocaleString()}</strong></p>
+                <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${formatMoneyAr(ncOrder.total)}</strong></p>
               )}
                 </>
               )}

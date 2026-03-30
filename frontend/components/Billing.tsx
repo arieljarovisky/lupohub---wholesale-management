@@ -4,6 +4,7 @@ import { getRemitente } from '../services/apiIntegration';
 import { Customer, Payment, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
+import { formatMoneyAr } from '../utils/moneyFormat';
 
 interface BillingProps {
   role: Role;
@@ -133,7 +134,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       const desc = ((i.productName ?? '').toString().trim()) || '—';
       const ivaItem = Math.round(Number(base) * 0.21 * 100) / 100;
       const totalItem = Math.round((Number(base) + ivaItem) * 100) / 100;
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">$${ivaItem.toLocaleString('es-AR')}</td><td style="text-align:right">$${totalItem.toLocaleString('es-AR')}</td></tr>`;
+      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${formatMoneyAr(base)}</td><td style="text-align:right">$${formatMoneyAr(ivaItem)}</td><td style="text-align:right">$${formatMoneyAr(totalItem)}</td></tr>`;
     }).join('');
 
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
@@ -223,7 +224,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       <div class="inv-table-wrap">
         <table class="inv-table">
           <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${totalComprobante.toLocaleString('es-AR')}</span></div></div></div>
+      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${formatMoneyAr(baseImponible)}</span></div><div class="row"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${formatMoneyAr(totalComprobante)}</span></div></div></div>
       <div class="inv-footer">
         <div class="inv-footer-grid">
           <div>
@@ -259,13 +260,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       const despacho = i.numeroDespacho || i.numero_despacho || null;
       const despachoCell = despacho ? String(despacho).trim() : '—';
       const desc = [(i.sku || ''), (i.productName || '').toString().trim(), i.sizeCode || '', i.colorName || ''].filter(Boolean).join(' — ') || '—';
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
+      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${formatMoneyAr(base)}</td><td style="text-align:right">—</td><td style="text-align:right">$${formatMoneyAr(base)}</td></tr>`;
     }).join('');
     const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
     const companyDir = [remitente.address, remitente.city].filter(Boolean).join(', ');
     const customerDir = [customer?.address, customer?.city].filter(Boolean).join(', ');
 
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroComprobante}</title><style>/* ... same CSS as factura ... */</style></head><body><div><h2>NOTA DE CRÉDITO Nº ${nroComprobante}</h2><p>Fecha: ${fecha}</p></div><div><strong>Datos cliente:</strong> ${customer?.businessName || customer?.name || ''}</div><div>...</div><table><thead><tr><th>Producto</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div>Total: $${baseImponible.toLocaleString('es-AR')}</div><div>CAE: ${nc.cae || '—'} Vto CAE: ${vtoCae}</div><div><button onclick="window.print()">Imprimir / Guardar PDF</button><button onclick="window.close()">Cerrar</button></div></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroComprobante}</title><style>/* ... same CSS as factura ... */</style></head><body><div><h2>NOTA DE CRÉDITO Nº ${nroComprobante}</h2><p>Fecha: ${fecha}</p></div><div><strong>Datos cliente:</strong> ${customer?.businessName || customer?.name || ''}</div><div>...</div><table><thead><tr><th>Producto</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div>Total: $${formatMoneyAr(baseImponible)}</div><div>CAE: ${nc.cae || '—'} Vto CAE: ${vtoCae}</div><div><button onclick="window.print()">Imprimir / Guardar PDF</button><button onclick="window.close()">Cerrar</button></div></body></html>`;
   };
 
   const handleVer = async (item: any) => {
@@ -468,7 +469,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
                     <td className="px-3 py-2">{numero}</td>
                     <td className="px-3 py-2">{item.orderId}</td>
                     <td className="px-3 py-2">{item.customerBusinessName}</td>
-                    <td className="px-3 py-2 text-right">${(item.importe ?? 0).toLocaleString('es-AR')}</td>
+                    <td className="px-3 py-2 text-right">${formatMoneyAr(item.importe ?? 0)}</td>
                     <td className="px-3 py-2 text-xs">{item.cae}</td>
                     <td className="px-3 py-2 text-right">
                       <button
@@ -514,7 +515,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
                     Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
                   </div>
                 </div>
-                <div className="text-sm font-black text-emerald-300">${Number(p.amount || 0).toLocaleString('es-AR')}</div>
+                <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
               </div>
             ))}
             {payments.length > 25 && (

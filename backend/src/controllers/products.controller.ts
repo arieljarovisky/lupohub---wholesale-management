@@ -357,7 +357,30 @@ export const getProductBySku = async (req: any, res: any) => {
         [`${sku}-%`]
       );
     }
-    
+
+    // Código de variante completo (ej. QE5546-158-614): primer segmento = SKU del modelo
+    if (!product && String(sku).includes('-')) {
+      const base = String(sku).split('-')[0];
+      product = await get(
+        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
+         FROM products p WHERE p.sku = ?`,
+        [base]
+      );
+    }
+    if (!product) {
+      product = await get(
+        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
+         FROM products p WHERE ? LIKE CONCAT(p.sku, '-%') ORDER BY CHAR_LENGTH(p.sku) DESC LIMIT 1`,
+        [sku]
+      );
+    }
+
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
     
     // Obtener todas las variantes del producto encontrado

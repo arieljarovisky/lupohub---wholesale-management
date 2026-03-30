@@ -71,6 +71,37 @@ const Despachos: React.FC = () => {
   const [showAsignarUnoModal, setShowAsignarUnoModal] = useState(false);
   const [asignarUnoForm, setAsignarUnoForm] = useState({ numero_despacho: '', sku: '' });
   const [savingAsignarUno, setSavingAsignarUno] = useState(false);
+  const [asignarUnoPreview, setAsignarUnoPreview] = useState<{ name: string; sku: string; stockTotal?: number } | null>(null);
+  const [asignarUnoPreviewLoading, setAsignarUnoPreviewLoading] = useState(false);
+  const [asignarUnoPreviewSearched, setAsignarUnoPreviewSearched] = useState(false);
+
+  const refreshAsignarUnoPreview = async (skuRaw: string) => {
+    const t = skuRaw.trim();
+    if (!t) {
+      setAsignarUnoPreview(null);
+      setAsignarUnoPreviewSearched(false);
+      return;
+    }
+    setAsignarUnoPreviewLoading(true);
+    try {
+      const base = t.includes('-') ? t.split('-')[0] : t;
+      let p = await api.getProductBySku(base);
+      if (!p && base !== t) p = await api.getProductBySku(t);
+      if (p) {
+        const st = (p as { stock_total?: number }).stock_total;
+        setAsignarUnoPreview({
+          name: p.name,
+          sku: p.sku,
+          stockTotal: typeof st === 'number' ? st : undefined
+        });
+      } else {
+        setAsignarUnoPreview(null);
+      }
+      setAsignarUnoPreviewSearched(true);
+    } finally {
+      setAsignarUnoPreviewLoading(false);
+    }
+  };
 
   // Form state
   const [form, setForm] = useState({
@@ -330,6 +361,8 @@ const Despachos: React.FC = () => {
             onClick={() => {
               setShowAsignarUnoModal(true);
               setAsignarUnoForm({ numero_despacho: '', sku: '' });
+              setAsignarUnoPreview(null);
+              setAsignarUnoPreviewSearched(false);
             }}
             className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm border border-slate-600"
           >
@@ -1031,6 +1064,10 @@ const Despachos: React.FC = () => {
               <p className="text-slate-400 text-sm">
                 El número de despacho tiene que existir en el listado (o crealo con &quot;Nuevo Despacho&quot;). Podés usar el SKU del modelo (ej. <span className="text-slate-300">QE5546</span>) o el código completo de la factura (ej. <span className="text-slate-300">QE5546-158-614</span>).
               </p>
+              <div className="bg-slate-800/80 border border-slate-600/60 rounded-xl p-3 text-sm text-slate-300">
+                <strong className="text-white">Sin stock en depósito:</strong> igual podés asignar el despacho acá; no hace falta tener unidades. Si en Inventario no lo ves, desactivá el filtro{' '}
+                <span className="text-cyan-300 font-semibold">«Ocultar variantes con 0 stock»</span> o buscá por SKU en la barra de búsqueda.
+              </div>
               <div>
                 <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Número de despacho *</label>
                 <input
@@ -1046,10 +1083,33 @@ const Despachos: React.FC = () => {
                 <input
                   type="text"
                   value={asignarUnoForm.sku}
-                  onChange={(e) => setAsignarUnoForm({ ...asignarUnoForm, sku: e.target.value })}
+                  onChange={(e) => {
+                    setAsignarUnoForm({ ...asignarUnoForm, sku: e.target.value });
+                    setAsignarUnoPreview(null);
+                    setAsignarUnoPreviewSearched(false);
+                  }}
+                  onBlur={(e) => void refreshAsignarUnoPreview(e.target.value)}
                   placeholder="Ej: QE5546 o QE5546-158-614"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
+                {asignarUnoPreviewLoading && (
+                  <p className="text-xs text-slate-500 mt-2 flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" /> Buscando producto…
+                  </p>
+                )}
+                {!asignarUnoPreviewLoading && asignarUnoPreview && (
+                  <p className="text-xs text-emerald-400/95 mt-2">
+                    ✓ Encontrado: <span className="font-semibold text-white">{asignarUnoPreview.name}</span> ({asignarUnoPreview.sku})
+                    {typeof asignarUnoPreview.stockTotal === 'number' && (
+                      <span className="text-slate-400"> · Stock total actual: {asignarUnoPreview.stockTotal}</span>
+                    )}
+                  </p>
+                )}
+                {!asignarUnoPreviewLoading && asignarUnoPreviewSearched && asignarUnoForm.sku.trim() && !asignarUnoPreview && (
+                  <p className="text-xs text-amber-400/90 mt-2">
+                    No se encontró el producto con ese código. Revisá el SKU del modelo o probá el código base (ej. QE5546).
+                  </p>
+                )}
               </div>
             </div>
             <div className="p-6 pt-0 flex justify-end gap-3">
