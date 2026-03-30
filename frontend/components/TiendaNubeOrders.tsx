@@ -689,24 +689,29 @@ const TiendaNubeOrders: React.FC = () => {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-2">
+        <div className="mt-6 pb-2">
+          <div className="flex flex-wrap justify-center items-center gap-2">
+            <span className="text-xs text-slate-500 px-2">
+              Página {page} de {totalPages}
+            </span>
+          </div>
+          <div className="mt-2 flex flex-wrap justify-center items-center gap-2">
           <button
             onClick={() => setPage(1)}
             disabled={page === 1}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
           >
-            <ChevronLeft size={18} className="text-white" />
-            <ChevronLeft size={18} className="text-white -ml-3" />
+            «
           </button>
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
           >
-            <ChevronLeft size={18} className="text-white" />
+            <ChevronLeft size={16} className="text-white" />
           </button>
           
-          <div className="flex items-center gap-1 px-4">
+          <div className="flex items-center gap-1 px-1">
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNum;
               if (totalPages <= 5) {
@@ -737,18 +742,18 @@ const TiendaNubeOrders: React.FC = () => {
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
           >
-            <ChevronRight size={18} className="text-white" />
+            <ChevronRight size={16} className="text-white" />
           </button>
           <button
             onClick={() => setPage(totalPages)}
             disabled={page === totalPages}
-            className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+            className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
           >
-            <ChevronRight size={18} className="text-white" />
-            <ChevronRight size={18} className="text-white -ml-3" />
+            »
           </button>
+        </div>
         </div>
       )}
     </div>
