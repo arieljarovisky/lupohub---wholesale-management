@@ -4,6 +4,15 @@ import { Order, OrderItem } from '../types';
 import { restoreStockForOrder, restoreStockForOrderItem } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
+async function resolveDespachoIdForItem(item: any): Promise<string | null> {
+  const raw = item?.despachoId ?? item?.despacho_id;
+  if (raw == null || raw === '') return null;
+  const id = String(raw).trim();
+  if (!id) return null;
+  const row = await get('SELECT id FROM despachos WHERE id = ?', [id]);
+  return row?.id ?? null;
+}
+
 function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
@@ -46,7 +55,7 @@ export const getOrders = async (req: any, res: any) => {
     const orderIds = ordersRow.map((o: any) => o.id);
     const placeholders = orderIds.map(() => '?').join(',');
     const itemsRows = await query(`
-      SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.order_id, i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack,
              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
@@ -54,14 +63,15 @@ export const getOrders = async (req: any, res: any) => {
              p.name AS productName,
              s.size_code AS sizeCode,
              c.name AS colorName,
-             d.numero_despacho AS numeroDespacho
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
-      LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id IN (${placeholders})
     `, orderIds);
 
@@ -75,6 +85,7 @@ export const getOrders = async (req: any, res: any) => {
         items.push({
           variantId: row.variantId,
           productId: row.productId,
+          despachoId: row.despachoId ?? undefined,
           quantity: row.quantity,
           picked: row.picked ?? 0,
           priceAtMoment: Number(row.priceAtMoment),
@@ -212,9 +223,10 @@ export const createOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
+      const despachoId = await resolveDespachoIdForItem(item);
       await execute(
-        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack]
+        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, despachoId]
       );
     }
 
@@ -230,21 +242,25 @@ export const createOrder = async (req: any, res: any) => {
     );
     if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
     const items = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id = ?
     `, [orderId]);
     const itemsMapped = (items as any[]).map((row: any) => ({
       variantId: row.variantId,
       productId: row.productId,
+      despachoId: row.despachoId ?? undefined,
       quantity: row.quantity,
       picked: row.picked ?? 0,
       priceAtMoment: Number(row.priceAtMoment),
@@ -253,7 +269,8 @@ export const createOrder = async (req: any, res: any) => {
       sku: row.sku ?? undefined,
       productName: row.productName ?? undefined,
       sizeCode: row.sizeCode ?? undefined,
-      colorName: row.colorName ?? undefined
+      colorName: row.colorName ?? undefined,
+      numeroDespacho: row.numeroDespacho ?? undefined
     }));
     const orderResponse = {
       id: created.id,
@@ -366,9 +383,10 @@ export const updateOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
+      const despachoId = await resolveDespachoIdForItem(item);
       await execute(
-        "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]
+        "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]
       );
     }
     const created = await get(
@@ -377,21 +395,25 @@ export const updateOrder = async (req: any, res: any) => {
     );
     if (!created) return res.json({ ...updated, id });
     const itemsRows = await query(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id = ?
     `, [id]);
     const itemsMapped = (itemsRows as any[]).map((row: any) => ({
       variantId: row.variantId,
       productId: row.productId,
+      despachoId: row.despachoId ?? undefined,
       quantity: row.quantity,
       picked: row.picked ?? 0,
       priceAtMoment: Number(row.priceAtMoment),
@@ -400,7 +422,8 @@ export const updateOrder = async (req: any, res: any) => {
       sku: row.sku ?? undefined,
       productName: row.productName ?? undefined,
       sizeCode: row.sizeCode ?? undefined,
-      colorName: row.colorName ?? undefined
+      colorName: row.colorName ?? undefined,
+      numeroDespacho: row.numeroDespacho ?? undefined
     }));
     res.json({
       id: created.id,

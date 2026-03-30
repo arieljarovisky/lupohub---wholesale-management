@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight, List } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calendar, Package, AlertCircle, Bot, Loader2, CheckCircle2, XCircle, ChevronDown, ChevronRight, List, Copy } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, OrderItem, Role, PriceList } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
@@ -29,6 +29,8 @@ interface OrderRow {
   /** Si true, quantity es en packs (descuento = quantity × mayoristaPackSize) */
   sellAsPack?: boolean;
   mayoristaPackSize?: number;
+  /** Despacho de importación (varias filas misma variante con distinto número) */
+  despachoId?: string;
 }
 
 const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role, priceLists = [], selectedPriceListId = null, onPriceListChange }) => {
@@ -44,6 +46,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSearchProductKey, setExpandedSearchProductKey] = useState<string | null>(null);
   const [variantSelect, setVariantSelect] = useState<{ sku: string; productName: string; price: number; mayoristaPackSize: number; variants: Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number }> } | null>(null);
+  const [despachosOptions, setDespachosOptions] = useState<{ id: string; numero_despacho: string }[]>([]);
 
   const isReadOnly = initialOrder?.status === OrderStatus.DISPATCHED;
 
@@ -54,17 +57,27 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   };
 
   useEffect(() => {
+    let cancelled = false;
+    api.getDespachos({ limit: 500 }).then(res => {
+      if (!cancelled) {
+        setDespachosOptions((res.despachos || []).map((d: any) => ({ id: d.id, numero_despacho: d.numero_despacho || d.id })));
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     if (initialOrder) {
       setSelectedCustomerId(initialOrder.customerId);
       setOrderDate(initialOrder.date);
-      const mappedRows = initialOrder.items.map(item => {
+      const mappedRows = initialOrder.items.map((item, idx) => {
         const p = products.find(prod => prod.id === item.productId) || products.find(prod => (prod as any).product_id === item.productId) || products.find(prod => prod.sku === (item as any).sku);
         const name = (item as any).productName ?? p?.name ?? 'Variante';
         const sku = (item as any).sku ?? p?.sku ?? 'N/A';
         const desc = [name, (item as any).sizeCode, (item as any).colorName].filter(Boolean).join(' · ') || name;
         const packSize = (item as any).mayoristaPackSize ?? (p as any)?.mayorista_pack_size ?? 1;
         return {
-          id: `row-${Math.random()}`,
+          id: `row-${initialOrder.id}-${idx}`,
           variantId: (item as any).variantId,
           sku,
           description: desc,
@@ -72,7 +85,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           quantity: item.quantity,
           isBackorder: !!(item as any).isBackorder,
           sellAsPack: !!(item as any).sellAsPack,
-          mayoristaPackSize: packSize
+          mayoristaPackSize: packSize,
+          despachoId: (item as any).despachoId || undefined
         };
       });
       setRows(mappedRows);
@@ -144,7 +158,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const addItem = async (product: Product) => {
     if (isReadOnly) return;
     const baseSku = (product as any).base_sku ?? (((product.sku || '').replace(/-[^-]+-[^-]+$/, '').trim() || product.sku));
-    const existing = rows.find(r => r.sku === product.sku || r.sku === baseSku);
+    const existing = rows.find(r => (r.sku === product.sku || r.sku === baseSku) && (r.despachoId ?? '') === '');
     const isBackorder = product.stock <= 0;
 
     if (existing) {
@@ -215,6 +229,25 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     setRows(rows.map(r => r.id === id ? { ...r, quantity: Math.max(1, qty) } : r));
   };
 
+  const setRowDespacho = (rowId: string, despachoId: string) => {
+    if (isReadOnly) return;
+    setRows(prev => prev.map(r => (r.id === rowId ? { ...r, despachoId: despachoId || undefined } : r)));
+  };
+
+  const duplicateRowForAnotherDespacho = (rowId: string) => {
+    if (isReadOnly) return;
+    setRows(prev => {
+      const row = prev.find(r => r.id === rowId);
+      if (!row) return prev;
+      return [...prev, {
+        ...row,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        quantity: 1,
+        despachoId: undefined
+      }];
+    });
+  };
+
   const packSize = (row: OrderRow) => Math.max(1, row.mayoristaPackSize ?? 1);
   const canSellAsPack = (row: OrderRow) => packSize(row) > 1;
   const toggleSellAsPack = (id: string) => {
@@ -243,7 +276,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         quantity: r.quantity,
         priceAtMoment: r.price,
         isBackorder: r.isBackorder,
-        sellAsPack: r.sellAsPack === true
+        sellAsPack: r.sellAsPack === true,
+        despachoId: r.despachoId || undefined
       })),
       total,
       status: initialOrder?.status ?? OrderStatus.CONFIRMED,
@@ -371,6 +405,30 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                   {row.isBackorder && <span className="text-[8px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded font-black uppercase shrink-0">Faltante</span>}
                 </div>
                 <div className="text-sm font-bold text-white break-words line-clamp-2 sm:truncate">{row.description}</div>
+                <div className="flex flex-col gap-2 mt-2 w-full max-w-md">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">N° despacho (importación)</label>
+                  <select
+                    disabled={isReadOnly}
+                    value={row.despachoId ?? ''}
+                    onChange={(e) => setRowDespacho(row.id, e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 px-2 text-xs text-white focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50"
+                    aria-label="Número de despacho"
+                  >
+                    <option value="">Sin asignar (usar último del producto en remitos)</option>
+                    {despachosOptions.map(d => (
+                      <option key={d.id} value={d.id}>{d.numero_despacho}</option>
+                    ))}
+                  </select>
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => duplicateRowForAnotherDespacho(row.id)}
+                      className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 w-fit"
+                    >
+                      <Copy size={12} /> Misma variante, otro despacho
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-wrap items-center gap-2 mt-1">
                   <span className="text-xs text-blue-400 font-bold">${row.price.toLocaleString()} un.</span>
                   {canSellAsPack(row) && (
@@ -525,7 +583,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                     <div className="divide-y divide-slate-700/80 border-t border-slate-700">
                       {variants.map(p => {
                         const qty = getQuantityInCart(p.id);
-                        const existingRow = rows.find(r => r.variantId === p.id);
+                        const existingRow = rows.find(r => r.variantId === p.id && (r.despachoId ?? '') === '');
                         return (
                           <div
                             key={p.id}

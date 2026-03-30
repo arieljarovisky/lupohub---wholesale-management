@@ -140,20 +140,29 @@ export const deductStockForOrder = async (orderId: string): Promise<{ success: b
       [orderId]
     );
 
+    const unitsByVariant = new Map<string, { units: number; sku: string }>();
     for (const item of items as any[]) {
       const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
-      const currentStock = item.current_stock || 0;
-      const newStock = Math.max(0, currentStock - units);
+      const vid = item.variant_id as string;
+      const prev = unitsByVariant.get(vid);
+      if (prev) prev.units += units;
+      else unitsByVariant.set(vid, { units, sku: item.sku || vid });
+    }
+
+    for (const [variantId, { units, sku }] of unitsByVariant) {
+      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+      const currentStock = stockRow?.stock ?? 0;
+      const newStock = Math.max(0, Number(currentStock) - units);
 
       const success = await updateVariantStock(
-        item.variant_id,
+        variantId,
         newStock,
         'PEDIDO_MAYORISTA',
         `Pedido: ${orderId}`
       );
 
       if (!success) {
-        errors.push(`Error actualizando stock para variante ${item.sku || item.variant_id}`);
+        errors.push(`Error actualizando stock para variante ${sku || variantId}`);
       }
     }
 
@@ -182,20 +191,29 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
       [orderId]
     );
 
+    const unitsByVariant = new Map<string, { units: number; sku: string }>();
     for (const item of items as any[]) {
       const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
-      const currentStock = item.current_stock || 0;
-      const newStock = currentStock + units;
+      const vid = item.variant_id as string;
+      const prev = unitsByVariant.get(vid);
+      if (prev) prev.units += units;
+      else unitsByVariant.set(vid, { units, sku: item.sku || vid });
+    }
+
+    for (const [variantId, { units, sku }] of unitsByVariant) {
+      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+      const currentStock = stockRow?.stock ?? 0;
+      const newStock = Number(currentStock) + units;
 
       const success = await updateVariantStock(
-        item.variant_id,
+        variantId,
         newStock,
         'DEVOLUCION',
         `Cancelación pedido: ${orderId}`
       );
 
       if (!success) {
-        errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
+        errors.push(`Error restaurando stock para variante ${sku || variantId}`);
       }
     }
 
