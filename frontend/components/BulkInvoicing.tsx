@@ -28,7 +28,7 @@ const BulkInvoicing: React.FC = () => {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyOffset, setHistoryOffset] = useState(0);
   const [selectedInvoice, setSelectedInvoice] = useState<ExternalInvoiceRow | null>(null);
-  const historyLimit = 20;
+  const [historyLimit, setHistoryLimit] = useState(20);
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
@@ -48,7 +48,7 @@ const BulkInvoicing: React.FC = () => {
 
   useEffect(() => {
     setHistoryOffset(0);
-  }, [historySource]);
+  }, [historySource, historyLimit]);
 
   useEffect(() => {
     fetchHistory();
@@ -114,6 +114,17 @@ const BulkInvoicing: React.FC = () => {
               <option value="ALL">Todos</option>
               <option value="TIENDANUBE">Tienda Nube</option>
               <option value="MERCADOLIBRE">Mercado Libre</option>
+            </select>
+            <select
+              value={historyLimit}
+              onChange={(e) => setHistoryLimit(Number(e.target.value) || 20)}
+              className="bg-slate-900/70 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200"
+              title="Cantidad por página"
+            >
+              <option value={10}>10 por página</option>
+              <option value={20}>20 por página</option>
+              <option value={50}>50 por página</option>
+              <option value={100}>100 por página</option>
             </select>
             <button
               type="button"
@@ -196,32 +207,34 @@ const BulkInvoicing: React.FC = () => {
         )}
 
         {historyPages > 1 && (
-          <div className="flex items-center justify-center gap-2">
+          <div className="mt-2 pb-1">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="text-xs text-slate-500 px-2">
+                Página {historyPage} de {historyPages}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => setHistoryOffset(0)}
               disabled={historyOffset === 0}
-              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+              className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
             >
-              <ChevronLeft size={16} className="text-white" />
-              <ChevronLeft size={16} className="text-white -ml-2" />
+              «
             </button>
             <button
               type="button"
               onClick={() => setHistoryOffset((v) => Math.max(0, v - historyLimit))}
               disabled={historyOffset === 0}
-              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+              className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
             >
               <ChevronLeft size={16} className="text-white" />
             </button>
-            <span className="px-3 text-sm text-slate-300">
-              Página {historyPage} de {historyPages}
-            </span>
             <button
               type="button"
               onClick={() => setHistoryOffset((v) => v + historyLimit)}
               disabled={historyPage >= historyPages}
-              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+              className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
             >
               <ChevronRight size={16} className="text-white" />
             </button>
@@ -229,11 +242,11 @@ const BulkInvoicing: React.FC = () => {
               type="button"
               onClick={() => setHistoryOffset((historyPages - 1) * historyLimit)}
               disabled={historyPage >= historyPages}
-              className="p-2 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors"
+              className="h-10 px-3 bg-slate-800/50 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-700/50 transition-colors text-slate-200 text-sm font-bold"
             >
-              <ChevronRight size={16} className="text-white" />
-              <ChevronRight size={16} className="text-white -ml-2" />
+              »
             </button>
+          </div>
           </div>
         )}
       </div>
