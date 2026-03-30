@@ -121,6 +121,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [bulkLinkTnVariants, setBulkLinkTnVariants] = useState<{ variantId: number | string; sku: string; color: string; size: string }[]>([]);
   const [bulkLinkLoading, setBulkLinkLoading] = useState(false);
   const [bulkLinkAssignments, setBulkLinkAssignments] = useState<Record<string, { ml?: string; tn?: string }>>({});
+  const [bulkLinkSkuEdits, setBulkLinkSkuEdits] = useState<Record<string, string>>({});
   const [bulkLinkSaving, setBulkLinkSaving] = useState(false);
 
   // Editar producto (artículo)
@@ -1433,6 +1434,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         };
       });
       setBulkLinkAssignments(assignments);
+      const skuMap: Record<string, string> = {};
+      variants.forEach((v: any) => { skuMap[v.variantId] = String(v.sku || ''); });
+      setBulkLinkSkuEdits(skuMap);
       setBulkLinkLoading(false);
     }).catch(() => setBulkLinkLoading(false));
   }, [showBulkLinkModal, bulkLinkGroupKey]);
@@ -1524,6 +1528,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (!bulkLinkGroupKey || !bulkLinkProductId) return;
     setBulkLinkSaving(true);
     try {
+      // Permitir corregir SKU local de cada variante en el mismo modal.
+      for (const v of bulkLinkVariants) {
+        const nextSku = (bulkLinkSkuEdits[v.variantId] ?? v.sku ?? '').toString().trim();
+        if (!nextSku || nextSku === v.sku) continue;
+        await api.updateVariant(String(v.variantId), { sku: nextSku });
+      }
+
       const links = bulkLinkVariants.map(v => {
         const ml = bulkLinkAssignments[v.variantId]?.ml?.trim() || '';
         const tn = bulkLinkAssignments[v.variantId]?.tn?.trim() || '';
@@ -1551,7 +1562,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
-          sku: `${bulkLinkGroupKey}-${v.sizeCode}-${v.colorCode}`,
+          sku: (v as any).sku || `${bulkLinkGroupKey}-${v.sizeCode}-${v.colorCode}`,
           name: groupedProducts[bulkLinkGroupKey]?.[0]?.name || '',
           category: groupedProducts[bulkLinkGroupKey]?.[0]?.category || 'General',
           price: groupedProducts[bulkLinkGroupKey]?.[0]?.price || 0,
@@ -3920,7 +3931,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           {bulkLinkVariants.map(v => (
                             <tr key={v.variantId} className="border-b border-slate-700/50 hover:bg-slate-800/30">
                               <td className="p-3">
-                                <span className="font-mono text-blue-300">{v.sku}</span>
+                                <input
+                                  type="text"
+                                  value={bulkLinkSkuEdits[v.variantId] ?? v.sku ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setBulkLinkSkuEdits(prev => ({ ...prev, [v.variantId]: val }));
+                                  }}
+                                  placeholder="SKU local"
+                                  className="w-full max-w-[240px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-blue-200 text-xs font-mono"
+                                />
                                 <span className="text-slate-500 ml-2">— {v.size} / {v.color}</span>
                               </td>
                               <td className="p-3">

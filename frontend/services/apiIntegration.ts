@@ -1,5 +1,5 @@
 import { Product, ApiConfig, RemitenteConfig } from '../types';
-import DEFAULT_COMPANY_LOGO_URL from '../Lupo_logo.svg (1).png?inline';
+import FIXED_COMPANY_LOGO_URL from '../dist/assets/Lupo_logo.svg?inline';
 
 // Helper to get config from localStorage (in a real app, this might come from a secure backend or context)
 export const getApiConfig = (): ApiConfig => {
@@ -19,13 +19,6 @@ const REMITENTE_KEY = 'lupo_remitente';
 export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
   const parsed = s ? JSON.parse(s) : {};
-  const rawLogo = (parsed.logoUrl ?? '').toString().trim();
-  const looksValidLogo =
-    !!rawLogo &&
-    rawLogo !== 'undefined' &&
-    rawLogo !== 'null' &&
-    /^(data:image\/|https?:\/\/|blob:|\/)/i.test(rawLogo);
-  const safeLogo = looksValidLogo ? rawLogo : DEFAULT_COMPANY_LOGO_URL;
   return {
     businessName: parsed.businessName ?? '',
     address: parsed.address ?? '',
@@ -35,7 +28,8 @@ export const getRemitente = (): RemitenteConfig => {
     inicioActividad: parsed.inicioActividad ?? '13/06/2005',
     email: parsed.email ?? '',
     phone: parsed.phone ?? '',
-    logoUrl: safeLogo,
+    // Requisito del cliente: usar siempre el logo corporativo fijo.
+    logoUrl: FIXED_COMPANY_LOGO_URL,
     caiRemito: parsed.caiRemito ?? '',
     caiRemitoVencimiento: parsed.caiRemitoVencimiento ?? ''
   };
