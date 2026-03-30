@@ -296,7 +296,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
     const razonEmpresa = (remitente.businessName || '—').toString();
     const cuitEmpresa = ((remitente as any).cuit || '').toString();
-    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '').toString();
+    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '901-2113373').toString();
     const inicioActividadEmpresa = ((remitente as any).inicioActividad || '13/06/2005').toString();
     const emailEmpresa = ((remitente as any).email || '').toString();
     const telEmpresa = ((remitente as any).phone || '').toString();
@@ -512,7 +512,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     // Formato tipo "Tango" (como la imagen): A4 + cajas + tabla (Cantidad / Código / Descripción / P.Unitario / Importe)
     const razonEmpresa = (remitente.businessName || '—').toString();
     const cuitEmpresa = ((remitente as any).cuit || '').toString();
-    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '').toString();
+    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '901-2113373').toString();
     const inicioActividadEmpresa = ((remitente as any).inicioActividad || '13/06/2005').toString();
     const emailEmpresa = ((remitente as any).email || '').toString();
     const telEmpresa = ((remitente as any).phone || '').toString();

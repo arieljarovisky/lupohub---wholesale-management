@@ -15,16 +15,18 @@ export const saveApiConfig = (config: ApiConfig) => {
 };
 
 const REMITENTE_KEY = 'lupo_remitente';
+const DEFAULT_INGRESOS_BRUTOS = '901-2113373';
 
 export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
   const parsed = s ? JSON.parse(s) : {};
+  const ingresosBrutos = (parsed.ingresosBrutos ?? '').toString().trim() || DEFAULT_INGRESOS_BRUTOS;
   return {
     businessName: parsed.businessName ?? '',
     address: parsed.address ?? '',
     city: parsed.city ?? '',
     cuit: parsed.cuit ?? '',
-    ingresosBrutos: parsed.ingresosBrutos ?? '',
+    ingresosBrutos,
     inicioActividad: parsed.inicioActividad ?? '13/06/2005',
     email: parsed.email ?? '',
     phone: parsed.phone ?? '',

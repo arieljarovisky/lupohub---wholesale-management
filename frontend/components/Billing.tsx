@@ -217,7 +217,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
         </div>
       </div>
       <div class="inv-datos">
-        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}${(remitente as any).ingresosBrutos ? 'Ingresos Brutos ' + (remitente as any).ingresosBrutos + '<br>' : ''}${(remitente as any).inicioActividad ? 'Inicio de actividad ' + (remitente as any).inicioActividad + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
+        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}Ingresos Brutos ${((remitente as any).ingresosBrutos || '901-2113373')}<br>${(remitente as any).inicioActividad ? 'Inicio de actividad ' + (remitente as any).inicioActividad + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
         <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.transportNumber ? 'N° Transporte ' + customer.transportNumber + '<br>' : ''}${customer?.remitoNumber ? 'N° Remito ' + customer.remitoNumber + '<br>' : ''}${customer?.saleCondition ? 'Condición de venta ' + customer.saleCondition + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
       </div>
       <div class="inv-table-wrap">
