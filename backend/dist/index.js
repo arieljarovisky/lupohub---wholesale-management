@@ -54,6 +54,7 @@ const add_remitente_table_1 = require("./database/add_remitente_table");
 const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
 const add_payments_table_1 = require("./database/add_payments_table");
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
+const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -147,6 +148,7 @@ function initDatabase() {
                 yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
                 yield (0, add_payments_table_1.addPaymentsTable)();
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
+                yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

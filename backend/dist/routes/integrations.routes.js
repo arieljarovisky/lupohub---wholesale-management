@@ -31,6 +31,7 @@ router.get('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integra
 /** Probar descuento de stock por una orden ML: POST { "orderId": "200..." } o GET ?orderId=200... (requiere login) */
 router.post('/mercadolibre/test-order', auth_1.authMiddleware, integrations_controller_1.testMercadoLibreOrder);
 router.get('/mercadolibre/test-order', auth_1.authMiddleware, integrations_controller_1.testMercadoLibreOrder);
+router.post('/mercadolibre/invoice-bulk', auth_1.authMiddleware, integrations_controller_1.invoiceMercadoLibreOrdersBulk);
 // Tienda Nube
 router.get('/tiendanube/auth', integrations_controller_1.getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCallback);
@@ -50,5 +51,7 @@ router.get('/tiendanube/test-order', auth_1.authMiddleware, integrations_control
 /** Descontar stock de ventas TN desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
 router.post('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncTiendaNubeOrdersFromDate);
 router.get('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncTiendaNubeOrdersFromDate);
+router.post('/tiendanube/invoice-bulk', auth_1.authMiddleware, integrations_controller_1.invoiceTiendaNubeOrdersBulk);
+router.get('/invoices/external', auth_1.authMiddleware, integrations_controller_1.getExternalInvoicesHistory);
 router.delete('/:platform/disconnect', integrations_controller_1.disconnectIntegration);
 exports.default = router;

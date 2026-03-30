@@ -11,6 +11,7 @@ router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);
 router.post('/import', auth_1.authMiddleware, customers_controller_1.importCustomers);
 router.post('/bulk-update-cuit', auth_1.authMiddleware, customers_controller_1.bulkUpdateCuit);
 router.post('/:id/attach-user', auth_1.authMiddleware, customers_controller_1.attachUserToCustomer);
+router.post('/:id/clear-dispatched-pendings', auth_1.authMiddleware, customers_controller_1.clearDispatchedPendingsForCustomer);
 router.patch('/:id', auth_1.authMiddleware, customers_controller_1.updateCustomer);
 router.delete('/:id', auth_1.authMiddleware, customers_controller_1.deleteCustomer);
 exports.default = router;

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.clearDispatchedPendingsForCustomer = exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 function toCustomer(row, transportes) {
@@ -591,3 +591,70 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
     res.send('\uFEFF' + csv);
 });
 exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
+/** Quita pendientes de pedidos ya despachados para un cliente:
+ *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
+ *  - Elimina renglones con quantity <= 0
+ *  - Recalcula total del pedido
+ */
+const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Sin permisos para quitar pendientes' });
+        }
+        const { id: customerId } = req.params;
+        if (!customerId)
+            return res.status(400).json({ message: 'ID de cliente requerido' });
+        const customer = yield (0, db_1.get)('SELECT id, seller_id FROM customers WHERE id = ?', [customerId]);
+        if (!customer)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (authUser.role === 'SELLER' && customer.seller_id && customer.seller_id !== authUser.id) {
+            return res.status(403).json({ message: 'Solo podés operar sobre tus clientes' });
+        }
+        const dispatchedOrders = yield (0, db_1.query)(`SELECT id FROM orders
+       WHERE customer_id = ?
+         AND status IN ('Despachado', 'DISPATCHED')`, [customerId]);
+        const orderIds = (dispatchedOrders || []).map((o) => o.id).filter(Boolean);
+        if (orderIds.length === 0) {
+            return res.json({ message: 'No hay pedidos despachados para ajustar', ordersUpdated: 0, itemsAdjusted: 0, itemsRemoved: 0 });
+        }
+        let itemsAdjusted = 0;
+        let itemsRemoved = 0;
+        let ordersUpdated = 0;
+        for (const orderId of orderIds) {
+            const beforeAdjust = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt
+         FROM order_items
+         WHERE order_id = ? AND quantity > COALESCE(picked, 0)`, [orderId]);
+            const toAdjust = Number((beforeAdjust === null || beforeAdjust === void 0 ? void 0 : beforeAdjust.cnt) || 0);
+            if (toAdjust > 0) {
+                yield (0, db_1.execute)(`UPDATE order_items
+           SET quantity = COALESCE(picked, 0)
+           WHERE order_id = ? AND quantity > COALESCE(picked, 0)`, [orderId]);
+                itemsAdjusted += toAdjust;
+            }
+            const beforeDelete = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+            const toDelete = Number((beforeDelete === null || beforeDelete === void 0 ? void 0 : beforeDelete.cnt) || 0);
+            if (toDelete > 0) {
+                yield (0, db_1.execute)(`DELETE FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+                itemsRemoved += toDelete;
+            }
+            const totalRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(quantity * price_at_moment), 0) AS total
+         FROM order_items
+         WHERE order_id = ?`, [orderId]);
+            yield (0, db_1.execute)(`UPDATE orders SET total = ? WHERE id = ?`, [Number((totalRow === null || totalRow === void 0 ? void 0 : totalRow.total) || 0), orderId]);
+            if (toAdjust > 0 || toDelete > 0)
+                ordersUpdated++;
+        }
+        return res.json({
+            message: 'Pendientes de pedidos despachados ajustados',
+            ordersUpdated,
+            itemsAdjusted,
+            itemsRemoved
+        });
+    }
+    catch (error) {
+        console.error('clearDispatchedPendingsForCustomer:', error);
+        res.status(500).json({ message: 'Error quitando pendientes de pedidos despachados' });
+    }
+});
+exports.clearDispatchedPendingsForCustomer = clearDispatchedPendingsForCustomer;

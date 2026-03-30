@@ -2953,7 +2953,7 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
     }
 
     const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
-    const orderIds = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
+    const orderIds: string[] = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
@@ -2973,12 +2973,13 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
     const results: any[] = [];
 
     for (const orderId of orderIds) {
+      const orderIdStr = String(orderId);
       try {
         const existing = await get(
           `SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
            FROM external_invoices
            WHERE source = 'TIENDANUBE' AND external_order_id = ?`,
-          [orderId]
+          [orderIdStr]
         );
         if (existing) {
           results.push({
@@ -2993,7 +2994,7 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           continue;
         }
 
-        const orderRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(orderId)}`, {
+        const orderRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(orderIdStr)}`, {
           headers: {
             'Authentication': `bearer ${integration.access_token}`,
             'User-Agent': TN_USER_AGENT
@@ -3001,20 +3002,20 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           validateStatus: () => true
         });
         if (orderRes.status !== 200 || !orderRes.data) {
-          results.push({ orderId, status: 'error', message: 'No se pudo obtener la orden de Tienda Nube' });
+          results.push({ orderId: orderIdStr, status: 'error', message: 'No se pudo obtener la orden de Tienda Nube' });
           continue;
         }
 
         const order = orderRes.data;
         const paymentStatus = normalizeTnPaymentStatus(order);
         if (paymentStatus !== 'paid') {
-          results.push({ orderId, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
+          results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
           continue;
         }
 
         const total = Number(order?.total ?? 0);
         if (!Number.isFinite(total) || total <= 0) {
-          results.push({ orderId, status: 'error', message: 'La orden tiene total inválido para facturar' });
+          results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
           continue;
         }
 
@@ -3080,7 +3081,7 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
         });
       } catch (e: any) {
         results.push({
-          orderId,
+          orderId: orderIdStr,
           status: 'error',
           message: e?.message || 'Error emitiendo factura'
         });
@@ -3113,7 +3114,7 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
     }
 
     const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
-    const orderIds = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
+    const orderIds: string[] = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
@@ -3129,12 +3130,13 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
     const results: any[] = [];
 
     for (const orderId of orderIds) {
+      const orderIdStr = String(orderId);
       try {
         const existing = await get(
           `SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
            FROM external_invoices
            WHERE source = 'MERCADOLIBRE' AND external_order_id = ?`,
-          [orderId]
+          [orderIdStr]
         );
         if (existing) {
           results.push({
@@ -3150,23 +3152,23 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
         }
 
         const orderRes = await axios.get(
-          `https://api.mercadolibre.com/orders/${encodeURIComponent(orderId)}`,
+          `https://api.mercadolibre.com/orders/${encodeURIComponent(orderIdStr)}`,
           { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true }
         );
         if (orderRes.status !== 200 || !orderRes.data) {
-          results.push({ orderId, status: 'error', message: 'No se pudo obtener la orden de Mercado Libre' });
+          results.push({ orderId: orderIdStr, status: 'error', message: 'No se pudo obtener la orden de Mercado Libre' });
           continue;
         }
 
         const order = orderRes.data;
         if ((order?.status || '').toString().toLowerCase() !== 'paid') {
-          results.push({ orderId, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${order?.status || 'desconocido'})` });
+          results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${order?.status || 'desconocido'})` });
           continue;
         }
 
         const total = Number(order?.total_amount ?? 0);
         if (!Number.isFinite(total) || total <= 0) {
-          results.push({ orderId, status: 'error', message: 'La orden tiene total inválido para facturar' });
+          results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
           continue;
         }
 
@@ -3223,7 +3225,7 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
         });
       } catch (e: any) {
         results.push({
-          orderId,
+          orderId: orderIdStr,
           status: 'error',
           message: e?.message || 'Error emitiendo factura'
         });

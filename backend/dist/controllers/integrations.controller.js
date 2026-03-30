@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
@@ -2669,7 +2669,18 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         });
         let orders = ordersRes.data.map((order) => {
-            var _a, _b, _c;
+            var _a, _b, _c, _d;
+            const rawPaymentStatus = ((_a = order.payment_status) !== null && _a !== void 0 ? _a : '').toString().trim().toLowerCase();
+            const paymentDetails = Array.isArray(order.payment_details) ? order.payment_details : [];
+            const detailStates = paymentDetails
+                .map((d) => { var _a, _b; return ((_b = (_a = d === null || d === void 0 ? void 0 : d.status) !== null && _a !== void 0 ? _a : d === null || d === void 0 ? void 0 : d.state) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase(); })
+                .filter(Boolean);
+            const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
+            const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s) => s.includes('void') || s.includes('cancel'));
+            const looksPaid = rawPaymentStatus === 'paid'
+                || !!order.paid_at
+                || detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
+            const normalizedPaymentStatus = looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
             // Extraer nombre del cliente de diferentes fuentes
             let customerName = 'Sin nombre';
             if (order.customer) {
@@ -2687,21 +2698,23 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
             if (customerName === 'Sin nombre' && order.billing_name) {
                 customerName = order.billing_name;
             }
-            if (customerName === 'Sin nombre' && ((_a = order.shipping_address) === null || _a === void 0 ? void 0 : _a.name)) {
+            if (customerName === 'Sin nombre' && ((_b = order.shipping_address) === null || _b === void 0 ? void 0 : _b.name)) {
                 customerName = order.shipping_address.name;
             }
             return {
                 id: order.id,
                 number: order.number,
                 status: order.status,
-                paymentStatus: order.payment_status,
+                paymentStatus: normalizedPaymentStatus,
+                paymentStatusRaw: rawPaymentStatus || null,
+                isPaid: normalizedPaymentStatus === 'paid',
                 shippingStatus: order.shipping_status,
                 total: order.total,
                 currency: order.currency,
                 customer: {
                     name: customerName,
-                    email: ((_b = order.customer) === null || _b === void 0 ? void 0 : _b.email) || order.contact_email || '',
-                    phone: ((_c = order.customer) === null || _c === void 0 ? void 0 : _c.phone) || order.contact_phone || ''
+                    email: ((_c = order.customer) === null || _c === void 0 ? void 0 : _c.email) || order.contact_email || '',
+                    phone: ((_d = order.customer) === null || _d === void 0 ? void 0 : _d.phone) || order.contact_phone || ''
                 },
                 products: (order.products || []).map((p) => ({
                     id: p.product_id,
@@ -2722,7 +2735,7 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
             };
         });
         if (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') {
-            orders = orders.filter((o) => o.paymentStatus === 'paid' &&
+            orders = orders.filter((o) => o.isPaid === true &&
                 o.shippingStatus !== 'shipped' &&
                 o.shippingStatus !== 'delivered');
         }
@@ -2739,6 +2752,339 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.getTiendaNubeOrders = getTiendaNubeOrders;
+function normalizeTnPaymentStatus(order) {
+    var _a;
+    const rawPaymentStatus = ((_a = order === null || order === void 0 ? void 0 : order.payment_status) !== null && _a !== void 0 ? _a : '').toString().trim().toLowerCase();
+    const paymentDetails = Array.isArray(order === null || order === void 0 ? void 0 : order.payment_details) ? order.payment_details : [];
+    const detailStates = paymentDetails
+        .map((d) => { var _a, _b; return ((_b = (_a = d === null || d === void 0 ? void 0 : d.status) !== null && _a !== void 0 ? _a : d === null || d === void 0 ? void 0 : d.state) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase(); })
+        .filter(Boolean);
+    const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
+    const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s) => s.includes('void') || s.includes('cancel'));
+    const looksPaid = rawPaymentStatus === 'paid'
+        || !!(order === null || order === void 0 ? void 0 : order.paid_at)
+        || detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
+    return looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+}
+/** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
+const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+        }
+        const orderIdsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.orderIds) ? req.body.orderIds : [];
+        const orderIds = Array.from(new Set(orderIdsRaw.map((x) => String(x).trim()).filter(Boolean)));
+        const cbteTipoFromBody = (_b = req.body) === null || _b === void 0 ? void 0 : _b.cbteTipo;
+        const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
+        if (!orderIds.length)
+            return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
+        if (orderIds.length > 100)
+            return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });
+        const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+            return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+        }
+        const storeId = integration.store_id || integration.user_id;
+        if (!storeId) {
+            return res.status(400).json({ message: 'No se encontró el store_id de Tienda Nube' });
+        }
+        const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        const results = [];
+        for (const orderId of orderIds) {
+            const orderIdStr = String(orderId);
+            try {
+                const existing = yield (0, db_1.get)(`SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
+           FROM external_invoices
+           WHERE source = 'TIENDANUBE' AND external_order_id = ?`, [orderIdStr]);
+                if (existing) {
+                    results.push({
+                        orderId,
+                        status: 'already_invoiced',
+                        invoiceId: existing.id,
+                        cae: existing.cae,
+                        cbteTipo: existing.cbte_tipo,
+                        cbteDesde: existing.cbte_desde,
+                        cbteHasta: existing.cbte_hasta
+                    });
+                    continue;
+                }
+                const orderRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(orderIdStr)}`, {
+                    headers: {
+                        'Authentication': `bearer ${integration.access_token}`,
+                        'User-Agent': TN_USER_AGENT
+                    },
+                    validateStatus: () => true
+                });
+                if (orderRes.status !== 200 || !orderRes.data) {
+                    results.push({ orderId: orderIdStr, status: 'error', message: 'No se pudo obtener la orden de Tienda Nube' });
+                    continue;
+                }
+                const order = orderRes.data;
+                const paymentStatus = normalizeTnPaymentStatus(order);
+                if (paymentStatus !== 'paid') {
+                    results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
+                    continue;
+                }
+                const total = Number((_c = order === null || order === void 0 ? void 0 : order.total) !== null && _c !== void 0 ? _c : 0);
+                if (!Number.isFinite(total) || total <= 0) {
+                    results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
+                    continue;
+                }
+                const customerName = ((_d = order === null || order === void 0 ? void 0 : order.customer) === null || _d === void 0 ? void 0 : _d.name)
+                    || `${((_e = order === null || order === void 0 ? void 0 : order.customer) === null || _e === void 0 ? void 0 : _e.first_name) || ''} ${((_f = order === null || order === void 0 ? void 0 : order.customer) === null || _f === void 0 ? void 0 : _f.last_name) || ''}`.trim()
+                    || (order === null || order === void 0 ? void 0 : order.contact_name)
+                    || (order === null || order === void 0 ? void 0 : order.billing_name)
+                    || 'Consumidor Final';
+                const rawDoc = String((_k = (_h = (_g = order === null || order === void 0 ? void 0 : order.billing_address) === null || _g === void 0 ? void 0 : _g.doc_number) !== null && _h !== void 0 ? _h : (_j = order === null || order === void 0 ? void 0 : order.customer) === null || _j === void 0 ? void 0 : _j.doc_number) !== null && _k !== void 0 ? _k : '').replace(/\D/g, '');
+                const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
+                const condicionIvaRaw = (((_l = order === null || order === void 0 ? void 0 : order.billing_address) === null || _l === void 0 ? void 0 : _l.fiscal_regime)
+                    || ((_m = order === null || order === void 0 ? void 0 : order.customer) === null || _m === void 0 ? void 0 : _m.fiscal_regime)
+                    || ((_o = order === null || order === void 0 ? void 0 : order.customer) === null || _o === void 0 ? void 0 : _o.iva_condition)
+                    || 'Consumidor Final').toString();
+                const afipResult = yield emitirAfip({
+                    id: `TN-${order.id}`,
+                    date: (order === null || order === void 0 ? void 0 : order.created_at) || new Date().toISOString().slice(0, 10),
+                    total,
+                    customerId: `TN-${((_p = order === null || order === void 0 ? void 0 : order.customer) === null || _p === void 0 ? void 0 : _p.id) || order.id}`
+                }, {
+                    id: `TN-${((_q = order === null || order === void 0 ? void 0 : order.customer) === null || _q === void 0 ? void 0 : _q.id) || order.id}`,
+                    businessName: customerName,
+                    cuit: maybeCuit,
+                    condicionIva: condicionIvaRaw
+                }, forceCbteTipo);
+                const invoiceId = (0, uuid_1.v4)();
+                yield (0, db_1.execute)(`INSERT INTO external_invoices
+           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                    invoiceId,
+                    String(order.id),
+                    String((_r = order.number) !== null && _r !== void 0 ? _r : order.id),
+                    customerName,
+                    total,
+                    afipResult.cae,
+                    afipResult.caeFchVto || null,
+                    afipResult.puntoVta,
+                    afipResult.cbteTipo,
+                    afipResult.cbteDesde,
+                    afipResult.cbteHasta
+                ]);
+                results.push({
+                    orderId: String(order.id),
+                    status: 'invoiced',
+                    invoiceId,
+                    cae: afipResult.cae,
+                    cbteTipo: afipResult.cbteTipo,
+                    cbteDesde: afipResult.cbteDesde,
+                    cbteHasta: afipResult.cbteHasta
+                });
+            }
+            catch (e) {
+                results.push({
+                    orderId: orderIdStr,
+                    status: 'error',
+                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
+                });
+            }
+        }
+        const summary = {
+            total: results.length,
+            invoiced: results.filter(r => r.status === 'invoiced').length,
+            alreadyInvoiced: results.filter(r => r.status === 'already_invoiced').length,
+            skippedUnpaid: results.filter(r => r.status === 'skipped_unpaid').length,
+            errors: results.filter(r => r.status === 'error').length
+        };
+        res.json({ message: 'Facturación masiva de Tienda Nube finalizada', summary, results });
+    }
+    catch (error) {
+        console.error('invoiceTiendaNubeOrdersBulk:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error en facturación masiva de Tienda Nube';
+        const status = msg.includes('no configurado') ? 503 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.invoiceTiendaNubeOrdersBulk = invoiceTiendaNubeOrdersBulk;
+/** Emite facturas AFIP masivas para órdenes de Mercado Libre (solo pagadas). */
+const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+        }
+        const orderIdsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.orderIds) ? req.body.orderIds : [];
+        const orderIds = Array.from(new Set(orderIdsRaw.map((x) => String(x).trim()).filter(Boolean)));
+        const cbteTipoFromBody = (_b = req.body) === null || _b === void 0 ? void 0 : _b.cbteTipo;
+        const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
+        if (!orderIds.length)
+            return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
+        if (orderIds.length > 100)
+            return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });
+        const mlToken = yield getValidMLToken();
+        if (!mlToken) {
+            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+        }
+        const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        const results = [];
+        for (const orderId of orderIds) {
+            const orderIdStr = String(orderId);
+            try {
+                const existing = yield (0, db_1.get)(`SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
+           FROM external_invoices
+           WHERE source = 'MERCADOLIBRE' AND external_order_id = ?`, [orderIdStr]);
+                if (existing) {
+                    results.push({
+                        orderId,
+                        status: 'already_invoiced',
+                        invoiceId: existing.id,
+                        cae: existing.cae,
+                        cbteTipo: existing.cbte_tipo,
+                        cbteDesde: existing.cbte_desde,
+                        cbteHasta: existing.cbte_hasta
+                    });
+                    continue;
+                }
+                const orderRes = yield axios_1.default.get(`https://api.mercadolibre.com/orders/${encodeURIComponent(orderIdStr)}`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true });
+                if (orderRes.status !== 200 || !orderRes.data) {
+                    results.push({ orderId: orderIdStr, status: 'error', message: 'No se pudo obtener la orden de Mercado Libre' });
+                    continue;
+                }
+                const order = orderRes.data;
+                if (((order === null || order === void 0 ? void 0 : order.status) || '').toString().toLowerCase() !== 'paid') {
+                    results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${(order === null || order === void 0 ? void 0 : order.status) || 'desconocido'})` });
+                    continue;
+                }
+                const total = Number((_c = order === null || order === void 0 ? void 0 : order.total_amount) !== null && _c !== void 0 ? _c : 0);
+                if (!Number.isFinite(total) || total <= 0) {
+                    results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
+                    continue;
+                }
+                const buyerFirst = (((_d = order === null || order === void 0 ? void 0 : order.buyer) === null || _d === void 0 ? void 0 : _d.first_name) || '').toString().trim();
+                const buyerLast = (((_e = order === null || order === void 0 ? void 0 : order.buyer) === null || _e === void 0 ? void 0 : _e.last_name) || '').toString().trim();
+                const customerName = `${buyerFirst} ${buyerLast}`.trim()
+                    || (((_f = order === null || order === void 0 ? void 0 : order.buyer) === null || _f === void 0 ? void 0 : _f.nickname) || '').toString().trim()
+                    || 'Consumidor Final';
+                const afipResult = yield emitirAfip({
+                    id: `ML-${order.id}`,
+                    date: (order === null || order === void 0 ? void 0 : order.date_created) || new Date().toISOString().slice(0, 10),
+                    total,
+                    customerId: `ML-${((_g = order === null || order === void 0 ? void 0 : order.buyer) === null || _g === void 0 ? void 0 : _g.id) || order.id}`
+                }, {
+                    id: `ML-${((_h = order === null || order === void 0 ? void 0 : order.buyer) === null || _h === void 0 ? void 0 : _h.id) || order.id}`,
+                    businessName: customerName,
+                    cuit: undefined,
+                    condicionIva: 'Consumidor Final'
+                }, forceCbteTipo);
+                const invoiceId = (0, uuid_1.v4)();
+                yield (0, db_1.execute)(`INSERT INTO external_invoices
+           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                    invoiceId,
+                    String(order.id),
+                    String(order.id),
+                    customerName,
+                    total,
+                    afipResult.cae,
+                    afipResult.caeFchVto || null,
+                    afipResult.puntoVta,
+                    afipResult.cbteTipo,
+                    afipResult.cbteDesde,
+                    afipResult.cbteHasta
+                ]);
+                results.push({
+                    orderId: String(order.id),
+                    status: 'invoiced',
+                    invoiceId,
+                    cae: afipResult.cae,
+                    cbteTipo: afipResult.cbteTipo,
+                    cbteDesde: afipResult.cbteDesde,
+                    cbteHasta: afipResult.cbteHasta
+                });
+            }
+            catch (e) {
+                results.push({
+                    orderId: orderIdStr,
+                    status: 'error',
+                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
+                });
+            }
+        }
+        const summary = {
+            total: results.length,
+            invoiced: results.filter(r => r.status === 'invoiced').length,
+            alreadyInvoiced: results.filter(r => r.status === 'already_invoiced').length,
+            skippedUnpaid: results.filter(r => r.status === 'skipped_unpaid').length,
+            errors: results.filter(r => r.status === 'error').length
+        };
+        res.json({ message: 'Facturación masiva de Mercado Libre finalizada', summary, results });
+    }
+    catch (error) {
+        console.error('invoiceMercadoLibreOrdersBulk:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error en facturación masiva de Mercado Libre';
+        const status = msg.includes('no configurado') ? 503 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.invoiceMercadoLibreOrdersBulk = invoiceMercadoLibreOrdersBulk;
+/** Historial unificado de facturación masiva externa (Tienda Nube / Mercado Libre). */
+const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Sin permisos para ver historial de facturación externa' });
+        }
+        const sourceRaw = String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.source) || '').trim().toUpperCase();
+        const source = sourceRaw === 'TIENDANUBE' || sourceRaw === 'MERCADOLIBRE' ? sourceRaw : '';
+        const limitNum = Math.min(500, Math.max(1, parseInt(String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.limit) || '50'), 10) || 50));
+        const offsetNum = Math.max(0, parseInt(String(((_c = req.query) === null || _c === void 0 ? void 0 : _c.offset) || '0'), 10) || 0);
+        const where = [];
+        const params = [];
+        if (source) {
+            where.push('source = ?');
+            params.push(source);
+        }
+        const countRow = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt
+       FROM external_invoices
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`, params);
+        const total = Number((countRow === null || countRow === void 0 ? void 0 : countRow.cnt) || 0);
+        const rows = yield (0, db_1.query)(`SELECT id, source, external_order_id, order_number, customer_name, total,
+              cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
+       FROM external_invoices
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY created_at DESC
+       LIMIT ${limitNum} OFFSET ${offsetNum}`, params);
+        res.json({
+            total,
+            offset: offsetNum,
+            limit: limitNum,
+            invoices: rows.map((r) => {
+                var _a;
+                return ({
+                    id: r.id,
+                    source: r.source,
+                    externalOrderId: r.external_order_id,
+                    orderNumber: r.order_number,
+                    customerName: r.customer_name,
+                    total: Number(r.total || 0),
+                    cae: r.cae,
+                    caeFchVto: (_a = r.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
+                    puntoVta: r.punto_venta,
+                    cbteTipo: r.cbte_tipo,
+                    cbteDesde: r.cbte_desde,
+                    cbteHasta: r.cbte_hasta,
+                    createdAt: r.created_at
+                });
+            })
+        });
+    }
+    catch (error) {
+        console.error('getExternalInvoicesHistory:', error);
+        res.status(500).json({ message: 'Error obteniendo historial de facturación externa' });
+    }
+});
+exports.getExternalInvoicesHistory = getExternalInvoicesHistory;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -3209,7 +3555,7 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getMercadoLibreStock = getMercadoLibreStock;
 // Obtener variaciones de un ítem de Mercado Libre por ID (para vincular por ID padre)
 const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
         let { itemId } = req.params;
         if (!itemId) {
@@ -3237,7 +3583,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     break;
                 }
             }
-            catch (_h) {
+            catch (_j) {
                 // probar siguiente candidato
             }
         }
@@ -3257,7 +3603,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                         break;
                     }
                 }
-                catch (_j) {
+                catch (_k) {
                     // probar siguiente candidato
                 }
             }
@@ -3310,7 +3656,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     if ((d === null || d === void 0 ? void 0 : d.id) && !byItemId[d.id])
                         byItemId[d.id] = d;
                 }
-                catch (_k) {
+                catch (_l) {
                     // ignorar item inválido y seguir
                 }
             }
@@ -3342,12 +3688,70 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 });
             }
         }
+        // Caso "una publicación por variante" sin catálogo explícito:
+        // buscar publicaciones hermanas del mismo vendedor por título base.
+        if (!item.variations || item.variations.length === 0) {
+            const baseTitle = mlBaseTitle((item.title || '').toString().trim());
+            if (baseTitle) {
+                const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`, {
+                    headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
+                    params: { q: baseTitle, limit: 50, offset: 0 },
+                    validateStatus: () => true
+                });
+                const siblingIds = searchRes.status === 200 && Array.isArray((_a = searchRes.data) === null || _a === void 0 ? void 0 : _a.results)
+                    ? searchRes.data.results.map((x) => String(x || '').trim()).filter(Boolean)
+                    : [];
+                const uniqueSiblingIds = Array.from(new Set(siblingIds)).slice(0, 50);
+                if (uniqueSiblingIds.length > 1) {
+                    const siblings = yield Promise.all(uniqueSiblingIds.map((sid) => __awaiter(void 0, void 0, void 0, function* () {
+                        try {
+                            const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${sid}?include_attributes=all`, {
+                                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                            });
+                            return r.data;
+                        }
+                        catch (_a) {
+                            return null;
+                        }
+                    })));
+                    const siblingVariations = (siblings || [])
+                        .filter((it) => it && !it.error && (!it.variations || it.variations.length === 0))
+                        .filter((it) => mlBaseTitle((it.title || '').toString().trim()) === baseTitle)
+                        .map((it) => {
+                        var _a, _b, _c, _d, _e, _f, _g, _h;
+                        const attrs = Array.isArray(it.attributes) ? it.attributes : [];
+                        const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+                        const sku = ((_b = (_a = it.seller_sku) !== null && _a !== void 0 ? _a : it.seller_custom_field) !== null && _b !== void 0 ? _b : (skuAttr ? ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '') : '')).toString().trim();
+                        const colorAttr = attrs.find((a) => ['COLOR', 'COLOUR', 'COR'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
+                        const sizeAttr = attrs.find((a) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
+                        const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+                        return {
+                            variationId: it.id,
+                            sku,
+                            color: (colorAttr ? ((_f = (_e = colorAttr.value_name) !== null && _e !== void 0 ? _e : colorAttr.value) !== null && _f !== void 0 ? _f : '') : parsed.color).toString().trim(),
+                            size: (sizeAttr ? ((_h = (_g = sizeAttr.value_name) !== null && _g !== void 0 ? _g : sizeAttr.value) !== null && _h !== void 0 ? _h : '') : parsed.size).toString().trim(),
+                            stock: it.available_quantity || 0
+                        };
+                    });
+                    if (siblingVariations.length > 1) {
+                        return res.json({
+                            variations: siblingVariations,
+                            singleProduct: false,
+                            itemId: item.id,
+                            requestedItemId: String(req.params.itemId || ''),
+                            resolvedItemId,
+                            resolvedFromSiblingSearch: true
+                        });
+                    }
+                }
+            }
+        }
         // Sin variaciones: producto único
         const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
-        let singleSku = ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim();
+        let singleSku = ((_c = (_b = item.seller_sku) !== null && _b !== void 0 ? _b : item.seller_custom_field) !== null && _c !== void 0 ? _c : '').toString().trim();
         if (!singleSku && Array.isArray(item.attributes)) {
             const skuAttr = item.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
-            singleSku = (skuAttr ? ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '') : '').toString().trim();
+            singleSku = (skuAttr ? ((_e = (_d = skuAttr.value_name) !== null && _d !== void 0 ? _d : skuAttr.value) !== null && _e !== void 0 ? _e : '') : '').toString().trim();
         }
         return res.json({
             variations: [{
@@ -3364,8 +3768,8 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         });
     }
     catch (error) {
-        const status = (_e = error.response) === null || _e === void 0 ? void 0 : _e.status;
-        const detail = ((_g = (_f = error.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.message) || error.message;
+        const status = (_f = error.response) === null || _f === void 0 ? void 0 : _f.status;
+        const detail = ((_h = (_g = error.response) === null || _g === void 0 ? void 0 : _g.data) === null || _h === void 0 ? void 0 : _h.message) || error.message;
         console.error('Error fetching ML item variations:', detail);
         res.status(status === 404 ? 404 : 500).json({ message: 'Error obteniendo variaciones de Mercado Libre', detail });
     }
