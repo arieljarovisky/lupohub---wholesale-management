@@ -252,7 +252,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
       : (customer?.transportNumber || '').toString().trim();
     const remitoBaseNumber = (order.id || '').toString().trim();
-    const saleCondition = (customer?.saleCondition || '').toString().trim();
+    const saleCondition = '60 días';
     const numBultos = bultos !== undefined && bultos !== null && bultos !== '' ? (typeof bultos === 'number' ? bultos : parseInt(String(bultos), 10)) : null;
     const descripcionTrim = descripcion && String(descripcion).trim() ? String(descripcion).trim().replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
 
@@ -475,7 +475,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const cbteTipoNum = Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo);
     const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
     const codigoComprobante = cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
-    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(4,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
+    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
     const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
@@ -526,9 +526,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
     const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
     const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
-    const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim();
+    const saleCondition = '60 días';
     const dirCliente = clienteDir || '';
-    const ptoVta = String(inv.puntoVta ?? '').padStart(4, '0');
+    const ptoVta = String(inv.puntoVta ?? '').padStart(5, '0');
     const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');
     const periodDate = new Date(order.date);
     const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
@@ -662,7 +662,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <div class="block">
             ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
             ${remitoNumber ? `<div><strong>N° Remito:</strong> ${remitoNumber}</div>` : ''}
-            ${saleCondition ? `<div><strong>Condición de venta:</strong> ${saleCondition}</div>` : ''}
+            <div><strong>Condición de venta:</strong> ${saleCondition}</div>
           </div>
         </div>
 
