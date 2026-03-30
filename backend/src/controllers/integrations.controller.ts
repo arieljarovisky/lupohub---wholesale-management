@@ -3081,13 +3081,15 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
-           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
             String(order.id),
             String(order.number ?? order.id),
             customerName,
+            maybeCuit || null,
+            condicionIvaRaw || null,
             total,
             afipResult.cae,
             afipResult.caeFchVto || null,
@@ -3225,13 +3227,15 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
-           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
             String(order.id),
             String(order.id),
             customerName,
+            null,
+            'Consumidor Final',
             total,
             afipResult.cae,
             afipResult.caeFchVto || null,
@@ -3305,19 +3309,35 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
     const total = Number(countRow?.cnt || 0);
 
     const rows = await query(
-      `SELECT id, source, external_order_id, order_number, customer_name, total,
-              cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
-       FROM external_invoices
+      `SELECT ei.id, ei.source, ei.external_order_id, ei.order_number, ei.customer_name, ei.total,
+              ei.cae, ei.cae_fch_vto, ei.punto_venta, ei.cbte_tipo, ei.cbte_desde, ei.cbte_hasta, ei.created_at,
+              ecn.id AS credit_note_id, ecn.cae AS credit_note_cae, ecn.cbte_tipo AS credit_note_cbte_tipo, ecn.cbte_desde AS credit_note_cbte_desde
+       FROM external_invoices ei
+       LEFT JOIN external_credit_notes ecn ON ecn.external_invoice_id = ei.id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY created_at DESC
+       ORDER BY ei.created_at DESC
        LIMIT ${limitNum} OFFSET ${offsetNum}`,
       params
     ) as any[];
+
+    // Totales globales (sin filtro de source) para el resumen del historial.
+    const totalsRow = await get(
+      `SELECT
+         COUNT(*) AS total_all,
+         SUM(CASE WHEN source = 'TIENDANUBE' THEN 1 ELSE 0 END) AS total_tn,
+         SUM(CASE WHEN source = 'MERCADOLIBRE' THEN 1 ELSE 0 END) AS total_ml
+       FROM external_invoices`
+    ) as any;
 
     res.json({
       total,
       offset: offsetNum,
       limit: limitNum,
+      totals: {
+        all: Number(totalsRow?.total_all || 0),
+        tn: Number(totalsRow?.total_tn || 0),
+        ml: Number(totalsRow?.total_ml || 0)
+      },
       invoices: rows.map((r) => ({
         id: r.id,
         source: r.source,
@@ -3331,12 +3351,81 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
         cbteTipo: r.cbte_tipo,
         cbteDesde: r.cbte_desde,
         cbteHasta: r.cbte_hasta,
-        createdAt: r.created_at
+        createdAt: r.created_at,
+        hasCreditNote: !!r.credit_note_id,
+        creditNote: r.credit_note_id ? {
+          id: r.credit_note_id,
+          cae: r.credit_note_cae,
+          cbteTipo: r.credit_note_cbte_tipo,
+          cbteDesde: r.credit_note_cbte_desde
+        } : undefined
       }))
     });
   } catch (error: any) {
     console.error('getExternalInvoicesHistory:', error);
     res.status(500).json({ message: 'Error obteniendo historial de facturación externa' });
+  }
+};
+
+/** Emite NC total para una factura externa (una por factura). */
+export const emitirNotaCreditoExternalInvoice = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
+    }
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: 'ID de factura externa requerido' });
+
+    const inv = await get(
+      `SELECT id, source, external_order_id, customer_name, customer_cuit, customer_condicion_iva,
+              total, punto_venta, cbte_tipo, cbte_desde
+       FROM external_invoices WHERE id = ?`,
+      [id]
+    ) as any;
+    if (!inv) return res.status(404).json({ message: 'Factura externa no encontrada' });
+
+    const existingNc = await get(`SELECT id FROM external_credit_notes WHERE external_invoice_id = ?`, [id]);
+    if (existingNc) return res.status(409).json({ message: 'Esta factura externa ya tiene nota de crédito emitida' });
+
+    const amount = Number(inv.total || 0);
+    if (amount <= 0) return res.status(400).json({ message: 'Monto inválido para emitir nota de crédito' });
+
+    const { emitirNotaCredito } = await import('../services/afip.service');
+    const result = await emitirNotaCredito(
+      { puntoVta: Number(inv.punto_venta), cbteTipo: Number(inv.cbte_tipo), cbteDesde: Number(inv.cbte_desde) },
+      {
+        id: `EXT-${inv.id}`,
+        businessName: String(inv.customer_name || 'Consumidor Final'),
+        cuit: inv.customer_cuit ? String(inv.customer_cuit) : undefined,
+        condicionIva: inv.customer_condicion_iva ? String(inv.customer_condicion_iva) : 'Consumidor Final'
+      },
+      amount
+    );
+
+    const ncId = uuidv4();
+    await execute(
+      `INSERT INTO external_credit_notes
+       (id, external_invoice_id, source, external_order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [ncId, inv.id, inv.source, inv.external_order_id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amount]
+    );
+
+    res.status(201).json({
+      id: ncId,
+      externalInvoiceId: inv.id,
+      source: inv.source,
+      externalOrderId: inv.external_order_id,
+      cae: result.cae,
+      cbteTipo: result.cbteTipo,
+      cbteDesde: result.cbteDesde,
+      cbteHasta: result.cbteHasta
+    });
+  } catch (error: any) {
+    console.error('emitirNotaCreditoExternalInvoice:', error);
+    const msg = error?.message || 'Error emitiendo nota de crédito externa';
+    const status = msg.includes('ya tiene') ? 409 : msg.includes('no configurado') ? 503 : 500;
+    res.status(status).json({ message: msg });
   }
 };
 

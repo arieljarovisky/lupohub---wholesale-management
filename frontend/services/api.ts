@@ -934,6 +934,7 @@ export const api = {
     total: number;
     offset: number;
     limit: number;
+    totals?: { all: number; tn: number; ml: number };
     invoices: Array<{
       id: string;
       source: string;
@@ -948,6 +949,8 @@ export const api = {
       cbteDesde: number;
       cbteHasta: number;
       createdAt?: string;
+      hasCreditNote?: boolean;
+      creditNote?: { id: string; cae: string; cbteTipo: number; cbteDesde: number };
     }>
   }> => {
     return handleRequest(async () => {
@@ -957,7 +960,22 @@ export const api = {
       if (params?.offset != null) queryParams.append('offset', String(params.offset));
       const queryString = queryParams.toString();
       return await request(`/integrations/invoices/external${queryString ? '?' + queryString : ''}`, 'GET');
-    }, { total: 0, offset: 0, limit: params?.limit || 50, invoices: [] }, 'getExternalInvoicesHistory');
+    }, { total: 0, offset: 0, limit: params?.limit || 50, totals: { all: 0, tn: 0, ml: 0 }, invoices: [] }, 'getExternalInvoicesHistory');
+  },
+
+  emitirNotaCreditoExternalInvoice: async (externalInvoiceId: string): Promise<{
+    id: string;
+    externalInvoiceId: string;
+    source: string;
+    externalOrderId: string;
+    cae: string;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+  }> => {
+    return handleRequest(async () => {
+      return await request(`/integrations/invoices/external/${encodeURIComponent(externalInvoiceId)}/credit-note`, 'POST');
+    }, { id: '', externalInvoiceId, source: '', externalOrderId: '', cae: '', cbteTipo: 0, cbteDesde: 0, cbteHasta: 0 }, 'emitirNotaCreditoExternalInvoice');
   },
 
   // Stock de Tienda Nube (publicaciones con stock)

@@ -18,6 +18,13 @@ interface ExternalInvoiceRow {
   cbteTipo: number;
   cbteDesde: number;
   createdAt?: string;
+  hasCreditNote?: boolean;
+  creditNote?: {
+    id: string;
+    cae: string;
+    cbteTipo: number;
+    cbteDesde: number;
+  };
 }
 
 const BulkInvoicing: React.FC = () => {
@@ -29,6 +36,7 @@ const BulkInvoicing: React.FC = () => {
   const [historyOffset, setHistoryOffset] = useState(0);
   const [selectedInvoice, setSelectedInvoice] = useState<ExternalInvoiceRow | null>(null);
   const [historyLimit, setHistoryLimit] = useState(20);
+  const [globalTotals, setGlobalTotals] = useState({ all: 0, tn: 0, ml: 0 });
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
@@ -36,10 +44,16 @@ const BulkInvoicing: React.FC = () => {
       const source: 'TIENDANUBE' | 'MERCADOLIBRE' | undefined = historySource === 'ALL' ? undefined : historySource;
       const res = await api.getExternalInvoicesHistory({ source, limit: historyLimit, offset: historyOffset });
       setHistoryTotal(Number(res.total || 0));
+      setGlobalTotals({
+        all: Number(res.totals?.all || 0),
+        tn: Number(res.totals?.tn || 0),
+        ml: Number(res.totals?.ml || 0),
+      });
       setHistory(res.invoices || []);
     } catch (error) {
       console.error('Error loading external invoices history:', error);
       setHistoryTotal(0);
+      setGlobalTotals({ all: 0, tn: 0, ml: 0 });
       setHistory([]);
     } finally {
       setLoadingHistory(false);
@@ -63,12 +77,22 @@ const BulkInvoicing: React.FC = () => {
   const historyPage = Math.floor(historyOffset / historyLimit) + 1;
   const historyPages = Math.max(1, Math.ceil(historyTotal / historyLimit));
 
-  const stats = useMemo(() => {
-    const total = history.length;
-    const tn = history.filter(h => h.source === 'TIENDANUBE').length;
-    const ml = history.filter(h => h.source === 'MERCADOLIBRE').length;
-    return { total, tn, ml };
-  }, [history]);
+  const stats = useMemo(() => globalTotals, [globalTotals]);
+
+  const handleEmitNC = async (row: ExternalInvoiceRow) => {
+    if (row.hasCreditNote) {
+      window.alert('Esta factura ya tiene nota de crédito emitida.');
+      return;
+    }
+    if (!window.confirm(`¿Emitir nota de crédito TOTAL para la orden #${row.orderNumber || row.externalOrderId}?`)) return;
+    try {
+      const nc = await api.emitirNotaCreditoExternalInvoice(row.id);
+      window.alert(`Nota de crédito emitida.\nCAE: ${nc.cae}\nComprobante: ${nc.cbteTipo}-${nc.cbteDesde}`);
+      fetchHistory();
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo emitir la nota de crédito');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -141,7 +165,7 @@ const BulkInvoicing: React.FC = () => {
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2">
             <p className="text-xs text-slate-500">Total</p>
-            <p className="text-white font-black text-lg">{historyTotal}</p>
+            <p className="text-white font-black text-lg">{stats.all}</p>
           </div>
           <div className="bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2">
             <p className="text-xs text-slate-500">TN</p>
@@ -174,6 +198,7 @@ const BulkInvoicing: React.FC = () => {
                   <th className="text-left p-3 text-slate-500">Comprobante</th>
                   <th className="text-left p-3 text-slate-500">CAE</th>
                   <th className="text-left p-3 text-slate-500">Detalle</th>
+                  <th className="text-left p-3 text-slate-500">Nota de crédito</th>
                 </tr>
               </thead>
               <tbody>
@@ -198,6 +223,21 @@ const BulkInvoicing: React.FC = () => {
                       >
                         Ver
                       </button>
+                    </td>
+                    <td className="p-3">
+                      {h.hasCreditNote ? (
+                        <span className="px-2 py-1 rounded-lg text-xs font-bold bg-emerald-700/20 text-emerald-300">
+                          NC emitida
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleEmitNC(h)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-700/20 border border-red-600/30 text-red-300 hover:bg-red-700/30"
+                        >
+                          Nota de crédito
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -266,6 +306,7 @@ const BulkInvoicing: React.FC = () => {
               <div className="text-slate-400">Comprobante</div><div className="text-white font-semibold">{selectedInvoice.cbteTipo} - {selectedInvoice.cbteDesde}</div>
               <div className="text-slate-400">CAE</div><div className="text-emerald-300 font-mono">{selectedInvoice.cae}</div>
               <div className="text-slate-400">Fecha</div><div className="text-white">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString('es-AR') : '-'}</div>
+              <div className="text-slate-400">NC</div><div className="text-white">{selectedInvoice.hasCreditNote ? `Sí (${selectedInvoice.creditNote?.cbteTipo}-${selectedInvoice.creditNote?.cbteDesde || ''})` : 'No emitida'}</div>
             </div>
           </div>
         </div>

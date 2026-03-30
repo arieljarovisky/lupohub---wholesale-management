@@ -168,7 +168,7 @@ const TiendaNubeOrders: React.FC = () => {
 
   const selectAllVisiblePaid = () => {
     const paidIds = filteredOrders
-      .filter(o => o.isPaid === true || o.paymentStatus === 'paid')
+      .filter(o => (o.isPaid === true || o.paymentStatus === 'paid') && !o.invoiced)
       .map(o => o.id);
     setSelectedOrderIds(prev => Array.from(new Set([...prev, ...paidIds])));
   };
@@ -191,7 +191,7 @@ const TiendaNubeOrders: React.FC = () => {
 
         const res = await api.getTiendaNubeOrders(params);
         const batch = (res.orders || [])
-          .filter((o: any) => o.isPaid === true || o.paymentStatus === 'paid')
+          .filter((o: any) => (o.isPaid === true || o.paymentStatus === 'paid') && !o.invoiced)
           .map((o: any) => Number(o.id))
           .filter((id: number) => Number.isFinite(id));
         allPaidIds.push(...batch);
@@ -274,7 +274,7 @@ const TiendaNubeOrders: React.FC = () => {
           </select>
           <button
             onClick={selectAllVisiblePaid}
-            disabled={loading || filteredOrders.length === 0}
+            disabled={loading || filteredOrders.filter(o => (o.isPaid === true || o.paymentStatus === 'paid') && !o.invoiced).length === 0}
             className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
           >
             Seleccionar pagadas
@@ -509,6 +509,7 @@ const TiendaNubeOrders: React.FC = () => {
                           type="checkbox"
                           checked={selectedOrderIds.includes(order.id)}
                           onChange={() => toggleOrderSelection(order.id)}
+                          disabled={order.invoiced}
                           className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-cyan-500"
                           title="Seleccionar para facturación masiva"
                         />

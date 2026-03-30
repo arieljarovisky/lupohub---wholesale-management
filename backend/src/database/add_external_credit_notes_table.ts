@@ -1,0 +1,38 @@
+import { execute, get } from './db';
+
+/** Notas de crédito AFIP emitidas para facturas externas (TN/ML). */
+export async function addExternalCreditNotesTable(): Promise<void> {
+  console.log('[DB] Verificando tabla external_credit_notes...');
+  try {
+    const row = await get(
+      `SELECT COUNT(*) AS cnt FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'external_credit_notes'`
+    );
+    const exists = Number((row as any)?.cnt || 0) > 0;
+    if (!exists) {
+      await execute(`
+        CREATE TABLE external_credit_notes (
+          id VARCHAR(36) PRIMARY KEY,
+          external_invoice_id VARCHAR(36) NOT NULL,
+          source VARCHAR(40) NOT NULL,
+          external_order_id VARCHAR(80) NOT NULL,
+          cae VARCHAR(20) NOT NULL,
+          cae_fch_vto VARCHAR(20) DEFAULT NULL,
+          punto_venta INT NOT NULL,
+          cbte_tipo INT NOT NULL,
+          cbte_desde INT NOT NULL,
+          cbte_hasta INT NOT NULL,
+          amount_credited DECIMAL(12,2) NOT NULL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_external_nc_invoice (external_invoice_id),
+          INDEX idx_external_nc_source_created (source, created_at)
+        )
+      `);
+      console.log('[DB] Tabla external_credit_notes creada');
+    } else {
+      console.log('[DB] Tabla external_credit_notes ya existe');
+    }
+  } catch (e: any) {
+    console.error('[DB] Error creando tabla external_credit_notes:', e?.message);
+  }
+}

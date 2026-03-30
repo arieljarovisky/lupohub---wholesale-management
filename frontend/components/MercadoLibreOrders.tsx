@@ -169,13 +169,23 @@ const MercadoLibreOrders: React.FC = () => {
   const rowOrderIds = (order: MercadoLibreOrder): number[] =>
     (order.orderIds && order.orderIds.length > 0 ? order.orderIds : [order.id]).map(Number).filter(n => Number.isFinite(n));
 
+  const rowSelectableOrderIds = (order: MercadoLibreOrder): number[] => {
+    const all = rowOrderIds(order);
+    const invoicedCount = Number(order.invoicedCount || 0);
+    if (!invoicedCount) return all;
+    if (order.invoiced) return [];
+    // Para filas agrupadas, priorizamos no volver a seleccionar los ya facturados.
+    // Si backend no informa exactamente cuáles, al menos limitamos por diferencia.
+    return all.slice(0, Math.max(0, all.length - invoicedCount));
+  };
+
   const rowIsFullySelected = (order: MercadoLibreOrder): boolean => {
     const ids = rowOrderIds(order);
     return ids.length > 0 && ids.every(id => selectedOrderIds.includes(id));
   };
 
   const toggleRowSelection = (order: MercadoLibreOrder) => {
-    const ids = rowOrderIds(order);
+    const ids = rowSelectableOrderIds(order);
     setSelectedOrderIds(prev => {
       const selected = new Set(prev);
       const allSelected = ids.every(id => selected.has(id));
@@ -187,8 +197,8 @@ const MercadoLibreOrders: React.FC = () => {
 
   const selectAllVisiblePaid = () => {
     const paidIds = filteredOrders
-      .filter(o => o.status === 'paid')
-      .flatMap(o => rowOrderIds(o));
+      .filter(o => o.status === 'paid' && !o.invoiced)
+      .flatMap(o => rowSelectableOrderIds(o));
     setSelectedOrderIds(prev => Array.from(new Set([...prev, ...paidIds])));
   };
 
@@ -211,7 +221,7 @@ const MercadoLibreOrders: React.FC = () => {
         const res = await api.getMercadoLibreOrders(params);
         const batchOrders = res.orders || [];
         for (const o of batchOrders as any[]) {
-          if (o.status !== 'paid') continue;
+          if (o.status !== 'paid' || o.invoiced) continue;
           const ids = (Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id])
             .map((id: any) => Number(id))
             .filter((id: number) => Number.isFinite(id));
@@ -296,7 +306,7 @@ const MercadoLibreOrders: React.FC = () => {
           </select>
           <button
             onClick={selectAllVisiblePaid}
-            disabled={loading || filteredOrders.length === 0}
+            disabled={loading || filteredOrders.filter(o => o.status === 'paid' && !o.invoiced).length === 0}
             className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
           >
             Seleccionar pagadas
@@ -519,6 +529,7 @@ const MercadoLibreOrders: React.FC = () => {
                           type="checkbox"
                           checked={rowIsFullySelected(order)}
                           onChange={() => toggleRowSelection(order)}
+                          disabled={order.invoiced}
                           className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-yellow-500"
                           title="Seleccionar para facturación masiva"
                         />

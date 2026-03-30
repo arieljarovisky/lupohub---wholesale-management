@@ -42,6 +42,7 @@ import { addPaymentStatusToOrders } from './database/add_payment_status_orders';
 import { addPaymentsTable } from './database/add_payments_table';
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
 import { addExternalInvoicesTable } from './database/add_external_invoices_table';
+import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -140,6 +141,7 @@ async function initDatabase() {
       await addPaymentsTable();
       await addCustomerInvoiceFields();
       await addExternalInvoicesTable();
+      await addExternalCreditNotesTable();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {
