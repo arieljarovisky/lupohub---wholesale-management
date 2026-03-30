@@ -290,31 +290,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
-    const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
-    const fechaQr = !isNaN(fechaQrBase.getTime())
-      ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
-      : '';
-    const cuitEmisorNum = Number(String(cuitEmpresa).replace(/\D/g, '')) || 0;
-    const cuitReceptorDigits = String(cuitCliente).replace(/\D/g, '');
-    const tipoDocRec = cuitReceptorDigits.length === 11 ? 80 : cuitReceptorDigits.length >= 7 ? 96 : 99;
-    const nroDocRec = cuitReceptorDigits ? Number(cuitReceptorDigits) : 0;
-    const qrPayload = {
-      ver: 1,
-      fecha: fechaQr,
-      cuit: cuitEmisorNum,
-      ptoVta: Number(inv.puntoVta ?? 0),
-      tipoCmp: Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo ?? 0),
-      nroCmp: Number(inv.cbteDesde ?? 0),
-      importe: Number(total.toFixed(2)),
-      moneda: 'PES',
-      ctz: 1,
-      tipoDocRec,
-      nroDocRec,
-      tipoCodAut: 'E',
-      codAut: Number(String(inv.cae || '').replace(/\D/g, '')) || 0
-    };
-    const afipQrUrl = `https://www.afip.gob.ar/fe/qr/?p=${btoa(unescape(encodeURIComponent(JSON.stringify(qrPayload))))}`;
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(afipQrUrl)}`;
 
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -564,6 +539,31 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
+    const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
+    const fechaQr = !isNaN(fechaQrBase.getTime())
+      ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
+      : '';
+    const cuitEmisorNum = Number(String(cuitEmpresa).replace(/\D/g, '')) || 0;
+    const cuitReceptorDigits = String(cuitCliente).replace(/\D/g, '');
+    const tipoDocRec = cuitReceptorDigits.length === 11 ? 80 : cuitReceptorDigits.length >= 7 ? 96 : 99;
+    const nroDocRec = cuitReceptorDigits ? Number(cuitReceptorDigits) : 0;
+    const qrPayload = {
+      ver: 1,
+      fecha: fechaQr,
+      cuit: cuitEmisorNum,
+      ptoVta: Number(inv.puntoVta ?? 0),
+      tipoCmp: Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo ?? 0),
+      nroCmp: Number(inv.cbteDesde ?? 0),
+      importe: Number(total.toFixed(2)),
+      moneda: 'PES',
+      ctz: 1,
+      tipoDocRec,
+      nroDocRec,
+      tipoCodAut: 'E',
+      codAut: Number(String(inv.cae || '').replace(/\D/g, '')) || 0
+    };
+    const afipQrUrl = `https://www.afip.gob.ar/fe/qr/?p=${btoa(unescape(encodeURIComponent(JSON.stringify(qrPayload))))}`;
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(afipQrUrl)}`;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
