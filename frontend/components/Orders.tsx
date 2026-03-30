@@ -385,7 +385,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
     const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
-    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt.split('T')[0]) : formatDateShort(order.date);
+    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
     const rows = items.map(i => {
@@ -573,7 +573,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
     const nroNota = nc.puntoVta != null ? `${String(nc.puntoVta).padStart(5,'0')}-${String(nc.cbteDesde).padStart(8,'0')}` : String(nc.cbteDesde);
-    const fechaNota = nc.createdAt ? formatDateShort(nc.createdAt.split('T')[0]) : formatDateShort(order.date);
+    const fechaNota = nc.createdAt ? formatDateShort(nc.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const totalNota = Number(nc.amountCredited || 0);
 
