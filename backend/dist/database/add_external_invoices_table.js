@@ -27,6 +27,8 @@ function addExternalInvoicesTable() {
           external_order_id VARCHAR(80) NOT NULL,
           order_number VARCHAR(120) NULL,
           customer_name VARCHAR(255) NULL,
+          customer_cuit VARCHAR(20) NULL,
+          customer_condicion_iva VARCHAR(120) NULL,
           total DECIMAL(12,2) NOT NULL DEFAULT 0,
           cae VARCHAR(20) NOT NULL,
           cae_fch_vto VARCHAR(20) DEFAULT NULL,
@@ -43,6 +45,16 @@ function addExternalInvoicesTable() {
             }
             else {
                 console.log('[DB] Tabla external_invoices ya existe');
+                const cols = [
+                    { name: 'customer_cuit', sql: `ALTER TABLE external_invoices ADD COLUMN customer_cuit VARCHAR(20) NULL AFTER customer_name` },
+                    { name: 'customer_condicion_iva', sql: `ALTER TABLE external_invoices ADD COLUMN customer_condicion_iva VARCHAR(120) NULL AFTER customer_cuit` },
+                ];
+                for (const c of cols) {
+                    const col = yield (0, db_1.get)(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'external_invoices' AND COLUMN_NAME = ?`, [c.name]);
+                    if (!col)
+                        yield (0, db_1.execute)(c.sql);
+                }
             }
         }
         catch (e) {

@@ -416,7 +416,7 @@ exports.bulkUpdateCuit = bulkUpdateCuit;
 function roleCanViewSaldos(role) {
     return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
-/** Lista saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+/** Lista saldos pendientes por cliente (pedidos con cobro pendiente; importe con IVA 21% sobre neto, neto de NC). */
 const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
@@ -445,7 +445,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       c.cuit,
       c.city,
       c.email,
-      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS saldoPendiente,
       COUNT(DISTINCT o.id) AS pedidosPendientes
     FROM customers c
     INNER JOIN orders o ON o.customer_id = c.id
@@ -459,7 +459,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       AND (o.archived = 0 OR o.archived IS NULL)
       ${sellerFilter}
     GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    HAVING SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) > 0.01
     ORDER BY c.business_name ASC, c.name ASC
   `;
     const sqlSimple = `
@@ -470,7 +470,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       c.cuit,
       c.city,
       c.email,
-      SUM(o.total) AS saldoPendiente,
+      SUM(ROUND(o.total * 1.21, 2)) AS saldoPendiente,
       COUNT(DISTINCT o.id) AS pedidosPendientes
     FROM customers c
     INNER JOIN orders o ON o.customer_id = c.id
@@ -479,7 +479,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       AND (o.archived = 0 OR o.archived IS NULL)
       ${sellerFilter}
     GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(o.total) > 0.01
+    HAVING SUM(ROUND(o.total * 1.21, 2)) > 0.01
     ORDER BY c.business_name ASC, c.name ASC
   `;
     try {
@@ -516,7 +516,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       c.cuit,
       c.city,
       c.email,
-      SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) AS saldoPendiente,
+      SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS saldoPendiente,
       COUNT(DISTINCT o.id) AS pedidosPendientes
     FROM customers c
     INNER JOIN orders o ON o.customer_id = c.id
@@ -530,7 +530,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       AND (o.archived = 0 OR o.archived IS NULL)
       ${sellerFilter}
     GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))) > 0.01
+    HAVING SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) > 0.01
     ORDER BY c.business_name ASC, c.name ASC
   `;
     const sqlSimple = `
@@ -541,7 +541,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       c.cuit,
       c.city,
       c.email,
-      SUM(o.total) AS saldoPendiente,
+      SUM(ROUND(o.total * 1.21, 2)) AS saldoPendiente,
       COUNT(DISTINCT o.id) AS pedidosPendientes
     FROM customers c
     INNER JOIN orders o ON o.customer_id = c.id
@@ -550,7 +550,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       AND (o.archived = 0 OR o.archived IS NULL)
       ${sellerFilter}
     GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(o.total) > 0.01
+    HAVING SUM(ROUND(o.total * 1.21, 2)) > 0.01
     ORDER BY c.business_name ASC, c.name ASC
   `;
     let rows;

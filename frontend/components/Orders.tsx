@@ -27,6 +27,18 @@ interface OrdersProps {
   refreshOrders?: () => void;
 }
 
+const CONDICIONES_VENTA_FACTURA = [
+  'Contado',
+  'Tarjeta de Débito',
+  'Tarjeta de Crédito',
+  'Cuenta Corriente',
+  'Cheque',
+  'Transferencia Bancaria',
+  'Otra',
+  'Otros medios de pago electrónico',
+];
+const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -55,7 +67,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
-  const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>>({});
+  const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>>(() => {
+    try {
+      const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [facturaPreviewOrder, setFacturaPreviewOrder] = useState<Order | null>(null);
+  const [facturaTransportNumber, setFacturaTransportNumber] = useState('');
+  const [facturaRemitoNumber, setFacturaRemitoNumber] = useState('');
+  const [facturaSaleCondition, setFacturaSaleCondition] = useState('Cuenta Corriente');
 
   useEffect(() => {
     if (!ncOrder) {
@@ -93,6 +116,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }).catch(() => { setAfipConfigured(false); setAfipProduction(true); });
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FACTURA_MANUAL_DATA_KEY, JSON.stringify(manualFacturaDataByOrder));
+    } catch {
+      // ignore localStorage failures
+    }
+  }, [manualFacturaDataByOrder]);
 
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
@@ -252,7 +283,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
       : (customer?.transportNumber || '').toString().trim();
     const remitoBaseNumber = (order.id || '').toString().trim();
-    const saleCondition = '60 días';
+    const saleCondition = (customer?.saleCondition || 'Cuenta Corriente').toString().trim();
     const numBultos = bultos !== undefined && bultos !== null && bultos !== '' ? (typeof bultos === 'number' ? bultos : parseInt(String(bultos), 10)) : null;
     const descripcionTrim = descripcion && String(descripcion).trim() ? String(descripcion).trim().replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
 
@@ -397,7 +428,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; display: flex; flex-direction: column; }
       .page-break { page-break-before: always; }
       .topbar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: start; margin-bottom: 6px; }
       .logo { min-height: 42px; display: flex; align-items: center; }
@@ -526,7 +557,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
     const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
     const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
-    const saleCondition = '60 días';
+    const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? 'Cuenta Corriente').toString().trim();
     const dirCliente = clienteDir || '';
     const ptoVta = String(inv.puntoVta ?? '').padStart(5, '0');
     const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');
@@ -610,6 +641,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
       .footer { margin-top: 12px; font-size: 10px; }
+      .bottom-block { margin-top: auto; }
       .qr-wrap { border: 1px solid #111; padding: 3px; text-align: center; }
       .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
       .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
@@ -682,23 +714,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </tbody>
         </table>
 
-        <div class="summary">
-          <div class="qr-wrap">
-            <img src="${qrImageUrl}" alt="QR AFIP" />
-            <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
+        <div class="bottom-block">
+          <div class="summary">
+            <div class="qr-wrap">
+              <img src="${qrImageUrl}" alt="QR AFIP" />
+              <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
+            </div>
+            <div class="totals">
+              <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
+              <div class="r"><span>Bonificación</span><span>$0</span></div>
+              <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
+              <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
+            </div>
           </div>
-          <div class="totals">
-            <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>Bonificación</span><span>$0</span></div>
-            <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
-            <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
+          <div class="footer">
+            <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+            <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
           </div>
-        </div>
-
-        <div class="footer">
-          <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-          <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
         </div>
 
         <div class="no-print">
@@ -877,22 +910,44 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!order.invoice) return;
     const customer = customers.find(c => c.id === order.customerId);
     const prev = manualFacturaDataByOrder[order.id];
+    if (prev) {
+      const html = buildFacturaHtml(order, prev);
+      if (!html) return;
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
+      return;
+    }
     const manual = prev ?? {
       transportNumber: (customer?.transportNumber ?? '').toString().trim(),
       remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
-      saleCondition: (customer?.saleCondition ?? '').toString().trim(),
+      saleCondition: (customer?.saleCondition ?? 'Cuenta Corriente').toString().trim(),
     };
-    if (!prev) {
-      setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [order.id]: manual }));
-    }
+    setFacturaPreviewOrder(order);
+    setFacturaTransportNumber((manual.transportNumber ?? '').toString());
+    setFacturaRemitoNumber((manual.remitoNumber ?? '').toString());
+    setFacturaSaleCondition((manual.saleCondition ?? 'Cuenta Corriente').toString() || 'Cuenta Corriente');
+  };
 
-    const html = buildFacturaHtml(order, manual);
-    if (!html) return;
-    const w = window.open('', '_blank');
-    if (w) {
-      w.document.write(html);
-      w.document.close();
+  const confirmOpenFactura = () => {
+    if (!facturaPreviewOrder) return;
+    const manual = {
+      transportNumber: facturaTransportNumber.trim(),
+      remitoNumber: facturaRemitoNumber.trim(),
+      saleCondition: facturaSaleCondition.trim() || 'Cuenta Corriente',
+    };
+    setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [facturaPreviewOrder.id]: manual }));
+    const html = buildFacturaHtml(facturaPreviewOrder, manual);
+    if (html) {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
     }
+    setFacturaPreviewOrder(null);
   };
 
   const openNotaCredito = async (order: Order, e: React.MouseEvent) => {
@@ -1427,6 +1482,58 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               >
                 {emitiendoFacturaId === orderToEmitFactura?.id ? <Clock size={18} className="animate-pulse" /> : <Receipt size={18} />}
                 {emitiendoFacturaId === orderToEmitFactura?.id ? 'Emitiendo…' : 'Emitir factura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: completar datos para vista de factura */}
+      {facturaPreviewOrder && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setFacturaPreviewOrder(null)}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-1">Completar datos de factura</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              Pedido #{facturaPreviewOrder.id} — {facturaPreviewOrder.customerBusinessName || getCustomerName(facturaPreviewOrder)}
+            </p>
+            <div className="space-y-3 mb-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">N° Transporte</label>
+                <input
+                  type="text"
+                  value={facturaTransportNumber}
+                  onChange={(e) => setFacturaTransportNumber(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  placeholder="Opcional"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">N° Remito</label>
+                <input
+                  type="text"
+                  value={facturaRemitoNumber}
+                  onChange={(e) => setFacturaRemitoNumber(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  placeholder="Ej: R-0001-00001234"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Condición de venta</label>
+                <select
+                  value={facturaSaleCondition}
+                  onChange={(e) => setFacturaSaleCondition(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  {CONDICIONES_VENTA_FACTURA.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button type="button" onClick={() => setFacturaPreviewOrder(null)} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
+              <button type="button" onClick={confirmOpenFactura} className="px-5 py-2.5 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition">
+                Ver factura
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Wallet, RefreshCw, Download } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { Customer, Role, Order, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -31,6 +31,17 @@ const CONDICIONES_IVA = [
   'Sujeto No Categorizado',
   'IVA Liberado - Ley Nº 19.640',
   'Monotributista Social',
+];
+
+const CONDICIONES_VENTA = [
+  'Contado',
+  'Tarjeta de Débito',
+  'Tarjeta de Crédito',
+  'Cuenta Corriente',
+  'Cheque',
+  'Transferencia Bancaria',
+  'Otra',
+  'Otros medios de pago electrónico',
 ];
 
 const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [], users = [] }) => {
@@ -361,7 +372,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de venta</label>
-              <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newSaleCondition} onChange={(e) => setNewSaleCondition(e.target.value)} placeholder="Ej: Cuenta corriente / Contado" />
+              <select
+                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                value={newSaleCondition}
+                onChange={(e) => setNewSaleCondition(e.target.value)}
+              >
+                <option value="">— Seleccionar —</option>
+                {CONDICIONES_VENTA.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                {newSaleCondition && !CONDICIONES_VENTA.includes(newSaleCondition) && (
+                  <option value={newSaleCondition}>{newSaleCondition}</option>
+                )}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>
@@ -1003,98 +1026,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         </div>
       </div>
 
-      {canViewSaldos && (
-        <div className="bg-slate-800/90 rounded-xl border border-amber-700/35 overflow-hidden shadow-lg">
-          <div className="p-4 sm:p-5 border-b border-slate-700/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 shrink-0">
-                <Wallet size={22} />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-base font-bold text-white">Saldos pendientes (mayorista)</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Como en Tango: total adeudado por cliente según pedidos marcados como pendiente de cobro (se descuentan notas de crédito vinculadas). En Pedidos podés alternar <strong className="text-slate-300">Cobrado</strong> / <strong className="text-slate-300">Pendiente cobro</strong>.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={loadSaldos}
-                disabled={saldosLoading}
-                className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium border border-slate-600 flex items-center gap-2 disabled:opacity-50"
-              >
-                {saldosLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                Actualizar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  api
-                    .exportSaldosPendientes()
-                    .then(() => showToast('success', 'Listo: CSV descargado (abrilo en Excel).'))
-                    .catch((err: any) => showToast('error', err?.message || 'Error al exportar.'));
-                }}
-                disabled={saldosLoading || saldosRows.length === 0}
-                className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Download size={16} />
-                Exportar CSV
-              </button>
-            </div>
-          </div>
-          <div className="p-4 overflow-x-auto">
-            {saldosLoading && saldosRows.length === 0 ? (
-              <div className="flex items-center justify-center py-10 text-slate-500 gap-2">
-                <Loader2 size={20} className="animate-spin" /> Cargando…
-              </div>
-            ) : saldosRows.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-8">No hay saldos pendientes con los datos actuales.</p>
-            ) : (
-              <table className="w-full text-sm text-left min-w-[640px]">
-                <thead>
-                  <tr className="text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-700">
-                    <th className="pb-2 pr-3">Cliente</th>
-                    <th className="pb-2 pr-3">CUIT</th>
-                    <th className="pb-2 pr-3">Ciudad</th>
-                    <th className="pb-2 pr-3 text-right">Pedidos</th>
-                    <th className="pb-2 text-right">Saldo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {saldosRows.map((row) => (
-                    <tr key={row.customerId} className="border-b border-slate-700/50 hover:bg-slate-900/40">
-                      <td className="py-2.5 pr-3">
-                        <div className="font-semibold text-white truncate max-w-[220px]">{row.businessName || '—'}</div>
-                        <div className="text-xs text-slate-500 truncate">{row.contactName || row.email}</div>
-                      </td>
-                      <td className="py-2.5 pr-3 font-mono text-slate-300">{row.cuit || '—'}</td>
-                      <td className="py-2.5 pr-3 text-slate-400">{row.city || '—'}</td>
-                      <td className="py-2.5 pr-3 text-right text-slate-400">{row.pedidosPendientes}</td>
-                      <td className="py-2.5 text-right font-bold text-amber-300 tabular-nums">
-                        ${row.saldoPendiente.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="text-sm font-bold text-white">
-                    <td colSpan={4} className="pt-3 text-right pr-3 text-slate-400">Total</td>
-                    <td className="pt-3 text-right text-amber-300 tabular-nums">
-                      $
-                      {saldosRows.reduce((s, r) => s + r.saldoPendiente, 0).toLocaleString('es-AR', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
       <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
         {/* Toolbar */}
         <div className="p-4 border-b border-slate-700 bg-slate-900/50">
@@ -1112,7 +1043,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
         {/* List Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-          {filteredCustomers.map(customer => (
+          {filteredCustomers.map(customer => {
+            const saldo = saldosRows.find((r) => r.customerId === customer.id);
+            return (
             <div 
               key={customer.id} 
               onClick={() => setSelectedCustomer(customer)}
@@ -1150,6 +1083,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <h3 className="text-lg font-bold text-white mb-0.5 truncate">{customer.businessName}</h3>
                 <p className="text-sm text-slate-400 mb-2 truncate">{customer.name}</p>
 
+                {canViewSaldos && (
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]">
+                    <span className="text-amber-300/90 font-semibold">Saldo pendiente:</span>
+                    <span className="text-amber-300 font-bold tabular-nums">
+                      {saldosLoading
+                        ? '...'
+                        : `$${Number(saldo?.saldoPendiente || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    </span>
+                  </div>
+                )}
+
                 {role === Role.ADMIN && customer.sellerId && (
                   <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-slate-800/80 border border-slate-700 px-2 py-1 text-[11px] text-slate-300">
                     <Users size={11} className="text-slate-400" />
@@ -1185,7 +1129,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  Ver Perfil Completo <ArrowRight size={12} className="ml-1"/>
               </div>
             </div>
-          ))}
+            );
+          })}
           {filteredCustomers.length === 0 && (
             <div className="col-span-full py-16 text-center text-slate-500">
                <Users size={48} className="mx-auto text-slate-800 mb-4"/>
@@ -1282,13 +1227,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de venta</label>
-                  <input
-                    type="text"
+                  <select
                     className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     value={newSaleCondition}
                     onChange={(e) => setNewSaleCondition(e.target.value)}
-                    placeholder="Ej: Cuenta corriente / Contado"
-                  />
+                  >
+                    <option value="">— Seleccionar —</option>
+                    {CONDICIONES_VENTA.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                    {newSaleCondition && !CONDICIONES_VENTA.includes(newSaleCondition) && (
+                      <option value={newSaleCondition}>{newSaleCondition}</option>
+                    )}
+                  </select>
                 </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Condición de IVA</label>

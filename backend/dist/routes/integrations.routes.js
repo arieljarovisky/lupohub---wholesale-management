@@ -53,5 +53,6 @@ router.post('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrat
 router.get('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncTiendaNubeOrdersFromDate);
 router.post('/tiendanube/invoice-bulk', auth_1.authMiddleware, integrations_controller_1.invoiceTiendaNubeOrdersBulk);
 router.get('/invoices/external', auth_1.authMiddleware, integrations_controller_1.getExternalInvoicesHistory);
+router.post('/invoices/external/:id/credit-note', auth_1.authMiddleware, integrations_controller_1.emitirNotaCreditoExternalInvoice);
 router.delete('/:platform/disconnect', integrations_controller_1.disconnectIntegration);
 exports.default = router;

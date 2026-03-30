@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
@@ -2739,6 +2739,27 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                 o.shippingStatus !== 'shipped' &&
                 o.shippingStatus !== 'delivered');
         }
+        // Marcar si cada orden TN ya fue facturada en facturación masiva externa.
+        const tnExternalIds = Array.from(new Set(orders.map((o) => String(o.id)).filter(Boolean)));
+        if (tnExternalIds.length > 0) {
+            const placeholders = tnExternalIds.map(() => '?').join(', ');
+            const invoicedRows = yield (0, db_1.query)(`SELECT id, external_order_id, cae, cbte_tipo, cbte_desde, created_at
+         FROM external_invoices
+         WHERE source = 'TIENDANUBE' AND external_order_id IN (${placeholders})`, tnExternalIds);
+            const byExternalId = new Map();
+            for (const row of invoicedRows)
+                byExternalId.set(String(row.external_order_id), row);
+            orders = orders.map((o) => {
+                const inv = byExternalId.get(String(o.id));
+                return Object.assign(Object.assign({}, o), { invoiced: !!inv, invoice: inv ? {
+                        id: inv.id,
+                        cae: inv.cae,
+                        cbteTipo: inv.cbte_tipo,
+                        cbteDesde: inv.cbte_desde,
+                        createdAt: inv.created_at
+                    } : undefined });
+            });
+        }
         res.json({
             orders,
             page: pageNum,
@@ -2856,12 +2877,14 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                 }, forceCbteTipo);
                 const invoiceId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO external_invoices
-           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+           (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
                     String(order.id),
                     String((_r = order.number) !== null && _r !== void 0 ? _r : order.id),
                     customerName,
+                    maybeCuit || null,
+                    condicionIvaRaw || null,
                     total,
                     afipResult.cae,
                     afipResult.caeFchVto || null,
@@ -2978,12 +3001,14 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
                 }, forceCbteTipo);
                 const invoiceId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO external_invoices
-           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+           (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
                     String(order.id),
                     String(order.id),
                     customerName,
+                    null,
+                    'Consumidor Final',
                     total,
                     afipResult.cae,
                     afipResult.caeFchVto || null,
@@ -3049,16 +3074,29 @@ const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 
        FROM external_invoices
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`, params);
         const total = Number((countRow === null || countRow === void 0 ? void 0 : countRow.cnt) || 0);
-        const rows = yield (0, db_1.query)(`SELECT id, source, external_order_id, order_number, customer_name, total,
-              cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
-       FROM external_invoices
+        const rows = yield (0, db_1.query)(`SELECT ei.id, ei.source, ei.external_order_id, ei.order_number, ei.customer_name, ei.total,
+              ei.cae, ei.cae_fch_vto, ei.punto_venta, ei.cbte_tipo, ei.cbte_desde, ei.cbte_hasta, ei.created_at,
+              ecn.id AS credit_note_id, ecn.cae AS credit_note_cae, ecn.cbte_tipo AS credit_note_cbte_tipo, ecn.cbte_desde AS credit_note_cbte_desde
+       FROM external_invoices ei
+       LEFT JOIN external_credit_notes ecn ON ecn.external_invoice_id = ei.id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY created_at DESC
+       ORDER BY ei.created_at DESC
        LIMIT ${limitNum} OFFSET ${offsetNum}`, params);
+        // Totales globales (sin filtro de source) para el resumen del historial.
+        const totalsRow = yield (0, db_1.get)(`SELECT
+         COUNT(*) AS total_all,
+         SUM(CASE WHEN source = 'TIENDANUBE' THEN 1 ELSE 0 END) AS total_tn,
+         SUM(CASE WHEN source = 'MERCADOLIBRE' THEN 1 ELSE 0 END) AS total_ml
+       FROM external_invoices`);
         res.json({
             total,
             offset: offsetNum,
             limit: limitNum,
+            totals: {
+                all: Number((totalsRow === null || totalsRow === void 0 ? void 0 : totalsRow.total_all) || 0),
+                tn: Number((totalsRow === null || totalsRow === void 0 ? void 0 : totalsRow.total_tn) || 0),
+                ml: Number((totalsRow === null || totalsRow === void 0 ? void 0 : totalsRow.total_ml) || 0)
+            },
             invoices: rows.map((r) => {
                 var _a;
                 return ({
@@ -3074,7 +3112,14 @@ const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 
                     cbteTipo: r.cbte_tipo,
                     cbteDesde: r.cbte_desde,
                     cbteHasta: r.cbte_hasta,
-                    createdAt: r.created_at
+                    createdAt: r.created_at,
+                    hasCreditNote: !!r.credit_note_id,
+                    creditNote: r.credit_note_id ? {
+                        id: r.credit_note_id,
+                        cae: r.credit_note_cae,
+                        cbteTipo: r.credit_note_cbte_tipo,
+                        cbteDesde: r.credit_note_cbte_desde
+                    } : undefined
                 });
             })
         });
@@ -3085,6 +3130,57 @@ const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.getExternalInvoicesHistory = getExternalInvoicesHistory;
+/** Emite NC total para una factura externa (una por factura). */
+const emitirNotaCreditoExternalInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
+        }
+        const { id } = req.params;
+        if (!id)
+            return res.status(400).json({ message: 'ID de factura externa requerido' });
+        const inv = yield (0, db_1.get)(`SELECT id, source, external_order_id, customer_name, customer_cuit, customer_condicion_iva,
+              total, punto_venta, cbte_tipo, cbte_desde
+       FROM external_invoices WHERE id = ?`, [id]);
+        if (!inv)
+            return res.status(404).json({ message: 'Factura externa no encontrada' });
+        const existingNc = yield (0, db_1.get)(`SELECT id FROM external_credit_notes WHERE external_invoice_id = ?`, [id]);
+        if (existingNc)
+            return res.status(409).json({ message: 'Esta factura externa ya tiene nota de crédito emitida' });
+        const amount = Number(inv.total || 0);
+        if (amount <= 0)
+            return res.status(400).json({ message: 'Monto inválido para emitir nota de crédito' });
+        const { emitirNotaCredito } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        const result = yield emitirNotaCredito({ puntoVta: Number(inv.punto_venta), cbteTipo: Number(inv.cbte_tipo), cbteDesde: Number(inv.cbte_desde) }, {
+            id: `EXT-${inv.id}`,
+            businessName: String(inv.customer_name || 'Consumidor Final'),
+            cuit: inv.customer_cuit ? String(inv.customer_cuit) : undefined,
+            condicionIva: inv.customer_condicion_iva ? String(inv.customer_condicion_iva) : 'Consumidor Final'
+        }, amount);
+        const ncId = (0, uuid_1.v4)();
+        yield (0, db_1.execute)(`INSERT INTO external_credit_notes
+       (id, external_invoice_id, source, external_order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [ncId, inv.id, inv.source, inv.external_order_id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amount]);
+        res.status(201).json({
+            id: ncId,
+            externalInvoiceId: inv.id,
+            source: inv.source,
+            externalOrderId: inv.external_order_id,
+            cae: result.cae,
+            cbteTipo: result.cbteTipo,
+            cbteDesde: result.cbteDesde,
+            cbteHasta: result.cbteHasta
+        });
+    }
+    catch (error) {
+        console.error('emitirNotaCreditoExternalInvoice:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo nota de crédito externa';
+        const status = msg.includes('ya tiene') ? 409 : msg.includes('no configurado') ? 503 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.emitirNotaCreditoExternalInvoice = emitirNotaCreditoExternalInvoice;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -3257,6 +3353,33 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
             const raw = ordersRes.data.results || [];
             total = (_b = (_a = ordersRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) !== null && _b !== void 0 ? _b : raw.length;
             orders = raw.map(mapOrder);
+        }
+        // Marcar si las órdenes ML del response ya están facturadas.
+        const externalIdsFlat = Array.from(new Set(orders.flatMap((o) => {
+            const ids = Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id];
+            return (ids || []).map((id) => String(id)).filter(Boolean);
+        })));
+        if (externalIdsFlat.length > 0) {
+            const placeholders = externalIdsFlat.map(() => '?').join(', ');
+            const invoicedRows = yield (0, db_1.query)(`SELECT id, external_order_id, cae, cbte_tipo, cbte_desde, created_at
+         FROM external_invoices
+         WHERE source = 'MERCADOLIBRE' AND external_order_id IN (${placeholders})`, externalIdsFlat);
+            const byExternalId = new Map();
+            for (const row of invoicedRows)
+                byExternalId.set(String(row.external_order_id), row);
+            orders = orders.map((o) => {
+                const ids = Array.isArray(o.orderIds) && o.orderIds.length > 0 ? o.orderIds : [o.id];
+                const invMatches = ids.map((id) => byExternalId.get(String(id))).filter(Boolean);
+                const fullyInvoiced = ids.length > 0 && invMatches.length === ids.length;
+                const inv = invMatches[0];
+                return Object.assign(Object.assign({}, o), { invoiced: fullyInvoiced, invoicedCount: invMatches.length, totalOrderIds: ids.length, invoice: inv ? {
+                        id: inv.id,
+                        cae: inv.cae,
+                        cbteTipo: inv.cbte_tipo,
+                        cbteDesde: inv.cbte_desde,
+                        createdAt: inv.created_at
+                    } : undefined });
+            });
         }
         res.json({
             orders,
