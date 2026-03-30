@@ -230,123 +230,211 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoDescripcion('');
   };
 
-  /** Genera el HTML del remito. Incluye opcionalmente cantidad de bultos y descripción (para envíos por expreso al interior). */
+  /** Genera el HTML del remito con formato de factura y multipágina. */
   const buildRemitoHtml = (order: Order, transporteName: string, bultos?: number | string | null, descripcion?: string | null) => {
     const customer = customers.find(c => c.id === order.customerId);
-    const remitente = getRemitente();
+    const localRemitente = getRemitente();
+    const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
+      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
+      : localRemitente;
     const items = sortOrderItemsForPrint(order.items.map(enrichItem));
     const formatDateShort = (d: string) => {
       const x = new Date(d);
       if (isNaN(x.getTime())) return d;
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      return `${String(x.getDate()).padStart(2,'0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
+      const day = x.getDate();
+      const month = meses[x.getMonth()];
+      const year = x.getFullYear();
+      return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
     const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
-    const transportesStr = transporteName.trim()
+    const transportNumber = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
-      : '—';
+      : (customer?.transportNumber || '').toString().trim();
+    const remitoBaseNumber = (order.id || '').toString().trim();
+    const saleCondition = (customer?.saleCondition || '').toString().trim();
     const numBultos = bultos !== undefined && bultos !== null && bultos !== '' ? (typeof bultos === 'number' ? bultos : parseInt(String(bultos), 10)) : null;
     const descripcionTrim = descripcion && String(descripcion).trim() ? String(descripcion).trim().replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
-    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
-    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
-    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
-    const rows = items.map(i => {
-      const sub = i.quantity * (i.priceAtMoment ?? 0);
+
+    const localSkuOf = (i: OrderItem) => {
+      const variantId = i.variantId ?? i.productId;
+      const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+      return (localProduct?.sku ?? i.sku ?? '').toString().trim();
+    };
+
+    const rowsFor = (slice: OrderItem[]) => slice.map(i => {
+      const qty = Number(i.quantity || 0);
+      const unit = Number(i.priceAtMoment ?? 0);
+      const importe = Math.round(qty * unit * 100) / 100;
+      const sku = localSkuOf(i);
+      const desc = (i.productName ?? '').toString().trim() || '—';
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoStr = despacho != null && String(despacho).trim() ? ` (Nº despacho: ${String(despacho).trim()})` : '';
-      const skuPart = (i.sku ?? '').toString().trim();
-      const prodPart = (i.productName ?? '').toString().trim() + despachoStr;
-      const desc = [skuPart, prodPart].filter(Boolean).join(' — ') || '—';
-      return `<tr><td>${desc}</td><td>${i.sizeCode ?? '—'}</td><td>${i.colorName ?? '—'}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${(i.priceAtMoment ?? 0).toLocaleString('es-AR')}</td><td style="text-align:right">$${sub.toLocaleString('es-AR')}</td></tr>`;
+      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
+      return `<tr>
+        <td class="col-c">${qty.toLocaleString('es-AR')}</td>
+        <td class="col-c col-code">${sku || '—'}</td>
+        <td class="col-desc">${desc}</td>
+        <td class="col-c">${despachoCell}</td>
+        <td class="col-r">$${unit.toLocaleString('es-AR')}</td>
+        <td class="col-r">$${importe.toLocaleString('es-AR')}</td>
+      </tr>`;
     }).join('');
-    const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
-    const totalAmount = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+
+    const itemsPerPage = 18;
+    const pages: OrderItem[][] = [];
+    for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
+    if (pages.length === 0) pages.push([]);
+
+    const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+    const neto = Math.round(baseImponible * 100) / 100;
+    const iva21 = Math.round(neto * 0.21 * 100) / 100;
+    const total = Math.round((neto + iva21) * 100) / 100;
+    const subtotalBruto = neto;
+
+    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
+    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+    const razonEmpresa = (remitente.businessName || '—').toString();
+    const cuitEmpresa = ((remitente as any).cuit || '').toString();
+    const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '').toString();
+    const inicioActividadEmpresa = ((remitente as any).inicioActividad || '13/06/2005').toString();
+    const emailEmpresa = ((remitente as any).email || '').toString();
+    const telEmpresa = ((remitente as any).phone || '').toString();
+    const cuitCliente = (customer?.cuit || '').toString();
+
     const caiRemitoTrim = remitente.caiRemito?.trim();
     const caiVencimientoStr = remitente.caiRemitoVencimiento
       ? (() => { const d = new Date(remitente.caiRemitoVencimiento! + 'T12:00:00'); return isNaN(d.getTime()) ? remitente.caiRemitoVencimiento : formatDateShort(remitente.caiRemitoVencimiento); })()
       : '';
     const caiFooterHtml = caiRemitoTrim
-      ? `<div class="rem-cai">C.A.I. ${caiRemitoTrim}${caiVencimientoStr ? ` — Vencimiento: ${caiVencimientoStr}` : ''}</div>`
+      ? `<div><strong>C.A.I.:</strong> ${caiRemitoTrim}${caiVencimientoStr ? ` &nbsp; <strong>Vto. C.A.I.:</strong> ${caiVencimientoStr}` : ''}</div>`
       : '';
+
     const logoUrlRemito = (remitente.logoUrl && remitente.logoUrl.trim()) ? remitente.logoUrl.trim() : '';
     const logoPlaceholder = (remitente.businessName || 'Empresa').replace(/</g, '&lt;');
     const logoBlockRemito = logoUrlRemito
       ? `<div style="display:flex;align-items:center;gap:8px;">
-           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:52px;max-width:190px;width:auto;height:auto;object-fit:contain;display:block;" />
+           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />
          </div>`
       : `<span class="inv-logo-placeholder">${logoPlaceholder}</span>`;
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
-      * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px 28px; color: #111; background: #fff; font-size: 14px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb; }
-      .inv-logo-wrap { min-height: 52px; display: flex; align-items: center; }
-      .inv-logo { max-height: 52px; max-width: 180px; width: auto; height: auto; object-fit: contain; display: block; }
-      .inv-logo-placeholder { font-size: 1.25rem; font-weight: 700; color: #111; }
-      .inv-meta { text-align: right; }
-      .inv-meta .inv-num { font-size: 1.1rem; font-weight: 700; color: #111; }
-      .inv-meta .inv-fecha { font-size: 0.9rem; color: #4b5563; margin-top: 2px; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 20px; font-size: 0.9rem; line-height: 1.5; }
-      .inv-datos strong { display: block; font-size: 0.8rem; color: #374151; margin-bottom: 6px; font-weight: 700; }
-      .rem-transporte { font-size: 0.9rem; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-      .rem-transporte strong { color: #374151; }
-      .rem-bultos-desc { font-size: 0.9rem; margin-bottom: 20px; padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
-      .rem-bultos-desc strong { color: #374151; }
-      .rem-bultos-desc .rem-desc-block { margin-top: 8px; }
-      .rem-bultos-desc .rem-desc-text { margin-top: 6px; padding: 8px 10px; background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb; white-space: pre-line; }
-      .inv-table-wrap { margin-bottom: 24px; }
-      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-      .inv-table th { text-align: left; padding: 10px 12px; font-weight: 600; color: #111; border-bottom: 2px solid #e5e7eb; }
-      .inv-table th:nth-child(4) { text-align: center; }
-      .inv-table th:nth-child(n+5) { text-align: right; }
-      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
-      .inv-table td:nth-child(4) { text-align: center; }
-      .inv-table td:nth-child(n+5) { text-align: right; }
-      .rem-firmas { display: flex; justify-content: space-between; margin-top: 28px; font-size: 0.8rem; }
-      .rem-firma { width: 28%; text-align: center; border-top: 1px solid #d1d5db; padding-top: 8px; color: #6b7280; }
-      .inv-footer { padding-top: 20px; margin-top: 24px; border-top: 1px solid #e5e7eb; font-size: 0.8rem; color: #6b7280; }
-      .rem-cai { margin-bottom: 8px; }
-      .no-print { margin-top: 24px; }
-      @media print { .no-print { display: none !important; } body { padding: 24px; } }
-    </style></head><body>
-      <div class="inv-top">
-        <div class="inv-logo-wrap">${logoBlockRemito}</div>
-        <div class="inv-meta">
-          <div class="inv-num">REMITO Nº: ${order.id}</div>
-          <div class="inv-fecha">Fecha: ${formatDateShort(order.date)}</div>
+
+    const pagesHtml = pages.map((pageItems, idx) => {
+      const remitoNumber = pages.length > 1
+        ? `${remitoBaseNumber}-${String(idx + 1).padStart(2, '0')}`
+        : remitoBaseNumber;
+      const isLast = idx === pages.length - 1;
+      const pageRows = rowsFor(pageItems);
+
+      return `<section class="sheet ${idx > 0 ? 'page-break' : ''}">
+        <div class="topbar">
+          <div class="logo">${logoBlockRemito}</div>
+          <div class="codebox">
+            <div class="code">REMITO<br>R</div>
+            <div class="num">${remitoNumber || '—'}</div>
+            <div style="margin-top:6px;" class="muted">Fecha: ${formatDateShort(order.date)}</div>
+          </div>
         </div>
-      </div>
-      <div class="inv-datos">
-        <div>
-          <strong>Datos empresa</strong>
-          ${remitente.businessName || '—'}<br>
-          ${empresaDir ? empresaDir + '<br>' : ''}${remitente.cuit ? 'CUIT ' + remitente.cuit + '<br>' : ''}${remitente.email ? remitente.email + '<br>' : ''}${remitente.phone ? remitente.phone : ''}
+        <div class="hr"></div>
+        <div class="grid2">
+          <div>
+            <div><strong>${razonEmpresa}</strong></div>
+            ${empresaDir ? `<div>${empresaDir}</div>` : ''}
+            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+            ${ingresosBrutosEmpresa ? `<div>Ingresos Brutos: ${ingresosBrutosEmpresa}</div>` : ''}
+            ${inicioActividadEmpresa ? `<div>Inicio de actividad: ${inicioActividadEmpresa}</div>` : ''}
+            ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
+            ${telEmpresa ? `<div>Tel: ${telEmpresa}</div>` : ''}
+          </div>
+          <div>
+            ${cuitEmpresa ? `<div class="line"><div class="k">C.U.I.T.:</div><div class="v">${cuitEmpresa}</div></div>` : ''}
+          </div>
         </div>
-        <div>
-          <strong>Datos cliente</strong>
-          ${clienteNombre}<br>
-          ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
+        <div class="boxrow">
+          <div class="block">
+            <div><strong>Sr./es:</strong> ${clienteNombre}</div>
+            ${clienteDir ? `<div>${clienteDir}</div>` : ''}
+            ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
+          </div>
+          <div class="block">
+            ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
+            <div><strong>N° Remito:</strong> ${remitoNumber || '—'}</div>
+            ${saleCondition ? `<div><strong>Condición de venta:</strong> ${saleCondition}</div>` : ''}
+            ${(numBultos != null && !isNaN(numBultos)) ? `<div><strong>Bultos:</strong> ${numBultos}</div>` : ''}
+          </div>
         </div>
-      </div>
-      <div class="rem-transporte"><strong>Transporte:</strong> ${transportesStr}</div>
-      ${(numBultos != null && !isNaN(numBultos)) || descripcionTrim ? `
-      <div class="rem-bultos-desc">
-        ${(numBultos != null && !isNaN(numBultos)) ? `<div><strong>Cantidad de bultos:</strong> ${numBultos}</div>` : ''}
-        ${descripcionTrim ? `<div class="rem-desc-block"><strong>Descripción de lo que va:</strong><div class="rem-desc-text">${descripcionTrim}</div></div>` : ''}
-      </div>` : ''}
-      <div class="inv-table-wrap">
-        <table class="inv-table">
-          <thead><tr><th>Descripción / Producto</th><th>Talle</th><th>Color</th><th>Cant.</th><th>P. unit.</th><th>Subtotal</th></tr></thead>
-          <tbody>${rows}</tbody>
-          <tfoot><tr><td colspan="3"><strong>Total (${totalUnits} unidades)</strong></td><td></td><td></td><td style="text-align:right"><strong>$${totalAmount.toLocaleString('es-AR')}</strong></td></tr></tfoot>
+        ${descripcionTrim ? `<div class="desc-box"><strong>Descripción:</strong> ${descripcionTrim}</div>` : ''}
+        <table>
+          <thead>
+            <tr>
+              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 110px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
+              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
+              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 92px;">IMPORTE</th>
+            </tr>
+          </thead>
+          <tbody>${pageRows}</tbody>
         </table>
+        ${isLast ? `<div class="summary">
+          <div></div>
+          <div class="totals">
+            <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Bonificación</span><span>$0</span></div>
+            <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
+          </div>
+        </div>` : ''}
+        <div class="footer">
+          ${caiFooterHtml}
+          <div class="muted">Página ${idx + 1} de ${pages.length}</div>
+        </div>
+      </section>`;
+    }).join('');
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
+      @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+      .page-break { page-break-before: always; }
+      .topbar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: start; margin-bottom: 6px; }
+      .logo { min-height: 42px; display: flex; align-items: center; }
+      .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
+      .codebox { border: 1px solid #111; padding: 6px 8px; text-align: center; }
+      .codebox .code { font-weight: 700; letter-spacing: 0.08em; }
+      .codebox .num { margin-top: 6px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
+      .hr { border-top: 1px solid #111; margin: 6px 0 10px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .block { padding: 6px 8px; border: 1px solid #111; min-height: 58px; }
+      .muted { color: #333; }
+      .line { display: flex; gap: 8px; }
+      .line .k { width: 78px; color: #333; }
+      .line .v { flex: 1; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 10px; margin-top: 8px; }
+      .boxrow .block { min-height: 46px; }
+      .desc-box { margin-top: 8px; border: 1px solid #111; padding: 6px 8px; white-space: pre-line; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
+      tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+      .col-c { text-align: center; }
+      .col-r { text-align: right; }
+      .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
+      .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; }
+      .totals { border: 1px solid #111; }
+      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+      .totals .r:last-child { border-bottom: none; font-weight: 700; }
+      .footer { margin-top: 12px; font-size: 10px; }
+      .no-print { margin: 14px auto 18px; width: 210mm; padding: 0 10mm; display: flex; gap: 10px; }
+      @media print { .no-print { display: none !important; } .sheet { margin: 0 auto; } }
+    </style></head><body>
+      ${pagesHtml}
+      <div class="no-print">
+        <button onclick="window.print()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 6px; font-weight: 700;">Descargar PDF / Imprimir</button>
+        <button onclick="window.close()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 6px;">Cerrar</button>
       </div>
-      <div class="rem-firmas">
-        <div class="rem-firma">Firma remitente</div>
-        <div class="rem-firma">Firma transportista</div>
-        <div class="rem-firma">Firma receptor</div>
-      </div>
-      <div class="inv-footer">${caiFooterHtml}</div>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #374151; color: white; border: none; border-radius: 8px; font-weight: 600;">Imprimir / Guardar PDF</button> &nbsp; <button onclick="window.close()" style="padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;
   };
 
@@ -384,7 +472,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const year = x.getFullYear();
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
-    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
+    const tipoFactura = Number((inv as any).cbteTipo ?? (inv as any).cbte_tipo) === 1 ? 'A' : 'B';
+    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(4,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
     const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
@@ -425,9 +514,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const inicioActividadEmpresa = ((remitente as any).inicioActividad || '13/06/2005').toString();
     const emailEmpresa = ((remitente as any).email || '').toString();
     const telEmpresa = ((remitente as any).phone || '').toString();
-    const dirEmpresa = empresaDir || '';
+    const razonEmpresaLower = razonEmpresa.toLowerCase();
+    const dirEmpresa = (razonEmpresaLower.includes('multimedia') || razonEmpresaLower.includes('multimedias'))
+      ? 'Murillo 630, CABA'
+      : (empresaDir || '');
     const razonCliente = clienteNombre || 'Cliente';
     const cuitCliente = (customer?.cuit || '').toString();
+    const condicionIvaEmisor = ((remitente as any).condicionIva || (remitente as any).condicion_iva || 'Responsable Inscripto').toString().trim();
+    const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
     const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
     const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
     const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim();
@@ -486,6 +580,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
         </div>
 
+        <div class="title">FACTURA ${tipoFactura}</div>
         <div class="hr"></div>
 
         <div class="grid2">
@@ -493,6 +588,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div><strong>${razonEmpresa}</strong></div>
             ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
             ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+            ${condicionIvaEmisor ? `<div>Condición IVA: ${condicionIvaEmisor}</div>` : ''}
             ${ingresosBrutosEmpresa ? `<div>Ingresos Brutos: ${ingresosBrutosEmpresa}</div>` : ''}
             ${inicioActividadEmpresa ? `<div>Inicio de actividad: ${inicioActividadEmpresa}</div>` : ''}
             ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
@@ -508,6 +604,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div><strong>Sr./es:</strong> ${razonCliente}</div>
             ${dirCliente ? `<div>${dirCliente}</div>` : ''}
             ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
+            ${condicionIvaReceptor ? `<div>Condición IVA: ${condicionIvaReceptor}</div>` : ''}
           </div>
           <div class="block">
             ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
