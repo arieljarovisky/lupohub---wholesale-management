@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, DollarSign, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { api } from '../services/api';
 
 interface MercadoLibreOrder {
@@ -145,6 +145,14 @@ const MercadoLibreOrders: React.FC = () => {
   const clearDateFilter = () => {
     setDateFrom('');
     setDateTo('');
+    setOffset(0);
+  };
+  const clearAllFilters = () => {
+    setShowAllSales(false);
+    setFilterStatus('');
+    setDateFrom('');
+    setDateTo('');
+    setSearchTerm('');
     setOffset(0);
   };
 
@@ -366,45 +374,31 @@ const MercadoLibreOrders: React.FC = () => {
 
       {/* Filters Bar */}
       <div className="bg-slate-800/30 rounded-2xl p-4 border border-slate-700/30 space-y-4">
-        {/* Vista principal: segmento único para que solo uno esté activo */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider self-center sm:self-auto">Vista</span>
-          <div className="inline-flex p-1 bg-slate-900/60 rounded-xl border border-slate-700/50">
-            <button
-              type="button"
-              onClick={() => { if (showAllSales) { setShowAllSales(false); setFilterStatus(''); setOffset(0); } }}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all min-w-[140px] ${
-                !showAllSales
-                  ? 'bg-yellow-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              Solo por enviar
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (!showAllSales) { setShowAllSales(true); setOffset(0); } }}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all min-w-[140px] ${
-                showAllSales
-                  ? 'bg-yellow-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              Todas las ventas
-            </button>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-black text-slate-500 uppercase">Vista</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowAllSales(false); setFilterStatus(''); setOffset(0); }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border ${!showAllSales ? 'bg-yellow-600 text-white border-yellow-500' : 'bg-slate-800/50 text-slate-300 border-slate-700'}`}
+              >
+                Solo por enviar
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAllSales(true); setOffset(0); }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border ${showAllSales ? 'bg-yellow-600 text-white border-yellow-500' : 'bg-slate-800/50 text-slate-300 border-slate-700'}`}
+              >
+                Todas las ventas
+              </button>
+            </div>
           </div>
-          {!showAllSales && (
-            <p className="text-xs text-slate-500 self-center sm:self-auto">Solo órdenes con envío en preparación o listas para despachar</p>
-          )}
-        </div>
-
-        {/* Filtro por estado: solo cuando "Todas las ventas" está activo */}
-        {showAllSales && (
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Estado</span>
-            <div className="flex gap-2 flex-wrap">
+          <div className="space-y-2">
+            <p className="text-[11px] font-black text-slate-500 uppercase">Estado</p>
+            <div className="flex flex-wrap gap-2">
               {[
-                { value: '', label: 'Todas' },
+                { value: '', label: 'Todos' },
                 { value: 'paid', label: 'Pagadas' },
                 { value: 'confirmed', label: 'Confirmadas' },
                 { value: 'cancelled', label: 'Canceladas' },
@@ -412,141 +406,63 @@ const MercadoLibreOrders: React.FC = () => {
                 <button
                   key={status.value}
                   onClick={() => { setFilterStatus(status.value); setOffset(0); }}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                  disabled={!showAllSales && status.value !== ''}
+                  className={`px-3 py-2 rounded-xl text-sm font-bold border transition-all ${
                     filterStatus === status.value
-                      ? 'bg-yellow-600 text-white'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-white border border-slate-600'
-                  }`}
+                      ? 'bg-yellow-600 text-white border-yellow-500'
+                      : 'bg-slate-800/50 text-slate-300 border-slate-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
                   {status.label}
                 </button>
               ))}
             </div>
           </div>
-        )}
+        </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 pt-1 border-t border-slate-700/30">
-          {/* Search */}
-          <div className="relative flex-1">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_auto] gap-3">
+          <div className="relative">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
               placeholder="Buscar por ID, comprador, producto o SKU..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-yellow-500/50 transition-colors"
+              onChange={(e) => { setSearchTerm(e.target.value); setOffset(0); }}
+              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-10 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-yellow-500/50 transition-colors"
             />
             {searchTerm && (
-              <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+              <button onClick={() => { setSearchTerm(''); setOffset(0); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
                 <X size={16} />
               </button>
             )}
           </div>
-
-          {/* Date Filter Toggle */}
-          <button
-            onClick={() => setShowDateFilter(!showDateFilter)}
-            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shrink-0 ${
-              hasDateFilter
-                ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/30'
-                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white border border-slate-700/50'
-            }`}
-          >
-            <Calendar size={16} />
-            {hasDateFilter ? 'Filtro activo' : 'Filtrar por fecha'}
-            {hasDateFilter && (
-              <span 
-                onClick={(e) => { e.stopPropagation(); clearDateFilter(); }}
-                className="ml-1 hover:bg-yellow-700 rounded-full p-0.5"
-              >
-                <X size={14} />
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <Calendar size={16} className="text-slate-500" />
+            <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setOffset(0); }} className="bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2 text-white text-sm" />
+            <span className="text-slate-500">-</span>
+            <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setOffset(0); }} className="bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <button type="button" onClick={() => setQuickDate(7)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">7d</button>
+            <button type="button" onClick={() => setQuickDate(30)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">30d</button>
+            <button type="button" onClick={() => setQuickDate(90)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">90d</button>
+            <button type="button" onClick={clearAllFilters} className="px-3 py-2 rounded-xl text-xs font-bold bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20">Limpiar filtros</button>
+          </div>
         </div>
 
-        {/* Date Filter Panel */}
-        {showDateFilter && (
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/30">
-            <div className="flex flex-col lg:flex-row gap-4 items-end">
-              {/* Quick Filters */}
-              <div className="flex-1">
-                <p className="text-xs text-slate-500 font-bold uppercase mb-2">Filtros rápidos</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setQuickDate(7)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 7 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(15)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 15 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(30)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 30 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(60)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 60 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(90)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 90 días
-                  </button>
-                </div>
-              </div>
-
-              {/* Custom Date Range */}
-              <div className="flex gap-3 items-end">
-                <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase mb-2">Desde</p>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => { setDateFrom(e.target.value); setOffset(0); }}
-                    className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500/50"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase mb-2">Hasta</p>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => { setDateTo(e.target.value); setOffset(0); }}
-                    className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500/50"
-                  />
-                </div>
-                {hasDateFilter && (
-                  <button
-                    onClick={clearDateFilter}
-                    className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-bold transition-colors"
-                  >
-                    Limpiar
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Active Filter Display */}
-            {hasDateFilter && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30">
-                <p className="text-xs text-yellow-400">
-                  Mostrando ventas {dateFrom && `desde ${new Date(dateFrom).toLocaleDateString('es-AR')}`} {dateTo && `hasta ${new Date(dateTo).toLocaleDateString('es-AR')}`}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="px-2 py-1 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-300">
+            Vista: {showAllSales ? 'Todas' : 'Solo por enviar'}
+          </span>
+          <span className="px-2 py-1 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-300">
+            Estado: {filterStatus || 'Todos'}
+          </span>
+          {hasDateFilter && (
+            <span className="px-2 py-1 rounded-lg bg-yellow-700/20 border border-yellow-600/30 text-yellow-300">
+              Fecha: {dateFrom || '...'} a {dateTo || '...'}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Orders List */}

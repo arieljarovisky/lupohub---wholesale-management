@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, CreditCard, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, Filter, X, Clock, CheckCircle, XCircle, AlertCircle, DollarSign, Eye, ChevronDown } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
 
 interface TiendaNubeOrder {
@@ -51,7 +51,6 @@ const TiendaNubeOrders: React.FC = () => {
   const [onlyUnpaid, setOnlyUnpaid] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
-  const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>(twoDaysAgoIso);
   const [dateTo, setDateTo] = useState<string>(todayIso);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
@@ -143,6 +142,15 @@ const TiendaNubeOrders: React.FC = () => {
   const clearDateFilter = () => {
     setDateFrom('');
     setDateTo('');
+    setPage(1);
+  };
+  const clearAllFilters = () => {
+    setSearchTerm('');
+    setOnlyUnpaid(false);
+    setShowAllOrders(true);
+    setFilterStatus('');
+    setDateFrom(twoDaysAgoIso);
+    setDateTo(todayIso);
     setPage(1);
   };
 
@@ -346,178 +354,107 @@ const TiendaNubeOrders: React.FC = () => {
 
       {/* Filters Bar */}
       <div className="bg-slate-800/30 rounded-2xl p-4 border border-slate-700/30 space-y-4">
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* Search */}
-          <div className="relative flex-1">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-black text-slate-500 uppercase">Vista</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowAllOrders(true); setFilterStatus(''); setPage(1); }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border ${showAllOrders ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-slate-800/50 text-slate-300 border-slate-700'}`}
+              >
+                Todas las órdenes
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAllOrders(false); setFilterStatus(''); setPage(1); }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border ${!showAllOrders ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-slate-800/50 text-slate-300 border-slate-700'}`}
+              >
+                Solo pagadas por enviar
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOnlyUnpaid(v => !v); setPage(1); }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border ${onlyUnpaid ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800/50 text-slate-300 border-slate-700'}`}
+              >
+                Solo no pagados
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-[11px] font-black text-slate-500 uppercase">Estado</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: '', label: 'Todos' },
+                { value: 'open', label: 'Abiertas' },
+                { value: 'closed', label: 'Cerradas' },
+                { value: 'cancelled', label: 'Canceladas' },
+              ].map((status) => (
+                <button
+                  key={status.value}
+                  onClick={() => { setFilterStatus(status.value); setPage(1); }}
+                  disabled={!showAllOrders && status.value !== ''}
+                  className={`px-3 py-2 rounded-xl text-sm font-bold border transition-all ${
+                    filterStatus === status.value
+                      ? 'bg-cyan-600 text-white border-cyan-500'
+                      : 'bg-slate-800/50 text-slate-300 border-slate-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto_auto] gap-3">
+          <div className="relative">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
               placeholder="Buscar por número, cliente, producto o SKU..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
+              onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
+              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-10 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
             />
             {searchTerm && (
-              <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+              <button onClick={() => { setSearchTerm(''); setPage(1); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
                 <X size={16} />
               </button>
             )}
           </div>
-
-          {/* Date Filter Toggle */}
-          <button
-            onClick={() => setShowDateFilter(!showDateFilter)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
-              hasDateFilter
-                ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/30'
-                : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white border border-slate-700/50'
-            }`}
-          >
-            <Calendar size={16} />
-            {hasDateFilter ? 'Filtro activo' : 'Filtrar por fecha'}
-            {hasDateFilter && (
-              <span 
-                onClick={(e) => { e.stopPropagation(); clearDateFilter(); }}
-                className="ml-1 hover:bg-cyan-700 rounded-full p-0.5"
-              >
-                <X size={14} />
-              </span>
-            )}
-          </button>
-
-          {/* Status Filter */}
-          <div className="flex gap-2 flex-wrap items-center">
-            <button
-              type="button"
-              onClick={() => { setOnlyUnpaid(v => !v); setPage(1); }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                onlyUnpaid
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/30'
-                  : 'bg-slate-800/50 text-slate-300 hover:bg-slate-700/50 border border-slate-700/50'
-              }`}
-            >
-              {onlyUnpaid ? 'Solo no pagados' : 'Ver solo no pagados'}
-            </button>
-            <button
-              onClick={() => { setShowAllOrders(!showAllOrders); setPage(1); }}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                showAllOrders
-                  ? 'bg-slate-600 text-slate-300 border border-slate-500'
-                  : 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/30'
-              }`}
-            >
-              {showAllOrders ? 'Ver todas las órdenes' : 'Solo pagados por enviar'}
-            </button>
-            {[
-              { value: '', label: 'Todas', count: total },
-              { value: 'open', label: 'Abiertas' },
-              { value: 'closed', label: 'Cerradas' },
-              { value: 'cancelled', label: 'Canceladas' },
-            ].filter(s => showAllOrders || s.value === '').map((status) => (
-              <button
-                key={status.value}
-                onClick={() => { setFilterStatus(status.value); setPage(1); }}
-                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${
-                  filterStatus === status.value
-                    ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-900/30'
-                    : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white border border-slate-700/50'
-                }`}
-              >
-                {status.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <Calendar size={16} className="text-slate-500" />
+            <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className="bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2 text-white text-sm" />
+            <span className="text-slate-500">-</span>
+            <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className="bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2 text-white text-sm" />
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <button type="button" onClick={() => setQuickDate(2)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">2d</button>
+            <button type="button" onClick={() => setQuickDate(7)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">7d</button>
+            <button type="button" onClick={() => setQuickDate(30)} className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-800/60 border border-slate-700 text-slate-300 hover:text-white">30d</button>
+            <button type="button" onClick={clearAllFilters} className="px-3 py-2 rounded-xl text-xs font-bold bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20">Limpiar filtros</button>
           </div>
         </div>
 
-        {/* Date Filter Panel */}
-        {showDateFilter && (
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-slate-700/30">
-            <div className="flex flex-col lg:flex-row gap-4 items-end">
-              {/* Quick Filters */}
-              <div className="flex-1">
-                <p className="text-xs text-slate-500 font-bold uppercase mb-2">Filtros rápidos</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setQuickDate(2)}
-                    className="px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-cyan-900/30"
-                  >
-                    Últimos 2 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(7)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 7 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(15)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 15 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(30)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 30 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(60)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 60 días
-                  </button>
-                  <button
-                    onClick={() => setQuickDate(90)}
-                    className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Últimos 90 días
-                  </button>
-                </div>
-              </div>
-
-              {/* Custom Date Range */}
-              <div className="flex gap-3 items-end">
-                <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase mb-2">Desde</p>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                    className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-500/50"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase mb-2">Hasta</p>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                    className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-500/50"
-                  />
-                </div>
-                {hasDateFilter && (
-                  <button
-                    onClick={clearDateFilter}
-                    className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm font-bold transition-colors"
-                  >
-                    Limpiar
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Active Filter Display */}
-            {hasDateFilter && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30">
-                <p className="text-xs text-cyan-400">
-                  Mostrando órdenes {dateFrom && `desde ${new Date(dateFrom).toLocaleDateString('es-AR')}`} {dateTo && `hasta ${new Date(dateTo).toLocaleDateString('es-AR')}`}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="px-2 py-1 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-300">
+            Vista: {showAllOrders ? 'Todas' : 'Solo pagadas por enviar'}
+          </span>
+          <span className="px-2 py-1 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-300">
+            Estado: {filterStatus || 'Todos'}
+          </span>
+          {onlyUnpaid && (
+            <span className="px-2 py-1 rounded-lg bg-amber-700/20 border border-amber-600/30 text-amber-300">
+              Solo no pagados
+            </span>
+          )}
+          {hasDateFilter && (
+            <span className="px-2 py-1 rounded-lg bg-cyan-700/20 border border-cyan-600/30 text-cyan-300">
+              Fecha: {dateFrom || '...'} a {dateTo || '...'}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Orders List */}
