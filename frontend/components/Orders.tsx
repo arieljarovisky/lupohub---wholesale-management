@@ -605,15 +605,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .col-r { text-align: right; }
       .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
-      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 96px 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
       .footer { margin-top: 12px; font-size: 10px; }
-      .footer-grid { display: grid; grid-template-columns: 1fr 126px; gap: 10px; align-items: end; }
-      .qr-wrap { border: 1px solid #111; padding: 4px; text-align: center; }
-      .qr-wrap img { width: 110px; height: 110px; display: block; margin: 0 auto; }
-      .qr-label { margin-top: 4px; font-size: 9px; line-height: 1.2; }
+      .qr-wrap { border: 1px solid #111; padding: 3px; text-align: center; }
+      .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
+      .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       @media print { .no-print { display: none !important; } }
     </style></head><body>
@@ -684,7 +683,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </table>
 
         <div class="summary">
-          <div></div>
+          <div class="qr-wrap">
+            <img src="${qrImageUrl}" alt="QR AFIP" />
+            <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
+          </div>
           <div class="totals">
             <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
             <div class="r"><span>Bonificación</span><span>$0</span></div>
@@ -695,16 +697,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
 
         <div class="footer">
-          <div class="footer-grid">
-            <div>
-              <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-              <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
-            </div>
-            <div class="qr-wrap">
-              <img src="${qrImageUrl}" alt="QR AFIP" />
-              <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
-            </div>
-          </div>
+          <div><strong>CAE:</strong> ${inv.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+          <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</div>
         </div>
 
         <div class="no-print">
