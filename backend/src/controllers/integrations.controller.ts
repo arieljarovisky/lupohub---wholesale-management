@@ -2930,6 +2930,374 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   }
 };
 
+function normalizeTnPaymentStatus(order: any): 'paid' | 'pending' | 'refunded' | 'voided' {
+  const rawPaymentStatus = (order?.payment_status ?? '').toString().trim().toLowerCase();
+  const paymentDetails = Array.isArray(order?.payment_details) ? order.payment_details : [];
+  const detailStates = paymentDetails
+    .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
+    .filter(Boolean);
+  const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
+  const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
+  const looksPaid = rawPaymentStatus === 'paid'
+    || !!order?.paid_at
+    || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
+  return looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+}
+
+/** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
+export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+    }
+
+    const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
+    const orderIds = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
+    const cbteTipoFromBody = req.body?.cbteTipo;
+    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+
+    if (!orderIds.length) return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
+    if (orderIds.length > 100) return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });
+
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) {
+      return res.status(400).json({ message: 'No se encontró el store_id de Tienda Nube' });
+    }
+
+    const { emitirFactura: emitirAfip } = await import('../services/afip.service');
+    const results: any[] = [];
+
+    for (const orderId of orderIds) {
+      try {
+        const existing = await get(
+          `SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
+           FROM external_invoices
+           WHERE source = 'TIENDANUBE' AND external_order_id = ?`,
+          [orderId]
+        );
+        if (existing) {
+          results.push({
+            orderId,
+            status: 'already_invoiced',
+            invoiceId: existing.id,
+            cae: existing.cae,
+            cbteTipo: existing.cbte_tipo,
+            cbteDesde: existing.cbte_desde,
+            cbteHasta: existing.cbte_hasta
+          });
+          continue;
+        }
+
+        const orderRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(orderId)}`, {
+          headers: {
+            'Authentication': `bearer ${integration.access_token}`,
+            'User-Agent': TN_USER_AGENT
+          },
+          validateStatus: () => true
+        });
+        if (orderRes.status !== 200 || !orderRes.data) {
+          results.push({ orderId, status: 'error', message: 'No se pudo obtener la orden de Tienda Nube' });
+          continue;
+        }
+
+        const order = orderRes.data;
+        const paymentStatus = normalizeTnPaymentStatus(order);
+        if (paymentStatus !== 'paid') {
+          results.push({ orderId, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
+          continue;
+        }
+
+        const total = Number(order?.total ?? 0);
+        if (!Number.isFinite(total) || total <= 0) {
+          results.push({ orderId, status: 'error', message: 'La orden tiene total inválido para facturar' });
+          continue;
+        }
+
+        const customerName =
+          order?.customer?.name
+          || `${order?.customer?.first_name || ''} ${order?.customer?.last_name || ''}`.trim()
+          || order?.contact_name
+          || order?.billing_name
+          || 'Consumidor Final';
+        const rawDoc = String(order?.billing_address?.doc_number ?? order?.customer?.doc_number ?? '').replace(/\D/g, '');
+        const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
+        const condicionIvaRaw = (
+          order?.billing_address?.fiscal_regime
+          || order?.customer?.fiscal_regime
+          || order?.customer?.iva_condition
+          || 'Consumidor Final'
+        ).toString();
+
+        const afipResult = await emitirAfip(
+          {
+            id: `TN-${order.id}`,
+            date: order?.created_at || new Date().toISOString().slice(0, 10),
+            total,
+            customerId: `TN-${order?.customer?.id || order.id}`
+          },
+          {
+            id: `TN-${order?.customer?.id || order.id}`,
+            businessName: customerName,
+            cuit: maybeCuit,
+            condicionIva: condicionIvaRaw
+          },
+          forceCbteTipo
+        );
+
+        const invoiceId = uuidv4();
+        await execute(
+          `INSERT INTO external_invoices
+           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            invoiceId,
+            String(order.id),
+            String(order.number ?? order.id),
+            customerName,
+            total,
+            afipResult.cae,
+            afipResult.caeFchVto || null,
+            afipResult.puntoVta,
+            afipResult.cbteTipo,
+            afipResult.cbteDesde,
+            afipResult.cbteHasta
+          ]
+        );
+
+        results.push({
+          orderId: String(order.id),
+          status: 'invoiced',
+          invoiceId,
+          cae: afipResult.cae,
+          cbteTipo: afipResult.cbteTipo,
+          cbteDesde: afipResult.cbteDesde,
+          cbteHasta: afipResult.cbteHasta
+        });
+      } catch (e: any) {
+        results.push({
+          orderId,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
+        });
+      }
+    }
+
+    const summary = {
+      total: results.length,
+      invoiced: results.filter(r => r.status === 'invoiced').length,
+      alreadyInvoiced: results.filter(r => r.status === 'already_invoiced').length,
+      skippedUnpaid: results.filter(r => r.status === 'skipped_unpaid').length,
+      errors: results.filter(r => r.status === 'error').length
+    };
+
+    res.json({ message: 'Facturación masiva de Tienda Nube finalizada', summary, results });
+  } catch (error: any) {
+    console.error('invoiceTiendaNubeOrdersBulk:', error);
+    const msg = error?.message || 'Error en facturación masiva de Tienda Nube';
+    const status = msg.includes('no configurado') ? 503 : 500;
+    res.status(status).json({ message: msg });
+  }
+};
+
+/** Emite facturas AFIP masivas para órdenes de Mercado Libre (solo pagadas). */
+export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
+    }
+
+    const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
+    const orderIds = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
+    const cbteTipoFromBody = req.body?.cbteTipo;
+    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+
+    if (!orderIds.length) return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
+    if (orderIds.length > 100) return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });
+
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+
+    const { emitirFactura: emitirAfip } = await import('../services/afip.service');
+    const results: any[] = [];
+
+    for (const orderId of orderIds) {
+      try {
+        const existing = await get(
+          `SELECT id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta
+           FROM external_invoices
+           WHERE source = 'MERCADOLIBRE' AND external_order_id = ?`,
+          [orderId]
+        );
+        if (existing) {
+          results.push({
+            orderId,
+            status: 'already_invoiced',
+            invoiceId: existing.id,
+            cae: existing.cae,
+            cbteTipo: existing.cbte_tipo,
+            cbteDesde: existing.cbte_desde,
+            cbteHasta: existing.cbte_hasta
+          });
+          continue;
+        }
+
+        const orderRes = await axios.get(
+          `https://api.mercadolibre.com/orders/${encodeURIComponent(orderId)}`,
+          { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true }
+        );
+        if (orderRes.status !== 200 || !orderRes.data) {
+          results.push({ orderId, status: 'error', message: 'No se pudo obtener la orden de Mercado Libre' });
+          continue;
+        }
+
+        const order = orderRes.data;
+        if ((order?.status || '').toString().toLowerCase() !== 'paid') {
+          results.push({ orderId, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${order?.status || 'desconocido'})` });
+          continue;
+        }
+
+        const total = Number(order?.total_amount ?? 0);
+        if (!Number.isFinite(total) || total <= 0) {
+          results.push({ orderId, status: 'error', message: 'La orden tiene total inválido para facturar' });
+          continue;
+        }
+
+        const buyerFirst = (order?.buyer?.first_name || '').toString().trim();
+        const buyerLast = (order?.buyer?.last_name || '').toString().trim();
+        const customerName = `${buyerFirst} ${buyerLast}`.trim()
+          || (order?.buyer?.nickname || '').toString().trim()
+          || 'Consumidor Final';
+
+        const afipResult = await emitirAfip(
+          {
+            id: `ML-${order.id}`,
+            date: order?.date_created || new Date().toISOString().slice(0, 10),
+            total,
+            customerId: `ML-${order?.buyer?.id || order.id}`
+          },
+          {
+            id: `ML-${order?.buyer?.id || order.id}`,
+            businessName: customerName,
+            cuit: undefined,
+            condicionIva: 'Consumidor Final'
+          },
+          forceCbteTipo
+        );
+
+        const invoiceId = uuidv4();
+        await execute(
+          `INSERT INTO external_invoices
+           (id, source, external_order_id, order_number, customer_name, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
+           VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            invoiceId,
+            String(order.id),
+            String(order.id),
+            customerName,
+            total,
+            afipResult.cae,
+            afipResult.caeFchVto || null,
+            afipResult.puntoVta,
+            afipResult.cbteTipo,
+            afipResult.cbteDesde,
+            afipResult.cbteHasta
+          ]
+        );
+
+        results.push({
+          orderId: String(order.id),
+          status: 'invoiced',
+          invoiceId,
+          cae: afipResult.cae,
+          cbteTipo: afipResult.cbteTipo,
+          cbteDesde: afipResult.cbteDesde,
+          cbteHasta: afipResult.cbteHasta
+        });
+      } catch (e: any) {
+        results.push({
+          orderId,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
+        });
+      }
+    }
+
+    const summary = {
+      total: results.length,
+      invoiced: results.filter(r => r.status === 'invoiced').length,
+      alreadyInvoiced: results.filter(r => r.status === 'already_invoiced').length,
+      skippedUnpaid: results.filter(r => r.status === 'skipped_unpaid').length,
+      errors: results.filter(r => r.status === 'error').length
+    };
+
+    res.json({ message: 'Facturación masiva de Mercado Libre finalizada', summary, results });
+  } catch (error: any) {
+    console.error('invoiceMercadoLibreOrdersBulk:', error);
+    const msg = error?.message || 'Error en facturación masiva de Mercado Libre';
+    const status = msg.includes('no configurado') ? 503 : 500;
+    res.status(status).json({ message: msg });
+  }
+};
+
+/** Historial unificado de facturación masiva externa (Tienda Nube / Mercado Libre). */
+export const getExternalInvoicesHistory = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Sin permisos para ver historial de facturación externa' });
+    }
+    const sourceRaw = String(req.query?.source || '').trim().toUpperCase();
+    const source = sourceRaw === 'TIENDANUBE' || sourceRaw === 'MERCADOLIBRE' ? sourceRaw : '';
+    const limitNum = Math.min(500, Math.max(1, parseInt(String(req.query?.limit || '100'), 10) || 100));
+
+    const where: string[] = [];
+    const params: any[] = [];
+    if (source) {
+      where.push('source = ?');
+      params.push(source);
+    }
+
+    const rows = await query(
+      `SELECT id, source, external_order_id, order_number, customer_name, total,
+              cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
+       FROM external_invoices
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY created_at DESC
+       LIMIT ${limitNum}`,
+      params
+    ) as any[];
+
+    res.json({
+      invoices: rows.map((r) => ({
+        id: r.id,
+        source: r.source,
+        externalOrderId: r.external_order_id,
+        orderNumber: r.order_number,
+        customerName: r.customer_name,
+        total: Number(r.total || 0),
+        cae: r.cae,
+        caeFchVto: r.cae_fch_vto ?? undefined,
+        puntoVta: r.punto_venta,
+        cbteTipo: r.cbte_tipo,
+        cbteDesde: r.cbte_desde,
+        cbteHasta: r.cbte_hasta,
+        createdAt: r.created_at
+      }))
+    });
+  } catch (error: any) {
+    console.error('getExternalInvoicesHistory:', error);
+    res.status(500).json({ message: 'Error obteniendo historial de facturación externa' });
+  }
+};
+
 // Obtener órdenes de Mercado Libre
 export const getMercadoLibreOrders = async (req: Request, res: Response) => {
   try {

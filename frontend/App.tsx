@@ -39,6 +39,7 @@ const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
 const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
 const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
+const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 
@@ -144,6 +145,7 @@ const App: React.FC = () => {
         orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         create_order_template: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
+        bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
         mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
         stock_history: [Role.ADMIN, Role.WAREHOUSE],
@@ -694,6 +696,7 @@ const App: React.FC = () => {
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'create_order_template', label: 'Pedido (plantilla)', icon: FileText, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+      { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -732,6 +735,7 @@ const App: React.FC = () => {
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
                  {baseView === 'orders' && (currentUser.role === Role.CUSTOMER ? 'Mis pedidos' : 'Pedidos Mayoristas')}
+                {baseView === 'bulk_invoicing' && 'Facturación masiva'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
@@ -897,6 +901,11 @@ const App: React.FC = () => {
           {baseView === 'tiendanube_orders' && (
             <Suspense fallback={<ViewFallback />}>
               <TiendaNubeOrders />
+            </Suspense>
+          )}
+          {baseView === 'bulk_invoicing' && (
+            <Suspense fallback={<ViewFallback />}>
+              <BulkInvoicing />
             </Suspense>
           )}
           {baseView === 'mercadolibre_orders' && (

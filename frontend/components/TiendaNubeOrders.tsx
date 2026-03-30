@@ -54,6 +54,9 @@ const TiendaNubeOrders: React.FC = () => {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>(twoDaysAgoIso);
   const [dateTo, setDateTo] = useState<string>(todayIso);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
+  const [bulkInvoicing, setBulkInvoicing] = useState(false);
+  const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -68,6 +71,7 @@ const TiendaNubeOrders: React.FC = () => {
       const res = await api.getTiendaNubeOrders(params);
       setOrders(res.orders);
       setTotal(res.total);
+      setSelectedOrderIds(prev => prev.filter(id => res.orders.some((o: TiendaNubeOrder) => o.id === id)));
     } catch (error) {
       console.error('Error fetching TN orders:', error);
     } finally {
@@ -141,6 +145,47 @@ const TiendaNubeOrders: React.FC = () => {
     setPage(1);
   };
 
+  const toggleOrderSelection = (orderId: number) => {
+    setSelectedOrderIds(prev => prev.includes(orderId) ? prev.filter(id => id !== orderId) : [...prev, orderId]);
+  };
+
+  const selectAllVisiblePaid = () => {
+    const paidIds = filteredOrders
+      .filter(o => o.isPaid === true || o.paymentStatus === 'paid')
+      .map(o => o.id);
+    setSelectedOrderIds(prev => Array.from(new Set([...prev, ...paidIds])));
+  };
+
+  const clearSelection = () => setSelectedOrderIds([]);
+
+  const handleBulkInvoice = async () => {
+    if (selectedOrderIds.length === 0) {
+      window.alert('Seleccioná al menos una orden para facturar.');
+      return;
+    }
+    if (!window.confirm(`¿Facturar masivamente ${selectedOrderIds.length} orden(es) de Tienda Nube?`)) return;
+    setBulkInvoicing(true);
+    try {
+      const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : undefined;
+      const res = await api.invoiceTiendaNubeOrdersBulk({
+        orderIds: selectedOrderIds,
+        cbteTipo
+      });
+      window.alert(
+        `Facturación masiva finalizada.\n\n` +
+        `Facturadas: ${res.summary.invoiced}\n` +
+        `Ya facturadas: ${res.summary.alreadyInvoiced}\n` +
+        `No pagadas (omitidas): ${res.summary.skippedUnpaid}\n` +
+        `Errores: ${res.summary.errors}`
+      );
+      fetchOrders();
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo completar la facturación masiva');
+    } finally {
+      setBulkInvoicing(false);
+    }
+  };
+
   const hasDateFilter = dateFrom || dateTo;
 
   return (
@@ -156,14 +201,47 @@ const TiendaNubeOrders: React.FC = () => {
             <p className="text-slate-400 text-sm">Gestiona tus órdenes de e-commerce</p>
           </div>
         </div>
-        <button
-          onClick={fetchOrders}
-          disabled={loading}
-          className="bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-cyan-900/30 transition-all"
-        >
-          {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
-          Actualizar
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={bulkCbteTipo}
+            onChange={(e) => setBulkCbteTipo(e.target.value as 'auto' | 'A' | 'B')}
+            className="bg-slate-900/70 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-200"
+            title="Tipo de factura para lote"
+          >
+            <option value="auto">Tipo: Auto</option>
+            <option value="A">Tipo: Factura A</option>
+            <option value="B">Tipo: Factura B</option>
+          </select>
+          <button
+            onClick={selectAllVisiblePaid}
+            disabled={loading || filteredOrders.length === 0}
+            className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+          >
+            Seleccionar pagadas
+          </button>
+          <button
+            onClick={clearSelection}
+            disabled={selectedOrderIds.length === 0}
+            className="bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+          >
+            Limpiar selección
+          </button>
+          <button
+            onClick={handleBulkInvoice}
+            disabled={bulkInvoicing || selectedOrderIds.length === 0}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-black disabled:opacity-50"
+          >
+            {bulkInvoicing ? 'Facturando...' : `Facturar masivo (${selectedOrderIds.length})`}
+          </button>
+          <button
+            onClick={fetchOrders}
+            disabled={loading}
+            className="bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-cyan-900/30 transition-all"
+          >
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            Actualizar
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -426,6 +504,18 @@ const TiendaNubeOrders: React.FC = () => {
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     {/* Left: Order Info */}
                     <div className="flex items-center gap-4">
+                      <label
+                        className="flex items-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(order.id)}
+                          onChange={() => toggleOrderSelection(order.id)}
+                          className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-cyan-500"
+                          title="Seleccionar para facturación masiva"
+                        />
+                      </label>
                       <div className="flex flex-col items-center">
                         <span className="text-xs text-slate-500">{dateInfo.date}</span>
                         <span className="text-[10px] text-slate-600">{dateInfo.time}</span>

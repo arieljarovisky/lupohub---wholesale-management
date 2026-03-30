@@ -887,6 +887,20 @@ export const api = {
     }, { orders: [], total: 0 }, 'getTiendaNubeOrders');
   },
 
+  invoiceTiendaNubeOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
+    message: string;
+    summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };
+    results: Array<{ orderId: string; status: string; message?: string; cae?: string; cbteTipo?: number; cbteDesde?: number; cbteHasta?: number }>;
+  }> => {
+    return handleRequest(async () => {
+      return await request('/integrations/tiendanube/invoice-bulk', 'POST', payload, undefined, 180000);
+    }, {
+      message: 'Offline',
+      summary: { total: 0, invoiced: 0, alreadyInvoiced: 0, skippedUnpaid: 0, errors: 0 },
+      results: []
+    }, 'invoiceTiendaNubeOrdersBulk');
+  },
+
   // Órdenes de Mercado Libre
   getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string; only_pending_shipment_and_cancelled?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
@@ -900,6 +914,46 @@ export const api = {
       const queryString = queryParams.toString();
       return await request<{ orders: any[]; total: number }>(`/integrations/mercadolibre/orders${queryString ? '?' + queryString : ''}`, 'GET');
     }, { orders: [], total: 0 }, 'getMercadoLibreOrders');
+  },
+
+  invoiceMercadoLibreOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
+    message: string;
+    summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };
+    results: Array<{ orderId: string; status: string; message?: string; cae?: string; cbteTipo?: number; cbteDesde?: number; cbteHasta?: number }>;
+  }> => {
+    return handleRequest(async () => {
+      return await request('/integrations/mercadolibre/invoice-bulk', 'POST', payload, undefined, 180000);
+    }, {
+      message: 'Offline',
+      summary: { total: 0, invoiced: 0, alreadyInvoiced: 0, skippedUnpaid: 0, errors: 0 },
+      results: []
+    }, 'invoiceMercadoLibreOrdersBulk');
+  },
+
+  getExternalInvoicesHistory: async (params?: { source?: 'TIENDANUBE' | 'MERCADOLIBRE'; limit?: number }): Promise<{
+    invoices: Array<{
+      id: string;
+      source: string;
+      externalOrderId: string;
+      orderNumber?: string;
+      customerName?: string;
+      total: number;
+      cae: string;
+      caeFchVto?: string;
+      puntoVta: number;
+      cbteTipo: number;
+      cbteDesde: number;
+      cbteHasta: number;
+      createdAt?: string;
+    }>
+  }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.source) queryParams.append('source', params.source);
+      if (params?.limit) queryParams.append('limit', String(params.limit));
+      const queryString = queryParams.toString();
+      return await request(`/integrations/invoices/external${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { invoices: [] }, 'getExternalInvoicesHistory');
   },
 
   // Stock de Tienda Nube (publicaciones con stock)
