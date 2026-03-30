@@ -123,13 +123,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
     const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt.split('T')[0]) : formatDateShort(order.date);
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const baseImponible = order.total != null && order.total > 0 ? order.total : order.items.reduce((s: number, i: any) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
+    const iva21 = Math.round(Number(baseImponible) * 0.21 * 100) / 100;
+    const totalComprobante = Math.round((Number(baseImponible) + iva21) * 100) / 100;
 
     const rows = order.items.map((i: any) => {
       const base = i.quantity * (i.priceAtMoment ?? 0);
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
       const desc = ((i.productName ?? '').toString().trim()) || '—';
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">—</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td></tr>`;
+      const ivaItem = Math.round(Number(base) * 0.21 * 100) / 100;
+      const totalItem = Math.round((Number(base) + ivaItem) * 100) / 100;
+      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${base.toLocaleString('es-AR')}</td><td style="text-align:right">$${ivaItem.toLocaleString('es-AR')}</td><td style="text-align:right">$${totalItem.toLocaleString('es-AR')}</td></tr>`;
     }).join('');
 
     const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
@@ -191,7 +195,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
       <div class="inv-table-wrap">
         <table class="inv-table">
           <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>—</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div></div></div>
+      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${baseImponible.toLocaleString('es-AR')}</span></div><div class="row"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${totalComprobante.toLocaleString('es-AR')}</span></div></div></div>
       <div class="inv-footer"><div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div><p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p></div>
       <div class="no-print"><button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button><button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
     </body></html>`;

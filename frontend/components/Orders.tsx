@@ -389,8 +389,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim();
     const dirCliente = clienteDir || '';
 
-    const total = Math.round(baseImponible * 100) / 100;
-    const subtotalBruto = total; // hoy usamos total como bruto (el sistema no separa bonificación/impuestos en el HTML)
+    const neto = Math.round(baseImponible * 100) / 100;
+    const iva21 = Math.round(neto * 0.21 * 100) / 100;
+    const total = Math.round((neto + iva21) * 100) / 100;
+    const subtotalBruto = neto;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
@@ -491,7 +493,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <div class="totals">
             <div class="r"><span>Subtotal Bruto</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span></div>
             <div class="r"><span>Bonificación</span><span>$0</span></div>
-            <div class="r"><span>Subtotal Neto</span><span>$${total.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Subtotal Neto</span><span>$${neto.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>IVA 21%</span><span>$${iva21.toLocaleString('es-AR')}</span></div>
+            <div class="r"><span>Total</span><span>$${total.toLocaleString('es-AR')}</span></div>
           </div>
         </div>
 

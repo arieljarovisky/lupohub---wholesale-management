@@ -20,7 +20,12 @@ export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
   const parsed = s ? JSON.parse(s) : {};
   const rawLogo = (parsed.logoUrl ?? '').toString().trim();
-  const safeLogo = rawLogo && rawLogo !== 'undefined' && rawLogo !== 'null' ? rawLogo : DEFAULT_COMPANY_LOGO_URL;
+  const looksValidLogo =
+    !!rawLogo &&
+    rawLogo !== 'undefined' &&
+    rawLogo !== 'null' &&
+    /^(data:image\/|https?:\/\/|blob:|\/)/i.test(rawLogo);
+  const safeLogo = looksValidLogo ? rawLogo : DEFAULT_COMPANY_LOGO_URL;
   return {
     businessName: parsed.businessName ?? '',
     address: parsed.address ?? '',
