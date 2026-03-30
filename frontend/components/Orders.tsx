@@ -1001,12 +1001,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'PENDIENTE COBRO' : 'COBRADO'}
                       </button>
                     )}
-                    {order.creditNotesTotalCount && order.creditNotesTotalCount > 0 && (
+                    {Number(order.creditNotesTotalCount || 0) > 0 && (
                       <span className="bg-violet-900/30 text-violet-300 border border-violet-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
                         <FileMinus size={10} /> N.C. TOTAL ({order.creditNotesTotalCount})
                       </span>
                     )}
-                    {(!order.creditNotesTotalCount || order.creditNotesTotalCount === 0) && order.creditNotesItemCount && order.creditNotesItemCount > 0 && (
+                    {Number(order.creditNotesTotalCount || 0) === 0 && Number(order.creditNotesItemCount || 0) > 0 && (
                       <span className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
                         <FileMinus size={10} /> N.C. PARCIAL ({order.creditNotesItemCount})
                       </span>
@@ -1071,7 +1071,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <Receipt size={16} />
                     </button>
                   )}
-                  {order.creditNotesCount && order.creditNotesCount > 0 && (
+                  {Number(order.creditNotesCount || 0) > 0 && (
                     <button
                       onClick={(e) => openNotaCredito(order, e)}
                       className="p-2 rounded-lg text-slate-400 hover:text-violet-400 hover:bg-slate-700/50 transition"
