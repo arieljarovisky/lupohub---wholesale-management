@@ -978,6 +978,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const buildOrderSheet = (order: Order) => {
     const customerName = getCustomerName(order);
     const enrichedItems = order.items.map(enrichItem);
+    const colorCodeFromSku = (skuRaw: string): string => {
+      const sku = String(skuRaw || '').trim();
+      if (!sku) return '';
+      const parts = sku.split('-').filter(Boolean);
+      if (parts.length >= 3) return parts[parts.length - 1];
+      return '';
+    };
 
     const sizeOrder = Array.from(
       new Set(
@@ -1000,7 +1007,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     for (const item of enrichedItems) {
       const codigo = String(item.sku || '').trim() || '—';
       const descripcion = String(item.productName || '').trim() || '—';
-      const color = String(item.colorName || '').trim() || '—';
+      const color = String((item as any).colorCode || '').trim()
+        || colorCodeFromSku(String(item.sku || ''))
+        || String(item.colorName || '').trim()
+        || '—';
       const size = String(item.sizeCode || '').trim() || '';
       const price = Number(item.priceAtMoment || 0);
       const qty = Number(item.quantity || 0);
