@@ -985,6 +985,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       if (parts.length >= 3) return parts[parts.length - 1];
       return '';
     };
+    const colorCodeFromName = (nameRaw: string): string => {
+      const name = String(nameRaw || '').trim();
+      if (!name) return '';
+      // Ej: "614 - Natural", "997 - Negro"
+      const leading = name.match(/^([A-Z0-9]+)\s*-/i);
+      if (leading?.[1]) return leading[1].toUpperCase();
+      // Ej: "TRICOLOR_905", "ESTAMPADO_948"
+      const embedded = name.match(/(?:^|_)(\d{3})(?:$|_)/);
+      if (embedded?.[1]) return embedded[1];
+      return '';
+    };
 
     const SIZE_COLS = ['U', 'P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'] as const;
     const sizeLabelFromCode = (raw: string): string => {
@@ -1015,8 +1026,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const byKey = new Map<string, PivotRow>();
     for (const item of enrichedItems) {
       const codigo = String(item.sku || '').trim() || '—';
-      const descripcion = String(item.productName || '').trim() || '—';
       const color = String((item as any).colorCode || '').trim()
+        || colorCodeFromName(String(item.colorName || ''))
         || colorCodeFromSku(String(item.sku || ''))
         || String(item.colorName || '').trim()
         || '—';
