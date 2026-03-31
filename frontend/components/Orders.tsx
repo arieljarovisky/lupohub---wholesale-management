@@ -982,8 +982,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const sku = String(skuRaw || '').trim();
       if (!sku) return '';
       const parts = sku.split('-').filter(Boolean);
-      if (parts.length >= 3) return parts[parts.length - 1];
+      if (parts.length >= 3) {
+        const d = parts[parts.length - 1].replace(/\D/g, '');
+        if (d.length >= 3) return d.slice(0, 3);
+      }
+      const digits = sku.replace(/\D/g, '');
+      if (digits.length >= 3) return digits.slice(-3);
       return '';
+    };
+    const articleCodeFromSku = (skuRaw: string): string => {
+      const sku = String(skuRaw || '').trim();
+      if (!sku) return '';
+      const parts = sku.split('-').filter(Boolean);
+      if (parts.length >= 3) return parts[0];
+      const digits = sku.replace(/\D/g, '');
+      if (!digits) return sku;
+      // Formato común local: BASE(7) + TALLE(3) + COLOR(3)
+      if (digits.length > 9) return digits.slice(0, -6);
+      return digits;
     };
     const colorCodeFromName = (nameRaw: string): string => {
       const name = String(nameRaw || '').trim();
@@ -1025,10 +1041,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const byKey = new Map<string, PivotRow>();
     for (const item of enrichedItems) {
-      const codigo = String(item.sku || '').trim() || '—';
+      const codigo = articleCodeFromSku(String(item.sku || '')) || String(item.sku || '').trim() || '—';
       const color = String((item as any).colorCode || '').trim()
-        || colorCodeFromName(String(item.colorName || ''))
         || colorCodeFromSku(String(item.sku || ''))
+        || colorCodeFromName(String(item.colorName || ''))
         || String(item.colorName || '').trim()
         || '—';
       const size = String(item.sizeCode || '').trim() || '';
