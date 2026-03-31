@@ -977,23 +977,72 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const buildOrderSheet = (order: Order) => {
     const customerName = getCustomerName(order);
-    const itemHeaders = ['SKU', 'Producto', 'Talle', 'Color', 'Cantidad', 'Precio unit.', 'Subtotal'];
     const enrichedItems = order.items.map(enrichItem);
-    const itemRows = enrichedItems.map(item => {
-      const price = item.priceAtMoment ?? 0;
-      const subtotal = item.quantity * price;
+
+    const sizeOrder = Array.from(
+      new Set(
+        enrichedItems
+          .map(i => String(i.sizeCode || '').trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    type PivotRow = {
+      codigo: string;
+      descripcion: string;
+      color: string;
+      price: number;
+      qtyBySize: Record<string, number>;
+      totalUnits: number;
+    };
+
+    const byKey = new Map<string, PivotRow>();
+    for (const item of enrichedItems) {
+      const codigo = String(item.sku || '').trim() || '—';
+      const descripcion = String(item.productName || '').trim() || '—';
+      const color = String(item.colorName || '').trim() || '—';
+      const size = String(item.sizeCode || '').trim() || '';
+      const price = Number(item.priceAtMoment || 0);
+      const qty = Number(item.quantity || 0);
+      const key = `${codigo}__${color}__${price}`;
+
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          codigo,
+          descripcion,
+          color,
+          price,
+          qtyBySize: {},
+          totalUnits: 0
+        });
+      }
+      const row = byKey.get(key)!;
+      if (size) row.qtyBySize[size] = (row.qtyBySize[size] || 0) + qty;
+      row.totalUnits += qty;
+    }
+
+    const pivotRows = Array.from(byKey.values()).sort((a, b) => {
+      const byCode = a.codigo.localeCompare(b.codigo, undefined, { numeric: true });
+      if (byCode !== 0) return byCode;
+      return a.color.localeCompare(b.color, undefined, { numeric: true });
+    });
+
+    const itemHeaders = ['Código', 'Descripción', 'Color', 'Todas', ...sizeOrder, 'Precio unit.', 'Subtotal'];
+    const itemRows = pivotRows.map(r => {
+      const subtotal = r.totalUnits * r.price;
       return [
-        item.sku ?? '',
-        item.productName ?? '',
-        item.sizeCode ?? '',
-        item.colorName ?? '',
-        item.quantity,
-        price,
-        subtotal,
+        r.codigo,
+        r.descripcion,
+        r.color,
+        r.totalUnits,
+        ...sizeOrder.map(s => r.qtyBySize[s] || 0),
+        r.price,
+        subtotal
       ];
     });
-    const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
-    const totalFromItems = itemRows.reduce((sum, row) => sum + (Number(row[6]) || 0), 0);
+
+    const totalUnits = enrichedItems.reduce((s, i) => s + Number(i.quantity || 0), 0);
+    const totalFromItems = itemRows.reduce((sum, row) => sum + (Number(row[row.length - 1]) || 0), 0);
     const displayTotal = order.total != null && order.total > 0 ? order.total : totalFromItems;
     const header = [
       ['Pedido', order.id],
@@ -1002,13 +1051,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ['Estado', order.status],
       ['Total', displayTotal],
     ];
-    const totalRow = ['', '', '', '', totalUnits, '', displayTotal];
+    const lastCols = sizeOrder.length + 3;
+    const totalRow = ['', '', 'Totales', totalUnits, ...Array(sizeOrder.length).fill(''), '', displayTotal];
     const data = [
       ...header,
       [],
       itemHeaders,
       ...itemRows,
       totalRow,
+      [],
+      ['Formato exportado: planilla (código+color con columnas por talle)', ...Array(lastCols).fill('')]
     ];
     return XLSX.utils.aoa_to_sheet(data);
   };
