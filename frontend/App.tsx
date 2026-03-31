@@ -33,7 +33,6 @@ const Orders = lazyWithReload(() => import('./components/Orders'));
 const Visits = lazyWithReload(() => import('./components/Visits'));
 const Settings = lazyWithReload(() => import('./components/Settings'));
 const Billing = lazyWithReload(() => import('./components/Billing'));
-const CreateOrder = lazyWithReload(() => import('./components/CreateOrder'));
 const CreateOrderTemplate = lazyWithReload(() => import('./components/CreateOrderTemplate'));
 const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
@@ -748,7 +747,7 @@ const App: React.FC = () => {
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
                  {baseView === 'facturacion' && 'Facturación'}
-                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido' : 'Nuevo Pedido (Plantilla)')}
+                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido (Plantilla)' : 'Nuevo Pedido (Plantilla)')}
                  {baseView === 'create_order_template' && 'Nuevo Pedido (Plantilla)'}
                  {baseView === 'order_picking' && 'Preparando Pedido'}
                </h1>
@@ -864,23 +863,7 @@ const App: React.FC = () => {
               />
             </Suspense>
           )}
-          {baseView === 'create_order' && editingOrder && (
-            <Suspense fallback={<ViewFallback />}>
-              <CreateOrder
-                products={products}
-                customers={getVisibleCustomers}
-                onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
-                sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
-                initialOrder={editingOrder}
-                role={currentUser.role}
-                priceLists={priceLists}
-                selectedPriceListId={createOrderPriceListId}
-                onPriceListChange={setCreateOrderPriceListId}
-              />
-            </Suspense>
-          )}
-          {(baseView === 'create_order' && !editingOrder) || baseView === 'create_order_template' ? (
+          {baseView === 'create_order' || baseView === 'create_order_template' ? (
             <Suspense fallback={<ViewFallback />}>
               <CreateOrderTemplate
                 products={products}
@@ -888,6 +871,7 @@ const App: React.FC = () => {
                 onSave={handleCreateOrder}
                 onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
+                initialOrder={editingOrder}
                 role={currentUser.role}
                 priceLists={priceLists}
                 selectedPriceListId={createOrderPriceListId}

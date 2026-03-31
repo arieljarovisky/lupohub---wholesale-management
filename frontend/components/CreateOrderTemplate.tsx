@@ -14,6 +14,7 @@ interface CreateOrderTemplateProps {
   onSave: (order: Order) => void;
   onCancel: () => void;
   sellerId?: string | null;
+  initialOrder?: Order | null;
   role?: Role;
   priceLists?: PriceList[];
   selectedPriceListId?: string | null;
@@ -43,6 +44,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   onSave,
   onCancel,
   sellerId,
+  initialOrder = null,
   role,
   priceLists = [],
   selectedPriceListId = null,
@@ -70,8 +72,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
   const draftRestoredRef = useRef(false);
 
+  const isEditing = !!initialOrder;
+
   /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
   useEffect(() => {
+    if (isEditing) return;
     if (customers.length === 0 || draftRestoredRef.current) return;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -86,7 +91,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     } catch {
       localStorage.removeItem(DRAFT_KEY);
     }
-  }, [customers]);
+  }, [customers, isEditing]);
 
   const filteredCustomers = useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
@@ -122,11 +127,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   useEffect(() => {
     const t = setTimeout(() => saveDraft(selectedCustomerId, orderDate, rows), 600);
+    if (isEditing) return () => clearTimeout(t);
     return () => clearTimeout(t);
-  }, [selectedCustomerId, orderDate, rows, saveDraft]);
+  }, [selectedCustomerId, orderDate, rows, saveDraft, isEditing]);
 
   /** Al cerrar/actualizar la página guardar borrador. */
   useEffect(() => {
+    if (isEditing) return;
     const onBeforeUnload = () => {
       if (rows.length > 0 || selectedCustomerId) {
         saveDraft(selectedCustomerId, orderDate, rows);
@@ -134,7 +141,46 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [rows, selectedCustomerId, orderDate, saveDraft]);
+  }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
+
+  /** Modo edición: convertir ítems existentes del pedido en filas de planilla. */
+  useEffect(() => {
+    if (!initialOrder) return;
+    setSelectedCustomerId(initialOrder.customerId);
+    setOrderDate(initialOrder.date);
+
+    const rowsByKey = new Map<string, TemplateRow>();
+    for (const item of initialOrder.items || []) {
+      const sizeCode = String((item as any).sizeCode || '').trim();
+      const colorName = String((item as any).colorName || '').trim() || 'Color';
+      const productCode = String((item as any).sku || '').trim() || 'SKU';
+      const price = Number(item.priceAtMoment || 0);
+      const productId = String((item as any).productId || '');
+      const variantId = String((item as any).variantId || '').trim();
+      if (!sizeCode || !variantId) continue;
+
+      const key = `${productCode}__${colorName}`;
+      if (!rowsByKey.has(key)) {
+        rowsByKey.set(key, {
+          id: `edit-${key}-${Math.random().toString(36).slice(2, 8)}`,
+          productCode,
+          productName: String((item as any).productName || productCode),
+          productId,
+          colorCode: colorName,
+          colorName,
+          variantBySize: {},
+          quantitiesBySize: {},
+          stockBySize: {},
+          price
+        });
+      }
+      const row = rowsByKey.get(key)!;
+      row.variantBySize[sizeCode] = variantId;
+      row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
+      if (!row.price && price) row.price = price;
+    }
+    setRows(Array.from(rowsByKey.values()));
+  }, [initialOrder]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
@@ -397,12 +443,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
     if (items.length === 0) return null;
     return {
-      id: `O-${Date.now().toString().slice(-6)}`,
+      id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
-      sellerId: sellerId ?? null,
+      sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
-      status: asDraft ? OrderStatus.DRAFT : OrderStatus.CONFIRMED,
+      status: asDraft ? OrderStatus.DRAFT : (initialOrder?.status ?? OrderStatus.CONFIRMED),
       date: orderDate
     };
   };
@@ -518,7 +564,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <ArrowLeft size={22} />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Nuevo pedido</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{isEditing ? 'Editar pedido' : 'Nuevo pedido'}</h1>
             <p className="text-sm text-slate-400 mt-0.5">
               {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
