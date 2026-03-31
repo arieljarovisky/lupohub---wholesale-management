@@ -986,17 +986,26 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return '';
     };
 
-    const sizeOrder = Array.from(
-      new Set(
-        enrichedItems
-          .map(i => String(i.sizeCode || '').trim())
-          .filter(Boolean)
-      )
-    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const SIZE_COLS = ['U', 'P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'] as const;
+    const sizeLabelFromCode = (raw: string): string => {
+      const code = String(raw || '').trim().toUpperCase();
+      if (!code) return '';
+      if (SIZE_COLS.includes(code as any)) return code;
+      const map: Record<string, string> = {
+        '170': 'U',
+        '130': 'P',
+        '140': 'M',
+        '150': 'G',
+        '160': 'GG',
+        '180': 'XG',
+        '200': 'XXG',
+        '250': 'XXXG',
+      };
+      return map[code] || '';
+    };
 
     type PivotRow = {
       codigo: string;
-      descripcion: string;
       color: string;
       price: number;
       qtyBySize: Record<string, number>;
@@ -1019,7 +1028,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       if (!byKey.has(key)) {
         byKey.set(key, {
           codigo,
-          descripcion,
           color,
           price,
           qtyBySize: {},
@@ -1027,7 +1035,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         });
       }
       const row = byKey.get(key)!;
-      if (size) row.qtyBySize[size] = (row.qtyBySize[size] || 0) + qty;
+      const sizeLabel = sizeLabelFromCode(size);
+      if (sizeLabel) row.qtyBySize[sizeLabel] = (row.qtyBySize[sizeLabel] || 0) + qty;
       row.totalUnits += qty;
     }
 
@@ -1037,41 +1046,39 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return a.color.localeCompare(b.color, undefined, { numeric: true });
     });
 
-    const itemHeaders = ['Código', 'Descripción', 'Color', 'Todas', ...sizeOrder, 'Precio unit.', 'Subtotal'];
-    const itemRows = pivotRows.map(r => {
-      const subtotal = r.totalUnits * r.price;
+    const blockHeaders = ['CÓDIGO', 'COLOR', ...SIZE_COLS, 'PRECIO'];
+    const blockRow = (r?: PivotRow) => {
+      if (!r) return Array(blockHeaders.length).fill('');
       return [
         r.codigo,
-        r.descripcion,
         r.color,
-        r.totalUnits,
-        ...sizeOrder.map(s => r.qtyBySize[s] || 0),
-        r.price,
-        subtotal
+        ...SIZE_COLS.map(s => {
+          const q = Number(r.qtyBySize[s] || 0);
+          return q > 0 ? q : '';
+        }),
+        r.price
       ];
-    });
+    };
 
     const totalUnits = enrichedItems.reduce((s, i) => s + Number(i.quantity || 0), 0);
-    const totalFromItems = itemRows.reduce((sum, row) => sum + (Number(row[row.length - 1]) || 0), 0);
+    const totalFromItems = pivotRows.reduce((sum, r) => sum + (r.totalUnits * r.price), 0);
     const displayTotal = order.total != null && order.total > 0 ? order.total : totalFromItems;
-    const header = [
-      ['Pedido', order.id],
-      ['Fecha', formatOrderDate(order.date)],
-      ['Cliente', customerName],
-      ['Estado', order.status],
-      ['Total', displayTotal],
-    ];
-    const lastCols = sizeOrder.length + 3;
-    const totalRow = ['', '', 'Totales', totalUnits, ...Array(sizeOrder.length).fill(''), '', displayTotal];
-    const data = [
-      ...header,
+    const half = Math.ceil(pivotRows.length / 2);
+    const left = pivotRows.slice(0, half);
+    const right = pivotRows.slice(half);
+    const rowsCount = Math.max(left.length, right.length);
+    const separator = ['', ''];
+
+    const data: any[][] = [
+      ['CLIENTE', customerName, '', '', '', '', '', '', '', '', '', '', '', 'FECHA', formatOrderDate(order.date)],
+      ['PEDIDO', order.id, '', '', '', '', '', '', '', '', '', '', '', 'ESTADO', order.status],
+      ['TOTAL', displayTotal, '', '', '', '', '', '', '', '', '', '', '', 'UNIDADES', totalUnits],
       [],
-      itemHeaders,
-      ...itemRows,
-      totalRow,
-      [],
-      ['Formato exportado: planilla (código+color con columnas por talle)', ...Array(lastCols).fill('')]
+      [...blockHeaders, ...separator, ...blockHeaders],
     ];
+    for (let i = 0; i < rowsCount; i++) {
+      data.push([...blockRow(left[i]), ...separator, ...blockRow(right[i])]);
+    }
     return XLSX.utils.aoa_to_sheet(data);
   };
 
