@@ -4,13 +4,31 @@ import { Order, OrderItem } from '../types';
 import { restoreStockForOrder, restoreStockForOrderItem } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
-async function resolveDespachoIdForItem(item: any): Promise<string | null> {
+async function resolveDespachoIdForItem(item: any, variantId?: string): Promise<string | null> {
   const raw = item?.despachoId ?? item?.despacho_id;
-  if (raw == null || raw === '') return null;
-  const id = String(raw).trim();
-  if (!id) return null;
-  const row = await get('SELECT id FROM despachos WHERE id = ?', [id]);
-  return row?.id ?? null;
+  if (raw != null && raw !== '') {
+    const id = String(raw).trim();
+    if (id) {
+      const row = await get('SELECT id FROM despachos WHERE id = ?', [id]);
+      if (row?.id) return row.id;
+    }
+  }
+
+  // Fallback automático: si no viene despacho explícito, usar el último despacho del producto de la variante.
+  if (!variantId) return null;
+  const fallback = await get(
+    `SELECT p.ultimo_despacho_id AS despacho_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     WHERE pv.id = ?
+     LIMIT 1`,
+    [variantId]
+  );
+  const fallbackId = fallback?.despacho_id;
+  if (!fallbackId) return null;
+  const exists = await get('SELECT id FROM despachos WHERE id = ?', [fallbackId]);
+  return exists?.id ?? null;
 }
 
 function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
@@ -223,7 +241,7 @@ export const createOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-      const despachoId = await resolveDespachoIdForItem(item);
+      const despachoId = await resolveDespachoIdForItem(item, variantId);
       await execute(
         `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, despachoId]
@@ -383,7 +401,7 @@ export const updateOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-      const despachoId = await resolveDespachoIdForItem(item);
+      const despachoId = await resolveDespachoIdForItem(item, variantId);
       await execute(
         "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]

@@ -144,7 +144,6 @@ const App: React.FC = () => {
         inventory: [Role.ADMIN, Role.WAREHOUSE],
         orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
-        create_order_template: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
         bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
         mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
@@ -155,7 +154,7 @@ const App: React.FC = () => {
         catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
         settings: [Role.ADMIN]
       };
-      const isSpecial = savedView === 'create_order' || savedView === 'create_order_template' || savedView === 'order_picking';
+      const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
       if (!isSpecial && allowedByRole[savedView]?.includes(role)) {
         setCurrentView(savedView);
       }
@@ -175,6 +174,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (baseView === 'mercadolibre_marketing') setCurrentView('dashboard');
+  }, [baseView]);
+
+  useEffect(() => {
+    if (baseView === 'create_order_template') setCurrentView('create_order');
   }, [baseView]);
 
   const loadData = async () => {
@@ -249,7 +252,7 @@ const App: React.FC = () => {
   };
 
   /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
-  const inCreateOrderView = baseView === 'create_order' || baseView === 'create_order_template' || !!editingOrder;
+  const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
   useEffect(() => {
     if (!currentUser) return;
     if (inCreateOrderView) {
@@ -695,7 +698,6 @@ const App: React.FC = () => {
     { title: 'Pedidos y canales', items: [
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-      { id: 'create_order_template', label: 'Pedido (plantilla)', icon: FileText, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
