@@ -107,6 +107,24 @@ export function getLlmStatus(): {
   };
 }
 
+/** Modelo estable actual (Google dejó de exponer gemini-1.5-flash en v1beta para muchas cuentas). */
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest'] as const;
+
+function isGeminiModelNotFound(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  if (err.response?.status === 404) return true;
+  const e = err.response?.data as { error?: { status?: string } } | undefined;
+  return e?.error?.status === 'NOT_FOUND';
+}
+
+function geminiModelAttempts(): string[] {
+  const fromEnv = process.env.GEMINI_MODEL?.trim();
+  const primary = fromEnv || DEFAULT_GEMINI_MODEL;
+  const rest = GEMINI_FALLBACK_MODELS.filter((m) => m !== primary);
+  return [primary, ...rest];
+}
+
 async function callGeminiAnswer(params: {
   itemTitle: string;
   description: string;
@@ -116,33 +134,44 @@ async function callGeminiAnswer(params: {
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) throw new Error('GEMINI_API_KEY no configurada');
 
-  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash';
   const system = [DEFAULT_SYSTEM, params.extraSystem?.trim()].filter(Boolean).join('\n\n');
   const user = `Título de la publicación:\n${params.itemTitle}\n\nDescripción (texto plano):\n${params.description || '(sin descripción)'}\n\nPregunta del comprador:\n${params.questionText}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-  const res = await axios.post(
-    url,
-    {
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 1024
-      }
-    },
-    {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 60000
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: 'user', parts: [{ text: user }] }],
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 1024
     }
-  );
+  };
 
-  const cand = res.data?.candidates?.[0];
-  const block = cand?.finishReason && cand.finishReason !== 'STOP' ? ` (${cand.finishReason})` : '';
-  const text =
-    cand?.content?.parts?.map((p: { text?: string }) => p.text || '').join('')?.trim() || '';
-  if (!text) throw new Error(`Gemini no devolvió texto${block}`);
-  return truncateAnswer(text);
+  let lastErr: unknown;
+  for (const model of geminiModelAttempts()) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    try {
+      const res = await axios.post(url, body, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 60000
+      });
+
+      const cand = res.data?.candidates?.[0];
+      const block = cand?.finishReason && cand.finishReason !== 'STOP' ? ` (${cand.finishReason})` : '';
+      const text =
+        cand?.content?.parts?.map((p: { text?: string }) => p.text || '').join('')?.trim() || '';
+      if (!text) throw new Error(`Gemini no devolvió texto${block}`);
+      return truncateAnswer(text);
+    } catch (err) {
+      lastErr = err;
+      if (isGeminiModelNotFound(err)) {
+        console.warn(`[ML Questions AI] Modelo Gemini no disponible (${model}), probando siguiente…`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error('Gemini: sin modelo disponible');
 }
 
 async function callGroqAnswer(params: {
