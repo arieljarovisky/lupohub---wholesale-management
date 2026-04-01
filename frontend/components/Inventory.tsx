@@ -1413,6 +1413,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     () => bulkLinkTnVariants.filter((t) => bulkLinkOptionMatch(bulkLinkTnSearch, t)),
     [bulkLinkTnVariants, bulkLinkTnSearch]
   );
+  const getVisibleBulkLinkTnVariants = (selectedValue?: string) => {
+    const selected = (selectedValue || '').trim();
+    const base = filteredBulkLinkTnVariants.length > 0 ? filteredBulkLinkTnVariants : bulkLinkTnVariants;
+    if (!selected) return base;
+    const hasSelected = base.some((t) => String(t.variantId) === selected);
+    if (hasSelected) return base;
+    const selectedOption = bulkLinkTnVariants.find((t) => String(t.variantId) === selected);
+    return selectedOption ? [selectedOption, ...base] : base;
+  };
 
   React.useEffect(() => {
     if (!showBulkLinkModal || !bulkLinkGroupKey) return;
@@ -4038,8 +4047,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 </div>
                               </td>
                               <td className="p-3">
+                                {(() => {
+                                  const tnCurrent = bulkLinkAssignments[v.variantId]?.tn ?? '';
+                                  const tnOptions = getVisibleBulkLinkTnVariants(tnCurrent);
+                                  return (
                                 <select
-                                  value={bulkLinkAssignments[v.variantId]?.tn ?? ''}
+                                  value={tnCurrent}
                                   onChange={(e) => {
                                     const tnVal = e.target.value;
                                     const tnOpt = bulkLinkTnVariants.find(t => String(t.variantId) === tnVal);
@@ -4055,15 +4068,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                   className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
                                 >
                                   <option value="">—</option>
-                                  {filteredBulkLinkTnVariants.map(t => (
+                                  {tnOptions.map(t => (
                                     <option key={String(t.variantId)} value={String(t.variantId)}>
                                       {t.sku || '(sin SKU)'} — {[formatSizeForLink(t.size), t.color].filter(Boolean).join(' / ') || '—'}
                                     </option>
                                   ))}
-                                  {filteredBulkLinkTnVariants.length === 0 && (
+                                  {tnOptions.length === 0 && (
                                     <option value="" disabled>Sin coincidencias con el filtro</option>
                                   )}
                                 </select>
+                                  );
+                                })()}
                               </td>
                             </tr>
                           ))}
