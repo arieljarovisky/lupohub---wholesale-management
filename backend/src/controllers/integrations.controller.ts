@@ -4,6 +4,7 @@ import { execute, query, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -182,7 +183,7 @@ async function putTnVariantWithRetry(
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 // Función para obtener un token válido de Mercado Libre (refresca automáticamente si expiró)
-async function getValidMLToken(): Promise<{ access_token: string; user_id: string } | null> {
+export async function getValidMLToken(): Promise<{ access_token: string; user_id: string } | null> {
   const integration = await get(`SELECT access_token, refresh_token, expires_at, user_id FROM integrations WHERE platform = 'mercadolibre'`);
   
   if (!integration) {
@@ -1529,6 +1530,30 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
         await processMercadoLibreOrder(orderId);
       } else {
         console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
+      }
+    }
+
+    /** Preguntas: responder con IA si está habilitado (no bloquea la respuesta 200 al webhook). */
+    if (topic === 'questions') {
+      const qm = resourceRaw.match(/questions\/(\d+)/);
+      const questionId = qm?.[1];
+      if (questionId) {
+        setImmediate(() => {
+          (async () => {
+            try {
+              const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
+              if (!cfg.enabled || !mlQuestionsAi.openAiConfigured()) return;
+              const t = await getValidMLToken();
+              if (!t) return;
+              await mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
+                extraSystemPrompt: cfg.extraSystemPrompt
+              });
+              console.log(`[ML Questions AI] Procesada pregunta ${questionId}`);
+            } catch (e: any) {
+              console.error('[ML Questions AI] Error:', e?.response?.data || e?.message || e);
+            }
+          })();
+        });
       }
     }
 
@@ -4655,5 +4680,64 @@ export const saveMLAutoMessageConfig = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error saving ML auto message config:', error.message);
     res.status(500).json({ message: 'Error guardando configuración', error: error.message });
+  }
+};
+
+/** Config de respuesta automática a preguntas ML (Gemini / Groq gratis u OpenAI). */
+export const getMLQuestionsAiConfig = async (req: Request, res: Response) => {
+  try {
+    const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
+    const st = mlQuestionsAi.getLlmStatus();
+    res.json({
+      enabled: cfg.enabled,
+      extraSystemPrompt: cfg.extraSystemPrompt || '',
+      openAiConfigured: st.configured,
+      llmProvider: st.provider,
+      llmLabel: st.label
+    });
+  } catch (error: any) {
+    console.error('getMLQuestionsAiConfig:', error);
+    res.status(500).json({ message: 'Error obteniendo configuración', error: error.message });
+  }
+};
+
+export const saveMLQuestionsAiConfig = async (req: Request, res: Response) => {
+  try {
+    const { enabled, extraSystemPrompt } = req.body || {};
+    await mlQuestionsAi.saveMlQuestionsAiConfig(!!enabled, extraSystemPrompt != null ? String(extraSystemPrompt) : null);
+    res.json({ success: true, message: 'Configuración guardada' });
+  } catch (error: any) {
+    console.error('saveMLQuestionsAiConfig:', error);
+    res.status(500).json({ message: 'Error guardando configuración', error: error.message });
+  }
+};
+
+/** Procesa preguntas sin responder (manual). Requiere ML + clave IA (Gemini/Groq/OpenAI). */
+export const processMLQuestionsAi = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+      return res.status(403).json({ message: 'Solo administradores o depósito pueden ejecutar esto' });
+    }
+    if (!mlQuestionsAi.llmConfigured()) {
+      return res.status(503).json({
+        message:
+          'Configurá una clave de IA en el servidor: GEMINI_API_KEY (gratis en Google AI Studio), GROQ_API_KEY (gratis) u OPENAI_API_KEY (de pago).'
+      });
+    }
+    const rawLimit = (req.body as any)?.limit ?? (req.query as any)?.limit;
+    const limit = Math.min(Math.max(parseInt(String(rawLimit ?? '10'), 10) || 10, 1), 25);
+    const token = await getValidMLToken();
+    if (!token) return res.status(503).json({ message: 'Mercado Libre no conectado o token inválido' });
+    const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
+    const { processed, results } = await mlQuestionsAi.processUnansweredBatch(token, {
+      limit,
+      extraSystemPrompt: cfg.extraSystemPrompt
+    });
+    res.json({ processed, results });
+  } catch (error: any) {
+    const detail = error?.response?.data ?? error?.message;
+    console.error('processMLQuestionsAi:', detail);
+    res.status(500).json({ message: error?.message || 'Error procesando preguntas', detail });
   }
 };

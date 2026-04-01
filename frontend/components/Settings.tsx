@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
@@ -217,6 +217,14 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlAutoMessageLoading, setMlAutoMessageLoading] = useState(false);
   const [mlAutoMessageSaved, setMlAutoMessageSaved] = useState(false);
 
+  const [mlQuestionsAiEnabled, setMlQuestionsAiEnabled] = useState(false);
+  const [mlQuestionsAiExtraPrompt, setMlQuestionsAiExtraPrompt] = useState('');
+  const [mlQuestionsAiOpenAiOk, setMlQuestionsAiOpenAiOk] = useState(false);
+  const [mlQuestionsAiLlmLabel, setMlQuestionsAiLlmLabel] = useState('');
+  const [mlQuestionsAiLoading, setMlQuestionsAiLoading] = useState(false);
+  const [mlQuestionsAiProcessLoading, setMlQuestionsAiProcessLoading] = useState(false);
+  const [mlQuestionsAiSaved, setMlQuestionsAiSaved] = useState(false);
+
   useEffect(() => {
     // Al volver de OAuth: solo marcar "guardado" y actualizar estado. NO ejecutar importación/sync de productos.
     const hash = window.location.hash;
@@ -253,6 +261,19 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
     fetchMLAutoMessage();
+
+    const fetchMlQuestionsAi = async () => {
+      try {
+        const cfg = await api.getMLQuestionsAiConfig();
+        setMlQuestionsAiEnabled(cfg.enabled);
+        setMlQuestionsAiExtraPrompt(cfg.extraSystemPrompt || '');
+        setMlQuestionsAiOpenAiOk(!!cfg.openAiConfigured);
+        setMlQuestionsAiLlmLabel(cfg.llmLabel || '');
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchMlQuestionsAi();
   }, []);
 
   const handleConnect = async (platform: 'mercadolibre' | 'tiendanube') => {
@@ -1677,6 +1698,92 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           {mlAutoMessageLoading ? <Loader2 size={14} className="animate-spin" /> : mlAutoMessageSaved ? <Check size={14} /> : <Save size={14} />}
                           {mlAutoMessageSaved ? 'GUARDADO' : 'GUARDAR MENSAJE'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Preguntas ML + IA */}
+                    <div className="border-t border-slate-700/50 pt-4 mt-2">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Bot size={16} className="text-cyan-400" />
+                          <p className="text-white font-bold text-sm">Preguntas de Mercado Libre (IA)</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={mlQuestionsAiEnabled}
+                            onChange={(e) => setMlQuestionsAiEnabled(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600" />
+                        </label>
+                      </div>
+                      <p className="text-slate-500 text-xs mb-2">
+                        Respondé automáticamente con IA usando el título y la descripción de cada publicación. En el servidor (.env) podés usar una opción <strong>gratis</strong>: <code className="text-slate-400">GEMINI_API_KEY</code> (Google AI Studio) o <code className="text-slate-400">GROQ_API_KEY</code> (Groq); opcionalmente <code className="text-slate-400">OPENAI_API_KEY</code> (de pago). Para respuesta al instante, registrá el webhook de ML con el tema <strong>questions</strong>.
+                      </p>
+                      {mlQuestionsAiOpenAiOk && mlQuestionsAiLlmLabel && (
+                        <div className="mb-3 p-2 rounded-lg bg-emerald-900/20 border border-emerald-700/40 text-emerald-200 text-xs">
+                          IA lista: {mlQuestionsAiLlmLabel}
+                        </div>
+                      )}
+                      {!mlQuestionsAiOpenAiOk && (
+                        <div className="mb-3 p-3 rounded-xl bg-amber-900/20 border border-amber-700/40 text-amber-200 text-xs">
+                          Falta una clave de IA en el backend (GEMINI_API_KEY, GROQ_API_KEY u OPENAI_API_KEY). Sin eso no se pueden generar respuestas.
+                        </div>
+                      )}
+                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Instrucciones extra para la IA (opcional)</label>
+                      <textarea
+                        value={mlQuestionsAiExtraPrompt}
+                        onChange={(e) => setMlQuestionsAiExtraPrompt(e.target.value)}
+                        rows={3}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 outline-none resize-none font-mono text-xs mb-3"
+                        placeholder="Ej.: Mencioná que los envíos son por Correo Argentino..."
+                      />
+                      <div className="flex flex-wrap gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setMlQuestionsAiProcessLoading(true);
+                            try {
+                              const res = await api.processMLQuestionsAi(10);
+                              const ok = res.results?.filter(r => r.status === 'answered').length ?? 0;
+                              const err = res.results?.filter(r => r.status === 'error').length ?? 0;
+                              showToast('success', `Procesadas: ${res.processed}. Respondidas: ${ok}. Errores: ${err}.`);
+                            } catch (e: any) {
+                              showToast('error', e?.message || 'No se pudo procesar preguntas');
+                            } finally {
+                              setMlQuestionsAiProcessLoading(false);
+                            }
+                          }}
+                          disabled={mlQuestionsAiProcessLoading || !mlQuestionsAiOpenAiOk}
+                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {mlQuestionsAiProcessLoading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                          PROCESAR AHORA (hasta 10)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setMlQuestionsAiLoading(true);
+                            try {
+                              await api.saveMLQuestionsAiConfig({
+                                enabled: mlQuestionsAiEnabled,
+                                extraSystemPrompt: mlQuestionsAiExtraPrompt
+                              });
+                              setMlQuestionsAiSaved(true);
+                              setTimeout(() => setMlQuestionsAiSaved(false), 3000);
+                            } catch (e) {
+                              showToast('error', 'Error guardando configuración de preguntas IA');
+                            } finally {
+                              setMlQuestionsAiLoading(false);
+                            }
+                          }}
+                          disabled={mlQuestionsAiLoading}
+                          className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {mlQuestionsAiLoading ? <Loader2 size={14} className="animate-spin" /> : mlQuestionsAiSaved ? <Check size={14} /> : <Save size={14} />}
+                          {mlQuestionsAiSaved ? 'GUARDADO' : 'GUARDAR IA'}
                         </button>
                       </div>
                     </div>
