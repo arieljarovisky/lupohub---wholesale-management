@@ -125,6 +125,7 @@ function unitsToDeductForOrderItem(quantity, sellAsPack, mayoristaPackSize) {
 }
 // Descontar stock por pedido mayorista
 const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const errors = [];
     try {
         const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
@@ -136,13 +137,23 @@ const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, funct
        JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`, [orderId]);
+        const unitsByVariant = new Map();
         for (const item of items) {
             const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
-            const currentStock = item.current_stock || 0;
-            const newStock = Math.max(0, currentStock - units);
-            const success = yield (0, exports.updateVariantStock)(item.variant_id, newStock, 'PEDIDO_MAYORISTA', `Pedido: ${orderId}`);
+            const vid = item.variant_id;
+            const prev = unitsByVariant.get(vid);
+            if (prev)
+                prev.units += units;
+            else
+                unitsByVariant.set(vid, { units, sku: item.sku || vid });
+        }
+        for (const [variantId, { units, sku }] of unitsByVariant) {
+            const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+            const currentStock = (_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0;
+            const newStock = Math.max(0, Number(currentStock) - units);
+            const success = yield (0, exports.updateVariantStock)(variantId, newStock, 'PEDIDO_MAYORISTA', `Pedido: ${orderId}`);
             if (!success) {
-                errors.push(`Error actualizando stock para variante ${item.sku || item.variant_id}`);
+                errors.push(`Error actualizando stock para variante ${sku || variantId}`);
             }
         }
         return { success: errors.length === 0, errors };
@@ -155,6 +166,7 @@ const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, funct
 exports.deductStockForOrder = deductStockForOrder;
 // Restaurar stock cuando se cancela un pedido
 const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const errors = [];
     try {
         const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
@@ -166,13 +178,23 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
        JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?`, [orderId]);
+        const unitsByVariant = new Map();
         for (const item of items) {
             const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
-            const currentStock = item.current_stock || 0;
-            const newStock = currentStock + units;
-            const success = yield (0, exports.updateVariantStock)(item.variant_id, newStock, 'DEVOLUCION', `Cancelación pedido: ${orderId}`);
+            const vid = item.variant_id;
+            const prev = unitsByVariant.get(vid);
+            if (prev)
+                prev.units += units;
+            else
+                unitsByVariant.set(vid, { units, sku: item.sku || vid });
+        }
+        for (const [variantId, { units, sku }] of unitsByVariant) {
+            const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+            const currentStock = (_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0;
+            const newStock = Number(currentStock) + units;
+            const success = yield (0, exports.updateVariantStock)(variantId, newStock, 'DEVOLUCION', `Cancelación pedido: ${orderId}`);
             if (!success) {
-                errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
+                errors.push(`Error restaurando stock para variante ${sku || variantId}`);
             }
         }
         return { success: errors.length === 0, errors };

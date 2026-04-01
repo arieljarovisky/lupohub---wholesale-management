@@ -9,6 +9,8 @@ router.get('/stats', despachos_controller_1.getDespachoStats);
 router.get('/productos-sin-despacho', despachos_controller_1.getProductosSinDespacho);
 // Asignar un número de despacho a todos los productos que no tienen despacho (debe ir antes de /:id)
 router.post('/asignar-todos', despachos_controller_1.asignarDespachoATodos);
+// Asignar un despacho existente a un solo producto por código (SKU base o variante)
+router.post('/asignar-a-producto', despachos_controller_1.asignarDespachoAProducto);
 // CRUD de despachos
 router.get('/', despachos_controller_1.getDespachos);
 router.get('/:id', despachos_controller_1.getDespachoById);

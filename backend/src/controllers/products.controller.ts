@@ -774,18 +774,26 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       );
     }
 
-    // Enviar stock local a plataformas externas para todas las variantes vinculadas
+    // Enviar stock local a plataformas externas (ML/TN). Por lotes para no disparar el timeout del cliente.
+    const SYNC_BATCH = 4;
     let synced = 0;
-    for (const link of links) {
-      if (!link.variantId) continue;
-      try {
-        const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
-        const currentStock = Number(stockRow?.stock ?? 0);
-        await syncStockToExternalPlatforms(link.variantId, currentStock);
-        synced++;
-      } catch (err: any) {
-        console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', err?.message || err);
-      }
+    const toSync = links.filter((l) => l.variantId);
+    for (let i = 0; i < toSync.length; i += SYNC_BATCH) {
+      const batch = toSync.slice(i, i + SYNC_BATCH);
+      const batchCounts = await Promise.all(
+        batch.map(async (link) => {
+          try {
+            const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
+            const currentStock = Number(stockRow?.stock ?? 0);
+            await syncStockToExternalPlatforms(link.variantId!, currentStock);
+            return 1;
+          } catch (err: any) {
+            console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', err?.message || err);
+            return 0;
+          }
+        })
+      );
+      synced += batchCounts.reduce<number>((a, b) => a + b, 0);
     }
 
     res.json({

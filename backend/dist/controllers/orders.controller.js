@@ -46,11 +46,39 @@ exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura 
 const db_1 = require("../database/db");
 const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
+function resolveDespachoIdForItem(item, variantId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        const raw = (_a = item === null || item === void 0 ? void 0 : item.despachoId) !== null && _a !== void 0 ? _a : item === null || item === void 0 ? void 0 : item.despacho_id;
+        if (raw != null && raw !== '') {
+            const id = String(raw).trim();
+            if (id) {
+                const row = yield (0, db_1.get)('SELECT id FROM despachos WHERE id = ?', [id]);
+                if (row === null || row === void 0 ? void 0 : row.id)
+                    return row.id;
+            }
+        }
+        // Fallback automático: si no viene despacho explícito, usar el último despacho del producto de la variante.
+        if (!variantId)
+            return null;
+        const fallback = yield (0, db_1.get)(`SELECT p.ultimo_despacho_id AS despacho_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     WHERE pv.id = ?
+     LIMIT 1`, [variantId]);
+        const fallbackId = fallback === null || fallback === void 0 ? void 0 : fallback.despacho_id;
+        if (!fallbackId)
+            return null;
+        const exists = yield (0, db_1.get)('SELECT id FROM despachos WHERE id = ?', [fallbackId]);
+        return (_b = exists === null || exists === void 0 ? void 0 : exists.id) !== null && _b !== void 0 ? _b : null;
+    });
+}
 function mapPaymentStatus(row) {
     return (row === null || row === void 0 ? void 0 : row.payment_status) === 'pendiente' ? 'pendiente' : 'pagado';
 }
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
         const archivedOnly = req.query.archivedOnly === 'true' || req.query.archivedOnly === '1';
@@ -87,7 +115,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const orderIds = ordersRow.map((o) => o.id);
         const placeholders = orderIds.map(() => '?').join(',');
         const itemsRows = yield (0, db_1.query)(`
-      SELECT i.order_id, i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.order_id, i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack,
              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
@@ -95,14 +123,15 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
              p.name AS productName,
              s.size_code AS sizeCode,
              c.name AS colorName,
-             d.numero_despacho AS numeroDespacho
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
-      LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id IN (${placeholders})
     `, orderIds);
         const itemsByOrderId = {};
@@ -115,16 +144,17 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 items.push({
                     variantId: row.variantId,
                     productId: row.productId,
+                    despachoId: (_a = row.despachoId) !== null && _a !== void 0 ? _a : undefined,
                     quantity: row.quantity,
-                    picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
+                    picked: (_b = row.picked) !== null && _b !== void 0 ? _b : 0,
                     priceAtMoment: Number(row.priceAtMoment),
                     sellAsPack: !!(row.sellAsPack),
                     mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-                    sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
-                    productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
-                    sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
-                    colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined,
-                    numeroDespacho: (_g = (_f = row.numeroDespacho) !== null && _f !== void 0 ? _f : row.numero_despacho) !== null && _g !== void 0 ? _g : undefined
+                    sku: (_c = row.sku) !== null && _c !== void 0 ? _c : undefined,
+                    productName: (_d = row.productName) !== null && _d !== void 0 ? _d : undefined,
+                    sizeCode: (_e = row.sizeCode) !== null && _e !== void 0 ? _e : undefined,
+                    colorName: (_f = row.colorName) !== null && _f !== void 0 ? _f : undefined,
+                    numeroDespacho: (_h = (_g = row.numeroDespacho) !== null && _g !== void 0 ? _g : row.numero_despacho) !== null && _h !== void 0 ? _h : undefined
                 });
             }
         }
@@ -133,8 +163,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         for (const inv of invoicesRows) {
             invoiceByOrderId[inv.order_id] = {
                 cae: inv.cae,
-                caeFchVto: (_h = inv.cae_fch_vto) !== null && _h !== void 0 ? _h : undefined,
-                puntoVta: (_j = inv.punto_venta) !== null && _j !== void 0 ? _j : undefined,
+                caeFchVto: (_j = inv.cae_fch_vto) !== null && _j !== void 0 ? _j : undefined,
+                puntoVta: (_k = inv.punto_venta) !== null && _k !== void 0 ? _k : undefined,
                 cbteDesde: inv.cbte_desde,
                 cbteHasta: inv.cbte_hasta,
                 cbteTipo: inv.cbte_tipo,
@@ -238,7 +268,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack]);
+            const despachoId = yield resolveDespachoIdForItem(item, variantId);
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack, despachoId]);
         }
         if (newOrder.status === 'Confirmado') {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -250,32 +281,37 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
         const items = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id = ?
     `, [orderId]);
         const itemsMapped = items.map((row) => {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f, _g;
             return ({
                 variantId: row.variantId,
                 productId: row.productId,
+                despachoId: (_a = row.despachoId) !== null && _a !== void 0 ? _a : undefined,
                 quantity: row.quantity,
-                picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
+                picked: (_b = row.picked) !== null && _b !== void 0 ? _b : 0,
                 priceAtMoment: Number(row.priceAtMoment),
                 sellAsPack: !!(row.sellAsPack),
                 mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-                sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
-                productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
-                sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
-                colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
+                sku: (_c = row.sku) !== null && _c !== void 0 ? _c : undefined,
+                productName: (_d = row.productName) !== null && _d !== void 0 ? _d : undefined,
+                sizeCode: (_e = row.sizeCode) !== null && _e !== void 0 ? _e : undefined,
+                colorName: (_f = row.colorName) !== null && _f !== void 0 ? _f : undefined,
+                numeroDespacho: (_g = row.numeroDespacho) !== null && _g !== void 0 ? _g : undefined
             });
         });
         const orderResponse = {
@@ -380,38 +416,44 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack) VALUES (?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack]);
+            const despachoId = yield resolveDespachoIdForItem(item, variantId);
+            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
         }
         const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?', [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id = ?
     `, [id]);
         const itemsMapped = itemsRows.map((row) => {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f, _g;
             return ({
                 variantId: row.variantId,
                 productId: row.productId,
+                despachoId: (_a = row.despachoId) !== null && _a !== void 0 ? _a : undefined,
                 quantity: row.quantity,
-                picked: (_a = row.picked) !== null && _a !== void 0 ? _a : 0,
+                picked: (_b = row.picked) !== null && _b !== void 0 ? _b : 0,
                 priceAtMoment: Number(row.priceAtMoment),
                 sellAsPack: !!(row.sellAsPack),
                 mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-                sku: (_b = row.sku) !== null && _b !== void 0 ? _b : undefined,
-                productName: (_c = row.productName) !== null && _c !== void 0 ? _c : undefined,
-                sizeCode: (_d = row.sizeCode) !== null && _d !== void 0 ? _d : undefined,
-                colorName: (_e = row.colorName) !== null && _e !== void 0 ? _e : undefined
+                sku: (_c = row.sku) !== null && _c !== void 0 ? _c : undefined,
+                productName: (_d = row.productName) !== null && _d !== void 0 ? _d : undefined,
+                sizeCode: (_e = row.sizeCode) !== null && _e !== void 0 ? _e : undefined,
+                colorName: (_f = row.colorName) !== null && _f !== void 0 ? _f : undefined,
+                numeroDespacho: (_g = row.numeroDespacho) !== null && _g !== void 0 ? _g : undefined
             });
         });
         res.json({

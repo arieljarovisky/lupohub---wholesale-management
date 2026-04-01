@@ -360,6 +360,22 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
                 COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
          FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`, [`${sku}-%`]);
         }
+        // Código de variante completo (ej. QE5546-158-614): primer segmento = SKU del modelo
+        if (!product && String(sku).includes('-')) {
+            const base = String(sku).split('-')[0];
+            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
+         FROM products p WHERE p.sku = ?`, [base]);
+        }
+        if (!product) {
+            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
+                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
+                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
+                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
+         FROM products p WHERE ? LIKE CONCAT(p.sku, '-%') ORDER BY CHAR_LENGTH(p.sku) DESC LIMIT 1`, [sku]);
+        }
         if (!product)
             return res.status(404).json({ message: 'Producto no encontrado' });
         // Obtener todas las variantes del producto encontrado
@@ -655,7 +671,7 @@ exports.unlinkProductPlatforms = unlinkProductPlatforms;
  *  Usa el stock local como fuente de verdad y lo envía a ML/TN (no importa stock desde ML).
  */
 const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     const body = req.body || {};
     const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = body;
     if (!links || !Array.isArray(links) || links.length === 0) {
@@ -701,20 +717,26 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 variantId
             ]);
         }
-        // Enviar stock local a plataformas externas para todas las variantes vinculadas
+        // Enviar stock local a plataformas externas (ML/TN). Por lotes para no disparar el timeout del cliente.
+        const SYNC_BATCH = 4;
         let synced = 0;
-        for (const link of links) {
-            if (!link.variantId)
-                continue;
-            try {
-                const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
-                const currentStock = Number((_b = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _b !== void 0 ? _b : 0);
-                yield (0, stock_controller_1.syncStockToExternalPlatforms)(link.variantId, currentStock);
-                synced++;
-            }
-            catch (err) {
-                console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', (err === null || err === void 0 ? void 0 : err.message) || err);
-            }
+        const toSync = links.filter((l) => l.variantId);
+        for (let i = 0; i < toSync.length; i += SYNC_BATCH) {
+            const batch = toSync.slice(i, i + SYNC_BATCH);
+            const batchCounts = yield Promise.all(batch.map((link) => __awaiter(void 0, void 0, void 0, function* () {
+                var _a;
+                try {
+                    const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
+                    const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);
+                    yield (0, stock_controller_1.syncStockToExternalPlatforms)(link.variantId, currentStock);
+                    return 1;
+                }
+                catch (err) {
+                    console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', (err === null || err === void 0 ? void 0 : err.message) || err);
+                    return 0;
+                }
+            })));
+            synced += batchCounts.reduce((a, b) => a + b, 0);
         }
         res.json({
             updated: links.length,

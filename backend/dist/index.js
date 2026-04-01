@@ -38,6 +38,7 @@ const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
 const add_pack_size_products_1 = require("./database/add_pack_size_products");
 const add_order_item_sell_as_pack_1 = require("./database/add_order_item_sell_as_pack");
+const add_order_item_despacho_id_1 = require("./database/add_order_item_despacho_id");
 const add_variant_publications_table_1 = require("./database/add_variant_publications_table");
 const add_external_sku_1 = require("./database/add_external_sku");
 const add_mercado_libre_item_id_1 = require("./database/add_mercado_libre_item_id");
@@ -133,6 +134,7 @@ function initDatabase() {
                 yield (0, add_despachos_table_1.addDespachosTable)();
                 yield (0, add_pack_size_products_1.addPackSizeToProducts)();
                 yield (0, add_order_item_sell_as_pack_1.addOrderItemSellAsPack)();
+                yield (0, add_order_item_despacho_id_1.addOrderItemDespachoId)();
                 yield (0, add_variant_publications_table_1.addVariantPublicationsTable)();
                 yield (0, add_external_sku_1.addExternalSkuToVariants)();
                 yield (0, add_mercado_libre_item_id_1.addMercadoLibreItemIdToVariants)();
