@@ -123,6 +123,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [bulkLinkAssignments, setBulkLinkAssignments] = useState<Record<string, { ml?: string; tn?: string }>>({});
   const [bulkLinkSkuEdits, setBulkLinkSkuEdits] = useState<Record<string, string>>({});
   const [bulkLinkSaving, setBulkLinkSaving] = useState(false);
+  const [bulkLinkMlSearch, setBulkLinkMlSearch] = useState('');
+  const [bulkLinkTnSearch, setBulkLinkTnSearch] = useState('');
 
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1297,6 +1299,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setBulkLinkMlVariations([]);
     setBulkLinkTnVariants([]);
     setBulkLinkAssignments({});
+    setBulkLinkMlSearch('');
+    setBulkLinkTnSearch('');
   };
 
   const handleDeleteVariant = (variantId: string, skuLabel: string, groupKey?: string) => {
@@ -1389,6 +1393,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setBulkLinkAssignments(next);
     return next;
   };
+
+  const bulkLinkOptionMatch = (
+    query: string,
+    item: { sku?: string; size?: string; color?: string; variationId?: string | number; variantId?: string | number }
+  ) => {
+    const q = norm(query);
+    if (!q) return true;
+    const id = item.variationId ?? item.variantId ?? '';
+    const text = [item.sku || '', formatSizeForLink(item.size), item.color || '', String(id)].join(' ');
+    return norm(text).includes(q);
+  };
+
+  const filteredBulkLinkMlVariations = React.useMemo(
+    () => bulkLinkMlVariations.filter((m) => bulkLinkOptionMatch(bulkLinkMlSearch, m)),
+    [bulkLinkMlVariations, bulkLinkMlSearch]
+  );
+  const filteredBulkLinkTnVariants = React.useMemo(
+    () => bulkLinkTnVariants.filter((t) => bulkLinkOptionMatch(bulkLinkTnSearch, t)),
+    [bulkLinkTnVariants, bulkLinkTnSearch]
+  );
 
   React.useEffect(() => {
     if (!showBulkLinkModal || !bulkLinkGroupKey) return;
@@ -3917,6 +3941,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       Volver a emparejar (SKU, luego talle/color)
                     </button>
                   )}
+                  {(bulkLinkMlVariations.length > 0 || bulkLinkTnVariants.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={bulkLinkMlSearch}
+                        onChange={(e) => setBulkLinkMlSearch(e.target.value)}
+                        placeholder={`Filtrar opciones ML (${bulkLinkMlVariations.length}) por SKU/talle/color/ID`}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={bulkLinkTnSearch}
+                        onChange={(e) => setBulkLinkTnSearch(e.target.value)}
+                        placeholder={`Filtrar opciones TN (${bulkLinkTnVariants.length}) por SKU/talle/color/ID`}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs"
+                      />
+                    </div>
+                  )}
                   {bulkLinkVariants.length > 0 && (
                     <div className="rounded-xl border border-slate-700 overflow-x-auto touch-scroll scrollbar-hide -mx-1 sm:mx-0">
                       <table className="w-full min-w-[520px] text-sm">
@@ -3972,11 +4014,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       className="w-full max-w-[220px] bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-slate-300 text-xs"
                                     >
                                       <option value="">Rellenar desde publicación cargada</option>
-                                      {bulkLinkMlVariations.map(m => (
+                                      {filteredBulkLinkMlVariations.map(m => (
                                         <option key={String(m.variationId)} value={String(m.variationId)}>
                                           {m.sku || '(sin SKU)'} — {[formatSizeForLink(m.size), m.color].filter(Boolean).join(' / ') || '—'}
                                         </option>
                                       ))}
+                                      {filteredBulkLinkMlVariations.length === 0 && (
+                                        <option value="" disabled>Sin coincidencias con el filtro</option>
+                                      )}
                                     </select>
                                   )}
                                   {(() => {
@@ -4010,11 +4055,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                   className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
                                 >
                                   <option value="">—</option>
-                                  {bulkLinkTnVariants.map(t => (
+                                  {filteredBulkLinkTnVariants.map(t => (
                                     <option key={String(t.variantId)} value={String(t.variantId)}>
                                       {t.sku || '(sin SKU)'} — {[formatSizeForLink(t.size), t.color].filter(Boolean).join(' / ') || '—'}
                                     </option>
                                   ))}
+                                  {filteredBulkLinkTnVariants.length === 0 && (
+                                    <option value="" disabled>Sin coincidencias con el filtro</option>
+                                  )}
                                 </select>
                               </td>
                             </tr>
