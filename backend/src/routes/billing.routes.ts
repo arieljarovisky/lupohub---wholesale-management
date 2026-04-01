@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { listBilling, exportBilling } from '../controllers/billing.controller';
-import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
+import { authMiddleware, billingAccessMiddleware } from '../middleware/auth';
 
 const router = Router();
 
-router.use(authMiddleware, adminOrDepositoMiddleware);
+router.use(authMiddleware, billingAccessMiddleware);
 
 router.get('/', listBilling);
 router.get('/export', exportBilling);

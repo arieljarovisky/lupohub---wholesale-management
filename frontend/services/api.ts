@@ -592,7 +592,7 @@ export const api = {
     }, [], 'getCustomers');
   },
 
-  /** Saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+  /** Saldos: pedidos impagos (IVA incl.) menos pagos/recibos cargados en Facturación. */
   getSaldosPendientes: async (): Promise<Array<{
     customerId: string;
     businessName: string;
@@ -601,6 +601,10 @@ export const api = {
     city: string;
     email: string;
     saldoPendiente: number;
+    /** Suma pedidos con cobro pendiente (IVA 21%), antes de restar pagos */
+    totalCargosPendiente: number;
+    /** Suma de recibos en `payments` para el cliente */
+    totalPagos: number;
     pedidosPendientes: number;
   }>> => {
     return await request('/customers/saldos-pendientes', 'GET');

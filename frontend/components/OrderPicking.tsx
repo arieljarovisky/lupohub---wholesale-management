@@ -26,7 +26,8 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
     setItems(order.items.map(i => ({ ...i, picked: i.picked || 0 })));
   }, [order]);
 
-  const itemKey = (item: OrderItem) => item.productId || item.variantId || '';
+  /** Una línea = una variante; productId se repite entre talles/colores. */
+  const itemKey = (item: OrderItem) => item.variantId || item.productId || '';
 
   const toggleItemComplete = (key: string) => {
     if (isReadOnly) return;
@@ -116,7 +117,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
 
       {/* Picking List */}
       <div className="p-3 md:p-6 space-y-3 pb-24 md:pb-6 overflow-y-auto">
-        {items.map((item) => {
+        {items.map((item, lineIdx) => {
           const product = products.find(p => p.id === item.productId) ?? products.find(p => (p as any).product_id === item.productId);
           const displaySku = (item as any).sku ?? product?.sku ?? 'Variante';
           const displayName = (item as any).productName ?? product?.name ?? `Ítem (${item.quantity} un.)`;
@@ -128,7 +129,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
           
           return (
             <div 
-              key={key} 
+              key={`${key}-${lineIdx}`}
               className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
                 isFullyPicked 
                 ? 'bg-slate-900/50 border-green-900/30 opacity-60' 

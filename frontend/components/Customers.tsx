@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2 } from 'lucide-react';
-import { Customer, Role, Order, OrderStatus, Product, Transporte, User } from '../types';
+import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
 import { api } from '../services/api';
@@ -71,6 +71,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     city: string;
     email: string;
     saldoPendiente: number;
+    totalCargosPendiente?: number;
+    totalPagos?: number;
     pedidosPendientes: number;
   }>>([]);
   const [saldosLoading, setSaldosLoading] = useState(false);
@@ -120,6 +122,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     if (!sellerId) return '';
     const seller = users.find(u => u.id === sellerId);
     return seller?.name || '';
+  };
+
+  /** El backend ya envía nombre/SKU/talle/color por línea; el catálogo local puede no estar cargado. */
+  const lineTitleForItem = (item: OrderItem) => {
+    const fromApi = item.productName?.trim();
+    if (fromApi) return fromApi;
+    const p = products.find((pr) => pr.id === item.productId);
+    return p?.name?.trim() || 'Producto Desconocido';
+  };
+
+  const lineMetaForItem = (item: OrderItem) => {
+    const p = products.find((pr) => pr.id === item.productId);
+    const sku = item.sku ?? p?.sku;
+    const size = item.sizeCode ?? p?.size;
+    const color = item.colorName ?? p?.color;
+    const parts = [sku, size, color].filter((x) => x != null && String(x).trim() !== '');
+    return parts.length ? parts.join(' • ') : '—';
   };
 
   const getStatusColor = (status: OrderStatus) => {
@@ -224,7 +243,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const productCounts: Record<string, number> = {};
     customerOrders.forEach(order => {
       order.items.forEach(item => {
-        productCounts[item.productId] = (productCounts[item.productId] || 0) + item.quantity;
+        if (item.productId) {
+          productCounts[item.productId] = (productCounts[item.productId] || 0) + item.quantity;
+        }
       });
     });
     
@@ -295,17 +316,16 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            <div className="p-6">
               <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-4">Items del Pedido</h3>
               <div className="space-y-3">
-                 {selectedOrder.items.map(item => {
-                    const product = products.find(p => p.id === item.productId);
+                 {selectedOrder.items.map((item, itemIdx) => {
                     return (
-                       <div key={item.productId} className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl border border-slate-800">
+                       <div key={item.variantId || `${item.productId || 'line'}-${itemIdx}`} className="flex items-center justify-between p-4 bg-slate-900 rounded-2xl border border-slate-800">
                           <div className="flex items-center gap-4">
                              <div className="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 font-bold">
                                 {item.quantity}x
                              </div>
                              <div>
-                                <p className="font-bold text-white">{product?.name || 'Producto Desconocido'}</p>
-                                <p className="text-xs text-slate-500">{product?.sku} • {product?.size} • {product?.color}</p>
+                                <p className="font-bold text-white">{lineTitleForItem(item)}</p>
+                                <p className="text-xs text-slate-500">{lineMetaForItem(item)}</p>
                              </div>
                           </div>
                           <div className="text-right">
@@ -1084,13 +1104,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <p className="text-sm text-slate-400 mb-2 truncate">{customer.name}</p>
 
                 {canViewSaldos && (
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]">
-                    <span className="text-amber-300/90 font-semibold">Saldo pendiente:</span>
-                    <span className="text-amber-300 font-bold tabular-nums">
-                      {saldosLoading
-                        ? '...'
-                        : `$${Number(saldo?.saldoPendiente || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    </span>
+                  <div
+                    className="mb-2 space-y-1"
+                    title="Saldo = pedidos con cobro pendiente (IVA incl.) menos pagos registrados en Facturación → Cargar pago."
+                  >
+                    <div className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]">
+                      <span className="text-amber-300/90 font-semibold">Deuda neta:</span>
+                      <span className="text-amber-300 font-bold tabular-nums">
+                        {saldosLoading
+                          ? '...'
+                          : `$${Number(saldo?.saldoPendiente || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                      </span>
+                    </div>
+                    {!saldosLoading && saldo && (Number(saldo.totalPagos) > 0 || Number(saldo.totalCargosPendiente) > 0) && (
+                      <div className="text-[10px] text-slate-500 tabular-nums">
+                        Cargos IVA: ${Number(saldo.totalCargosPendiente ?? saldo.saldoPendiente).toLocaleString('es-AR', { minimumFractionDigits: 2 })} · Pagos: $
+                        {Number(saldo.totalPagos ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      </div>
+                    )}
                   </div>
                 )}
 
