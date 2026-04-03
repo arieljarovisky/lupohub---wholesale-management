@@ -3429,6 +3429,65 @@ export const emitirNotaCreditoExternalInvoice = async (req: Request, res: Respon
   }
 };
 
+/** Listado de preguntas del vendedor (historial desde la API de Mercado Libre). */
+export const getMercadoLibreQuestions = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+
+    const offsetNum = Math.max(0, parseInt((req.query.offset as string) || '0', 10) || 0);
+    const limitNum = Math.min(50, Math.max(1, parseInt((req.query.limit as string) || '20', 10) || 20));
+    const statusFilter = ((req.query.status as string) || '').toString().trim().toUpperCase();
+    const allowedStatus = ['ANSWERED', 'UNANSWERED', 'BANNED', 'CLOSED_UNANSWERED', 'UNDER_REVIEW'];
+    const params = new URLSearchParams({
+      seller_id: String(mlToken.user_id),
+      limit: String(limitNum),
+      offset: String(offsetNum),
+    });
+    if (statusFilter && allowedStatus.includes(statusFilter)) {
+      params.set('status', statusFilter);
+    }
+
+    const url = `https://api.mercadolibre.com/questions/search?${params.toString()}`;
+    const r = await axios.get(url, {
+      headers: { Authorization: `Bearer ${mlToken.access_token}` },
+    });
+
+    const data = r.data || {};
+    const raw = Array.isArray(data.questions) ? data.questions : Array.isArray(data.results) ? data.results : [];
+
+    const questions = raw.map((q: any) => ({
+      id: q.id,
+      text: q.text ?? '',
+      status: q.status ?? '',
+      itemId: q.item_id != null ? String(q.item_id) : null,
+      itemTitle: q.item?.title ?? q.item_title ?? null,
+      dateCreated: q.date_created ?? null,
+      buyerNickname: q.buyer?.nickname ?? q.from?.nickname ?? null,
+      answerText: q.answer?.text ?? null,
+      answerDate: q.answer?.date_created ?? null,
+    }));
+
+    res.json({
+      questions,
+      total: typeof data.total === 'number' ? data.total : questions.length,
+      offset: typeof data.offset === 'number' ? data.offset : offsetNum,
+      limit: typeof data.limit === 'number' ? data.limit : limitNum,
+    });
+  } catch (error: any) {
+    const errData = error.response?.data;
+    console.error('[ML Questions]', errData || error.message);
+    const msg =
+      (typeof errData?.message === 'string' && errData.message) ||
+      (typeof errData?.error === 'string' && errData.error) ||
+      error.message ||
+      'Error al obtener preguntas de Mercado Libre';
+    res.status(error.response?.status || 500).json({ message: msg });
+  }
+};
+
 // Obtener órdenes de Mercado Libre
 export const getMercadoLibreOrders = async (req: Request, res: Response) => {
   try {

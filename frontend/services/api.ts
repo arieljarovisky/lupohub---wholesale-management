@@ -917,6 +917,33 @@ export const api = {
     }, { orders: [], total: 0 }, 'getMercadoLibreOrders');
   },
 
+  /** Preguntas del vendedor en ML (texto de la pregunta y de la respuesta, vía API oficial). */
+  getMercadoLibreQuestions: async (params?: { offset?: number; limit?: number; status?: '' | 'ANSWERED' | 'UNANSWERED' | 'BANNED' | 'CLOSED_UNANSWERED' | 'UNDER_REVIEW' }): Promise<{
+    questions: Array<{
+      id: string | number;
+      text: string;
+      status: string;
+      itemId: string | null;
+      itemTitle: string | null;
+      dateCreated: string | null;
+      buyerNickname: string | null;
+      answerText: string | null;
+      answerDate: string | null;
+    }>;
+    total: number;
+    offset: number;
+    limit: number;
+  }> => {
+    return handleRequest(async () => {
+      const queryParams = new URLSearchParams();
+      if (params?.offset !== undefined) queryParams.append('offset', String(params.offset));
+      if (params?.limit !== undefined) queryParams.append('limit', String(params.limit));
+      if (params?.status) queryParams.append('status', params.status);
+      const queryString = queryParams.toString();
+      return await request(`/integrations/mercadolibre/questions${queryString ? '?' + queryString : ''}`, 'GET');
+    }, { questions: [], total: 0, offset: 0, limit: 20 }, 'getMercadoLibreQuestions');
+  },
+
   invoiceMercadoLibreOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
     message: string;
     summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };

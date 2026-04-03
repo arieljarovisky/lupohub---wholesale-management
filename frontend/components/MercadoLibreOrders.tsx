@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { api } from '../services/api';
+import MercadoLibreQuestions from './MercadoLibreQuestions';
 
 interface MercadoLibreOrder {
   id: number;
@@ -57,6 +58,7 @@ const MercadoLibreOrders: React.FC = () => {
   const [bulkInvoicing, setBulkInvoicing] = useState(false);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [mlSection, setMlSection] = useState<'orders' | 'questions'>('orders');
   const limit = 15;
 
   const fetchOrders = async () => {
@@ -282,6 +284,35 @@ const MercadoLibreOrders: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex gap-1 border-b border-slate-700/80 pb-0">
+        <button
+          type="button"
+          onClick={() => setMlSection('orders')}
+          className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors ${
+            mlSection === 'orders'
+              ? 'bg-slate-800 text-white border border-b-0 border-slate-600'
+              : 'text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          Ventas
+        </button>
+        <button
+          type="button"
+          onClick={() => setMlSection('questions')}
+          className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors ${
+            mlSection === 'questions'
+              ? 'bg-slate-800 text-white border border-b-0 border-slate-600'
+              : 'text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          Preguntas
+        </button>
+      </div>
+
+      {mlSection === 'questions' ? (
+        <MercadoLibreQuestions />
+      ) : (
+      <>
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div className="flex items-center gap-4">
@@ -769,6 +800,8 @@ const MercadoLibreOrders: React.FC = () => {
           </button>
         </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

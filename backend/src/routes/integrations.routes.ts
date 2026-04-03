@@ -25,6 +25,7 @@ import {
   getTiendaNubeStockTotals,
   getTiendaNubeProductVariants,
   getMercadoLibreOrders,
+  getMercadoLibreQuestions,
   getMercadoLibreStock,
   getMercadoLibreStockTotals,
   getMercadoLibreItemVariations,
@@ -54,6 +55,7 @@ router.get('/mercadolibre/callback', handleMercadoLibreCallback);
 router.get('/mercadolibre/test', testMercadoLibreConnection);
 router.get('/mercadolibre/debug', debugMercadoLibreItem);
 router.get('/mercadolibre/orders', getMercadoLibreOrders);
+router.get('/mercadolibre/questions', getMercadoLibreQuestions);
 router.get('/mercadolibre/stock', getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', getMercadoLibreStockTotals);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);

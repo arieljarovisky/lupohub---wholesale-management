@@ -11,6 +11,7 @@ router.get('/mercadolibre/callback', integrations_controller_1.handleMercadoLibr
 router.get('/mercadolibre/test', integrations_controller_1.testMercadoLibreConnection);
 router.get('/mercadolibre/debug', integrations_controller_1.debugMercadoLibreItem);
 router.get('/mercadolibre/orders', integrations_controller_1.getMercadoLibreOrders);
+router.get('/mercadolibre/questions', integrations_controller_1.getMercadoLibreQuestions);
 router.get('/mercadolibre/stock', integrations_controller_1.getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLibreStockTotals);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);

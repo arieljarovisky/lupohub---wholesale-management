@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
@@ -3181,6 +3181,64 @@ const emitirNotaCreditoExternalInvoice = (req, res) => __awaiter(void 0, void 0,
     }
 });
 exports.emitirNotaCreditoExternalInvoice = emitirNotaCreditoExternalInvoice;
+/** Listado de preguntas del vendedor (historial desde la API de Mercado Libre). */
+const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const mlToken = yield getValidMLToken();
+        if (!mlToken) {
+            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+        }
+        const offsetNum = Math.max(0, parseInt(req.query.offset || '0', 10) || 0);
+        const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit || '20', 10) || 20));
+        const statusFilter = (req.query.status || '').toString().trim().toUpperCase();
+        const allowedStatus = ['ANSWERED', 'UNANSWERED', 'BANNED', 'CLOSED_UNANSWERED', 'UNDER_REVIEW'];
+        const params = new URLSearchParams({
+            seller_id: String(mlToken.user_id),
+            limit: String(limitNum),
+            offset: String(offsetNum),
+        });
+        if (statusFilter && allowedStatus.includes(statusFilter)) {
+            params.set('status', statusFilter);
+        }
+        const url = `https://api.mercadolibre.com/questions/search?${params.toString()}`;
+        const r = yield axios_1.default.get(url, {
+            headers: { Authorization: `Bearer ${mlToken.access_token}` },
+        });
+        const data = r.data || {};
+        const raw = Array.isArray(data.questions) ? data.questions : Array.isArray(data.results) ? data.results : [];
+        const questions = raw.map((q) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+            return ({
+                id: q.id,
+                text: (_a = q.text) !== null && _a !== void 0 ? _a : '',
+                status: (_b = q.status) !== null && _b !== void 0 ? _b : '',
+                itemId: q.item_id != null ? String(q.item_id) : null,
+                itemTitle: (_e = (_d = (_c = q.item) === null || _c === void 0 ? void 0 : _c.title) !== null && _d !== void 0 ? _d : q.item_title) !== null && _e !== void 0 ? _e : null,
+                dateCreated: (_f = q.date_created) !== null && _f !== void 0 ? _f : null,
+                buyerNickname: (_k = (_h = (_g = q.buyer) === null || _g === void 0 ? void 0 : _g.nickname) !== null && _h !== void 0 ? _h : (_j = q.from) === null || _j === void 0 ? void 0 : _j.nickname) !== null && _k !== void 0 ? _k : null,
+                answerText: (_m = (_l = q.answer) === null || _l === void 0 ? void 0 : _l.text) !== null && _m !== void 0 ? _m : null,
+                answerDate: (_p = (_o = q.answer) === null || _o === void 0 ? void 0 : _o.date_created) !== null && _p !== void 0 ? _p : null,
+            });
+        });
+        res.json({
+            questions,
+            total: typeof data.total === 'number' ? data.total : questions.length,
+            offset: typeof data.offset === 'number' ? data.offset : offsetNum,
+            limit: typeof data.limit === 'number' ? data.limit : limitNum,
+        });
+    }
+    catch (error) {
+        const errData = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data;
+        console.error('[ML Questions]', errData || error.message);
+        const msg = (typeof (errData === null || errData === void 0 ? void 0 : errData.message) === 'string' && errData.message) ||
+            (typeof (errData === null || errData === void 0 ? void 0 : errData.error) === 'string' && errData.error) ||
+            error.message ||
+            'Error al obtener preguntas de Mercado Libre';
+        res.status(((_b = error.response) === null || _b === void 0 ? void 0 : _b.status) || 500).json({ message: msg });
+    }
+});
+exports.getMercadoLibreQuestions = getMercadoLibreQuestions;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
