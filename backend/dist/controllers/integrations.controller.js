@@ -45,13 +45,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.getValidMLToken = getValidMLToken;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const products_controller_1 = require("./products.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
+const mlQuestionsAi = __importStar(require("../services/mlQuestionsAi.service"));
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
@@ -1434,6 +1436,33 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
             }
             else {
                 console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
+            }
+        }
+        /** Preguntas: responder con IA si está habilitado (no bloquea la respuesta 200 al webhook). */
+        if (topic === 'questions') {
+            const qm = resourceRaw.match(/questions\/(\d+)/);
+            const questionId = qm === null || qm === void 0 ? void 0 : qm[1];
+            if (questionId) {
+                setImmediate(() => {
+                    (() => __awaiter(void 0, void 0, void 0, function* () {
+                        var _a;
+                        try {
+                            const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
+                            if (!cfg.enabled || !mlQuestionsAi.openAiConfigured())
+                                return;
+                            const t = yield getValidMLToken();
+                            if (!t)
+                                return;
+                            yield mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
+                                extraSystemPrompt: cfg.extraSystemPrompt
+                            });
+                            console.log(`[ML Questions AI] Procesada pregunta ${questionId}`);
+                        }
+                        catch (e) {
+                            console.error('[ML Questions AI] Error:', ((_a = e === null || e === void 0 ? void 0 : e.response) === null || _a === void 0 ? void 0 : _a.data) || (e === null || e === void 0 ? void 0 : e.message) || e);
+                        }
+                    }))();
+                });
             }
         }
         res.status(200).json({ received: true });
@@ -3183,7 +3212,7 @@ const emitirNotaCreditoExternalInvoice = (req, res) => __awaiter(void 0, void 0,
 exports.emitirNotaCreditoExternalInvoice = emitirNotaCreditoExternalInvoice;
 /** Listado de preguntas del vendedor (historial desde la API de Mercado Libre). */
 const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -3193,21 +3222,55 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
         const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit || '20', 10) || 20));
         const statusFilter = (req.query.status || '').toString().trim().toUpperCase();
         const allowedStatus = ['ANSWERED', 'UNANSWERED', 'BANNED', 'CLOSED_UNANSWERED', 'UNDER_REVIEW'];
+        let dateFromRaw = (req.query.date_from || '').toString().trim();
+        let dateToRaw = (req.query.date_to || '').toString().trim();
+        const ymd = /^\d{4}-\d{2}-\d{2}$/;
+        if (dateFromRaw && dateToRaw && ymd.test(dateFromRaw) && ymd.test(dateToRaw) && dateFromRaw > dateToRaw) {
+            const t = dateFromRaw;
+            dateFromRaw = dateToRaw;
+            dateToRaw = t;
+        }
         const params = new URLSearchParams({
             seller_id: String(mlToken.user_id),
             limit: String(limitNum),
             offset: String(offsetNum),
+            /** Últimas primero (API ML) */
+            sort_fields: 'date_created',
+            sort_types: 'DESC',
         });
         if (statusFilter && allowedStatus.includes(statusFilter)) {
             params.set('status', statusFilter);
         }
-        const url = `https://api.mercadolibre.com/questions/search?${params.toString()}`;
-        const r = yield axios_1.default.get(url, {
-            headers: { Authorization: `Bearer ${mlToken.access_token}` },
-        });
+        if (dateFromRaw && ymd.test(dateFromRaw)) {
+            params.set('from', `${dateFromRaw}T00:00:00.000-03:00`);
+        }
+        if (dateToRaw && ymd.test(dateToRaw)) {
+            params.set('to', `${dateToRaw}T23:59:59.999-03:00`);
+        }
+        const baseQs = params.toString();
+        let r;
+        try {
+            r = yield axios_1.default.get(`https://api.mercadolibre.com/questions/search?${baseQs}`, {
+                headers: { Authorization: `Bearer ${mlToken.access_token}` },
+            });
+        }
+        catch (first) {
+            if (((_a = first === null || first === void 0 ? void 0 : first.response) === null || _a === void 0 ? void 0 : _a.status) === 400 && baseQs.includes('sort_fields')) {
+                const fallback = new URLSearchParams(baseQs);
+                fallback.delete('sort_fields');
+                fallback.delete('sort_types');
+                r = yield axios_1.default.get(`https://api.mercadolibre.com/questions/search?${fallback.toString()}`, {
+                    headers: { Authorization: `Bearer ${mlToken.access_token}` },
+                });
+            }
+            else {
+                throw first;
+            }
+        }
         const data = r.data || {};
         const raw = Array.isArray(data.questions) ? data.questions : Array.isArray(data.results) ? data.results : [];
-        const questions = raw.map((q) => {
+        const questions = raw
+            .map((q) => {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
             return ({
                 id: q.id,
@@ -3220,6 +3283,11 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
                 answerText: (_m = (_l = q.answer) === null || _l === void 0 ? void 0 : _l.text) !== null && _m !== void 0 ? _m : null,
                 answerDate: (_p = (_o = q.answer) === null || _o === void 0 ? void 0 : _o.date_created) !== null && _p !== void 0 ? _p : null,
             });
+        })
+            .sort((a, b) => {
+            const ta = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+            const tb = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+            return tb - ta;
         });
         res.json({
             questions,
@@ -3229,13 +3297,13 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
         });
     }
     catch (error) {
-        const errData = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data;
+        const errData = (_b = error.response) === null || _b === void 0 ? void 0 : _b.data;
         console.error('[ML Questions]', errData || error.message);
         const msg = (typeof (errData === null || errData === void 0 ? void 0 : errData.message) === 'string' && errData.message) ||
             (typeof (errData === null || errData === void 0 ? void 0 : errData.error) === 'string' && errData.error) ||
             error.message ||
             'Error al obtener preguntas de Mercado Libre';
-        res.status(((_b = error.response) === null || _b === void 0 ? void 0 : _b.status) || 500).json({ message: msg });
+        res.status(((_c = error.response) === null || _c === void 0 ? void 0 : _c.status) || 500).json({ message: msg });
     }
 });
 exports.getMercadoLibreQuestions = getMercadoLibreQuestions;
@@ -4441,3 +4509,66 @@ const saveMLAutoMessageConfig = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.saveMLAutoMessageConfig = saveMLAutoMessageConfig;
+/** Config de respuesta automática a preguntas ML (Gemini / Groq gratis u OpenAI). */
+const getMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
+        const st = mlQuestionsAi.getLlmStatus();
+        res.json({
+            enabled: cfg.enabled,
+            extraSystemPrompt: cfg.extraSystemPrompt || '',
+            openAiConfigured: st.configured,
+            llmProvider: st.provider,
+            llmLabel: st.label
+        });
+    }
+    catch (error) {
+        console.error('getMLQuestionsAiConfig:', error);
+        res.status(500).json({ message: 'Error obteniendo configuración', error: error.message });
+    }
+});
+exports.getMLQuestionsAiConfig = getMLQuestionsAiConfig;
+const saveMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { enabled, extraSystemPrompt } = req.body || {};
+        yield mlQuestionsAi.saveMlQuestionsAiConfig(!!enabled, extraSystemPrompt != null ? String(extraSystemPrompt) : null);
+        res.json({ success: true, message: 'Configuración guardada' });
+    }
+    catch (error) {
+        console.error('saveMLQuestionsAiConfig:', error);
+        res.status(500).json({ message: 'Error guardando configuración', error: error.message });
+    }
+});
+exports.saveMLQuestionsAiConfig = saveMLQuestionsAiConfig;
+/** Procesa preguntas sin responder (manual). Requiere ML + clave IA (Gemini/Groq/OpenAI). */
+const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const user = req.user;
+        if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+            return res.status(403).json({ message: 'Solo administradores o depósito pueden ejecutar esto' });
+        }
+        if (!mlQuestionsAi.llmConfigured()) {
+            return res.status(503).json({
+                message: 'Configurá una clave de IA en el servidor: GEMINI_API_KEY (gratis en Google AI Studio), GROQ_API_KEY (gratis) u OPENAI_API_KEY (de pago).'
+            });
+        }
+        const rawLimit = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.limit) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.limit;
+        const limit = Math.min(Math.max(parseInt(String(rawLimit !== null && rawLimit !== void 0 ? rawLimit : '10'), 10) || 10, 1), 25);
+        const token = yield getValidMLToken();
+        if (!token)
+            return res.status(503).json({ message: 'Mercado Libre no conectado o token inválido' });
+        const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
+        const { processed, results } = yield mlQuestionsAi.processUnansweredBatch(token, {
+            limit,
+            extraSystemPrompt: cfg.extraSystemPrompt
+        });
+        res.json({ processed, results });
+    }
+    catch (error) {
+        const detail = (_e = (_d = error === null || error === void 0 ? void 0 : error.response) === null || _d === void 0 ? void 0 : _d.data) !== null && _e !== void 0 ? _e : error === null || error === void 0 ? void 0 : error.message;
+        console.error('processMLQuestionsAi:', detail);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error procesando preguntas', detail });
+    }
+});
+exports.processMLQuestionsAi = processMLQuestionsAi;

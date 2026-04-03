@@ -3466,34 +3466,73 @@ export const getMercadoLibreQuestions = async (req: Request, res: Response) => {
     const limitNum = Math.min(50, Math.max(1, parseInt((req.query.limit as string) || '20', 10) || 20));
     const statusFilter = ((req.query.status as string) || '').toString().trim().toUpperCase();
     const allowedStatus = ['ANSWERED', 'UNANSWERED', 'BANNED', 'CLOSED_UNANSWERED', 'UNDER_REVIEW'];
+    let dateFromRaw = ((req.query.date_from as string) || '').toString().trim();
+    let dateToRaw = ((req.query.date_to as string) || '').toString().trim();
+    const ymd = /^\d{4}-\d{2}-\d{2}$/;
+    if (dateFromRaw && dateToRaw && ymd.test(dateFromRaw) && ymd.test(dateToRaw) && dateFromRaw > dateToRaw) {
+      const t = dateFromRaw;
+      dateFromRaw = dateToRaw;
+      dateToRaw = t;
+    }
+
     const params = new URLSearchParams({
       seller_id: String(mlToken.user_id),
       limit: String(limitNum),
       offset: String(offsetNum),
+      /** Últimas primero (API ML) */
+      sort_fields: 'date_created',
+      sort_types: 'DESC',
     });
     if (statusFilter && allowedStatus.includes(statusFilter)) {
       params.set('status', statusFilter);
     }
 
-    const url = `https://api.mercadolibre.com/questions/search?${params.toString()}`;
-    const r = await axios.get(url, {
-      headers: { Authorization: `Bearer ${mlToken.access_token}` },
-    });
+    if (dateFromRaw && ymd.test(dateFromRaw)) {
+      params.set('from', `${dateFromRaw}T00:00:00.000-03:00`);
+    }
+    if (dateToRaw && ymd.test(dateToRaw)) {
+      params.set('to', `${dateToRaw}T23:59:59.999-03:00`);
+    }
+
+    const baseQs = params.toString();
+    let r;
+    try {
+      r = await axios.get(`https://api.mercadolibre.com/questions/search?${baseQs}`, {
+        headers: { Authorization: `Bearer ${mlToken.access_token}` },
+      });
+    } catch (first: any) {
+      if (first?.response?.status === 400 && baseQs.includes('sort_fields')) {
+        const fallback = new URLSearchParams(baseQs);
+        fallback.delete('sort_fields');
+        fallback.delete('sort_types');
+        r = await axios.get(`https://api.mercadolibre.com/questions/search?${fallback.toString()}`, {
+          headers: { Authorization: `Bearer ${mlToken.access_token}` },
+        });
+      } else {
+        throw first;
+      }
+    }
 
     const data = r.data || {};
     const raw = Array.isArray(data.questions) ? data.questions : Array.isArray(data.results) ? data.results : [];
 
-    const questions = raw.map((q: any) => ({
-      id: q.id,
-      text: q.text ?? '',
-      status: q.status ?? '',
-      itemId: q.item_id != null ? String(q.item_id) : null,
-      itemTitle: q.item?.title ?? q.item_title ?? null,
-      dateCreated: q.date_created ?? null,
-      buyerNickname: q.buyer?.nickname ?? q.from?.nickname ?? null,
-      answerText: q.answer?.text ?? null,
-      answerDate: q.answer?.date_created ?? null,
-    }));
+    const questions = raw
+      .map((q: any) => ({
+        id: q.id,
+        text: q.text ?? '',
+        status: q.status ?? '',
+        itemId: q.item_id != null ? String(q.item_id) : null,
+        itemTitle: q.item?.title ?? q.item_title ?? null,
+        dateCreated: q.date_created ?? null,
+        buyerNickname: q.buyer?.nickname ?? q.from?.nickname ?? null,
+        answerText: q.answer?.text ?? null,
+        answerDate: q.answer?.date_created ?? null,
+      }))
+      .sort((a: { dateCreated: string | null }, b: { dateCreated: string | null }) => {
+        const ta = a.dateCreated ? new Date(a.dateCreated).getTime() : 0;
+        const tb = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
+        return tb - ta;
+      });
 
     res.json({
       questions,

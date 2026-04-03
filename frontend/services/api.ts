@@ -922,7 +922,15 @@ export const api = {
   },
 
   /** Preguntas del vendedor en ML (texto de la pregunta y de la respuesta, vía API oficial). */
-  getMercadoLibreQuestions: async (params?: { offset?: number; limit?: number; status?: '' | 'ANSWERED' | 'UNANSWERED' | 'BANNED' | 'CLOSED_UNANSWERED' | 'UNDER_REVIEW' }): Promise<{
+  getMercadoLibreQuestions: async (params?: {
+    offset?: number;
+    limit?: number;
+    status?: '' | 'ANSWERED' | 'UNANSWERED' | 'BANNED' | 'CLOSED_UNANSWERED' | 'UNDER_REVIEW';
+    /** YYYY-MM-DD: filtro desde (inclusive), horario Argentina */
+    date_from?: string;
+    /** YYYY-MM-DD: filtro hasta (inclusive), horario Argentina */
+    date_to?: string;
+  }): Promise<{
     questions: Array<{
       id: string | number;
       text: string;
@@ -943,6 +951,8 @@ export const api = {
       if (params?.offset !== undefined) queryParams.append('offset', String(params.offset));
       if (params?.limit !== undefined) queryParams.append('limit', String(params.limit));
       if (params?.status) queryParams.append('status', params.status);
+      if (params?.date_from) queryParams.append('date_from', params.date_from);
+      if (params?.date_to) queryParams.append('date_to', params.date_to);
       const queryString = queryParams.toString();
       return await request(`/integrations/mercadolibre/questions${queryString ? '?' + queryString : ''}`, 'GET');
     }, { questions: [], total: 0, offset: 0, limit: 20 }, 'getMercadoLibreQuestions');

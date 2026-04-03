@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight, ExternalLink, Calendar, X } from 'lucide-react';
 import { api } from '../services/api';
 
 type QStatus = '' | 'ANSWERED' | 'UNANSWERED';
@@ -31,16 +31,22 @@ const MercadoLibreQuestions: React.FC = () => {
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState<QStatus>('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const limit = 15;
 
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const df = dateFrom.trim();
+      const dt = dateTo.trim();
       const res = await api.getMercadoLibreQuestions({
         offset,
         limit,
         status: statusFilter || undefined,
+        date_from: /^\d{4}-\d{2}-\d{2}$/.test(df) ? df : undefined,
+        date_to: /^\d{4}-\d{2}-\d{2}$/.test(dt) ? dt : undefined,
       });
       setQuestions(res.questions || []);
       setTotal(res.total ?? 0);
@@ -51,7 +57,7 @@ const MercadoLibreQuestions: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [offset, limit, statusFilter]);
+  }, [offset, limit, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchQuestions();
@@ -75,11 +81,49 @@ const MercadoLibreQuestions: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-3">
+      <div className="flex flex-col gap-3">
         <p className="text-sm text-slate-400">
-          Datos en vivo desde Mercado Libre: pregunta del comprador y tu respuesta (si existe).
+          Datos en vivo desde Mercado Libre. Orden: <strong className="text-slate-300">más recientes primero</strong>.
         </p>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col lg:flex-row lg:flex-wrap items-stretch lg:items-end gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500 uppercase font-semibold flex items-center gap-1">
+              <Calendar size={14} /> Fecha pregunta
+            </span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setOffset(0);
+              }}
+              className="bg-slate-900/70 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200"
+            />
+            <span className="text-slate-500 text-sm">a</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setOffset(0);
+              }}
+              className="bg-slate-900/70 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                  setOffset(0);
+                }}
+                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white border border-slate-600 hover:bg-slate-800"
+              >
+                <X size={16} /> Limpiar fechas
+              </button>
+            )}
+          </div>
+        <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
           <select
             value={statusFilter}
             onChange={(e) => {
@@ -101,6 +145,7 @@ const MercadoLibreQuestions: React.FC = () => {
             {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
             Actualizar
           </button>
+        </div>
         </div>
       </div>
 

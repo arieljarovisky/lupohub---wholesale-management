@@ -18,6 +18,9 @@ router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.g
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMessageConfig);
+router.get('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiConfig);
+router.post('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.saveMLQuestionsAiConfig);
+router.post('/mercadolibre/questions-ai/process', auth_1.authMiddleware, integrations_controller_1.processMLQuestionsAi);
 router.post('/mercadolibre/sync', integrations_controller_1.syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', integrations_controller_1.syncAllStockToMercadoLibre);
 router.post('/mercadolibre/sync-stock-selected', integrations_controller_1.syncSelectedStockToMercadoLibre);
