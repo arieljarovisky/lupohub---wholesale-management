@@ -1720,7 +1720,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </label>
                       </div>
                       <p className="text-slate-500 text-xs mb-2">
-                        Respondé automáticamente con IA usando el título y la descripción de cada publicación. En el servidor (.env) podés usar una opción <strong>gratis</strong>: <code className="text-slate-400">GEMINI_API_KEY</code> (Google AI Studio) o <code className="text-slate-400">GROQ_API_KEY</code> (Groq); opcionalmente <code className="text-slate-400">OPENAI_API_KEY</code> (de pago). Para respuesta al instante, registrá el webhook de ML con el tema <strong>questions</strong>.
+                        La IA usa la publicación de ML y además un <strong>resumen de todo tu inventario LupoHub</strong> (SKU, talle, color, stock, vínculos ML) para poder sugerir otras tallas u otros productos. En el servidor (.env) podés usar una opción <strong>gratis</strong>: <code className="text-slate-400">GEMINI_API_KEY</code> (Google AI Studio) o <code className="text-slate-400">GROQ_API_KEY</code> (Groq); opcionalmente <code className="text-slate-400">OPENAI_API_KEY</code> (de pago). Opcional: <code className="text-slate-400">ML_QUESTIONS_AI_CATALOG_ENABLED=false</code> para desactivar el catálogo. Para respuesta al instante, registrá el webhook de ML con el tema <strong>questions</strong>.
                       </p>
                       {mlQuestionsAiOpenAiOk && mlQuestionsAiLlmLabel && (
                         <div className="mb-3 p-2 rounded-lg bg-emerald-900/20 border border-emerald-700/40 text-emerald-200 text-xs">

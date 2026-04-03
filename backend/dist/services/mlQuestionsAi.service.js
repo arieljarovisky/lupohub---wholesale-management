@@ -18,6 +18,7 @@ exports.saveMlQuestionsAiConfig = saveMlQuestionsAiConfig;
 exports.openAiConfigured = openAiConfigured;
 exports.llmConfigured = llmConfigured;
 exports.getLlmStatus = getLlmStatus;
+exports.buildLocalCatalogSummaryForMlQuestions = buildLocalCatalogSummaryForMlQuestions;
 exports.fetchQuestion = fetchQuestion;
 exports.searchUnansweredQuestions = searchUnansweredQuestions;
 exports.processOneQuestion = processOneQuestion;
@@ -38,8 +39,9 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_SYSTEM = `Sos el asistente de un vendedor en Mercado Libre (Argentina).
 Respondé en español rioplatense, de forma breve y cordial.
 Reglas:
-- Basá la respuesta SOLO en el título y la descripción del producto que te damos. No inventes datos.
-- Si la pregunta es sobre stock, envíos, garantías, cambios o plazos y no está aclarado en la descripción, decí que no tenés ese dato en la publicación e invitá al comprador a que te escriba por el chat de la compra si ya compró, o que consulte en la publicación.
+- Tenés dos fuentes: (1) el título y la descripción de LA publicación donde se hizo la pregunta, y (2) cuando se incluye el bloque "Catálogo LupoHub", es el inventario interno del negocio (SKU, talle, color, stock aproximado, vínculos ML si existen). Usá el catálogo para recomendar otras tallas, colores o artículos del mismo negocio cuando el comprador pida alternativas, más elasticidad, u otro modelo.
+- Priorizá datos de la publicación actual para el producto puntual; usá el catálogo para comparar con el resto del stock y sugerir opciones reales.
+- Si algo no figura ni en la descripción ni en el catálogo (envíos, garantías, plazos, políticas), no inventes: decí que no tenés ese dato y ofrecé canalizar por mensaje de compra o consulta en la publicación.
 - No uses markdown ni emojis en exceso (como mucho uno).
 - Máximo ~1200 caracteres. Sin listas largas.`;
 function ensureMlQuestionsAiConfigTable() {
@@ -144,6 +146,99 @@ function geminiModelAttempts() {
     const rest = GEMINI_FALLBACK_MODELS.filter((m) => m !== primary);
     return [primary, ...rest];
 }
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
+let catalogCache = null;
+function catalogEnabled() {
+    const v = (process.env.ML_QUESTIONS_AI_CATALOG_ENABLED || 'true').trim().toLowerCase();
+    return v !== '0' && v !== 'false' && v !== 'no';
+}
+function maxCatalogRows() {
+    const n = parseInt(process.env.ML_QUESTIONS_AI_CATALOG_MAX_ROWS || '600', 10);
+    return Math.min(5000, Math.max(50, Number.isFinite(n) ? n : 600));
+}
+function maxCatalogChars() {
+    const n = parseInt(process.env.ML_QUESTIONS_AI_CATALOG_MAX_CHARS || '14000', 10);
+    return Math.min(100000, Math.max(2000, Number.isFinite(n) ? n : 14000));
+}
+/** Resumen de variantes en LupoHub para contexto de IA (preguntas ML). */
+function buildLocalCatalogSummaryForMlQuestions() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!catalogEnabled())
+            return '';
+        try {
+            const limit = maxCatalogRows();
+            const rows = yield (0, db_1.query)(`SELECT
+         p.name AS product_name,
+         p.category,
+         p.sku AS base_sku,
+         COALESCE(NULLIF(TRIM(pv.external_sku), ''), NULLIF(TRIM(pv.sku), '')) AS variant_sku,
+         sz.size_code AS size_code,
+         COALESCE(sz.name, '') AS size_name,
+         c.name AS color_name,
+         COALESCE(st.stock, 0) AS stock,
+         p.mercado_libre_id AS ml_product,
+         pv.mercado_libre_item_id AS ml_variant_item
+       FROM products p
+       INNER JOIN product_colors pc ON pc.product_id = p.id
+       INNER JOIN product_variants pv ON pv.product_color_id = pc.id
+       LEFT JOIN sizes sz ON sz.id = pv.size_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN stocks st ON st.variant_id = pv.id
+       ORDER BY p.name ASC, variant_sku ASC
+       LIMIT ?`, [limit]);
+            if (!(rows === null || rows === void 0 ? void 0 : rows.length)) {
+                return '(No hay variantes cargadas en LupoHub.)';
+            }
+            const lines = [];
+            for (const r of rows) {
+                const sku = (r.variant_sku || r.base_sku || '—').toString().trim();
+                const talle = [r.size_code, r.size_name].filter(Boolean).join(' ').trim() || '—';
+                const color = (r.color_name || '—').toString();
+                const ml = (r.ml_variant_item || r.ml_product || '').toString().trim();
+                const mlBit = ml ? ` | ML:${ml}` : '';
+                lines.push(`- ${sku} | ${String(r.product_name || '').trim()} | Cat:${r.category || '—'} | Talle:${talle} | Color:${color} | Stock:${Number(r.stock) || 0}${mlBit}`);
+            }
+            let text = lines.join('\n');
+            const maxC = maxCatalogChars();
+            let truncated = false;
+            if (text.length > maxC) {
+                text = text.slice(0, maxC - 60) + '\n… (catálogo truncado por límite de contexto)';
+                truncated = true;
+            }
+            const head = `Listado de ${rows.length} variantes en LupoHub${truncated ? ' (parcial)' : ''}:\n`;
+            return head + text;
+        }
+        catch (e) {
+            console.warn('[ML Questions AI] Catálogo local:', (e === null || e === void 0 ? void 0 : e.message) || e);
+            return '(No se pudo cargar el catálogo LupoHub.)';
+        }
+    });
+}
+function getCachedCatalogSummary() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!catalogEnabled())
+            return '';
+        const now = Date.now();
+        if (catalogCache && now - catalogCache.at < CATALOG_CACHE_TTL_MS) {
+            return catalogCache.text;
+        }
+        const text = yield buildLocalCatalogSummaryForMlQuestions();
+        catalogCache = { text, at: now };
+        return text;
+    });
+}
+function buildMlQuestionUserPrompt(params) {
+    var _a;
+    const cat = (_a = params.catalogSummary) === null || _a === void 0 ? void 0 : _a.trim();
+    const catBlock = cat
+        ? `Catálogo LupoHub (inventario interno; puede estar incompleto o truncado):\n${cat}\n\n---\n\n`
+        : '';
+    return (`${catBlock}` +
+        `Publicación de Mercado Libre donde está la pregunta (ID ítem: ${params.itemListingId}):\n` +
+        `Título: ${params.itemTitle}\n\n` +
+        `Descripción (texto plano):\n${params.description || '(sin descripción)'}\n\n` +
+        `Pregunta del comprador:\n${params.questionText}`);
+}
 function callGeminiAnswer(params) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d, _e, _f, _g;
@@ -151,7 +246,7 @@ function callGeminiAnswer(params) {
         if (!key)
             throw new Error('GEMINI_API_KEY no configurada');
         const system = [DEFAULT_SYSTEM, (_b = params.extraSystem) === null || _b === void 0 ? void 0 : _b.trim()].filter(Boolean).join('\n\n');
-        const user = `Título de la publicación:\n${params.itemTitle}\n\nDescripción (texto plano):\n${params.description || '(sin descripción)'}\n\nPregunta del comprador:\n${params.questionText}`;
+        const user = params.userPrompt;
         const body = {
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: 'user', parts: [{ text: user }] }],
@@ -195,7 +290,7 @@ function callGroqAnswer(params) {
             throw new Error('GROQ_API_KEY no configurada');
         const model = ((_b = process.env.GROQ_MODEL) === null || _b === void 0 ? void 0 : _b.trim()) || 'llama-3.1-8b-instant';
         const system = [DEFAULT_SYSTEM, (_c = params.extraSystem) === null || _c === void 0 ? void 0 : _c.trim()].filter(Boolean).join('\n\n');
-        const user = `Título de la publicación:\n${params.itemTitle}\n\nDescripción (texto plano):\n${params.description || '(sin descripción)'}\n\nPregunta del comprador:\n${params.questionText}`;
+        const user = params.userPrompt;
         const res = yield axios_1.default.post(GROQ_URL, {
             model,
             messages: [
@@ -225,7 +320,7 @@ function callOpenAiAnswer(params) {
             throw new Error('OPENAI_API_KEY no configurada en el servidor');
         const model = ((_b = process.env.OPENAI_MODEL) === null || _b === void 0 ? void 0 : _b.trim()) || 'gpt-4o-mini';
         const system = [DEFAULT_SYSTEM, (_c = params.extraSystem) === null || _c === void 0 ? void 0 : _c.trim()].filter(Boolean).join('\n\n');
-        const user = `Título de la publicación:\n${params.itemTitle}\n\nDescripción (texto plano):\n${params.description || '(sin descripción)'}\n\nPregunta del comprador:\n${params.questionText}`;
+        const user = params.userPrompt;
         const res = yield axios_1.default.post(OPENAI_URL, {
             model,
             messages: [
@@ -253,11 +348,19 @@ function generateLlmAnswer(params) {
         if (!provider) {
             throw new Error('Ningún proveedor de IA configurado. Agregá GEMINI_API_KEY (recomendado, gratis), GROQ_API_KEY (gratis) u OPENAI_API_KEY en el servidor.');
         }
+        const userPrompt = buildMlQuestionUserPrompt({
+            catalogSummary: params.catalogSummary,
+            itemListingId: params.itemListingId,
+            itemTitle: params.itemTitle,
+            description: params.description,
+            questionText: params.questionText
+        });
+        const common = { userPrompt, extraSystem: params.extraSystem };
         if (provider === 'gemini')
-            return callGeminiAnswer(params);
+            return callGeminiAnswer(common);
         if (provider === 'groq')
-            return callGroqAnswer(params);
-        return callOpenAiAnswer(params);
+            return callGroqAnswer(common);
+        return callOpenAiAnswer(common);
     });
 }
 function truncateAnswer(s, max = 1900) {
@@ -346,11 +449,14 @@ function processOneQuestion(accessToken, questionId, opts) {
         const item = yield fetchItem(accessToken, itemId);
         const title = String((item === null || item === void 0 ? void 0 : item.title) || '(sin título)');
         const description = yield fetchDescription(accessToken, itemId);
+        const catalogSummary = yield getCachedCatalogSummary();
         const answerText = yield generateLlmAnswer({
             itemTitle: title,
             description,
             questionText,
-            extraSystem: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt
+            extraSystem: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt,
+            catalogSummary,
+            itemListingId: String(itemId)
         });
         yield mlPost(accessToken, '/answers', {
             question_id: Number(questionId),
