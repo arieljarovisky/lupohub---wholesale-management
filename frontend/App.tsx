@@ -705,7 +705,7 @@ const App: React.FC = () => {
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
-      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN] },
+      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
   ];

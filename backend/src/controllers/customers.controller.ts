@@ -442,14 +442,33 @@ function roleCanViewSaldos(role: string | undefined): boolean {
   return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
 
-/** Lista saldos pendientes por cliente (pedidos con cobro pendiente; importe con IVA 21% sobre neto, neto de NC). */
+/** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
 export const getSaldosPendientes = async (req: Request, res: Response) => {
   const user = (req as any).user;
   if (!user || !roleCanViewSaldos(user.role)) {
     return res.status(403).json({ message: 'Sin permiso para ver saldos' });
   }
   const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
-  const params: any[] = user.role === 'SELLER' ? [user.id] : [];
+  const baseParams: any[] = user.role === 'SELLER' ? [user.id] : [];
+
+  const paymentsJoin =
+    user.role === 'SELLER'
+      ? `LEFT JOIN (
+      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      FROM payments p
+      INNER JOIN customers c2 ON c2.id = p.customer_id
+      WHERE (p.seller_id = ? OR c2.seller_id = ?)
+      GROUP BY p.customer_id
+    ) pay ON pay.customer_id = t.customerId`
+      : `LEFT JOIN (
+      SELECT customer_id, SUM(amount) AS total_pagos
+      FROM payments
+      GROUP BY customer_id
+    ) pay ON pay.customer_id = t.customerId`;
+
+  const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
+  const paramsWithNc = [...baseParams, ...payParams];
+  const paramsSimple = [...baseParams, ...payParams];
 
   const mapRows = (rows: any[]) =>
     rows.map((r) => ({
@@ -460,63 +479,93 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       city: r.city ?? '',
       email: r.email ?? '',
       saldoPendiente: Number(r.saldoPendiente) || 0,
+      totalCargosPendiente: Number(r.totalCargosPendiente) || 0,
+      totalPagos: Number(r.totalPagos) || 0,
       pedidosPendientes: Number(r.pedidosPendientes) || 0
     }));
 
   const sqlWithNc = `
     SELECT
-      c.id AS customerId,
-      c.business_name AS businessName,
-      c.name AS contactName,
-      c.cuit,
-      c.city,
-      c.email,
-      SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS saldoPendiente,
-      COUNT(DISTINCT o.id) AS pedidosPendientes
-    FROM customers c
-    INNER JOIN orders o ON o.customer_id = c.id
-    LEFT JOIN (
-      SELECT order_id, SUM(amount_credited) AS cn_total
-      FROM credit_notes
-      GROUP BY order_id
-    ) cn ON cn.order_id = o.id
-    WHERE o.payment_status = 'pendiente'
-      AND o.status NOT IN ('Cancelado', 'Borrador')
-      AND (o.archived = 0 OR o.archived IS NULL)
-      ${sellerFilter}
-    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) > 0.01
-    ORDER BY c.business_name ASC, c.name ASC
+      t.customerId,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      t.city,
+      t.email,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        c.city,
+        c.email,
+        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    ) t
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
   const sqlSimple = `
     SELECT
-      c.id AS customerId,
-      c.business_name AS businessName,
-      c.name AS contactName,
-      c.cuit,
-      c.city,
-      c.email,
-      SUM(ROUND(o.total * 1.21, 2)) AS saldoPendiente,
-      COUNT(DISTINCT o.id) AS pedidosPendientes
-    FROM customers c
-    INNER JOIN orders o ON o.customer_id = c.id
-    WHERE o.payment_status = 'pendiente'
-      AND o.status NOT IN ('Cancelado', 'Borrador')
-      AND (o.archived = 0 OR o.archived IS NULL)
-      ${sellerFilter}
-    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(ROUND(o.total * 1.21, 2)) > 0.01
-    ORDER BY c.business_name ASC, c.name ASC
+      t.customerId,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      t.city,
+      t.email,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        c.city,
+        c.email,
+        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    ) t
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
   try {
-    const rows = await query(sqlWithNc, params);
+    const rows = await query(sqlWithNc, paramsWithNc);
     return res.json(mapRows(rows as any[]));
   } catch (e: any) {
     console.warn('[saldos] consulta con NC falló, reintentando sin NC:', e?.message);
     try {
-      const rows = await query(sqlSimple, params);
+      const rows = await query(sqlSimple, paramsSimple);
       return res.json(mapRows(rows as any[]));
     } catch (e2: any) {
       console.error('getSaldosPendientes:', e2);
@@ -532,60 +581,105 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
     return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
   }
   const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
-  const params: any[] = user.role === 'SELLER' ? [user.id] : [];
+  const baseParams: any[] = user.role === 'SELLER' ? [user.id] : [];
+  const paymentsJoin =
+    user.role === 'SELLER'
+      ? `LEFT JOIN (
+      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      FROM payments p
+      INNER JOIN customers c2 ON c2.id = p.customer_id
+      WHERE (p.seller_id = ? OR c2.seller_id = ?)
+      GROUP BY p.customer_id
+    ) pay ON pay.customer_id = t.customerId`
+      : `LEFT JOIN (
+      SELECT customer_id, SUM(amount) AS total_pagos
+      FROM payments
+      GROUP BY customer_id
+    ) pay ON pay.customer_id = t.customerId`;
+  const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
+  const paramsWithNc = [...baseParams, ...payParams];
+  const paramsSimple = [...baseParams, ...payParams];
 
   const sqlWithNc = `
     SELECT
-      c.id AS customerId,
-      c.business_name AS businessName,
-      c.name AS contactName,
-      c.cuit,
-      c.city,
-      c.email,
-      SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS saldoPendiente,
-      COUNT(DISTINCT o.id) AS pedidosPendientes
-    FROM customers c
-    INNER JOIN orders o ON o.customer_id = c.id
-    LEFT JOIN (
-      SELECT order_id, SUM(amount_credited) AS cn_total
-      FROM credit_notes
-      GROUP BY order_id
-    ) cn ON cn.order_id = o.id
-    WHERE o.payment_status = 'pendiente'
-      AND o.status NOT IN ('Cancelado', 'Borrador')
-      AND (o.archived = 0 OR o.archived IS NULL)
-      ${sellerFilter}
-    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) > 0.01
-    ORDER BY c.business_name ASC, c.name ASC
+      t.customerId,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      t.city,
+      t.email,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        c.city,
+        c.email,
+        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    ) t
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
   const sqlSimple = `
     SELECT
-      c.id AS customerId,
-      c.business_name AS businessName,
-      c.name AS contactName,
-      c.cuit,
-      c.city,
-      c.email,
-      SUM(ROUND(o.total * 1.21, 2)) AS saldoPendiente,
-      COUNT(DISTINCT o.id) AS pedidosPendientes
-    FROM customers c
-    INNER JOIN orders o ON o.customer_id = c.id
-    WHERE o.payment_status = 'pendiente'
-      AND o.status NOT IN ('Cancelado', 'Borrador')
-      AND (o.archived = 0 OR o.archived IS NULL)
-      ${sellerFilter}
-    GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
-    HAVING SUM(ROUND(o.total * 1.21, 2)) > 0.01
-    ORDER BY c.business_name ASC, c.name ASC
+      t.customerId,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      t.city,
+      t.email,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        c.city,
+        c.email,
+        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
+    ) t
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
   let rows: any[];
   try {
-    rows = (await query(sqlWithNc, params)) as any[];
+    rows = (await query(sqlWithNc, paramsWithNc)) as any[];
   } catch {
-    rows = (await query(sqlSimple, params)) as any[];
+    rows = (await query(sqlSimple, paramsSimple)) as any[];
   }
 
   const header = [
@@ -596,6 +690,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
     'ciudad',
     'email',
     'pedidos_impagos',
+    'total_cargos_iva',
+    'pagos_registrados',
     'saldo_pendiente'
   ];
   const lines = [header.join(';')];
@@ -610,6 +706,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         esc(r.city ?? ''),
         esc(r.email ?? ''),
         Number(r.pedidosPendientes) || 0,
+        (Number(r.totalCargosPendiente) || 0).toFixed(2).replace('.', ','),
+        (Number(r.totalPagos) || 0).toFixed(2).replace('.', ','),
         (Number(r.saldoPendiente) || 0).toFixed(2).replace('.', ',')
       ].join(';')
     );

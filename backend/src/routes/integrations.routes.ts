@@ -32,6 +32,9 @@ import {
   getVariantExternalStocks,
   getMLAutoMessageConfig,
   saveMLAutoMessageConfig,
+  getMLQuestionsAiConfig,
+  saveMLQuestionsAiConfig,
+  processMLQuestionsAi,
   importProductFromMercadoLibre,
   importProductFromTiendaNube,
   testTiendaNubeOrder,
@@ -62,6 +65,9 @@ router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariatio
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
+router.get('/mercadolibre/questions-ai', authMiddleware, getMLQuestionsAiConfig);
+router.post('/mercadolibre/questions-ai', authMiddleware, saveMLQuestionsAiConfig);
+router.post('/mercadolibre/questions-ai/process', authMiddleware, processMLQuestionsAi);
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
 router.post('/mercadolibre/sync-stock-selected', syncSelectedStockToMercadoLibre);

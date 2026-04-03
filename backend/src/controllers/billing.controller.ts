@@ -31,6 +31,12 @@ export const listBilling = async (req: Request, res: Response) => {
       params.push(tipo);
     }
 
+    const authUser = (req as any).user;
+    if (authUser?.role === 'SELLER') {
+      whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE seller_id = ?)');
+      params.push(authUser.id);
+    }
+
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
     const sql = `
@@ -139,6 +145,12 @@ export const exportBilling = async (req: Request, res: Response) => {
       params.push(tipo);
     }
 
+    const authUser = (req as any).user;
+    if (authUser?.role === 'SELLER') {
+      whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE seller_id = ?)');
+      params.push(authUser.id);
+    }
+
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
     const sql = `
@@ -154,6 +166,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           o.id AS order_id,
           o.date AS fecha,
           o.total AS importe,
+          c.id AS customer_id,
           c.business_name AS customer_business_name,
           i.cae,
           i.cae_fch_vto AS cae_fch_vto,
@@ -174,6 +187,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           cn.order_id AS order_id,
           o.date AS fecha,
           cn.amount_credited AS importe,
+          c.id AS customer_id,
           c.business_name AS customer_business_name,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,

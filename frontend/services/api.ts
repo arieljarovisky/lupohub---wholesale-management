@@ -592,7 +592,7 @@ export const api = {
     }, [], 'getCustomers');
   },
 
-  /** Saldos pendientes por cliente (pedidos con cobro pendiente, neto de NC). */
+  /** Saldos: pedidos impagos (IVA incl.) menos pagos/recibos cargados en Facturación. */
   getSaldosPendientes: async (): Promise<Array<{
     customerId: string;
     businessName: string;
@@ -601,6 +601,10 @@ export const api = {
     city: string;
     email: string;
     saldoPendiente: number;
+    /** Suma pedidos con cobro pendiente (IVA 21%), antes de restar pagos */
+    totalCargosPendiente: number;
+    /** Suma de recibos en `payments` para el cliente */
+    totalPagos: number;
     pedidosPendientes: number;
   }>> => {
     return await request('/customers/saldos-pendientes', 'GET');
@@ -1060,6 +1064,26 @@ export const api = {
     return handleRequest(async () => {
       return await request<{ success: boolean }>('/integrations/mercadolibre/auto-message', 'POST', config);
     }, { success: false }, 'saveMLAutoMessageConfig');
+  },
+
+  /** Respuestas automáticas a preguntas de ML (Gemini / Groq / OpenAI según .env). */
+  getMLQuestionsAiConfig: async (): Promise<{
+    enabled: boolean;
+    extraSystemPrompt: string;
+    openAiConfigured: boolean;
+    llmProvider: 'gemini' | 'groq' | 'openai' | null;
+    llmLabel: string;
+  }> => {
+    return await request('/integrations/mercadolibre/questions-ai', 'GET');
+  },
+  saveMLQuestionsAiConfig: async (config: { enabled: boolean; extraSystemPrompt: string }): Promise<{ success: boolean; message?: string }> => {
+    return await request('/integrations/mercadolibre/questions-ai', 'POST', config);
+  },
+  processMLQuestionsAi: async (limit?: number): Promise<{
+    processed: number;
+    results: Array<{ questionId: string; status: string; reason?: string; preview?: string; message?: string }>;
+  }> => {
+    return await request('/integrations/mercadolibre/questions-ai/process', 'POST', { limit: limit ?? 10 });
   },
 
   // Historial de movimientos de stock
