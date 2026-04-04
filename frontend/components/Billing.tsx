@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
-import { Customer, Payment, Role, User } from '../types';
+import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml } from '../utils/wholesaleInvoiceHtml';
+import { Customer, Order, Payment, Product, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
+
+const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 
 interface BillingProps {
   role: Role;
   customers: Customer[];
   users?: User[];
+  products?: Product[];
 }
 
-const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
+const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [] }) => {
   const { showToast } = useNotification();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,6 +35,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
+  const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
+
+  useEffect(() => {
+    api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
+  }, []);
+
+  const mergedRemitenteForFactura = () => {
+    const localRemitente = getRemitente();
+    return (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
+      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
+      : localRemitente;
+  };
 
   const load = async () => {
     setLoading(true);
@@ -104,171 +120,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
     return item.cbteTipo === 1 ? 'Factura A' : item.cbteTipo === 6 ? 'Factura B' : 'Factura';
   };
 
-  const buildFacturaHtml = (order: any) => {
-    if (!order?.invoice) return '';
-
-    const customer = customers.find(c => c.id === order.customerId);
-    const remitente = getRemitente();
-    const inv = order.invoice;
-
-    const formatDateShort = (d: any) => {
-      if (!d) return '';
-      const x = new Date(d);
-      if (Number.isNaN(x.getTime())) return String(d);
-      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      return `${String(x.getDate()).padStart(2, '0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
-    };
-
-    const formatoNumero = (n: any) => (n != null ? String(n) : '');
-    const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5,'0')}-${String(inv.cbteDesde).padStart(8,'0')}` : String(inv.cbteDesde);
-    const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
-    const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
-    const baseImponible = order.total != null && order.total > 0 ? order.total : order.items.reduce((s: number, i: any) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
-    const iva21 = Math.round(Number(baseImponible) * 0.21 * 100) / 100;
-    const totalComprobante = Math.round((Number(baseImponible) + iva21) * 100) / 100;
-
-    const rows = order.items.map((i: any) => {
-      const base = i.quantity * (i.priceAtMoment ?? 0);
-      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const desc = ((i.productName ?? '').toString().trim()) || '—';
-      const ivaItem = Math.round(Number(base) * 0.21 * 100) / 100;
-      const totalItem = Math.round((Number(base) + ivaItem) * 100) / 100;
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${formatMoneyAr(base)}</td><td style="text-align:right">$${formatMoneyAr(ivaItem)}</td><td style="text-align:right">$${formatMoneyAr(totalItem)}</td></tr>`;
-    }).join('');
-
-    const vtoCae = inv.caeFchVto ? formatDateShort(inv.caeFchVto) : '—';
-    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
-    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
-    const cuitEmpresaDigits = String((remitente as any).cuit || '').replace(/\D/g, '');
-    const cuitClienteDigits = String(customer?.cuit || '').replace(/\D/g, '');
-    const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
-    const fechaQr = !isNaN(fechaQrBase.getTime())
-      ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
-      : '';
-    const tipoDocRec = cuitClienteDigits.length === 11 ? 80 : cuitClienteDigits.length >= 7 ? 96 : 99;
-    const qrPayload = {
-      ver: 1,
-      fecha: fechaQr,
-      cuit: Number(cuitEmpresaDigits) || 0,
-      ptoVta: Number(inv.puntoVta ?? 0),
-      tipoCmp: Number(inv.cbteTipo ?? 0),
-      nroCmp: Number(inv.cbteDesde ?? 0),
-      importe: Number(totalComprobante.toFixed(2)),
-      moneda: 'PES',
-      ctz: 1,
-      tipoDocRec,
-      nroDocRec: cuitClienteDigits ? Number(cuitClienteDigits) : 0,
-      tipoCodAut: 'E',
-      codAut: Number(String(inv.cae || '').replace(/\D/g, '')) || 0
-    };
-    const afipQrUrl = `https://www.afip.gob.ar/fe/qr/?p=${btoa(unescape(encodeURIComponent(JSON.stringify(qrPayload))))}`;
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(afipQrUrl)}`;
-
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
-      @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
-      * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 24px 16px 40px; color: #000000; background: #ffffff; font-size: 13px; line-height: 1.4; }
-      .inv-doc { width: 100%; max-width: 190mm; margin: 0 auto; background: #ffffff; border: 1px solid #6b99de; border-radius: 12px; padding: 28px 32px 32px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #6b99de; }
-      .inv-logo-wrap { min-height: 56px; display: flex; align-items: center; }
-      .inv-logo { max-height: 56px; max-width: 220px; width: auto; height: auto; object-fit: contain; display: block; }
-      .inv-logo-placeholder { font-size: 1.3rem; font-weight: 700; color: #000000; }
-      .inv-meta { text-align: right; }
-      .inv-meta .inv-num { font-size: 1.05rem; font-weight: 800; color: #6b99de; }
-      .inv-meta .inv-fecha { font-size: 0.85rem; color: #000000; margin-top: 4px; font-weight: 700; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 22px; padding: 14px; background: #f5f8ff; border: 1px solid #dbe7ff; border-radius: 8px; }
-      .inv-datos strong { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #000000; margin-bottom: 6px; font-weight: 700; }
-      .inv-table-wrap { margin-bottom: 22px; border: 1px solid #dbe7ff; border-radius: 8px; overflow: hidden; }
-      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.79rem; }
-      .inv-table thead { background: linear-gradient(180deg, #dbe7ff 0%, #f5f8ff 100%); }
-      .inv-table th { text-align: left; padding: 11px 12px; font-weight: 700; color: #000000; border-bottom: 2px solid #6b99de; }
-      .inv-table th:nth-child(2), .inv-table th:nth-child(3) { text-align: center; }
-      .inv-table th:nth-child(n+4) { text-align: right; }
-      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #e6edff; vertical-align: middle; }
-      .inv-table tbody tr:nth-child(even) td { background: #f8fbff; }
-      .inv-table tbody tr:last-child td { border-bottom: none; }
-      .col-c { text-align: center; color: #000000; }
-      .col-r { text-align: right; }
-      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 24px; }
-      .inv-summary-inner { min-width: 260px; font-size: 0.88rem; border: 1px solid #dbe7ff; border-radius: 8px; overflow: hidden; }
-      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 20px; padding: 10px 14px; border-bottom: 1px solid #e6edff; }
-      .inv-summary-inner .row.total { font-weight: 800; font-size: 1rem; background: #eaf2ff; color: #000000; }
-      .inv-footer { padding: 14px 18px; background: #f5f8ff; border: 1px solid #dbe7ff; border-radius: 8px; font-size: 0.78rem; color: #000000; }
-      .inv-cae { margin-bottom: 6px; font-weight: 600; }
-      .inv-footer-grid { display: grid; grid-template-columns: 1fr 128px; gap: 12px; align-items: end; }
-      .inv-qr { border: 1px solid #9db7e6; border-radius: 6px; padding: 4px; text-align: center; background: #ffffff; }
-      .inv-qr img { width: 112px; height: 112px; display: block; margin: 0 auto; }
-      .inv-qr small { display: block; margin-top: 4px; font-size: 9px; line-height: 1.1; }
-      .no-print { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-      .no-print button { padding: 10px 22px; font-size: 0.95rem; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; }
-      .no-print button:first-child { background: #6b99de; color: #ffffff; }
-      .no-print button:last-child { background: #000000; color: #ffffff; }
-      @media print { .no-print { display: none !important; } .inv-doc { border: none; box-shadow: none; } }
-    </style></head><body>
-      <div class="inv-top">
-        <div class="inv-logo-wrap">${
-          (remitente.logoUrl && String(remitente.logoUrl).trim())
-            ? `<img src="${String(remitente.logoUrl).trim()}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />`
-            : `<span class="inv-logo-placeholder">${(remitente.businessName||'Empresa').replace(/</g,'&lt;')}</span>`
-        }</div>
-        <div class="inv-meta">
-          <div class="inv-num">FACTURA Nº: ${nroComprobante}</div>
-          <div class="inv-fecha">Fecha: ${fechaComprobante}</div>
-        </div>
-      </div>
-      <div class="inv-datos">
-        <div><strong>Datos empresa</strong>${remitente.businessName || '—'}<br>${empresaDir ? empresaDir + '<br>' : ''}${(remitente as any).cuit ? 'CUIT ' + (remitente as any).cuit + '<br>' : ''}Ingresos Brutos ${((remitente as any).ingresosBrutos || '901-2113373')}<br>${(remitente as any).inicioActividad ? 'Inicio de actividad ' + (remitente as any).inicioActividad + '<br>' : ''}${(remitente as any).email ? (remitente as any).email + '<br>' : ''}${(remitente as any).phone ? (remitente as any).phone : ''}</div>
-        <div><strong>Datos cliente</strong>${clienteNombre}<br>${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.transportNumber ? 'N° Transporte ' + customer.transportNumber + '<br>' : ''}${customer?.remitoNumber ? 'N° Remito ' + customer.remitoNumber + '<br>' : ''}Condición de venta ${(customer?.saleCondition || 'Cuenta Corriente')}<br>${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}</div>
-      </div>
-      <div class="inv-table-wrap">
-        <table class="inv-table">
-          <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="inv-summary"><div class="inv-summary-inner"><div class="row"><span>Base imponible</span><span>$${formatMoneyAr(baseImponible)}</span></div><div class="row"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div><div class="row"><span>Retención</span><span>—</span></div><div class="row total"><span>Total</span><span>$${formatMoneyAr(totalComprobante)}</span></div></div></div>
-      <div class="inv-footer">
-        <div class="inv-footer-grid">
-          <div>
-            <div class="inv-cae"><strong>CAE:</strong> ${inv.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-            <p style="font-size: 0.72rem; margin: 4px 0 0;">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaComprobante} y Pto.Vta ${inv.puntoVta != null ? inv.puntoVta : ''}.</p>
-          </div>
-          <div class="inv-qr">
-            <img src="${qrImageUrl}" alt="QR AFIP" />
-            <small>Comprobante autorizado<br/>AFIP</small>
-          </div>
-        </div>
-      </div>
-      <div class="no-print"><button onclick="window.print()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 8px; font-weight: 600;">Descargar PDF / Imprimir</button><button onclick="window.close()" style="padding: 10px 22px; font-size: 0.95rem; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 8px;">Cerrar</button></div>
-    </body></html>`;
-  };
-
-  const buildCreditNoteHtml = (order: any, nc: any) => {
-    const customer = customers.find((c) => c.id === order.customerId);
-    const remitente = getRemitente();
-    const items = order.items.map((i) => ({ ...i }));
-    const formatDateShort = (d: any) => {
-      if (!d) return '';
-      const x = new Date(d);
-      if (Number.isNaN(x.getTime())) return String(d);
-      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      return `${String(x.getDate()).padStart(2,'0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
-    };
-    const nroComprobante = nc.puntoVta != null ? `${String(nc.puntoVta).padStart(5,'0')}-${String(nc.cbteDesde).padStart(8,'0')}` : String(nc.cbteDesde);
-    const fecha = nc.createdAt ? formatDateShort(nc.createdAt.split('T')[0]) : formatDateShort(order.date);
-    const baseImponible = Number(nc.amountCredited || 0);
-    const rows = items.map((i: any) => {
-      const base = (i.quantity || 0) * (i.priceAtMoment || 0);
-      const despacho = i.numeroDespacho || i.numero_despacho || null;
-      const despachoCell = despacho ? String(despacho).trim() : '—';
-      const desc = [(i.sku || ''), (i.productName || '').toString().trim(), i.sizeCode || '', i.colorName || ''].filter(Boolean).join(' — ') || '—';
-      return `<tr><td>${desc}</td><td style="text-align:center">${despachoCell}</td><td style="text-align:center">${i.quantity}</td><td style="text-align:right">$${formatMoneyAr(base)}</td><td style="text-align:right">—</td><td style="text-align:right">$${formatMoneyAr(base)}</td></tr>`;
-    }).join('');
-    const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
-    const companyDir = [remitente.address, remitente.city].filter(Boolean).join(', ');
-    const customerDir = [customer?.address, customer?.city].filter(Boolean).join(', ');
-
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroComprobante}</title><style>/* ... same CSS as factura ... */</style></head><body><div><h2>NOTA DE CRÉDITO Nº ${nroComprobante}</h2><p>Fecha: ${fecha}</p></div><div><strong>Datos cliente:</strong> ${customer?.businessName || customer?.name || ''}</div><div>...</div><table><thead><tr><th>Producto</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div>Total: $${formatMoneyAr(baseImponible)}</div><div>CAE: ${nc.cae || '—'} Vto CAE: ${vtoCae}</div><div><button onclick="window.print()">Imprimir / Guardar PDF</button><button onclick="window.close()">Cerrar</button></div></body></html>`;
-  };
-
   const handleVer = async (item: any) => {
     if (!item?.orderId) {
       showToast('error', 'No se encontró el pedido para este comprobante');
@@ -277,7 +128,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
 
     try {
       const orders = await api.getOrders({ includeArchived: true, orderId: item.orderId });
-      const order = orders.find(o => o.id === item.orderId);
+      const order = orders.find((o) => o.id === item.orderId) as Order | undefined;
       if (!order) {
         showToast('error', 'Pedido no encontrado');
         return;
@@ -291,7 +142,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
           return;
         }
 
-        const html = buildCreditNoteHtml(order, nc);
+        const customerNc = customers.find((c) => c.id === order.customerId);
+        const html = buildWholesaleCreditNoteHtml({
+          order,
+          nc,
+          customer: customerNc,
+          products,
+          remitente: mergedRemitenteForFactura() as any,
+        });
         if (!html) {
           showToast('error', 'No se pudo generar la vista previa de la nota de crédito');
           return;
@@ -313,7 +171,32 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [] }) => {
         return;
       }
 
-      const html = buildFacturaHtml(order);
+      let manualFromLs: { remitoNumber?: string; transportNumber?: string; saleCondition?: string } | undefined;
+      try {
+        const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>;
+          manualFromLs = parsed[order.id];
+        }
+      } catch {
+        /* ignore */
+      }
+      const customer = customers.find((c) => c.id === order.customerId);
+      const manual =
+        manualFromLs ??
+        ({
+          transportNumber: (customer?.transportNumber ?? '').toString().trim(),
+          remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
+          saleCondition: (customer?.saleCondition ?? 'Cuenta Corriente').toString().trim(),
+        } as const);
+
+      const html = buildWholesaleFacturaHtml({
+        order,
+        customer,
+        products,
+        remitente: mergedRemitenteForFactura() as any,
+        manual,
+      });
       if (!html) {
         showToast('error', 'No se pudo generar la vista previa de factura');
         return;

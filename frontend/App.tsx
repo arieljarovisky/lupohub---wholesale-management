@@ -830,7 +830,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'facturacion' && (
             <Suspense fallback={<ViewFallback />}>
-              <Billing role={currentUser.role} customers={customers} users={users} />
+              <Billing role={currentUser.role} customers={customers} users={users} products={products} />
             </Suspense>
           )}
           {baseView === 'settings' && (

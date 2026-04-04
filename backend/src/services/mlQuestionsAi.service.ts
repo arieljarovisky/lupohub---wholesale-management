@@ -15,16 +15,17 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_SYSTEM = `Sos el asistente de un vendedor en Mercado Libre (Argentina).
 Respondé en español rioplatense, de forma breve y cordial.
 Reglas:
-- Tenés dos fuentes: (1) el título y la descripción de LA publicación donde se hizo la pregunta, y (2) cuando se incluye el bloque "Catálogo LupoHub", es el inventario interno del negocio (SKU, talle, color, stock aproximado, vínculos ML si existen). Usá el catálogo para recomendar otras tallas, colores o artículos del mismo negocio cuando el comprador pida alternativas, más elasticidad, u otro modelo.
-- Priorizá datos de la publicación actual para el producto puntual; usá el catálogo para comparar con el resto del stock y sugerir opciones reales.
+- Fuentes de la publicación: (1) Si en el prompt aparece "Guía de talles (Mercado Libre)", es la tabla oficial cargada en ML para ESA publicación: usala como referencia principal para M/G/medidas en cm. (2) Título y descripción (texto de la ficha). (3) El bloque "Catálogo LupoHub" es inventario interno (SKU, talle, color, stock, vínculos ML). Usá el catálogo para alternativas de modelo/color/stock cuando el comprador pida opciones.
+- Priorizá la guía de talles de ML (cuando exista) sobre suposiciones genéricas; cruzá con la descripción y el catálogo si hace falta.
+- Preguntas de talle/medidas (M vs G, cm de cadera, etc.): primero la guía de talles ML; si no hay guía en el prompt, usá tabla o rangos en la descripción y variantes del catálogo. Relacioná medidas del comprador con filas de la guía (cadera, contorno, etc.). No te cortes a mitad de frase: si recomendás un talle, decí cuál y en una oración por qué. Si falta un dato imprescindible, pedilo o compará opciones sin dejar la respuesta inconclusa.
 - Si el comprador pregunta por "más grande", "más chico", "más elástico", "otro talle", "otro modelo" o similares, revisá el catálogo y:
   1) confirmá si existe alguna alternativa real,
   2) mencioná hasta 3 opciones concretas (nombre/SKU/talle/color) que sí estén en catálogo,
   3) si no hay alternativas, decilo claramente.
 - Cuando afirmes que "sí hay", apoyate en datos visibles del catálogo. No inventes productos ni talles.
-- Si algo no figura ni en la descripción ni en el catálogo (envíos, garantías, plazos, políticas), no inventes: decí que no tenés ese dato y ofrecé canalizar por mensaje de compra o consulta en la publicación.
+- Si algo no figura en la guía de talles, la descripción ni el catálogo (envíos, garantías, plazos, políticas), no inventes: decí que no tenés ese dato y ofrecé canalizar por mensaje de compra o consulta en la publicación.
 - No uses markdown ni emojis en exceso (como mucho uno).
-- Máximo ~1200 caracteres. Sin listas largas.`;
+- Máximo ~1200 caracteres. Sin listas largas. Siempre cerrá oraciones: la respuesta debe ser un texto completo y útil, nunca truncada a mitad de idea.`;
 
 export async function ensureMlQuestionsAiConfigTable(): Promise<void> {
   await execute(`
@@ -219,21 +220,29 @@ async function getCachedCatalogSummary(): Promise<string> {
   return text;
 }
 
+const ML_SIZE_CHART_MAX_CHARS = 14000;
+
 function buildMlQuestionUserPrompt(params: {
   catalogSummary: string;
   itemListingId: string;
   itemTitle: string;
   description: string;
+  sizeGuideFromMl: string;
   questionText: string;
 }): string {
   const cat = params.catalogSummary?.trim();
   const catBlock = cat
     ? `Catálogo LupoHub (inventario interno; puede estar incompleto o truncado):\n${cat}\n\n---\n\n`
     : '';
+  const guide = params.sizeGuideFromMl?.trim();
+  const guideBlock = guide
+    ? `Guía de talles (Mercado Libre, publicación actual):\n${guide}\n\n---\n\n`
+    : '';
   return (
     `${catBlock}` +
     `Publicación de Mercado Libre donde está la pregunta (ID ítem: ${params.itemListingId}):\n` +
     `Título: ${params.itemTitle}\n\n` +
+    `${guideBlock}` +
     `Descripción (texto plano):\n${params.description || '(sin descripción)'}\n\n` +
     `Pregunta del comprador:\n${params.questionText}`
   );
@@ -251,7 +260,8 @@ async function callGeminiAnswer(params: { userPrompt: string; extraSystem?: stri
     contents: [{ role: 'user', parts: [{ text: user }] }],
     generationConfig: {
       temperature: 0.4,
-      maxOutputTokens: 1024
+      /** Gemini 2.5 puede usar parte del cupo en razonamiento interno; 1024 dejaba respuestas cortadas a mitad de frase. */
+      maxOutputTokens: 4096
     }
   };
 
@@ -265,7 +275,11 @@ async function callGeminiAnswer(params: { userPrompt: string; extraSystem?: stri
       });
 
       const cand = res.data?.candidates?.[0];
-      const block = cand?.finishReason && cand.finishReason !== 'STOP' ? ` (${cand.finishReason})` : '';
+      const finish = cand?.finishReason;
+      if (finish && finish !== 'STOP') {
+        console.warn(`[ML Questions AI] Gemini finishReason=${finish} (respuesta puede estar incompleta)`);
+      }
+      const block = finish && finish !== 'STOP' ? ` (${finish})` : '';
       const text =
         cand?.content?.parts?.map((p: { text?: string }) => p.text || '').join('')?.trim() || '';
       if (!text) throw new Error(`Gemini no devolvió texto${block}`);
@@ -300,7 +314,7 @@ async function callGroqAnswer(params: { userPrompt: string; extraSystem?: string
         { role: 'user', content: user }
       ],
       temperature: 0.4,
-      max_tokens: 700
+      max_tokens: 2048
     },
     {
       headers: {
@@ -334,7 +348,7 @@ async function callOpenAiAnswer(params: { userPrompt: string; extraSystem?: stri
         { role: 'user', content: user }
       ],
       temperature: 0.4,
-      max_tokens: 700
+      max_tokens: 2048
     },
     {
       headers: {
@@ -357,6 +371,8 @@ async function generateLlmAnswer(params: {
   extraSystem?: string | null;
   catalogSummary: string;
   itemListingId: string;
+  /** Texto derivado de GET /catalog/charts/{SIZE_GRID_ID} cuando la publicación tiene guía ML. */
+  sizeGuideFromMl?: string;
 }): Promise<string> {
   const provider = resolveProvider();
   if (!provider) {
@@ -369,6 +385,7 @@ async function generateLlmAnswer(params: {
     itemListingId: params.itemListingId,
     itemTitle: params.itemTitle,
     description: params.description,
+    sizeGuideFromMl: params.sizeGuideFromMl ?? '',
     questionText: params.questionText
   });
   const common = { userPrompt, extraSystem: params.extraSystem };
@@ -377,7 +394,8 @@ async function generateLlmAnswer(params: {
   return callOpenAiAnswer(common);
 }
 
-function truncateAnswer(s: string, max = 1900): string {
+/** ML suele aceptar hasta ~2000 caracteres por respuesta; recortamos solo si el modelo se pasara. */
+function truncateAnswer(s: string, max = 2000): string {
   const t = s.trim();
   if (t.length <= max) return t;
   return t.slice(0, max - 3) + '...';
@@ -420,7 +438,9 @@ export async function searchUnansweredQuestions(accessToken: string, sellerId: s
 }
 
 async function fetchItem(accessToken: string, itemId: string) {
-  const res = await mlGet(accessToken, `/items/${encodeURIComponent(itemId)}`);
+  const res = await mlGet(accessToken, `/items/${encodeURIComponent(itemId)}`, {
+    include_attributes: 'all'
+  });
   return res.data;
 }
 
@@ -430,6 +450,90 @@ async function fetchDescription(accessToken: string, itemId: string): Promise<st
     const plain = res.data?.plain_text ?? res.data?.text ?? '';
     return typeof plain === 'string' ? plain : '';
   } catch {
+    return '';
+  }
+}
+
+/** Valor del atributo SIZE_GRID_ID en ítems ML (ID numérico de la tabla en /catalog/charts). */
+function extractSizeGridIdFromItem(item: any): string | null {
+  const pick = (attrs: any[] | undefined): string | null => {
+    if (!Array.isArray(attrs)) return null;
+    const a = attrs.find((x) => String(x?.id || '').toUpperCase() === 'SIZE_GRID_ID');
+    if (!a) return null;
+    const vid = a.value_id;
+    if (vid != null && String(vid).trim() !== '') return String(vid).trim();
+    if (Array.isArray(a.values) && a.values.length) {
+      const first = a.values[0];
+      if (first?.id != null && String(first.id).trim() !== '') return String(first.id).trim();
+      const n = first?.name;
+      if (n != null && /^\d+$/.test(String(n).trim())) return String(n).trim();
+    }
+    return null;
+  };
+
+  let id = pick(item?.attributes);
+  if (id) return id;
+  const vars = item?.variations;
+  if (Array.isArray(vars)) {
+    for (const v of vars) {
+      id = pick(v?.attributes);
+      if (id) return id;
+    }
+  }
+  return null;
+}
+
+/** Convierte la respuesta de GET /catalog/charts/{id} en texto para el prompt. */
+function formatMlSizeChartForPrompt(chart: any): string {
+  if (!chart || typeof chart !== 'object') return '';
+  const lines: string[] = [];
+  const names = chart.names && typeof chart.names === 'object' ? chart.names : {};
+  const nameStr = [names.MLA, names.MLB, names.MLC, names.MLU]
+    .find((n: unknown) => typeof n === 'string' && n.trim())
+    ?? Object.values(names).find((n: unknown) => typeof n === 'string' && String(n).trim());
+  if (nameStr) lines.push(`Nombre de la guía: ${nameStr}`);
+  if (chart.id != null) lines.push(`ID tabla ML: ${chart.id}`);
+
+  const rows = Array.isArray(chart.rows) ? chart.rows : [];
+  for (const row of rows) {
+    const bits: string[] = [];
+    const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
+    for (const att of attrs) {
+      const label = (att.name || att.id || '').toString().trim();
+      const vals = Array.isArray(att.values) ? att.values : [];
+      const parts: string[] = [];
+      for (const v of vals) {
+        if (v?.name != null && String(v.name).trim()) parts.push(String(v.name).trim());
+        else if (v?.struct && typeof v.struct.number === 'number') {
+          const u = v.struct.unit ? ` ${v.struct.unit}` : '';
+          parts.push(`${v.struct.number}${u}`);
+        }
+      }
+      if (label && parts.length) bits.push(`${label}: ${parts.join(' / ')}`);
+    }
+    if (bits.length) lines.push(`- ${bits.join(' | ')}`);
+  }
+
+  let text = lines.join('\n').trim();
+  if (text.length > ML_SIZE_CHART_MAX_CHARS) {
+    text = text.slice(0, ML_SIZE_CHART_MAX_CHARS - 40) + '\n… (guía truncada por límite de contexto)';
+  }
+  return text;
+}
+
+async function fetchMlSizeChartForPrompt(accessToken: string, chartId: string): Promise<string> {
+  const id = String(chartId || '').trim();
+  if (!id) return '';
+  try {
+    /** /catalog/charts no usa el mismo contrato que /items; evitamos api_version en query. */
+    const res = await axios.get(`${ML_API}/catalog/charts/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 45000
+    });
+    return formatMlSizeChartForPrompt(res.data);
+  } catch (e: any) {
+    const st = e?.response?.status;
+    console.warn('[ML Questions AI] Guía de talles:', id, st || e?.message || e);
     return '';
   }
 }
@@ -465,6 +569,8 @@ export async function processOneQuestion(
   const item = await fetchItem(accessToken, itemId);
   const title = String(item?.title || '(sin título)');
   const description = await fetchDescription(accessToken, itemId);
+  const sizeGridId = extractSizeGridIdFromItem(item);
+  const sizeGuideFromMl = sizeGridId ? await fetchMlSizeChartForPrompt(accessToken, sizeGridId) : '';
   const catalogSummary = await getCachedCatalogSummary();
 
   const answerText = await generateLlmAnswer({
@@ -473,7 +579,8 @@ export async function processOneQuestion(
     questionText,
     extraSystem: opts?.extraSystemPrompt,
     catalogSummary,
-    itemListingId: String(itemId)
+    itemListingId: String(itemId),
+    sizeGuideFromMl
   });
 
   await mlPost(accessToken, '/answers', {
