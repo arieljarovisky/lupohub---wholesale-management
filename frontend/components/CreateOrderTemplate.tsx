@@ -11,7 +11,7 @@ const DRAFT_KEY = 'lupo_order_template_draft';
 interface CreateOrderTemplateProps {
   products: Product[];
   customers: Customer[];
-  onSave: (order: Order) => void;
+  onSave: (order: Order) => void | Promise<void>;
   onCancel: () => void;
   sellerId?: string | null;
   initialOrder?: Order | null;
@@ -60,6 +60,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [addingProduct, setAddingProduct] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
   const [addByCodeInput, setAddByCodeInput] = useState('');
   const [addByCodeError, setAddByCodeError] = useState<string | null>(null);
   /** Código del artículo al que se están agregando colores (para mostrar carga en el botón). */
@@ -468,22 +469,34 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (savingOrder) return;
     const order = buildOrderPayload(false);
     if (!order) {
       showToast('error', 'Agregá al menos una cantidad en algún talle.');
       return;
     }
-    onSave(order);
+    setSavingOrder(true);
+    try {
+      await Promise.resolve(onSave(order));
+    } finally {
+      setSavingOrder(false);
+    }
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
+    if (savingOrder) return;
     const order = buildOrderPayload(true);
     if (!order) {
       showToast('error', 'Agregá al menos una cantidad en algún talle para guardar el borrador.');
       return;
     }
-    onSave(order);
+    setSavingOrder(true);
+    try {
+      await Promise.resolve(onSave(order));
+    } finally {
+      setSavingOrder(false);
+    }
   };
 
   const totalUnits = useMemo(() => {
@@ -512,13 +525,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         if (rows.length > 0 && selectedCustomerId && totalUnits > 0) {
           e.preventDefault();
-          handleSaveRef.current();
+          if (!savingOrder) handleSaveRef.current();
         }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [rows, selectedCustomerId, totalUnits, hasExceededStock]);
+  }, [rows, selectedCustomerId, totalUnits, hasExceededStock, savingOrder]);
 
   /** Agrupar filas por código de artículo (orden de aparición). */
   const groups = useMemo(() => {
@@ -888,18 +901,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="button"
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0}
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
               onClick={handleSaveDraft}
               className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 border border-slate-600 disabled:opacity-60 transition-all touch-manipulation"
             >
-              <FileEdit size={20} /> Guardar borrador
+              <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
             </button>
             <button
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0}
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
               onClick={handleSave}
               className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
             >
-              <Save size={20} /> Confirmar pedido
+              <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
             </button>
           </div>
         </div>
