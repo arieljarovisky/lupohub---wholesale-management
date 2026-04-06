@@ -46,12 +46,24 @@ const CONDICIONES_VENTA_FACTURA = [
 ];
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 
-/** Mismo criterio que AFIP: total del pedido en neto; IVA 21% sobre neto. */
+/** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
 function afipDesdeNeto(neto: number) {
   const n = Number(neto) || 0;
   const iva = Math.round(n * 0.21 * 100) / 100;
   const impTotal = Math.round((n + iva) * 100) / 100;
   return { neto: n, iva, impTotal };
+}
+
+/** Neto gravado según líneas (cantidad × precio); coincide con subtotal de factura por ítems. `orders.total` puede estar desfasado. */
+function orderNetoFromItems(order: Order): number {
+  if (!order.items?.length) return Number(order.total) || 0;
+  let s = 0;
+  for (const i of order.items) {
+    const qty = Number(i.quantity) || 0;
+    const p = Number(i.priceAtMoment ?? 0);
+    s += Math.round(qty * p * 100) / 100;
+  }
+  return Math.round(s * 100) / 100;
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
@@ -275,8 +287,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
     if (pages.length === 0) pages.push([]);
 
-    const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
-    const neto = Math.round(baseImponible * 100) / 100;
+    const netFromLines = orderNetoFromItems(order);
+    const neto =
+      netFromLines > 0
+        ? netFromLines
+        : Math.round(
+            (order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0)) * 100
+          ) / 100;
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
@@ -655,7 +672,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const totalUnits = enrichedItems.reduce((s, i) => s + Number(i.quantity || 0), 0);
     const totalFromItems = pivotRows.reduce((sum, r) => sum + (r.totalUnits * r.price), 0);
-    const displayTotal = order.total != null && order.total > 0 ? order.total : totalFromItems;
+    const netFromLines = orderNetoFromItems(order);
+    const displayTotal =
+      netFromLines > 0 ? netFromLines : order.total != null && order.total > 0 ? order.total : totalFromItems;
     const half = Math.ceil(pivotRows.length / 2);
     const left = pivotRows.slice(0, half);
     const right = pivotRows.slice(half);
@@ -1119,7 +1138,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                      </button>
                    )}
                    <div className="text-right">
-                     <div className="text-lg font-black text-blue-400">${formatMoneyAr(order.total)}</div>
+                     <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
                    </div>
                 </div>
@@ -1402,7 +1421,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </div>
               )}
               {ncTipo === 'total' && (() => {
-                const { neto, iva, impTotal } = afipDesdeNeto(Number(ncOrder.total));
+                const baseNc = orderNetoFromItems(ncOrder);
+                const { neto, iva, impTotal } = afipDesdeNeto(baseNc);
                 return (
                   <div className="text-sm text-slate-500 space-y-2">
                     <p>

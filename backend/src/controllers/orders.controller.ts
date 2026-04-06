@@ -35,6 +35,21 @@ function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
 
+/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
+async function getOrderNetFromLineItems(orderId: string): Promise<number> {
+  const rows = await query(
+    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    [orderId]
+  ) as { quantity: number; price_at_moment: string | number }[];
+  let sum = 0;
+  for (const r of rows) {
+    const qty = Number(r.quantity) || 0;
+    const price = Number(r.price_at_moment) || 0;
+    sum += Math.round(qty * price * 100) / 100;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
 export const getOrders = async (req: any, res: any) => {
   try {
     const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
@@ -599,9 +614,12 @@ export const emitirFactura = async (req: any, res: any) => {
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
+    const netFromItems = await getOrderNetFromLineItems(id);
+    const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
-      { id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id },
+      { id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id },
       {
         id: customerRow.id,
         businessName: customerRow.business_name ?? '',
@@ -715,7 +733,8 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     let creditNoteItemQuantity: number | null = null;
 
     if (tipo === 'total') {
-      amountToCredit = Number(orderRow.total) || 0;
+      const netFromItems = await getOrderNetFromLineItems(id);
+      amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else {
       const itemsRows = await query(
