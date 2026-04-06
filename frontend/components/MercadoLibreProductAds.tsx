@@ -158,6 +158,7 @@ const MercadoLibreProductAds: React.FC = () => {
   const [advRetry, setAdvRetry] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [exportingFull, setExportingFull] = useState(false);
+  const [exportingSingleCampaignId, setExportingSingleCampaignId] = useState<string | number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -630,33 +631,69 @@ const MercadoLibreProductAds: React.FC = () => {
                       <div className="inline-flex items-center gap-0.5 justify-end">
                         <button
                           type="button"
-                          title="Descargar CSV solo con esta campaña"
-                          className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors"
-                          onClick={() => {
-                            downloadSingleCampaignCsv(c, { dateFrom, dateTo });
-                            showToast('success', 'CSV de la campaña descargado');
-                          }}
-                        >
-                          <Download size={16} className="text-emerald-400/90" aria-hidden />
-                        </button>
-                        <button
-                          type="button"
-                          title="Descargar Excel solo con esta campaña"
-                          disabled={advertiserId === ''}
+                          title="Descargar CSV: campaña + anuncios por publicación"
+                          disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
                           className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
                           onClick={() => {
                             if (advertiserId === '') return;
-                            downloadSingleCampaignExcel(c, {
-                              accountLabel: accountLabelForExport,
-                              siteId,
-                              advertiserId: advertiserId as number,
-                              dateFrom,
-                              dateTo
-                            });
-                            showToast('success', 'Excel de la campaña descargado');
+                            void (async () => {
+                              setExportingSingleCampaignId(c.id);
+                              try {
+                                await downloadSingleCampaignCsv(c, {
+                                  dateFrom,
+                                  dateTo,
+                                  siteId,
+                                  advertiserId: advertiserId as number
+                                });
+                                showToast(
+                                  'success',
+                                  'CSV listo: archivo de campaña y otro de publicaciones de esa campaña (si hay datos en el período).'
+                                );
+                              } catch (e: any) {
+                                showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar CSV');
+                              } finally {
+                                setExportingSingleCampaignId(null);
+                              }
+                            })();
                           }}
                         >
-                          <FileSpreadsheet size={16} className="text-emerald-400/90" aria-hidden />
+                          {exportingSingleCampaignId === c.id ? (
+                            <Loader2 size={16} className="text-emerald-400/90 animate-spin" aria-hidden />
+                          ) : (
+                            <Download size={16} className="text-emerald-400/90" aria-hidden />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          title="Descargar Excel: campaña + anuncios por publicación"
+                          disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
+                          className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
+                          onClick={() => {
+                            if (advertiserId === '') return;
+                            void (async () => {
+                              setExportingSingleCampaignId(c.id);
+                              try {
+                                await downloadSingleCampaignExcel(c, {
+                                  accountLabel: accountLabelForExport,
+                                  siteId,
+                                  advertiserId: advertiserId as number,
+                                  dateFrom,
+                                  dateTo
+                                });
+                                showToast('success', 'Excel generado con hojas Campaña y Anuncios');
+                              } catch (e: any) {
+                                showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar Excel');
+                              } finally {
+                                setExportingSingleCampaignId(null);
+                              }
+                            })();
+                          }}
+                        >
+                          {exportingSingleCampaignId === c.id ? (
+                            <Loader2 size={16} className="text-emerald-400/90 animate-spin" aria-hidden />
+                          ) : (
+                            <FileSpreadsheet size={16} className="text-emerald-400/90" aria-hidden />
+                          )}
                         </button>
                       </div>
                     </td>

@@ -1095,6 +1095,8 @@ export const api = {
     offset?: number;
     metrics_summary?: boolean;
     channel?: string;
+    /** Filtra anuncios/publicaciones de una campaña concreta (Product Ads API). */
+    campaign_id?: string | number;
   }): Promise<{ paging?: { offset: number; total: number; limit: number }; results: any[]; metrics_summary?: Record<string, number> }> => {
     const q = new URLSearchParams();
     q.set('site_id', params.site_id);
@@ -1105,6 +1107,7 @@ export const api = {
     if (params.offset != null) q.set('offset', String(params.offset));
     if (params.metrics_summary) q.set('metrics_summary', 'true');
     q.set('channel', params.channel ?? 'marketplace');
+    if (params.campaign_id != null && params.campaign_id !== '') q.set('campaign_id', String(params.campaign_id));
     return await request(`/integrations/mercadolibre/product-ads/ads?${q.toString()}`, 'GET');
   },
 

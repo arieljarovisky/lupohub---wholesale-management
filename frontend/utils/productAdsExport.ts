@@ -163,15 +163,68 @@ export function downloadAdsCsv(ads: any[], baseName: string) {
   downloadTextFile(buildCsv(rows, ADS_CSV_COLS), `${baseName}_publicaciones.csv`);
 }
 
-/** Una sola campaña: CSV con la fila de métricas del período visible. */
-export function downloadSingleCampaignCsv(campaign: any, opts: { dateFrom: string; dateTo: string }) {
-  const id = safeFilenamePart(String(campaign?.id ?? 'campaña'));
-  const base = `Campaña_${id}_${opts.dateFrom}_${opts.dateTo}`;
-  downloadTextFile(buildCsv([campaignRow(campaign)], CAMPAIGN_CSV_COLS), `${base}.csv`);
+/** Todas las publicaciones/anuncios con métricas de una campaña (paginado, Product Ads). */
+export async function fetchAllAdsForSingleCampaignExport(
+  siteId: string,
+  advertiserId: number,
+  campaignId: string | number,
+  dateFrom: string,
+  dateTo: string
+): Promise<any[]> {
+  const first = await api.getMercadoLibreProductAdsAds({
+    site_id: siteId,
+    advertiser_id: advertiserId,
+    date_from: dateFrom,
+    date_to: dateTo,
+    limit: PAGE,
+    offset: 0,
+    channel: 'marketplace',
+    campaign_id: campaignId
+  });
+  const list = [...(first.results || [])];
+  const total = first.paging?.total ?? list.length;
+  let offset = PAGE;
+  while (offset < total) {
+    const r = await api.getMercadoLibreProductAdsAds({
+      site_id: siteId,
+      advertiser_id: advertiserId,
+      date_from: dateFrom,
+      date_to: dateTo,
+      limit: PAGE,
+      offset,
+      channel: 'marketplace',
+      campaign_id: campaignId
+    });
+    const batch = r.results || [];
+    if (batch.length === 0) break;
+    list.push(...batch);
+    offset += PAGE;
+  }
+  return list;
 }
 
-/** Una sola campaña: Excel con resumen + hoja Métricas (una fila). */
-export function downloadSingleCampaignExcel(
+/** Una sola campaña: CSV de la campaña + CSV de cada anuncio/publicación de esa campaña. */
+export async function downloadSingleCampaignCsv(
+  campaign: any,
+  opts: { dateFrom: string; dateTo: string; siteId: string; advertiserId: number }
+) {
+  const id = safeFilenamePart(String(campaign?.id ?? 'campaña'));
+  const base = `Campaña_${id}_${opts.dateFrom}_${opts.dateTo}`;
+  downloadTextFile(buildCsv([campaignRow(campaign)], CAMPAIGN_CSV_COLS), `${base}_campaña.csv`);
+  const ads = await fetchAllAdsForSingleCampaignExport(
+    opts.siteId,
+    opts.advertiserId,
+    campaign?.id,
+    opts.dateFrom,
+    opts.dateTo
+  );
+  if (ads.length > 0) {
+    downloadAdsCsv(ads, base);
+  }
+}
+
+/** Una sola campaña: Excel con resumen, métricas de campaña y hoja de anuncios por publicación. */
+export async function downloadSingleCampaignExcel(
   campaign: any,
   opts: {
     accountLabel: string;
@@ -181,6 +234,13 @@ export function downloadSingleCampaignExcel(
     dateTo: string;
   }
 ) {
+  const ads = await fetchAllAdsForSingleCampaignExport(
+    opts.siteId,
+    opts.advertiserId,
+    campaign?.id,
+    opts.dateFrom,
+    opts.dateTo
+  );
   const wb = XLSX.utils.book_new();
   const id = campaign?.id ?? '';
   const name = (campaign?.name ?? '').toString();
@@ -193,16 +253,26 @@ export function downloadSingleCampaignExcel(
     ['Cuenta', opts.accountLabel],
     ['Site', opts.siteId],
     ['ID anunciante', opts.advertiserId],
+    ['Anuncios / publicaciones en el archivo', ads.length],
     [],
     ['Exportado', new Date().toLocaleString('es-AR')],
     [],
-    ['Nota', 'Métricas del período seleccionado solo para esta campaña.']
+    [
+      'Nota',
+      'Hoja Campaña: totales de la campaña. Hoja Anuncios: una fila por publicación con métricas del período (misma API que la tabla de publicaciones).'
+    ]
   ];
   const ws0 = XLSX.utils.aoa_to_sheet(resumen);
   XLSX.utils.book_append_sheet(wb, ws0, 'Resumen');
   const row = campaignRow(campaign);
   const ws1 = XLSX.utils.json_to_sheet([row]);
-  XLSX.utils.book_append_sheet(wb, ws1, 'Métricas');
+  XLSX.utils.book_append_sheet(wb, ws1, 'Campaña');
+  const adsData = ads.map(adRow);
+  const ws2 =
+    adsData.length > 0
+      ? XLSX.utils.json_to_sheet(adsData)
+      : XLSX.utils.aoa_to_sheet([['Sin publicaciones con métricas en el período para esta campaña.']]);
+  XLSX.utils.book_append_sheet(wb, ws2, 'Anuncios');
   const fname = `Campaña_${safeFilenamePart(String(id))}_${opts.dateFrom}_${opts.dateTo}.xlsx`;
   XLSX.writeFile(wb, fname);
 }
