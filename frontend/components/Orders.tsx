@@ -891,31 +891,58 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     const tipoFactura = getTipoFacturaParaCliente(order);
                     const condicionIva = customer?.condicionIva || 'No informada';
                     return (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        showConfirm({
-                          title: 'Emitir factura AFIP',
-                          message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
-                          confirmLabel: `Emitir Factura ${tipoFactura}`,
-                          onConfirm: () => {
-                            setEmitiendoFacturaId(order.id);
-                            api.emitirFactura(order.id)
-                              .then((res) => {
-                                onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
-                                showToast('success', `Factura ${tipoFactura} emitida. CAE ${res.cae}`);
-                              })
-                              .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
-                              .finally(() => setEmitiendoFacturaId(null));
-                          }
-                        });
-                      }}
-                      disabled={!!emitiendoFacturaId}
-                      className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                      title={`Emitir factura electrónica AFIP (se emitirá Factura ${tipoFactura} según condición IVA del cliente)`}
-                    >
-                      {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showConfirm({
+                            title: 'Emitir factura AFIP',
+                            message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
+                            confirmLabel: `Emitir Factura ${tipoFactura}`,
+                            onConfirm: () => {
+                              setEmitiendoFacturaId(order.id);
+                              api.emitirFactura(order.id)
+                                .then((res) => {
+                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                                  showToast('success', `Factura ${tipoFactura} emitida. CAE ${res.cae}`);
+                                })
+                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                                .finally(() => setEmitiendoFacturaId(null));
+                            }
+                          });
+                        }}
+                        disabled={!!emitiendoFacturaId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title={`Emitir factura electrónica AFIP (se emitirá Factura ${tipoFactura} según condición IVA del cliente)`}
+                      >
+                        {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showConfirm({
+                            title: 'Facturar sin stock',
+                            message: `Se emitirá Factura ${tipoFactura} y este pedido quedará marcado como "sin impacto de stock".\n\nUsar solo para facturación administrativa (sin movimiento real de inventario).\n\n¿Continuar?`,
+                            confirmLabel: `Facturar sin stock`,
+                            onConfirm: () => {
+                              setEmitiendoFacturaId(order.id);
+                              api.emitirFactura(order.id, { noStockImpact: true })
+                                .then((res) => {
+                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                                  showToast('success', `Factura ${tipoFactura} emitida sin impactar stock. CAE ${res.cae}`);
+                                })
+                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                                .finally(() => setEmitiendoFacturaId(null));
+                            }
+                          });
+                        }}
+                        disabled={!!emitiendoFacturaId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title="Emitir factura sin descontar stock"
+                      >
+                        <Package size={16} />
+                      </button>
+                    </>
                     );
                   })()}
                   <button

@@ -209,7 +209,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0,
                 creditNotesTotalCount: (_f = creditNotesTotalByOrderId[order.id]) !== null && _f !== void 0 ? _f : 0,
                 creditNotesItemCount: (_g = creditNotesItemByOrderId[order.id]) !== null && _g !== void 0 ? _g : 0,
-                paymentStatus: mapPaymentStatus(order)
+                paymentStatus: mapPaymentStatus(order),
+                noStockImpact: !!order.no_stock_impact
             });
         });
         res.json(ordersFull);
@@ -251,7 +252,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         };
         const sqlDate = toSqlDate(newOrder.date);
         const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus]);
+        const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -271,13 +273,13 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack, despachoId]);
         }
-        if (newOrder.status === 'Confirmado') {
+        if (newOrder.status === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield deductStockForOrder(orderId);
             if (!result.success)
                 console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?', [orderId]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [orderId]);
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
         const items = yield (0, db_1.query)(`
@@ -324,7 +326,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
-            paymentStatus: mapPaymentStatus(created)
+            paymentStatus: mapPaymentStatus(created),
+            noStockImpact: !!created.no_stock_impact
         };
         res.status(201).json(orderResponse);
     }
@@ -339,10 +342,11 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
     const { status, pickedBy } = req.body;
     try {
         // Obtener estado anterior
-        const currentOrder = yield (0, db_1.get)("SELECT status FROM orders WHERE id = ?", [id]);
+        const currentOrder = yield (0, db_1.get)("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
         const previousStatus = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
+        const noStockImpact = !!(currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.no_stock_impact);
         // Si pasa de Borrador a Confirmado, descontar stock
-        if (previousStatus === 'Borrador' && status === 'Confirmado') {
+        if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield deductStockForOrder(id);
             if (!result.success) {
@@ -350,7 +354,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
         }
         // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
-        const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+        const hadStockDeducted = !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
         if (status === 'Cancelado' && hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
@@ -398,7 +402,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sqlDate = toSqlDate(updated.date);
         const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
         const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
-        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, id]);
+        const noStockImpact = updated.noStockImpact === true || updated.no_stock_impact === 1 ? 1 : 0;
+        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         for (const item of updated.items) {
             let variantId = item.variantId;
@@ -419,7 +424,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?', [id]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
@@ -466,7 +471,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
-            paymentStatus: mapPaymentStatus(created)
+            paymentStatus: mapPaymentStatus(created),
+            noStockImpact: !!created.no_stock_impact
         });
     }
     catch (error) {
@@ -541,9 +547,10 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 message: "No se puede eliminar un pedido que tiene factura emitida. La factura sigue vigente en AFIP. Para anular el efecto fiscal emití una nota de crédito."
             });
         }
-        const currentOrder = yield (0, db_1.get)("SELECT status FROM orders WHERE id = ?", [id]);
+        const currentOrder = yield (0, db_1.get)("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
         const status = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
-        const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+        const hadStockDeducted = !(currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.no_stock_impact) &&
+            ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
         if (hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
@@ -591,7 +598,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -600,23 +607,27 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total FROM orders WHERE id = ?', [id]);
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
+        const noStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
+        if (noStockImpact && !orderRow.no_stock_impact) {
+            yield (0, db_1.execute)('UPDATE orders SET no_stock_impact = 1 WHERE id = ?', [id]);
+        }
         const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
         if (existingInv)
             return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
         const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
-        const cbteTipoFromBody = (_a = req.body) === null || _a === void 0 ? void 0 : _a.cbteTipo;
+        const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, {
             id: customerRow.id,
-            businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '',
+            businessName: (_d = customerRow.business_name) !== null && _d !== void 0 ? _d : '',
             cuit: customerRow.cuit,
-            condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : null
+            condicionIva: (_e = customerRow.condicion_iva) !== null && _e !== void 0 ? _e : null
         }, forceCbteTipo);
         const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
         const invoiceId = uuidv4();
