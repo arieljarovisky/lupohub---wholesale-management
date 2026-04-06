@@ -46,6 +46,14 @@ const CONDICIONES_VENTA_FACTURA = [
 ];
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 
+/** Mismo criterio que AFIP: total del pedido en neto; IVA 21% sobre neto. */
+function afipDesdeNeto(neto: number) {
+  const n = Number(neto) || 0;
+  const iva = Math.round(n * 0.21 * 100) / 100;
+  const impTotal = Math.round((n + iva) * 100) / 100;
+  return { neto: n, iva, impTotal };
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -1378,13 +1386,35 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <p className="text-xs text-amber-400">No queda monto a creditar para este ítem.</p>
                   )}
                   <p className="text-xs text-slate-500">
-                    Monto a creditar: ${formatMoneyAr(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0))}
+                    {(() => {
+                      const lineNet = ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0);
+                      const { iva, impTotal } = afipDesdeNeto(lineNet);
+                      return (
+                        <>
+                          Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(lineNet)}</strong>
+                          <span className="block mt-1 text-slate-400">
+                            AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </p>
                 </div>
               )}
-              {ncTipo === 'total' && (
-                <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${formatMoneyAr(ncOrder.total)}</strong></p>
-              )}
+              {ncTipo === 'total' && (() => {
+                const { neto, iva, impTotal } = afipDesdeNeto(Number(ncOrder.total));
+                return (
+                  <div className="text-sm text-slate-500 space-y-2">
+                    <p>
+                      La NC se emite sobre el <strong className="text-white">monto neto</strong> del pedido (sin IVA), igual que la factura:{' '}
+                      <strong className="text-white">${formatMoneyAr(neto)}</strong>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      En AFIP: IVA 21% ${formatMoneyAr(iva)} → total del comprobante ${formatMoneyAr(impTotal)}.
+                    </p>
+                  </div>
+                );
+              })()}
                 </>
               )}
             </div>
