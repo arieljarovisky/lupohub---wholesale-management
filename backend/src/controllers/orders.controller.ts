@@ -35,6 +35,21 @@ function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
 
+/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
+async function getOrderNetFromLineItems(orderId: string): Promise<number> {
+  const rows = await query(
+    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    [orderId]
+  ) as { quantity: number; price_at_moment: string | number }[];
+  let sum = 0;
+  for (const r of rows) {
+    const qty = Number(r.quantity) || 0;
+    const price = Number(r.price_at_moment) || 0;
+    sum += Math.round(qty * price * 100) / 100;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
 export const getOrders = async (req: any, res: any) => {
   try {
     const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
@@ -174,7 +189,8 @@ export const getOrders = async (req: any, res: any) => {
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
       creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
       creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0,
-      paymentStatus: mapPaymentStatus(order)
+      paymentStatus: mapPaymentStatus(order),
+      noStockImpact: !!order.no_stock_impact
     }));
 
     res.json(ordersFull);
@@ -217,9 +233,10 @@ export const createOrder = async (req: any, res: any) => {
     const sqlDate = toSqlDate(newOrder.date);
     const paymentStatus =
       (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+    const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
     await execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -248,14 +265,14 @@ export const createOrder = async (req: any, res: any) => {
       );
     }
 
-    if (newOrder.status === 'Confirmado') {
+    if (newOrder.status === 'Confirmado' && !noStockImpact) {
       const { deductStockForOrder } = await import('./stock.controller');
       const result = await deductStockForOrder(orderId);
       if (!result.success) console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
     }
 
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?',
+      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
       [orderId]
     );
     if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
@@ -300,7 +317,8 @@ export const createOrder = async (req: any, res: any) => {
       pickedBy: created.picked_by ?? undefined,
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
       items: itemsMapped,
-      paymentStatus: mapPaymentStatus(created)
+      paymentStatus: mapPaymentStatus(created),
+      noStockImpact: !!created.no_stock_impact
     };
     res.status(201).json(orderResponse);
   } catch (error) {
@@ -315,11 +333,12 @@ export const updateOrderStatus = async (req: any, res: any) => {
 
   try {
     // Obtener estado anterior
-    const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
+    const currentOrder = await get("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
     const previousStatus = currentOrder?.status;
+    const noStockImpact = !!currentOrder?.no_stock_impact;
 
     // Si pasa de Borrador a Confirmado, descontar stock
-    if (previousStatus === 'Borrador' && status === 'Confirmado') {
+    if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
       const { deductStockForOrder } = await import('./stock.controller');
       const result = await deductStockForOrder(id);
       
@@ -329,7 +348,8 @@ export const updateOrderStatus = async (req: any, res: any) => {
     }
 
     // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
-    const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+    const hadStockDeducted =
+      !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
     if (status === 'Cancelado' && hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
@@ -377,9 +397,10 @@ export const updateOrder = async (req: any, res: any) => {
     const sellerId = updated.sellerId ?? null;
     const paymentStatus =
       (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+    const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
     await execute(
-      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ? WHERE id = ?',
-      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, id]
+      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?',
+      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
     for (const item of updated.items as any[]) {
@@ -408,7 +429,7 @@ export const updateOrder = async (req: any, res: any) => {
       );
     }
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status FROM orders WHERE id = ?',
+      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
       [id]
     );
     if (!created) return res.json({ ...updated, id });
@@ -453,7 +474,8 @@ export const updateOrder = async (req: any, res: any) => {
       pickedBy: created.picked_by ?? undefined,
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
       items: itemsMapped,
-      paymentStatus: mapPaymentStatus(created)
+      paymentStatus: mapPaymentStatus(created),
+      noStockImpact: !!created.no_stock_impact
     });
   } catch (error) {
     console.error(error);
@@ -517,9 +539,11 @@ export const deleteOrder = async (req: any, res: any) => {
         message: "No se puede eliminar un pedido que tiene factura emitida. La factura sigue vigente en AFIP. Para anular el efecto fiscal emití una nota de crédito."
       });
     }
-    const currentOrder = await get("SELECT status FROM orders WHERE id = ?", [id]);
+    const currentOrder = await get("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
     const status = currentOrder?.status;
-    const hadStockDeducted = ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+    const hadStockDeducted =
+      !currentOrder?.no_stock_impact &&
+      ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
     if (hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
@@ -572,8 +596,12 @@ export const emitirFactura = async (req: any, res: any) => {
   }
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
-    const orderRow = await get('SELECT id, customer_id, date, total FROM orders WHERE id = ?', [id]);
+    const orderRow = await get('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
     if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+    const noStockImpact = req.body?.noStockImpact === true || req.body?.no_stock_impact === 1;
+    if (noStockImpact && !orderRow.no_stock_impact) {
+      await execute('UPDATE orders SET no_stock_impact = 1 WHERE id = ?', [id]);
+    }
     const existingInv = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
     if (existingInv) return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
 
@@ -586,9 +614,12 @@ export const emitirFactura = async (req: any, res: any) => {
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
+    const netFromItems = await getOrderNetFromLineItems(id);
+    const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
-      { id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id },
+      { id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id },
       {
         id: customerRow.id,
         businessName: customerRow.business_name ?? '',
@@ -702,7 +733,8 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     let creditNoteItemQuantity: number | null = null;
 
     if (tipo === 'total') {
-      amountToCredit = Number(orderRow.total) || 0;
+      const netFromItems = await getOrderNetFromLineItems(id);
+      amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else {
       const itemsRows = await query(

@@ -46,6 +46,26 @@ const CONDICIONES_VENTA_FACTURA = [
 ];
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 
+/** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
+function afipDesdeNeto(neto: number) {
+  const n = Number(neto) || 0;
+  const iva = Math.round(n * 0.21 * 100) / 100;
+  const impTotal = Math.round((n + iva) * 100) / 100;
+  return { neto: n, iva, impTotal };
+}
+
+/** Neto gravado según líneas (cantidad × precio); coincide con subtotal de factura por ítems. `orders.total` puede estar desfasado. */
+function orderNetoFromItems(order: Order): number {
+  if (!order.items?.length) return Number(order.total) || 0;
+  let s = 0;
+  for (const i of order.items) {
+    const qty = Number(i.quantity) || 0;
+    const p = Number(i.priceAtMoment ?? 0);
+    s += Math.round(qty * p * 100) / 100;
+  }
+  return Math.round(s * 100) / 100;
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -267,8 +287,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
     if (pages.length === 0) pages.push([]);
 
-    const baseImponible = order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0);
-    const neto = Math.round(baseImponible * 100) / 100;
+    const netFromLines = orderNetoFromItems(order);
+    const neto =
+      netFromLines > 0
+        ? netFromLines
+        : Math.round(
+            (order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0)) * 100
+          ) / 100;
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
@@ -647,7 +672,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const totalUnits = enrichedItems.reduce((s, i) => s + Number(i.quantity || 0), 0);
     const totalFromItems = pivotRows.reduce((sum, r) => sum + (r.totalUnits * r.price), 0);
-    const displayTotal = order.total != null && order.total > 0 ? order.total : totalFromItems;
+    const netFromLines = orderNetoFromItems(order);
+    const displayTotal =
+      netFromLines > 0 ? netFromLines : order.total != null && order.total > 0 ? order.total : totalFromItems;
     const half = Math.ceil(pivotRows.length / 2);
     const left = pivotRows.slice(0, half);
     const right = pivotRows.slice(half);
@@ -828,6 +855,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
+                    {order.noStockImpact && (
+                      <span
+                        className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help"
+                        title="Pedido marcado para facturación administrativa: no descuenta ni restaura stock."
+                      >
+                        <Package size={10} /> SIN IMPACTO STOCK
+                      </span>
+                    )}
                     {role !== Role.CUSTOMER && (
                       <button
                         type="button"
@@ -891,31 +926,58 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     const tipoFactura = getTipoFacturaParaCliente(order);
                     const condicionIva = customer?.condicionIva || 'No informada';
                     return (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        showConfirm({
-                          title: 'Emitir factura AFIP',
-                          message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
-                          confirmLabel: `Emitir Factura ${tipoFactura}`,
-                          onConfirm: () => {
-                            setEmitiendoFacturaId(order.id);
-                            api.emitirFactura(order.id)
-                              .then((res) => {
-                                onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
-                                showToast('success', `Factura ${tipoFactura} emitida. CAE ${res.cae}`);
-                              })
-                              .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
-                              .finally(() => setEmitiendoFacturaId(null));
-                          }
-                        });
-                      }}
-                      disabled={!!emitiendoFacturaId}
-                      className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                      title={`Emitir factura electrónica AFIP (se emitirá Factura ${tipoFactura} según condición IVA del cliente)`}
-                    >
-                      {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showConfirm({
+                            title: 'Emitir factura AFIP',
+                            message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
+                            confirmLabel: `Emitir Factura ${tipoFactura}`,
+                            onConfirm: () => {
+                              setEmitiendoFacturaId(order.id);
+                              api.emitirFactura(order.id)
+                                .then((res) => {
+                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                                  showToast('success', `Factura ${tipoFactura} emitida. CAE ${res.cae}`);
+                                })
+                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                                .finally(() => setEmitiendoFacturaId(null));
+                            }
+                          });
+                        }}
+                        disabled={!!emitiendoFacturaId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title={`Emitir factura electrónica AFIP (se emitirá Factura ${tipoFactura} según condición IVA del cliente)`}
+                      >
+                        {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showConfirm({
+                            title: 'Facturar sin stock',
+                            message: `Se emitirá Factura ${tipoFactura} y este pedido quedará marcado como "sin impacto de stock".\n\nUsar solo para facturación administrativa (sin movimiento real de inventario).\n\n¿Continuar?`,
+                            confirmLabel: `Facturar sin stock`,
+                            onConfirm: () => {
+                              setEmitiendoFacturaId(order.id);
+                              api.emitirFactura(order.id, { noStockImpact: true })
+                                .then((res) => {
+                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                                  showToast('success', `Factura ${tipoFactura} emitida sin impactar stock. CAE ${res.cae}`);
+                                })
+                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
+                                .finally(() => setEmitiendoFacturaId(null));
+                            }
+                          });
+                        }}
+                        disabled={!!emitiendoFacturaId}
+                        className="p-2 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title="Emitir factura sin descontar stock"
+                      >
+                        <Package size={16} />
+                      </button>
+                    </>
                     );
                   })()}
                   <button
@@ -1075,7 +1137,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className="text-lg font-black text-blue-400">${formatMoneyAr(order.total)}</div>
+                   <div className="text-right">
+                     <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
+                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
+                   </div>
                 </div>
               </div>
             </div>
@@ -1340,13 +1405,36 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <p className="text-xs text-amber-400">No queda monto a creditar para este ítem.</p>
                   )}
                   <p className="text-xs text-slate-500">
-                    Monto a creditar: ${formatMoneyAr(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0))}
+                    {(() => {
+                      const lineNet = ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0);
+                      const { iva, impTotal } = afipDesdeNeto(lineNet);
+                      return (
+                        <>
+                          Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(lineNet)}</strong>
+                          <span className="block mt-1 text-slate-400">
+                            AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </p>
                 </div>
               )}
-              {ncTipo === 'total' && (
-                <p className="text-sm text-slate-500">Se emitirá una NC por el total del pedido: <strong className="text-white">${formatMoneyAr(ncOrder.total)}</strong></p>
-              )}
+              {ncTipo === 'total' && (() => {
+                const baseNc = orderNetoFromItems(ncOrder);
+                const { neto, iva, impTotal } = afipDesdeNeto(baseNc);
+                return (
+                  <div className="text-sm text-slate-500 space-y-2">
+                    <p>
+                      La NC se emite sobre el <strong className="text-white">monto neto</strong> del pedido (sin IVA), igual que la factura:{' '}
+                      <strong className="text-white">${formatMoneyAr(neto)}</strong>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      En AFIP: IVA 21% ${formatMoneyAr(iva)} → total del comprobante ${formatMoneyAr(impTotal)}.
+                    </p>
+                  </div>
+                );
+              })()}
                 </>
               )}
             </div>

@@ -177,6 +177,8 @@ export interface Order {
   archived?: boolean;
   /** Cobro del pedido mayorista (cuenta corriente / saldos pendientes) */
   paymentStatus?: 'pendiente' | 'pagado';
+  /** Si true, este pedido no debe impactar stock (facturación administrativa). */
+  noStockImpact?: boolean;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

@@ -97,6 +97,7 @@ const App: React.FC = () => {
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
+  const savingOrderRef = useRef(false);
 
   // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
@@ -349,6 +350,8 @@ const App: React.FC = () => {
   };
 
   const handleCreateOrder = async (newOrder: Order) => {
+    if (savingOrderRef.current) return;
+    savingOrderRef.current = true;
     try {
       const isEditing = !!editingOrder;
       const orderToSave = { ...newOrder };
@@ -370,6 +373,8 @@ const App: React.FC = () => {
     } catch (error) {
       console.error(error);
       showToast('error', editingOrder ? 'Error actualizando el pedido' : 'Error creando el pedido');
+    } finally {
+      savingOrderRef.current = false;
     }
   };
 

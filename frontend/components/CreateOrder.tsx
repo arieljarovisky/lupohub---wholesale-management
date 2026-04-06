@@ -91,7 +91,29 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       });
       setRows(mappedRows);
     }
-  }, [initialOrder, products]);
+  }, [initialOrder]);
+
+  /**
+   * Si cambia la lista de precios (o se recargan productos con otra lista),
+   * refrescar el precio unitario de cada fila según la variante/SKU actual.
+   */
+  useEffect(() => {
+    if (!rows.length || !products.length) return;
+    setRows(prev => {
+      let changed = false;
+      const next = prev.map(r => {
+        const match =
+          products.find(p => r.variantId && String(p.id) === String(r.variantId)) ||
+          products.find(p => p.sku === r.sku);
+        if (!match) return r;
+        const nextPrice = Number(match.price);
+        if (!Number.isFinite(nextPrice) || nextPrice < 0 || nextPrice === r.price) return r;
+        changed = true;
+        return { ...r, price: nextPrice };
+      });
+      return changed ? next : prev;
+    });
+  }, [products, selectedPriceListId]);
 
   const isCustomerLocked = role === Role.CUSTOMER;
   useEffect(() => {

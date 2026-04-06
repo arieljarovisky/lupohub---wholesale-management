@@ -110,6 +110,7 @@ export async function initSchema(): Promise<void> {
       date DATE NOT NULL,
       status VARCHAR(50) NOT NULL,
       total DECIMAL(10, 2) NOT NULL,
+      no_stock_impact TINYINT(1) NOT NULL DEFAULT 0,
       picked_by VARCHAR(36) NULL,
       FOREIGN KEY (customer_id) REFERENCES customers(id),
       FOREIGN KEY (seller_id) REFERENCES users(id)
