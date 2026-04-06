@@ -1059,6 +1059,55 @@ export const api = {
     return request<{ variations: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string }>(`/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations`, 'GET');
   },
 
+  /** Mercado Ads — Product Ads: anunciantes, campañas y métricas por publicación (API oficial). */
+  getMercadoLibreProductAdsAdvertisers: async (): Promise<{
+    advertisers: Array<{ advertiser_id: number; site_id: string; advertiser_name: string; account_name: string }>;
+  }> => {
+    return await request('/integrations/mercadolibre/product-ads/advertisers', 'GET');
+  },
+  getMercadoLibreProductAdsCampaigns: async (params: {
+    site_id: string;
+    advertiser_id: string | number;
+    date_from: string;
+    date_to: string;
+    limit?: number;
+    offset?: number;
+    metrics_summary?: boolean;
+    aggregation_type?: string;
+  }): Promise<{ paging?: { offset: number; total: number; limit: number }; results: any[]; metrics_summary?: Record<string, number> }> => {
+    const q = new URLSearchParams();
+    q.set('site_id', params.site_id);
+    q.set('advertiser_id', String(params.advertiser_id));
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    if (params.metrics_summary) q.set('metrics_summary', 'true');
+    if (params.aggregation_type) q.set('aggregation_type', params.aggregation_type);
+    return await request(`/integrations/mercadolibre/product-ads/campaigns?${q.toString()}`, 'GET');
+  },
+  getMercadoLibreProductAdsAds: async (params: {
+    site_id: string;
+    advertiser_id: string | number;
+    date_from: string;
+    date_to: string;
+    limit?: number;
+    offset?: number;
+    metrics_summary?: boolean;
+    channel?: string;
+  }): Promise<{ paging?: { offset: number; total: number; limit: number }; results: any[]; metrics_summary?: Record<string, number> }> => {
+    const q = new URLSearchParams();
+    q.set('site_id', params.site_id);
+    q.set('advertiser_id', String(params.advertiser_id));
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    if (params.metrics_summary) q.set('metrics_summary', 'true');
+    q.set('channel', params.channel ?? 'marketplace');
+    return await request(`/integrations/mercadolibre/product-ads/ads?${q.toString()}`, 'GET');
+  },
+
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
     return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(`/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants`, 'GET');
   },

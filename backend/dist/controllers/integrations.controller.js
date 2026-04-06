@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
 exports.getValidMLToken = getValidMLToken;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 const axios_1 = __importDefault(require("axios"));
@@ -4572,3 +4572,139 @@ const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.processMLQuestionsAi = processMLQuestionsAi;
+/** Métricas por defecto para Product Ads (Mercado Ads API). */
+const ML_PADS_METRICS_DEFAULT = 'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
+/** Listado de anunciantes con acceso a Product Ads (PADS). */
+const getMercadoLibreProductAdsAdvertisers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const mlToken = yield getValidMLToken();
+        if (!mlToken) {
+            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+        }
+        const r = yield axios_1.default.get('https://api.mercadolibre.com/advertising/advertisers', {
+            headers: {
+                Authorization: `Bearer ${mlToken.access_token}`,
+                'Content-Type': 'application/json',
+                'Api-Version': '1'
+            },
+            params: { product_id: 'PADS' },
+            validateStatus: () => true
+        });
+        if (r.status !== 200) {
+            const detail = ((_a = r.data) === null || _a === void 0 ? void 0 : _a.message) || ((_c = (_b = r.data) === null || _b === void 0 ? void 0 : _b.cause) === null || _c === void 0 ? void 0 : _c.message) || ((_d = r.data) === null || _d === void 0 ? void 0 : _d.error) || r.statusText;
+            return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+                message: r.status === 404
+                    ? 'No hay permisos para Product Ads o no está activado. En Mercado Libre: Publicaciones → Campaña de publicidad (Product Ads).'
+                    : 'Error consultando anunciantes de Mercado Ads',
+                detail
+            });
+        }
+        res.json(r.data);
+    }
+    catch (error) {
+        console.error('getMercadoLibreProductAdsAdvertisers:', ((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || error.message);
+        res.status(500).json({ message: 'Error consultando Product Ads', error: error.message });
+    }
+});
+exports.getMercadoLibreProductAdsAdvertisers = getMercadoLibreProductAdsAdvertisers;
+function mlProductAdsForwardQuery(req) {
+    const params = {};
+    const pass = [
+        'date_from',
+        'date_to',
+        'metrics',
+        'limit',
+        'offset',
+        'aggregation_type',
+        'metrics_summary',
+        'channel',
+        'status',
+        'campaign_id',
+        'campaign_ids'
+    ];
+    for (const k of pass) {
+        const v = req.query[k];
+        if (v != null && v !== '')
+            params[k] = String(v);
+    }
+    if (!params.metrics)
+        params.metrics = ML_PADS_METRICS_DEFAULT;
+    return params;
+}
+/** Campañas de Product Ads con métricas (proxy a API oficial). Requiere site_id y advertiser_id. */
+const getMercadoLibreProductAdsCampaigns = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const mlToken = yield getValidMLToken();
+        if (!mlToken) {
+            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+        }
+        const siteId = (_a = req.query.site_id) === null || _a === void 0 ? void 0 : _a.trim();
+        const advertiserId = (_b = req.query.advertiser_id) === null || _b === void 0 ? void 0 : _b.trim();
+        if (!siteId || !advertiserId) {
+            return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id (desde el listado de anunciantes).' });
+        }
+        const params = mlProductAdsForwardQuery(req);
+        const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/campaigns/search`;
+        const r = yield axios_1.default.get(url, {
+            headers: {
+                Authorization: `Bearer ${mlToken.access_token}`,
+                'api-version': '2'
+            },
+            params,
+            validateStatus: () => true
+        });
+        if (r.status !== 200) {
+            const detail = ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || ((_e = (_d = r.data) === null || _d === void 0 ? void 0 : _d.cause) === null || _e === void 0 ? void 0 : _e.message) || ((_f = r.data) === null || _f === void 0 ? void 0 : _f.error) || r.statusText;
+            return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+                message: 'Error obteniendo campañas de Product Ads',
+                detail
+            });
+        }
+        res.json(r.data);
+    }
+    catch (error) {
+        console.error('getMercadoLibreProductAdsCampaigns:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
+        res.status(500).json({ message: 'Error obteniendo campañas de Product Ads', error: error.message });
+    }
+});
+exports.getMercadoLibreProductAdsCampaigns = getMercadoLibreProductAdsCampaigns;
+/** Anuncios por publicación con métricas (proxy). Requiere site_id y advertiser_id. */
+const getMercadoLibreProductAdsAds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const mlToken = yield getValidMLToken();
+        if (!mlToken) {
+            return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+        }
+        const siteId = (_a = req.query.site_id) === null || _a === void 0 ? void 0 : _a.trim();
+        const advertiserId = (_b = req.query.advertiser_id) === null || _b === void 0 ? void 0 : _b.trim();
+        if (!siteId || !advertiserId) {
+            return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id.' });
+        }
+        const params = mlProductAdsForwardQuery(req);
+        const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/ads/search`;
+        const r = yield axios_1.default.get(url, {
+            headers: {
+                Authorization: `Bearer ${mlToken.access_token}`,
+                'api-version': '2'
+            },
+            params,
+            validateStatus: () => true
+        });
+        if (r.status !== 200) {
+            const detail = ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || ((_e = (_d = r.data) === null || _d === void 0 ? void 0 : _d.cause) === null || _e === void 0 ? void 0 : _e.message) || ((_f = r.data) === null || _f === void 0 ? void 0 : _f.error) || r.statusText;
+            return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+                message: 'Error obteniendo anuncios de Product Ads',
+                detail
+            });
+        }
+        res.json(r.data);
+    }
+    catch (error) {
+        console.error('getMercadoLibreProductAdsAds:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
+        res.status(500).json({ message: 'Error obteniendo anuncios de Product Ads', error: error.message });
+    }
+});
+exports.getMercadoLibreProductAdsAds = getMercadoLibreProductAdsAds;

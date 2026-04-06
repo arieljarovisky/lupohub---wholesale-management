@@ -4839,3 +4839,135 @@ export const processMLQuestionsAi = async (req: Request, res: Response) => {
     res.status(500).json({ message: error?.message || 'Error procesando preguntas', detail });
   }
 };
+
+/** Métricas por defecto para Product Ads (Mercado Ads API). */
+const ML_PADS_METRICS_DEFAULT =
+  'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
+
+/** Listado de anunciantes con acceso a Product Ads (PADS). */
+export const getMercadoLibreProductAdsAdvertisers = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const r = await axios.get('https://api.mercadolibre.com/advertising/advertisers', {
+      headers: {
+        Authorization: `Bearer ${mlToken.access_token}`,
+        'Content-Type': 'application/json',
+        'Api-Version': '1'
+      },
+      params: { product_id: 'PADS' },
+      validateStatus: () => true
+    });
+    if (r.status !== 200) {
+      const detail = r.data?.message || r.data?.cause?.message || r.data?.error || r.statusText;
+      return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+        message:
+          r.status === 404
+            ? 'No hay permisos para Product Ads o no está activado. En Mercado Libre: Publicaciones → Campaña de publicidad (Product Ads).'
+            : 'Error consultando anunciantes de Mercado Ads',
+        detail
+      });
+    }
+    res.json(r.data);
+  } catch (error: any) {
+    console.error('getMercadoLibreProductAdsAdvertisers:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error consultando Product Ads', error: error.message });
+  }
+};
+
+function mlProductAdsForwardQuery(req: Request): Record<string, string> {
+  const params: Record<string, string> = {};
+  const pass = [
+    'date_from',
+    'date_to',
+    'metrics',
+    'limit',
+    'offset',
+    'aggregation_type',
+    'metrics_summary',
+    'channel',
+    'status',
+    'campaign_id',
+    'campaign_ids'
+  ];
+  for (const k of pass) {
+    const v = req.query[k];
+    if (v != null && v !== '') params[k] = String(v);
+  }
+  if (!params.metrics) params.metrics = ML_PADS_METRICS_DEFAULT;
+  return params;
+}
+
+/** Campañas de Product Ads con métricas (proxy a API oficial). Requiere site_id y advertiser_id. */
+export const getMercadoLibreProductAdsCampaigns = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const siteId = (req.query.site_id as string)?.trim();
+    const advertiserId = (req.query.advertiser_id as string)?.trim();
+    if (!siteId || !advertiserId) {
+      return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id (desde el listado de anunciantes).' });
+    }
+    const params = mlProductAdsForwardQuery(req);
+    const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/campaigns/search`;
+    const r = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${mlToken.access_token}`,
+        'api-version': '2'
+      },
+      params,
+      validateStatus: () => true
+    });
+    if (r.status !== 200) {
+      const detail = r.data?.message || r.data?.cause?.message || r.data?.error || r.statusText;
+      return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+        message: 'Error obteniendo campañas de Product Ads',
+        detail
+      });
+    }
+    res.json(r.data);
+  } catch (error: any) {
+    console.error('getMercadoLibreProductAdsCampaigns:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo campañas de Product Ads', error: error.message });
+  }
+};
+
+/** Anuncios por publicación con métricas (proxy). Requiere site_id y advertiser_id. */
+export const getMercadoLibreProductAdsAds = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const siteId = (req.query.site_id as string)?.trim();
+    const advertiserId = (req.query.advertiser_id as string)?.trim();
+    if (!siteId || !advertiserId) {
+      return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id.' });
+    }
+    const params = mlProductAdsForwardQuery(req);
+    const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/ads/search`;
+    const r = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${mlToken.access_token}`,
+        'api-version': '2'
+      },
+      params,
+      validateStatus: () => true
+    });
+    if (r.status !== 200) {
+      const detail = r.data?.message || r.data?.cause?.message || r.data?.error || r.statusText;
+      return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+        message: 'Error obteniendo anuncios de Product Ads',
+        detail
+      });
+    }
+    res.json(r.data);
+  } catch (error: any) {
+    console.error('getMercadoLibreProductAdsAds:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo anuncios de Product Ads', error: error.message });
+  }
+};

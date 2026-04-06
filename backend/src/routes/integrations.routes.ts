@@ -44,7 +44,10 @@ import {
   invoiceTiendaNubeOrdersBulk,
   invoiceMercadoLibreOrdersBulk,
   getExternalInvoicesHistory,
-  emitirNotaCreditoExternalInvoice
+  emitirNotaCreditoExternalInvoice,
+  getMercadoLibreProductAdsAdvertisers,
+  getMercadoLibreProductAdsCampaigns,
+  getMercadoLibreProductAdsAds
 } from '../controllers/integrations.controller';
 import { authMiddleware } from '../middleware/auth';
 
@@ -61,6 +64,10 @@ router.get('/mercadolibre/orders', getMercadoLibreOrders);
 router.get('/mercadolibre/questions', getMercadoLibreQuestions);
 router.get('/mercadolibre/stock', getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', getMercadoLibreStockTotals);
+/** Métricas Mercado Ads (Product Ads): anunciantes, campañas y anuncios por publicación. */
+router.get('/mercadolibre/product-ads/advertisers', getMercadoLibreProductAdsAdvertisers);
+router.get('/mercadolibre/product-ads/campaigns', getMercadoLibreProductAdsCampaigns);
+router.get('/mercadolibre/product-ads/ads', getMercadoLibreProductAdsAds);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);

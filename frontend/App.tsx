@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
 import { api } from './services/api';
@@ -38,6 +38,7 @@ const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
 const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
 const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
+const MercadoLibreProductAds = lazyWithReload(() => import('./components/MercadoLibreProductAds'));
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
@@ -146,6 +147,7 @@ const App: React.FC = () => {
         bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
         tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
         mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+        mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE],
         stock_history: [Role.ADMIN, Role.WAREHOUSE],
         despachos: [Role.ADMIN],
         customers: [Role.ADMIN, Role.SELLER],
@@ -172,7 +174,7 @@ const App: React.FC = () => {
   }, [currentView]);
 
   useEffect(() => {
-    if (baseView === 'mercadolibre_marketing') setCurrentView('dashboard');
+    if (baseView === 'mercadolibre_marketing') setCurrentView('mercadolibre_product_ads');
   }, [baseView]);
 
   useEffect(() => {
@@ -700,6 +702,7 @@ const App: React.FC = () => {
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'mercadolibre_product_ads', label: 'Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
     ]},
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
@@ -739,6 +742,7 @@ const App: React.FC = () => {
                 {baseView === 'bulk_invoicing' && 'Facturación masiva'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
+                 {baseView === 'mercadolibre_product_ads' && 'Product Ads (Mercado Libre)'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'despachos' && 'Despachos'}
@@ -897,6 +901,11 @@ const App: React.FC = () => {
           {baseView === 'mercadolibre_orders' && (
             <Suspense fallback={<ViewFallback />}>
               <MercadoLibreOrders />
+            </Suspense>
+          )}
+          {baseView === 'mercadolibre_product_ads' && (
+            <Suspense fallback={<ViewFallback />}>
+              <MercadoLibreProductAds />
             </Suspense>
           )}
           {baseView === 'catalogs' && (

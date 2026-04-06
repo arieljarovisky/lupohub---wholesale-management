@@ -14,6 +14,10 @@ router.get('/mercadolibre/orders', integrations_controller_1.getMercadoLibreOrde
 router.get('/mercadolibre/questions', integrations_controller_1.getMercadoLibreQuestions);
 router.get('/mercadolibre/stock', integrations_controller_1.getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLibreStockTotals);
+/** Métricas Mercado Ads (Product Ads): anunciantes, campañas y anuncios por publicación. */
+router.get('/mercadolibre/product-ads/advertisers', integrations_controller_1.getMercadoLibreProductAdsAdvertisers);
+router.get('/mercadolibre/product-ads/campaigns', integrations_controller_1.getMercadoLibreProductAdsCampaigns);
+router.get('/mercadolibre/product-ads/ads', integrations_controller_1.getMercadoLibreProductAdsAds);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
