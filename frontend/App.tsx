@@ -747,7 +747,7 @@ const App: React.FC = () => {
                 {baseView === 'bulk_invoicing' && 'Facturación masiva'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
-                 {baseView === 'mercadolibre_product_ads' && 'Product Ads (Mercado Libre)'}
+                 {baseView === 'mercadolibre_product_ads' && 'Product Ads — campañas y publicaciones'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'despachos' && 'Despachos'}

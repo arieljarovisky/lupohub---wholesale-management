@@ -183,6 +183,8 @@ export function downloadProductAdsExcel(params: {
 
   const resumen: (string | number)[][] = [
     ['Reporte Product Ads — Lupo Hub'],
+    ['Hoja Campañas', 'Métricas por campaña de Product Ads (una fila por campaña).'],
+    ['Hoja Publicaciones', 'Métricas por publicación promocionada (una fila por ítem / anuncio).'],
     [],
     ['Cuenta', meta.accountLabel],
     ['Site', meta.siteId],
