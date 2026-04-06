@@ -11,10 +11,24 @@ import {
   BarChart3,
   ExternalLink,
   CalendarRange,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet,
+  Download,
+  BookOpen,
+  ChevronDown
 } from 'lucide-react';
 import { api } from '../services/api';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { useNotification } from '../context/NotificationContext';
+import {
+  buildExportBaseName,
+  computeProductAdsTotals,
+  downloadAdsCsv,
+  downloadCampaignsCsv,
+  downloadProductAdsExcel,
+  fetchAllAdsForExport,
+  fetchAllCampaignsForExport
+} from '../utils/productAdsExport';
 
 type AdvertiserRow = { advertiser_id: number; site_id: string; advertiser_name: string; account_name: string };
 
@@ -45,7 +59,68 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Definiciones breves para la pantalla (alineadas con métricas típicas de Mercado Ads). */
+const MARKETING_GLOSSARY: { term: string; text: string }[] = [
+  {
+    term: 'Product Ads',
+    text: 'Modalidad de publicidad de Mercado Libre que promociona publicaciones en resultados de búsqueda y espacios de descubrimiento. Aquí ves el rendimiento de esas inversiones.'
+  },
+  {
+    term: 'Inversión · costo publicitario',
+    text: 'Dinero gastado en anuncios en el período seleccionado. Es la base para calcular eficiencia frente a las ventas.'
+  },
+  {
+    term: 'Ventas atribuidas',
+    text: 'Importe de ventas que la plataforma asocia a la publicidad (suele incluir ventas directas e indirectas según las reglas de atribución de Mercado Libre).'
+  },
+  {
+    term: 'ROAS (Return On Ad Spend)',
+    text: 'Retorno sobre la inversión publicitaria: cuántos pesos de venta generás por cada peso gastado. Ej.: 4× significa ~$4 de ventas por $1 invertido. Cuanto más alto, mejor suele ser el retorno relativo al gasto.'
+  },
+  {
+    term: 'ACOS (Advertising Cost of Sales)',
+    text: 'Costo publicitario en relación a las ventas, en porcentaje: (costo ÷ ventas) × 100. Un ACOS más bajo indica que la publicidad “pesa” menos sobre el facturado atribuido.'
+  },
+  {
+    term: 'Impresiones',
+    text: 'Cantidad de veces que se mostró tu anuncio (en la API suelen llamarse “prints”). Sirve para medir alcance y comparar con clicks.'
+  },
+  {
+    term: 'Clicks',
+    text: 'Veces que alguien hizo clic en tu anuncio. Más clicks con buen ROAS suelen indicar creatividad y oferta relevantes.'
+  },
+  {
+    term: 'CTR (Click-Through Rate)',
+    text: 'Tasa de clics: clicks ÷ impresiones, en porcentaje. Mide qué tan seguido la gente que ve el anuncio hace clic; ayuda a detectar títulos, precio o foto poco atractivos.'
+  },
+  {
+    term: 'CPC (Costo por clic)',
+    text: 'Costo promedio que pagás por cada clic (costo ÷ clicks). Útil para comparar competencia y eficiencia del tráfico pagado.'
+  },
+  {
+    term: 'CVR (tasa de conversión)',
+    text: 'Relación entre interacciones y ventas atribuidas en el modelo de la plataforma. Un CVR bajo con muchos clicks puede indicar ficha, precio o stock a revisar.'
+  },
+  {
+    term: 'SOV (Share of Voice)',
+    text: 'Participación de visibilidad de tus anuncios frente al espacio publicitario disponible (según Mercado Ads). Más SOV implica más presencia, pero conviene cruzarlo con ROAS/ACOS.'
+  },
+  {
+    term: 'Presupuesto diario',
+    text: 'Tope de gasto por día configurado en la campaña. Mercado Libre puede distribuir el gasto según subastas y días; no siempre se gasta el 100 % cada día.'
+  },
+  {
+    term: 'Ventas directas e indirectas',
+    text: 'Directa: compra ligada de forma más inmediata al anuncio. Indirecta: el usuario interactuó con la publicidad pero la compra se atribuye por otro camino dentro de las reglas de ML. Ambas suelen sumarse en “ventas totales” según el reporte.'
+  },
+  {
+    term: 'Estrategia de campaña',
+    text: 'Objetivo configurado (por ejemplo rentabilidad vs. crecimiento de ventas). Cambia cómo la plataforma optimiza pujas y presencia frente a tus metas de ROAS/ACOS.'
+  }
+];
+
 const MercadoLibreProductAds: React.FC = () => {
+  const { showToast } = useNotification();
   const [advertisers, setAdvertisers] = useState<AdvertiserRow[]>([]);
   const [advError, setAdvError] = useState<string | null>(null);
   const [loadingAdv, setLoadingAdv] = useState(true);
@@ -76,6 +151,7 @@ const MercadoLibreProductAds: React.FC = () => {
   const [dataError, setDataError] = useState<string | null>(null);
   const [advRetry, setAdvRetry] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [exportingFull, setExportingFull] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,6 +269,101 @@ const MercadoLibreProductAds: React.FC = () => {
     const a = advertisers.find((x) => x.site_id === siteId && x.advertiser_id === advertiserId);
     return a ? `${a.advertiser_name} (${a.site_id})` : '';
   }, [advertisers, siteId, advertiserId]);
+
+  const accountLabelForExport = useMemo(() => {
+    const a = advertisers.find((x) => x.site_id === siteId && x.advertiser_id === advertiserId);
+    return a?.account_name || a?.advertiser_name || siteId || 'cuenta';
+  }, [advertisers, siteId, advertiserId]);
+
+  const runExportExcel = (
+    scopeNote: string,
+    camp: any[],
+    adsRows: any[],
+    ms: Record<string, number> | null
+  ) => {
+    const totalsExport = computeProductAdsTotals(ms, camp);
+    downloadProductAdsExcel({
+      meta: {
+        siteId,
+        advertiserId: advertiserId as number,
+        accountLabel: accountLabelForExport,
+        dateFrom,
+        dateTo,
+        exportedAt: new Date().toLocaleString('es-AR'),
+        scopeNote
+      },
+      metricsSummary: ms,
+      totals: totalsExport,
+      campaigns: camp,
+      ads: adsRows
+    });
+  };
+
+  const handleExportExcelCurrent = () => {
+    try {
+      runExportExcel(
+        'Vista actual: filas visibles según paginación en pantalla (no necesariamente todo el período).',
+        campaigns,
+        ads,
+        metricsSummary
+      );
+      showToast('success', 'Archivo Excel generado');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al exportar');
+    }
+  };
+
+  const handleExportExcelFull = async () => {
+    if (advertiserId === '') return;
+    setExportingFull(true);
+    try {
+      const [{ campaigns: allCamp, metricsSummary: ms }, allAds] = await Promise.all([
+        fetchAllCampaignsForExport(siteId, advertiserId, dateFrom, dateTo),
+        fetchAllAdsForExport(siteId, advertiserId, dateFrom, dateTo)
+      ]);
+      runExportExcel(
+        'Período completo: todas las campañas y publicaciones disponibles en la API para las fechas elegidas.',
+        allCamp,
+        allAds,
+        ms
+      );
+      showToast('success', `Excel generado (${allCamp.length} campañas, ${allAds.length} publicaciones)`);
+    } catch (e: any) {
+      showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar');
+    } finally {
+      setExportingFull(false);
+    }
+  };
+
+  const handleExportCsvCurrent = () => {
+    try {
+      const base = buildExportBaseName(siteId, dateFrom, dateTo);
+      downloadCampaignsCsv(campaigns, `${base}_vista`);
+      downloadAdsCsv(ads, `${base}_vista`);
+      showToast('success', 'Se descargaron 2 archivos CSV (campañas y publicaciones)');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al exportar CSV');
+    }
+  };
+
+  const handleExportCsvFull = async () => {
+    if (advertiserId === '') return;
+    setExportingFull(true);
+    try {
+      const [{ campaigns: allCamp }, allAds] = await Promise.all([
+        fetchAllCampaignsForExport(siteId, advertiserId, dateFrom, dateTo),
+        fetchAllAdsForExport(siteId, advertiserId, dateFrom, dateTo)
+      ]);
+      const base = buildExportBaseName(siteId, dateFrom, dateTo);
+      downloadCampaignsCsv(allCamp, `${base}_completo`);
+      downloadAdsCsv(allAds, `${base}_completo`);
+      showToast('success', `CSV listo (${allCamp.length} campañas, ${allAds.length} publicaciones)`);
+    } catch (e: any) {
+      showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar');
+    } finally {
+      setExportingFull(false);
+    }
+  };
 
   if (loadingAdv) {
     return (
@@ -312,6 +483,62 @@ const MercadoLibreProductAds: React.FC = () => {
         {selectedAdvertiserLabel ? <span className="text-slate-600">· {selectedAdvertiserLabel}</span> : null}
       </p>
 
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <FileSpreadsheet size={18} className="text-emerald-400" />
+          <h3 className="text-sm font-bold text-white">Reportes para análisis</h3>
+          {exportingFull ? (
+            <span className="text-xs text-slate-400 inline-flex items-center gap-1 ml-2">
+              <Loader2 size={14} className="animate-spin" /> Generando…
+            </span>
+          ) : null}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Excel incluye hojas <strong className="text-slate-400">Resumen</strong>,{' '}
+          <strong className="text-slate-400">Campañas</strong> y <strong className="text-slate-400">Publicaciones</strong>. CSV usa
+          separador <strong className="text-slate-400">;</strong> (compatible con Excel en español). La opción{' '}
+          <em>período completo</em> descarga todas las filas del rango de fechas (puede tardar si hay muchas publicaciones).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={handleExportExcelCurrent}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40"
+          >
+            <FileSpreadsheet size={16} />
+            Excel · vista actual
+          </button>
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={() => void handleExportExcelFull()}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 text-xs font-semibold border border-emerald-700/50 disabled:opacity-40"
+          >
+            <FileSpreadsheet size={16} />
+            Excel · período completo
+          </button>
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={handleExportCsvCurrent}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 disabled:opacity-40"
+          >
+            <Download size={16} />
+            CSV · vista actual
+          </button>
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={() => void handleExportCsvFull()}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 disabled:opacity-40"
+          >
+            <Download size={16} />
+            CSV · período completo
+          </button>
+        </div>
+      </div>
+
       {dataError && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-300 flex items-start gap-2">
           <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -322,16 +549,53 @@ const MercadoLibreProductAds: React.FC = () => {
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         {[
-          { label: 'Inversión', value: `$${formatMoneyAr(totals.cost)}`, sub: 'Costo publicitario', icon: Wallet },
-          { label: 'Ventas atrib.', value: `$${formatMoneyAr(totals.totalAmount)}`, sub: 'Importe total', icon: TrendingUp },
-          { label: 'ROAS', value: formatRoas(totals.roas), sub: 'Retorno / inversión', icon: BarChart3 },
-          { label: 'ACOS', value: formatPct(totals.acos), sub: 'Costo / ventas', icon: Percent },
-          { label: 'Impresiones', value: totals.prints.toLocaleString('es-AR'), sub: 'Prints', icon: Eye },
-          { label: 'Clicks', value: totals.clicks.toLocaleString('es-AR'), sub: `CTR ${formatPct(totals.ctr)}`, icon: MousePointerClick }
+          {
+            label: 'Inversión',
+            value: `$${formatMoneyAr(totals.cost)}`,
+            sub: 'Costo publicitario',
+            icon: Wallet,
+            hint: 'Dinero gastado en publicidad en el período. Ver glosario abajo para más detalle.'
+          },
+          {
+            label: 'Ventas atrib.',
+            value: `$${formatMoneyAr(totals.totalAmount)}`,
+            sub: 'Importe total',
+            icon: TrendingUp,
+            hint: 'Ventas que Mercado Libre asocia a tus anuncios en el período (atribución de la plataforma).'
+          },
+          {
+            label: 'ROAS',
+            value: formatRoas(totals.roas),
+            sub: 'Retorno / inversión',
+            icon: BarChart3,
+            hint: 'Return On Ad Spend: pesos de venta por cada peso invertido en publicidad.'
+          },
+          {
+            label: 'ACOS',
+            value: formatPct(totals.acos),
+            sub: 'Costo / ventas',
+            icon: Percent,
+            hint: 'Advertising Cost of Sales: % del facturado atribuido que representa el gasto en ads.'
+          },
+          {
+            label: 'Impresiones',
+            value: totals.prints.toLocaleString('es-AR'),
+            sub: 'Prints',
+            icon: Eye,
+            hint: 'Veces que se mostró tu anuncio. En la API suelen llamarse “prints”.'
+          },
+          {
+            label: 'Clicks',
+            value: totals.clicks.toLocaleString('es-AR'),
+            sub: `CTR ${formatPct(totals.ctr)}`,
+            icon: MousePointerClick,
+            hint: 'Clics en el anuncio. CTR = clicks ÷ impresiones (qué tan clickeable es el anuncio).'
+          }
         ].map((card) => (
           <div
             key={card.label}
-            className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-lg shadow-black/20"
+            title={card.hint}
+            className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-lg shadow-black/20 cursor-help"
           >
             <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{card.label}</span>
@@ -342,6 +606,34 @@ const MercadoLibreProductAds: React.FC = () => {
           </div>
         ))}
       </div>
+
+      <details className="rounded-2xl border border-slate-700/80 bg-slate-900/45 open:bg-slate-900/55 open:[&_.gloss-chevron]:rotate-180">
+        <summary className="px-4 py-3.5 cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-semibold text-slate-100 select-none [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center gap-2 min-w-0">
+            <BookOpen size={18} className="text-yellow-500 shrink-0" aria-hidden />
+            <span className="truncate">Glosario: significado de las métricas de marketing</span>
+          </span>
+          <ChevronDown
+            size={18}
+            className="gloss-chevron text-slate-500 shrink-0 transition-transform duration-200"
+            aria-hidden
+          />
+        </summary>
+        <div className="px-4 pb-4 pt-0 border-t border-slate-800/80">
+          <p className="text-xs text-slate-500 mt-3 mb-4">
+            Definiciones orientativas para leer los números de Product Ads. Los cálculos exactos y la atribución los define
+            Mercado Libre en su plataforma.
+          </p>
+          <dl className="space-y-4 text-sm">
+            {MARKETING_GLOSSARY.map((item) => (
+              <div key={item.term} className="border-b border-slate-800/60 pb-4 last:border-0 last:pb-0">
+                <dt className="text-yellow-500/95 font-semibold mb-1">{item.term}</dt>
+                <dd className="text-slate-400 leading-relaxed">{item.text}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </details>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
