@@ -107,7 +107,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           products.find(p => p.sku === r.sku);
         if (!match) return r;
         const nextPrice = Number(match.price);
-        if (!Number.isFinite(nextPrice) || nextPrice <= 0 || nextPrice === r.price) return r;
+        if (!Number.isFinite(nextPrice) || nextPrice < 0 || nextPrice === r.price) return r;
         changed = true;
         return { ...r, price: nextPrice };
       });

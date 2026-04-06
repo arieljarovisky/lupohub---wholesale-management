@@ -341,6 +341,21 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return Math.max(0, Number(fallbackBasePrice) || 0);
   };
 
+  /** Recalcula precios de filas cuando cambia la lista de precios activa (products se refresca desde App). */
+  useEffect(() => {
+    if (!rows.length || !products.length) return;
+    setRows(prev => {
+      let changed = false;
+      const next = prev.map(r => {
+        const nextPrice = getPriceFromList(r.productId, r.productCode, r.price);
+        if (!Number.isFinite(nextPrice) || nextPrice === r.price) return r;
+        changed = true;
+        return { ...r, price: nextPrice };
+      });
+      return changed ? next : prev;
+    });
+  }, [products, selectedPriceListId]);
+
   /** Vuelve a agregar al pedido los colores de un artículo que ya está cargado (p. ej. si eliminaste una fila de color). */
   const addMissingColorsToArticle = async (productCode: string) => {
     const code = (productCode || '').trim();
