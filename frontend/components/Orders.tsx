@@ -828,6 +828,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
+                    {order.noStockImpact && (
+                      <span
+                        className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help"
+                        title="Pedido marcado para facturación administrativa: no descuenta ni restaura stock."
+                      >
+                        <Package size={10} /> SIN IMPACTO STOCK
+                      </span>
+                    )}
                     {role !== Role.CUSTOMER && (
                       <button
                         type="button"
