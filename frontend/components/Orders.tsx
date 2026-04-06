@@ -1110,7 +1110,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className="text-lg font-black text-blue-400">${formatMoneyAr(order.total)}</div>
+                   <div className="text-right">
+                     <div className="text-lg font-black text-blue-400">${formatMoneyAr(order.total)}</div>
+                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
+                   </div>
                 </div>
               </div>
             </div>
