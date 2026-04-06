@@ -18,6 +18,10 @@ router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLib
 router.get('/mercadolibre/product-ads/advertisers', integrations_controller_1.getMercadoLibreProductAdsAdvertisers);
 router.get('/mercadolibre/product-ads/campaigns', integrations_controller_1.getMercadoLibreProductAdsCampaigns);
 router.get('/mercadolibre/product-ads/ads', integrations_controller_1.getMercadoLibreProductAdsAds);
+router.get('/mercadolibre/brand-ads/advertisers', integrations_controller_1.getMercadoLibreBrandAdsAdvertisers);
+router.get('/mercadolibre/brand-ads/campaigns', integrations_controller_1.getMercadoLibreBrandAdsCampaigns);
+router.get('/mercadolibre/display-ads/advertisers', integrations_controller_1.getMercadoLibreDisplayAdsAdvertisers);
+router.get('/mercadolibre/display-ads/campaigns', integrations_controller_1.getMercadoLibreDisplayAdsCampaigns);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);

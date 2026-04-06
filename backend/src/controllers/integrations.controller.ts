@@ -4971,3 +4971,363 @@ export const getMercadoLibreProductAdsAds = async (req: Request, res: Response) 
     res.status(500).json({ message: 'Error obteniendo anuncios de Product Ads', error: error.message });
   }
 };
+
+const ML_ADS_V1_HEADERS = (accessToken: string) => ({
+  Authorization: `Bearer ${accessToken}`,
+  'Content-Type': 'application/json',
+  'Api-Version': '1'
+});
+
+function normalizeBrandSummary(summary: any): Record<string, number> {
+  if (!summary || typeof summary !== 'object') return {};
+  const et = summary.event_time || {};
+  const cost = Number(summary.consumed_budget) || 0;
+  const totalAmount = Number(et.units_amount) || 0;
+  const prints = Number(summary.prints) || 0;
+  const clicks = Number(summary.clicks) || 0;
+  const roas = cost > 0 && totalAmount > 0 ? totalAmount / cost : 0;
+  const acos = Number(summary.acos) || 0;
+  return {
+    cost,
+    prints,
+    clicks,
+    ctr: Number(summary.ctr) || 0,
+    cpc: Number(summary.cpc) || 0,
+    cvr: Number(summary.cvr) || 0,
+    acos,
+    total_amount: totalAmount,
+    roas,
+    units_quantity: Number(et.units_quantity) || 0
+  };
+}
+
+function normalizeDisplaySummary(summary: any): Record<string, number> {
+  if (!summary || typeof summary !== 'object') return {};
+  const et = summary.event_time || {};
+  const cost = Number(summary.consumed_budget) || 0;
+  const totalAmount = Number(et.direct_amount) || 0;
+  const prints = Number(summary.prints) || 0;
+  const clicks = Number(summary.clicks) || 0;
+  const roasEt = Number(et.roas) || 0;
+  const roas = roasEt > 0 ? roasEt : cost > 0 && totalAmount > 0 ? totalAmount / cost : 0;
+  const acos = totalAmount > 0 ? (cost / totalAmount) * 100 : 0;
+  return {
+    cost,
+    prints,
+    clicks,
+    ctr: Number(summary.ctr) || 0,
+    cpc: Number(summary.cpc) || 0,
+    cpm: Number(summary.cpm) || 0,
+    acos,
+    total_amount: totalAmount,
+    roas
+  };
+}
+
+function mergeSummaries(rows: Record<string, number>[]): Record<string, number> {
+  if (rows.length === 0) return {};
+  const sums: Record<string, number> = {};
+  const keys = new Set<string>();
+  rows.forEach((r) => Object.keys(r).forEach((k) => keys.add(k)));
+  for (const k of keys) {
+    sums[k] = rows.reduce((acc, r) => acc + (Number(r[k]) || 0), 0);
+  }
+  const cost = sums.cost || 0;
+  const totalAmount = sums.total_amount || 0;
+  if (cost > 0 && totalAmount > 0) {
+    sums.roas = totalAmount / cost;
+    sums.acos = (cost / totalAmount) * 100;
+  }
+  return sums;
+}
+
+async function fetchBrandAdvertiserMetricsSummary(
+  accessToken: string,
+  advertiserId: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<Record<string, number> | null> {
+  try {
+    const r = await axios.get(
+      `https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(advertiserId)}/brand_ads/campaigns/metrics`,
+      {
+        headers: ML_ADS_V1_HEADERS(accessToken),
+        params: { date_from: dateFrom, date_to: dateTo, aggregation_type: 'total' },
+        validateStatus: () => true
+      }
+    );
+    if (r.status !== 200 || !r.data?.summary) return null;
+    return normalizeBrandSummary(r.data.summary);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBrandCampaignMetricsRaw(
+  accessToken: string,
+  advertiserId: string,
+  campaignId: string | number,
+  dateFrom: string,
+  dateTo: string
+): Promise<Record<string, number>> {
+  try {
+    const r = await axios.get(
+      `https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(String(advertiserId))}/brand_ads/campaigns/${encodeURIComponent(String(campaignId))}/metrics`,
+      {
+        headers: ML_ADS_V1_HEADERS(accessToken),
+        params: { date_from: dateFrom, date_to: dateTo, aggregation_type: 'total' },
+        validateStatus: () => true
+      }
+    );
+    if (r.status !== 200 || !r.data?.summary) return {};
+    return normalizeBrandSummary(r.data.summary);
+  } catch {
+    return {};
+  }
+}
+
+/** Anunciantes con acceso a Brand Ads (BADS). */
+export const getMercadoLibreBrandAdsAdvertisers = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const r = await axios.get('https://api.mercadolibre.com/advertising/advertisers', {
+      headers: ML_ADS_V1_HEADERS(mlToken.access_token),
+      params: { product_id: 'BADS' },
+      validateStatus: () => true
+    });
+    if (r.status !== 200) {
+      const detail = r.data?.message || r.data?.cause?.message || r.data?.error || r.statusText;
+      return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+        message:
+          r.status === 404
+            ? 'No hay permisos para Brand Ads o no está activado. Consultá con tu asesor comercial de Mercado Libre.'
+            : 'Error consultando anunciantes Brand Ads',
+        detail
+      });
+    }
+    res.json(r.data);
+  } catch (error: any) {
+    console.error('getMercadoLibreBrandAdsAdvertisers:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error consultando Brand Ads', error: error.message });
+  }
+};
+
+/**
+ * Campañas Brand Ads con métricas por fila + resumen global del anunciante (misma API).
+ * Query: advertiser_id, date_from, date_to, limit, offset
+ */
+export const getMercadoLibreBrandAdsCampaigns = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const advertiserId = (req.query.advertiser_id as string)?.trim();
+    const dateFrom = (req.query.date_from as string)?.trim();
+    const dateTo = (req.query.date_to as string)?.trim();
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+    if (!advertiserId || !dateFrom || !dateTo) {
+      return res.status(400).json({ message: 'Parámetros requeridos: advertiser_id, date_from, date_to' });
+    }
+
+    const listUrl = `https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(advertiserId)}/brand_ads/campaigns`;
+    const listR = await axios.get(listUrl, {
+      headers: ML_ADS_V1_HEADERS(mlToken.access_token),
+      params: { limit, offset },
+      validateStatus: () => true
+    });
+    if (listR.status !== 200) {
+      const detail = listR.data?.message || listR.data?.cause?.message || listR.data?.error || listR.statusText;
+      return res.status(listR.status >= 400 && listR.status < 500 ? listR.status : 502).json({
+        message: 'Error obteniendo campañas Brand Ads',
+        detail
+      });
+    }
+    const rawCampaigns = Array.isArray(listR.data?.campaigns) ? listR.data.campaigns : [];
+    const paging = listR.data?.paging || { total: rawCampaigns.length, offset, limit };
+
+    const [metricsSummary, ...metricsRows] = await Promise.all([
+      fetchBrandAdvertiserMetricsSummary(mlToken.access_token, advertiserId, dateFrom, dateTo),
+      ...rawCampaigns.map((c: any) =>
+        fetchBrandCampaignMetricsRaw(mlToken.access_token, advertiserId, c.campaign_id, dateFrom, dateTo)
+      )
+    ]);
+
+    const results = rawCampaigns.map((c: any, i: number) => {
+      const m = metricsRows[i] || {};
+      const budgetAmt = c?.budget?.amount != null ? Number(c.budget.amount) : 0;
+      return {
+        id: c.campaign_id,
+        name: c.name,
+        status: c.status,
+        site_id: c.site_id,
+        strategy: c.campaign_type,
+        channel: 'brand_ads',
+        budget: budgetAmt,
+        metrics: m
+      };
+    });
+
+    res.json({
+      paging: { total: paging.total ?? results.length, offset: paging.offset ?? offset, limit: paging.limit ?? limit },
+      results,
+      metrics_summary: metricsSummary
+    });
+  } catch (error: any) {
+    console.error('getMercadoLibreBrandAdsCampaigns:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo campañas Brand Ads', error: error.message });
+  }
+};
+
+/** Anunciantes con acceso a Display Ads (DISPLAY). */
+export const getMercadoLibreDisplayAdsAdvertisers = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const r = await axios.get('https://api.mercadolibre.com/advertising/advertisers', {
+      headers: ML_ADS_V1_HEADERS(mlToken.access_token),
+      params: { product_id: 'DISPLAY' },
+      validateStatus: () => true
+    });
+    if (r.status !== 200) {
+      const detail = r.data?.message || r.data?.cause?.message || r.data?.error || r.statusText;
+      return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
+        message:
+          r.status === 404
+            ? 'No hay permisos para Display Ads o no está activado. Display se habilita vía asesor comercial de Mercado Libre.'
+            : 'Error consultando anunciantes Display Ads',
+        detail
+      });
+    }
+    res.json(r.data);
+  } catch (error: any) {
+    console.error('getMercadoLibreDisplayAdsAdvertisers:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error consultando Display Ads', error: error.message });
+  }
+};
+
+async function fetchDisplayCampaignMetricsRaw(
+  accessToken: string,
+  advertiserId: string,
+  campaignId: string | number,
+  dateFrom: string,
+  dateTo: string
+): Promise<Record<string, number>> {
+  try {
+    const r = await axios.get(
+      `https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(String(advertiserId))}/display/campaigns/${encodeURIComponent(String(campaignId))}/metrics`,
+      {
+        headers: ML_ADS_V1_HEADERS(accessToken),
+        params: { date_from: dateFrom, date_to: dateTo },
+        validateStatus: () => true
+      }
+    );
+    if (r.status !== 200 || !r.data?.summary) return {};
+    return normalizeDisplaySummary(r.data.summary);
+  } catch {
+    return {};
+  }
+}
+
+const DISPLAY_LIST_PAGE = 50;
+const DISPLAY_METRICS_CONCURRENCY = 8;
+
+/**
+ * Campañas Display con métricas por fila. Query: advertiser_id, date_from, date_to, limit, offset
+ * El resumen global suma todas las campañas del anunciante (hasta 200 campañas por petición).
+ */
+export const getMercadoLibreDisplayAdsCampaigns = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+    const advertiserId = (req.query.advertiser_id as string)?.trim();
+    const dateFrom = (req.query.date_from as string)?.trim();
+    const dateTo = (req.query.date_to as string)?.trim();
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+    if (!advertiserId || !dateFrom || !dateTo) {
+      return res.status(400).json({ message: 'Parámetros requeridos: advertiser_id, date_from, date_to' });
+    }
+
+    const allRows: any[] = [];
+    let listOffset = 0;
+    let totalFromApi = 0;
+    for (;;) {
+      const listR = await axios.get(
+        `https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(advertiserId)}/display/campaigns`,
+        {
+          headers: ML_ADS_V1_HEADERS(mlToken.access_token),
+          params: { limit: DISPLAY_LIST_PAGE, offset: listOffset, sort_by: 'start_date', sort_order: 'desc' },
+          validateStatus: () => true
+        }
+      );
+      if (listR.status !== 200) {
+        const detail = listR.data?.message || listR.data?.cause?.message || listR.data?.error || listR.statusText;
+        return res.status(listR.status >= 400 && listR.status < 500 ? listR.status : 502).json({
+          message: 'Error obteniendo campañas Display Ads',
+          detail
+        });
+      }
+      const batch = Array.isArray(listR.data?.results) ? listR.data.results : [];
+      totalFromApi = listR.data?.paging?.total ?? listR.data?.total ?? batch.length + listOffset;
+      allRows.push(...batch);
+      if (batch.length < DISPLAY_LIST_PAGE) break;
+      listOffset += DISPLAY_LIST_PAGE;
+      if (listOffset > 10000) break;
+    }
+
+    const MAX_METRICS = 200;
+    const idsForMetrics = allRows.slice(0, MAX_METRICS).map((r: any) => r.id);
+    const metricsById = new Map<number, Record<string, number>>();
+
+    for (let i = 0; i < idsForMetrics.length; i += DISPLAY_METRICS_CONCURRENCY) {
+      const chunk = idsForMetrics.slice(i, i + DISPLAY_METRICS_CONCURRENCY);
+      const settled = await Promise.all(
+        chunk.map((cid) =>
+          fetchDisplayCampaignMetricsRaw(mlToken.access_token, advertiserId, cid, dateFrom, dateTo).then((m) => ({
+            cid,
+            m
+          }))
+        )
+      );
+      settled.forEach(({ cid, m }) => metricsById.set(Number(cid), m));
+    }
+
+    const allSummaries = idsForMetrics.map((id) => metricsById.get(Number(id)) || {});
+    const metrics_summary = mergeSummaries(allSummaries);
+    const summary_partial = allRows.length > MAX_METRICS;
+
+    const enriched = allRows.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      site_id: c.site_id,
+      strategy: c.type,
+      channel: 'display',
+      goal: c.goal,
+      budget: 0,
+      metrics: metricsById.get(Number(c.id)) || {}
+    }));
+
+    const pageSlice = enriched.slice(offset, offset + limit);
+    const total = totalFromApi || enriched.length;
+
+    res.json({
+      paging: { total, offset, limit },
+      results: pageSlice,
+      metrics_summary,
+      summary_partial
+    });
+  } catch (error: any) {
+    console.error('getMercadoLibreDisplayAdsCampaigns:', error.response?.data || error.message);
+    res.status(500).json({ message: 'Error obteniendo campañas Display Ads', error: error.message });
+  }
+};

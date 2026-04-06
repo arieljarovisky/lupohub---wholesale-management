@@ -47,7 +47,11 @@ import {
   emitirNotaCreditoExternalInvoice,
   getMercadoLibreProductAdsAdvertisers,
   getMercadoLibreProductAdsCampaigns,
-  getMercadoLibreProductAdsAds
+  getMercadoLibreProductAdsAds,
+  getMercadoLibreBrandAdsAdvertisers,
+  getMercadoLibreBrandAdsCampaigns,
+  getMercadoLibreDisplayAdsAdvertisers,
+  getMercadoLibreDisplayAdsCampaigns
 } from '../controllers/integrations.controller';
 import { authMiddleware } from '../middleware/auth';
 
@@ -68,6 +72,10 @@ router.get('/mercadolibre/stock/totals', getMercadoLibreStockTotals);
 router.get('/mercadolibre/product-ads/advertisers', getMercadoLibreProductAdsAdvertisers);
 router.get('/mercadolibre/product-ads/campaigns', getMercadoLibreProductAdsCampaigns);
 router.get('/mercadolibre/product-ads/ads', getMercadoLibreProductAdsAds);
+router.get('/mercadolibre/brand-ads/advertisers', getMercadoLibreBrandAdsAdvertisers);
+router.get('/mercadolibre/brand-ads/campaigns', getMercadoLibreBrandAdsCampaigns);
+router.get('/mercadolibre/display-ads/advertisers', getMercadoLibreDisplayAdsAdvertisers);
+router.get('/mercadolibre/display-ads/campaigns', getMercadoLibreDisplayAdsCampaigns);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);

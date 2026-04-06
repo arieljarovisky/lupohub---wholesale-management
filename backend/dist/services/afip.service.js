@@ -225,12 +225,12 @@ function emitirFactura(order, customer, forceCbteTipo) {
                 condicionIva = CONSUMIDOR_FINAL;
             }
         }
-        const total = Number(order.total) || 0;
-        if (total <= 0)
-            throw new Error('El total del pedido debe ser mayor a 0.');
-        // IVA 21%: neto = total / 1.21, iva = total - neto
-        const impNeto = Math.round((total / 1.21) * 100) / 100;
-        const impIva = Math.round((total - impNeto) * 100) / 100;
+        // En la app el total del pedido se maneja en neto; para AFIP emitimos total con IVA 21%.
+        const impNeto = Number(order.total) || 0;
+        if (impNeto <= 0)
+            throw new Error('El total neto del pedido debe ser mayor a 0.');
+        const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+        const total = Math.round((impNeto + impIva) * 100) / 100;
         // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
         const dateStr = new Date().toISOString().split('T')[0];
         const fecha = dateStr.replace(/-/g, '');
@@ -306,7 +306,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
  * Emite una Nota de Crédito en AFIP asociada a una factura existente.
  * @param facturaOriginal - Factura que se está creditando (Pto.Vta, Tipo, Nro)
  * @param customer - Cliente (mismo que la factura)
- * @param amountToCredit - Monto total a creditar (incluye IVA)
+ * @param amountToCredit - Monto neto a creditar (sin IVA). Se calcula IVA 21% internamente.
  */
 function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -366,11 +366,11 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
                 condicionIva = CONSUMIDOR_FINAL;
             }
         }
-        const total = Number(amountToCredit) || 0;
-        if (total <= 0)
-            throw new Error('El monto a creditar debe ser mayor a 0.');
-        const impNeto = Math.round((total / 1.21) * 100) / 100;
-        const impIva = Math.round((total - impNeto) * 100) / 100;
+        const impNeto = Number(amountToCredit) || 0;
+        if (impNeto <= 0)
+            throw new Error('El monto neto a creditar debe ser mayor a 0.');
+        const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+        const total = Math.round((impNeto + impIva) * 100) / 100;
         const dateStr = new Date().toISOString().split('T')[0];
         const fecha = dateStr.replace(/-/g, '');
         const cbteFch = parseInt(fecha, 10);

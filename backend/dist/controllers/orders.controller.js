@@ -77,6 +77,19 @@ function resolveDespachoIdForItem(item, variantId) {
 function mapPaymentStatus(row) {
     return (row === null || row === void 0 ? void 0 : row.payment_status) === 'pendiente' ? 'pendiente' : 'pagado';
 }
+/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
+function getOrderNetFromLineItems(orderId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const rows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [orderId]);
+        let sum = 0;
+        for (const r of rows) {
+            const qty = Number(r.quantity) || 0;
+            const price = Number(r.price_at_moment) || 0;
+            sum += Math.round(qty * price * 100) / 100;
+        }
+        return Math.round(sum * 100) / 100;
+    });
+}
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
@@ -622,8 +635,10 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
+        const netFromItems = yield getOrderNetFromLineItems(id);
+        const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: Number(orderRow.total), customerId: orderRow.customer_id }, {
+        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id }, {
             id: customerRow.id,
             businessName: (_d = customerRow.business_name) !== null && _d !== void 0 ? _d : '',
             cuit: customerRow.cuit,
@@ -720,7 +735,8 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         let amountToCredit;
         let creditNoteItemQuantity = null;
         if (tipo === 'total') {
-            amountToCredit = Number(orderRow.total) || 0;
+            const netFromItems = yield getOrderNetFromLineItems(id);
+            amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
             if (amountToCredit <= 0)
                 return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
         }

@@ -1108,6 +1108,59 @@ export const api = {
     return await request(`/integrations/mercadolibre/product-ads/ads?${q.toString()}`, 'GET');
   },
 
+  /** Mercado Ads — Brand Ads (BADS): anunciantes y campañas con métricas. */
+  getMercadoLibreBrandAdsAdvertisers: async (): Promise<{
+    advertisers: Array<{ advertiser_id: number; site_id: string; advertiser_name: string; account_name: string }>;
+  }> => {
+    return await request('/integrations/mercadolibre/brand-ads/advertisers', 'GET');
+  },
+  getMercadoLibreBrandAdsCampaigns: async (params: {
+    advertiser_id: string | number;
+    date_from: string;
+    date_to: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    paging?: { offset: number; total: number; limit: number };
+    results: any[];
+    metrics_summary?: Record<string, number>;
+  }> => {
+    const q = new URLSearchParams();
+    q.set('advertiser_id', String(params.advertiser_id));
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    return await request(`/integrations/mercadolibre/brand-ads/campaigns?${q.toString()}`, 'GET');
+  },
+
+  /** Mercado Ads — Display: anunciantes y campañas con métricas. */
+  getMercadoLibreDisplayAdsAdvertisers: async (): Promise<{
+    advertisers: Array<{ advertiser_id: number; site_id: string; advertiser_name: string; account_name: string }>;
+  }> => {
+    return await request('/integrations/mercadolibre/display-ads/advertisers', 'GET');
+  },
+  getMercadoLibreDisplayAdsCampaigns: async (params: {
+    advertiser_id: string | number;
+    date_from: string;
+    date_to: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    paging?: { offset: number; total: number; limit: number };
+    results: any[];
+    metrics_summary?: Record<string, number>;
+    summary_partial?: boolean;
+  }> => {
+    const q = new URLSearchParams();
+    q.set('advertiser_id', String(params.advertiser_id));
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    if (params.limit != null) q.set('limit', String(params.limit));
+    if (params.offset != null) q.set('offset', String(params.offset));
+    return await request(`/integrations/mercadolibre/display-ads/campaigns?${q.toString()}`, 'GET');
+  },
+
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
     return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(`/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants`, 'GET');
   },

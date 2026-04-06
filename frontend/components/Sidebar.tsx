@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Megaphone, Sparkles, LayoutGrid } from 'lucide-react';
 import { Role } from '../types';
 
 interface SidebarProps {
@@ -34,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
         { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
         { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
         { id: 'mercadolibre_product_ads', label: 'Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
+        { id: 'mercadolibre_brand_ads', label: 'Brand Ads', icon: Sparkles, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
+        { id: 'mercadolibre_display_ads', label: 'Display Ads', icon: LayoutGrid, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
       ]
     },
     {

@@ -2,46 +2,43 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Loader2,
   RefreshCw,
-  Megaphone,
   MousePointerClick,
   Eye,
   Wallet,
   TrendingUp,
   Percent,
   BarChart3,
-  ExternalLink,
   CalendarRange,
   AlertCircle,
   FileSpreadsheet,
   Download,
   BookOpen,
-  ChevronDown
+  ChevronDown,
+  Sparkles,
+  LayoutGrid
 } from 'lucide-react';
 import { api } from '../services/api';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { useNotification } from '../context/NotificationContext';
+import { computeProductAdsTotals } from '../utils/productAdsExport';
 import {
-  buildExportBaseName,
-  computeProductAdsTotals,
-  downloadAdsCsv,
-  downloadCampaignsCsv,
-  downloadProductAdsExcel,
-  downloadSingleCampaignCsv,
-  downloadSingleCampaignExcel,
-  fetchAllAdsForExport,
-  fetchAllCampaignsForExport
-} from '../utils/productAdsExport';
+  buildBrandDisplayBaseName,
+  downloadBrandDisplayCampaignsCsv,
+  downloadBrandDisplayExcel,
+  downloadSingleBrandDisplayCampaignCsv,
+  downloadSingleBrandDisplayCampaignExcel,
+  fetchAllBrandCampaignsForExport,
+  fetchAllDisplayCampaignsForExport
+} from '../utils/brandDisplayAdsExport';
 
 type AdvertiserRow = { advertiser_id: number; site_id: string; advertiser_name: string; account_name: string };
+
+export type MercadoAdsKind = 'brand' | 'display';
 
 function toNum(v: unknown): number {
   if (typeof v === 'number' && !Number.isNaN(v)) return v;
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-function sumMetrics(rows: any[], key: string): number {
-  return rows.reduce((acc, r) => acc + toNum(r?.metrics?.[key]), 0);
 }
 
 function formatPct(value: number, digits = 2): string {
@@ -61,71 +58,110 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Definiciones breves para la pantalla (alineadas con métricas típicas de Mercado Ads). */
-const MARKETING_GLOSSARY: { term: string; text: string }[] = [
+const GLOSSARY_BRAND: { term: string; text: string }[] = [
   {
-    term: 'Product Ads',
-    text: 'Modalidad de publicidad de Mercado Libre que promociona publicaciones en resultados de búsqueda y espacios de descubrimiento. Aquí ves el rendimiento de esas inversiones.'
+    term: 'Brand Ads',
+    text: 'Publicidad de marca en Mercado Libre (búsqueda y posición destacada). Las métricas vienen por campaña según la API oficial.'
   },
   {
-    term: 'Métricas por campaña y por publicación',
-    text: 'Por campaña: agregás costo, ventas, ROAS, etc. a cada campaña que configuraste. Por publicación: las mismas métricas pero para cada anuncio/ítem promocionado. Sirve para ver qué campaña rinde y qué publicación conviene potenciar o pausar.'
+    term: 'Inversión · costo',
+    text: 'Equivale al presupuesto consumido en el período (en la API suele figurar como consumed_budget).'
   },
   {
-    term: 'Inversión · costo publicitario',
-    text: 'Dinero gastado en anuncios en el período seleccionado. Es la base para calcular eficiencia frente a las ventas.'
+    term: 'Ventas (importe atrib.)',
+    text: 'Importe asociado a conversiones según el bloque de atribución de la API (p. ej. event_time.units_amount en Brand Ads).'
   },
   {
-    term: 'Ventas atribuidas',
-    text: 'Importe de ventas que la plataforma asocia a la publicidad (suele incluir ventas directas e indirectas según las reglas de atribución de Mercado Libre).'
-  },
-  {
-    term: 'ROAS (Return On Ad Spend)',
-    text: 'Retorno sobre la inversión publicitaria: cuántos pesos de venta generás por cada peso gastado. Ej.: 4× significa ~$4 de ventas por $1 invertido. Cuanto más alto, mejor suele ser el retorno relativo al gasto.'
-  },
-  {
-    term: 'ACOS (Advertising Cost of Sales)',
-    text: 'Costo publicitario en relación a las ventas, en porcentaje: (costo ÷ ventas) × 100. Un ACOS más bajo indica que la publicidad “pesa” menos sobre el facturado atribuido.'
-  },
-  {
-    term: 'Impresiones',
-    text: 'Cantidad de veces que se mostró tu anuncio (en la API suelen llamarse “prints”). Sirve para medir alcance y comparar con clicks.'
-  },
-  {
-    term: 'Clicks',
-    text: 'Veces que alguien hizo clic en tu anuncio. Más clicks con buen ROAS suelen indicar creatividad y oferta relevantes.'
-  },
-  {
-    term: 'CTR (Click-Through Rate)',
-    text: 'Tasa de clics: clicks ÷ impresiones, en porcentaje. Mide qué tan seguido la gente que ve el anuncio hace clic; ayuda a detectar títulos, precio o foto poco atractivos.'
-  },
-  {
-    term: 'CPC (Costo por clic)',
-    text: 'Costo promedio que pagás por cada clic (costo ÷ clicks). Útil para comparar competencia y eficiencia del tráfico pagado.'
-  },
-  {
-    term: 'CVR (tasa de conversión)',
-    text: 'Relación entre interacciones y ventas atribuidas en el modelo de la plataforma. Un CVR bajo con muchos clicks puede indicar ficha, precio o stock a revisar.'
-  },
-  {
-    term: 'SOV (Share of Voice)',
-    text: 'Participación de visibilidad de tus anuncios frente al espacio publicitario disponible (según Mercado Ads). Más SOV implica más presencia, pero conviene cruzarlo con ROAS/ACOS.'
-  },
-  {
-    term: 'Presupuesto diario',
-    text: 'Tope de gasto por día configurado en la campaña. Mercado Libre puede distribuir el gasto según subastas y días; no siempre se gasta el 100 % cada día.'
-  },
-  {
-    term: 'Ventas directas e indirectas',
-    text: 'Directa: compra ligada de forma más inmediata al anuncio. Indirecta: el usuario interactuó con la publicidad pero la compra se atribuye por otro camino dentro de las reglas de ML. Ambas suelen sumarse en “ventas totales” según el reporte.'
-  },
-  {
-    term: 'Estrategia de campaña',
-    text: 'Objetivo configurado (por ejemplo rentabilidad vs. crecimiento de ventas). Cambia cómo la plataforma optimiza pujas y presencia frente a tus metas de ROAS/ACOS.'
+    term: 'ROAS / ACOS',
+    text: 'ROAS: retorno por peso invertido cuando podemos derivarlo de costo e importe. ACOS: costo sobre ventas cuando la API lo informa.'
   }
 ];
 
-const MercadoLibreProductAds: React.FC = () => {
+const GLOSSARY_DISPLAY: { term: string; text: string }[] = [
+  {
+    term: 'Display Ads',
+    text: 'Campañas display en el ecosistema Mercado Libre (habilitación vía asesor comercial). Métricas por campaña en el período elegido.'
+  },
+  {
+    term: 'Alcance y frecuencia',
+    text: 'En display pueden aparecer métricas como alcance (reach) o frecuencia; la tabla prioriza costo, impresiones, clics y ventas atribuidas.'
+  },
+  {
+    term: 'Resumen global',
+    text: 'Los KPI inferiores agregan todas las campañas del anunciante en el rango (hasta 200 campañas con métricas en el servidor; si hay más, puede mostrarse un aviso).'
+  }
+];
+
+const CFG: Record<
+  MercadoAdsKind,
+  {
+    title: string;
+    shortLabel: string;
+    exportPrefix: string;
+    productTitle: string;
+    loadAdvertisers: () => Promise<{ advertisers: AdvertiserRow[] }>;
+    loadCampaigns: (p: {
+      advertiser_id: number;
+      date_from: string;
+      date_to: string;
+      limit: number;
+      offset: number;
+    }) => Promise<{ results: any[]; paging?: { total: number }; metrics_summary?: Record<string, number>; summary_partial?: boolean }>;
+    emptyCopy: string;
+    errorTitle: string;
+    glossary: { term: string; text: string }[];
+    Icon: typeof Sparkles;
+    theme: 'violet' | 'fuchsia';
+  }
+> = {
+  brand: {
+    title: 'Brand Ads — campañas',
+    shortLabel: 'Brand Ads',
+    exportPrefix: 'BrandAds',
+    productTitle: 'Brand Ads',
+    loadAdvertisers: () => api.getMercadoLibreBrandAdsAdvertisers(),
+    loadCampaigns: (p) =>
+      api.getMercadoLibreBrandAdsCampaigns({
+        advertiser_id: p.advertiser_id,
+        date_from: p.date_from,
+        date_to: p.date_to,
+        limit: p.limit,
+        offset: p.offset
+      }),
+    emptyCopy: 'No hay cuentas con Brand Ads asociadas a esta integración.',
+    errorTitle: 'Brand Ads no disponible',
+    glossary: GLOSSARY_BRAND,
+    Icon: Sparkles,
+    theme: 'violet'
+  },
+  display: {
+    title: 'Display Ads — campañas',
+    shortLabel: 'Display Ads',
+    exportPrefix: 'DisplayAds',
+    productTitle: 'Display Ads',
+    loadAdvertisers: () => api.getMercadoLibreDisplayAdsAdvertisers(),
+    loadCampaigns: (p) =>
+      api.getMercadoLibreDisplayAdsCampaigns({
+        advertiser_id: p.advertiser_id,
+        date_from: p.date_from,
+        date_to: p.date_to,
+        limit: p.limit,
+        offset: p.offset
+      }),
+    emptyCopy: 'No hay cuentas con Display Ads asociadas a esta integración.',
+    errorTitle: 'Display Ads no disponible',
+    glossary: GLOSSARY_DISPLAY,
+    Icon: LayoutGrid,
+    theme: 'fuchsia'
+  }
+};
+
+export interface MercadoLibreBrandDisplayAdsProps {
+  kind: MercadoAdsKind;
+}
+
+const MercadoLibreBrandDisplayAdsInner: React.FC<{ kind: MercadoAdsKind }> = ({ kind }) => {
+  const cfg = CFG[kind];
   const { showToast } = useNotification();
   const [advertisers, setAdvertisers] = useState<AdvertiserRow[]>([]);
   const [advError, setAdvError] = useState<string | null>(null);
@@ -142,16 +178,13 @@ const MercadoLibreProductAds: React.FC = () => {
   });
   const [dateTo, setDateTo] = useState(() => ymd(today));
 
-  const CAMPAIGN_LIMIT = 50;
-  const ADS_LIMIT = 40;
+  const PAGE = 50;
 
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [campaignTotal, setCampaignTotal] = useState(0);
   const [campaignOffset, setCampaignOffset] = useState(0);
-  const [ads, setAds] = useState<any[]>([]);
-  const [adsTotal, setAdsTotal] = useState(0);
-  const [adsOffset, setAdsOffset] = useState(0);
   const [metricsSummary, setMetricsSummary] = useState<Record<string, number> | null>(null);
+  const [summaryPartial, setSummaryPartial] = useState(false);
 
   const [loadingData, setLoadingData] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -165,7 +198,7 @@ const MercadoLibreProductAds: React.FC = () => {
       setLoadingAdv(true);
       setAdvError(null);
       try {
-        const res = await api.getMercadoLibreProductAdsAdvertisers();
+        const res = await cfg.loadAdvertisers();
         if (cancelled) return;
         const list = Array.isArray(res?.advertisers) ? res.advertisers : [];
         setAdvertisers(list);
@@ -185,35 +218,22 @@ const MercadoLibreProductAds: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [advRetry]);
+  }, [advRetry, kind]);
 
   useEffect(() => {
-    if (!siteId || advertiserId === '') return;
+    if (advertiserId === '') return;
     let cancelled = false;
     setLoadingData(true);
     setDataError(null);
     (async () => {
       try {
-        const [campRes, adsRes] = await Promise.all([
-          api.getMercadoLibreProductAdsCampaigns({
-            site_id: siteId,
-            advertiser_id: advertiserId,
-            date_from: dateFrom,
-            date_to: dateTo,
-            limit: CAMPAIGN_LIMIT,
-            offset: campaignOffset,
-            metrics_summary: true
-          }),
-          api.getMercadoLibreProductAdsAds({
-            site_id: siteId,
-            advertiser_id: advertiserId,
-            date_from: dateFrom,
-            date_to: dateTo,
-            limit: ADS_LIMIT,
-            offset: adsOffset,
-            channel: 'marketplace'
-          })
-        ]);
+        const campRes = await cfg.loadCampaigns({
+          advertiser_id: advertiserId as number,
+          date_from: dateFrom,
+          date_to: dateTo,
+          limit: PAGE,
+          offset: campaignOffset
+        });
         if (cancelled) return;
         const cResults = Array.isArray(campRes?.results) ? campRes.results : [];
         setCampaigns(cResults);
@@ -223,18 +243,15 @@ const MercadoLibreProductAds: React.FC = () => {
             ? campRes.metrics_summary
             : null
         );
-
-        const aResults = Array.isArray(adsRes?.results) ? adsRes.results : [];
-        setAds(aResults);
-        setAdsTotal(adsRes?.paging?.total ?? aResults.length);
+        setSummaryPartial(!!campRes?.summary_partial);
       } catch (e: any) {
         if (cancelled) return;
         const msg = e?.response?.data?.message || e?.message || 'Error cargando métricas';
         setDataError(msg);
         setCampaigns([]);
-        setAds([]);
         setCampaignTotal(0);
-        setAdsTotal(0);
+        setMetricsSummary(null);
+        setSummaryPartial(false);
       } finally {
         if (!cancelled) setLoadingData(false);
       }
@@ -242,24 +259,9 @@ const MercadoLibreProductAds: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [siteId, advertiserId, dateFrom, dateTo, campaignOffset, adsOffset, refreshTick]);
+  }, [advertiserId, dateFrom, dateTo, campaignOffset, refreshTick, kind]);
 
-  const totals = useMemo(() => {
-    const base = metricsSummary || {};
-    const cost = toNum(base.cost) || sumMetrics(campaigns, 'cost');
-    const clicks = toNum(base.clicks) || sumMetrics(campaigns, 'clicks');
-    const prints = toNum(base.prints) || sumMetrics(campaigns, 'prints');
-    const totalAmount = toNum(base.total_amount) || sumMetrics(campaigns, 'total_amount');
-    const roasApi = toNum(base.roas);
-    const acosApi = toNum(base.acos);
-    const ctrApi = toNum(base.ctr);
-
-    const roas = cost > 0 && totalAmount > 0 ? totalAmount / cost : roasApi;
-    const acos = totalAmount > 0 ? (cost / totalAmount) * 100 : acosApi;
-    const ctr = prints > 0 ? (clicks / prints) * 100 : ctrApi;
-
-    return { cost, clicks, prints, totalAmount, roas, acos, ctr };
-  }, [metricsSummary, campaigns]);
+  const totalsExport = useMemo(() => computeProductAdsTotals(metricsSummary, campaigns), [metricsSummary, campaigns]);
 
   const setPresetDays = (days: number) => {
     const end = new Date();
@@ -268,7 +270,6 @@ const MercadoLibreProductAds: React.FC = () => {
     setDateFrom(ymd(start));
     setDateTo(ymd(end));
     setCampaignOffset(0);
-    setAdsOffset(0);
   };
 
   const selectedAdvertiserLabel = useMemo(() => {
@@ -281,14 +282,8 @@ const MercadoLibreProductAds: React.FC = () => {
     return a?.account_name || a?.advertiser_name || siteId || 'cuenta';
   }, [advertisers, siteId, advertiserId]);
 
-  const runExportExcel = (
-    scopeNote: string,
-    camp: any[],
-    adsRows: any[],
-    ms: Record<string, number> | null
-  ) => {
-    const totalsExport = computeProductAdsTotals(ms, camp);
-    downloadProductAdsExcel({
+  const runExportExcel = (scopeNote: string, camp: any[], ms: Record<string, number> | null) => {
+    downloadBrandDisplayExcel({
       meta: {
         siteId,
         advertiserId: advertiserId as number,
@@ -296,12 +291,12 @@ const MercadoLibreProductAds: React.FC = () => {
         dateFrom,
         dateTo,
         exportedAt: new Date().toLocaleString('es-AR'),
-        scopeNote
+        scopeNote,
+        productTitle: cfg.productTitle
       },
       metricsSummary: ms,
-      totals: totalsExport,
-      campaigns: camp,
-      ads: adsRows
+      totals: computeProductAdsTotals(ms, camp),
+      campaigns: camp
     });
   };
 
@@ -310,7 +305,6 @@ const MercadoLibreProductAds: React.FC = () => {
       runExportExcel(
         'Vista actual: filas visibles según paginación en pantalla (no necesariamente todo el período).',
         campaigns,
-        ads,
         metricsSummary
       );
       showToast('success', 'Archivo Excel generado');
@@ -323,17 +317,16 @@ const MercadoLibreProductAds: React.FC = () => {
     if (advertiserId === '') return;
     setExportingFull(true);
     try {
-      const [{ campaigns: allCamp, metricsSummary: ms }, allAds] = await Promise.all([
-        fetchAllCampaignsForExport(siteId, advertiserId, dateFrom, dateTo),
-        fetchAllAdsForExport(siteId, advertiserId, dateFrom, dateTo)
-      ]);
+      const { campaigns: allCamp, metricsSummary: ms } =
+        kind === 'brand'
+          ? await fetchAllBrandCampaignsForExport(advertiserId as number, dateFrom, dateTo)
+          : await fetchAllDisplayCampaignsForExport(advertiserId as number, dateFrom, dateTo);
       runExportExcel(
-        'Período completo: todas las campañas y publicaciones disponibles en la API para las fechas elegidas.',
+        'Período completo: todas las campañas disponibles en la API para las fechas elegidas.',
         allCamp,
-        allAds,
         ms
       );
-      showToast('success', `Excel generado (${allCamp.length} campañas, ${allAds.length} publicaciones)`);
+      showToast('success', `Excel generado (${allCamp.length} campañas)`);
     } catch (e: any) {
       showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar');
     } finally {
@@ -343,10 +336,9 @@ const MercadoLibreProductAds: React.FC = () => {
 
   const handleExportCsvCurrent = () => {
     try {
-      const base = buildExportBaseName(siteId, dateFrom, dateTo);
-      downloadCampaignsCsv(campaigns, `${base}_vista`);
-      downloadAdsCsv(ads, `${base}_vista`);
-      showToast('success', 'Se descargaron 2 archivos CSV (campañas y publicaciones)');
+      const base = buildBrandDisplayBaseName(cfg.exportPrefix, siteId, dateFrom, dateTo);
+      downloadBrandDisplayCampaignsCsv(campaigns, `${base}_vista`);
+      showToast('success', 'CSV de campañas descargado');
     } catch (e: any) {
       showToast('error', e?.message || 'Error al exportar CSV');
     }
@@ -356,14 +348,13 @@ const MercadoLibreProductAds: React.FC = () => {
     if (advertiserId === '') return;
     setExportingFull(true);
     try {
-      const [{ campaigns: allCamp }, allAds] = await Promise.all([
-        fetchAllCampaignsForExport(siteId, advertiserId, dateFrom, dateTo),
-        fetchAllAdsForExport(siteId, advertiserId, dateFrom, dateTo)
-      ]);
-      const base = buildExportBaseName(siteId, dateFrom, dateTo);
-      downloadCampaignsCsv(allCamp, `${base}_completo`);
-      downloadAdsCsv(allAds, `${base}_completo`);
-      showToast('success', `CSV listo (${allCamp.length} campañas, ${allAds.length} publicaciones)`);
+      const { campaigns: allCamp } =
+        kind === 'brand'
+          ? await fetchAllBrandCampaignsForExport(advertiserId as number, dateFrom, dateTo)
+          : await fetchAllDisplayCampaignsForExport(advertiserId as number, dateFrom, dateTo);
+      const base = buildBrandDisplayBaseName(cfg.exportPrefix, siteId, dateFrom, dateTo);
+      downloadBrandDisplayCampaignsCsv(allCamp, `${base}_completo`);
+      showToast('success', `CSV listo (${allCamp.length} campañas)`);
     } catch (e: any) {
       showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar');
     } finally {
@@ -371,10 +362,23 @@ const MercadoLibreProductAds: React.FC = () => {
     }
   };
 
+  const ringClass =
+    cfg.theme === 'violet'
+      ? 'border-violet-800/50 from-violet-950/40'
+      : 'border-fuchsia-800/50 from-fuchsia-950/40';
+  const btnPrimary =
+    cfg.theme === 'violet'
+      ? 'bg-violet-600 hover:bg-violet-500'
+      : 'bg-fuchsia-600 hover:bg-fuchsia-500';
+  const btnSecondary =
+    cfg.theme === 'violet'
+      ? 'bg-violet-800/90 hover:bg-violet-700 border-violet-600/50'
+      : 'bg-fuchsia-800/90 hover:bg-fuchsia-700 border-fuchsia-600/50';
+
   if (loadingAdv) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
-        <Loader2 className="animate-spin text-yellow-500" size={36} />
+        <Loader2 className={`animate-spin ${cfg.theme === 'violet' ? 'text-violet-500' : 'text-fuchsia-500'}`} size={36} />
         <p className="text-sm">Conectando con Mercado Ads…</p>
       </div>
     );
@@ -385,7 +389,7 @@ const MercadoLibreProductAds: React.FC = () => {
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 flex gap-4">
         <AlertCircle className="text-amber-400 shrink-0 mt-0.5" size={22} />
         <div>
-          <h3 className="text-amber-200 font-semibold mb-1">Product Ads no disponible</h3>
+          <h3 className="text-amber-200 font-semibold mb-1">{cfg.errorTitle}</h3>
           <p className="text-sm text-slate-400 mb-4">{advError}</p>
           <button
             type="button"
@@ -402,8 +406,8 @@ const MercadoLibreProductAds: React.FC = () => {
   if (advertisers.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-8 text-center text-slate-400">
-        <Megaphone className="mx-auto mb-3 text-slate-500" size={40} />
-        <p className="text-sm">No hay cuentas con Product Ads asociadas a esta integración.</p>
+        <cfg.Icon className="mx-auto mb-3 text-slate-500" size={40} />
+        <p className="text-sm">{cfg.emptyCopy}</p>
       </div>
     );
   }
@@ -420,9 +424,12 @@ const MercadoLibreProductAds: React.FC = () => {
               setSiteId(s);
               setAdvertiserId(aid ? Number(aid) : '');
               setCampaignOffset(0);
-              setAdsOffset(0);
             }}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:ring-2 focus:ring-yellow-600/50 focus:border-yellow-600"
+            className={`bg-slate-900 border rounded-xl px-3 py-2.5 text-sm text-white focus:ring-2 focus:border-transparent ${
+              cfg.theme === 'violet'
+                ? 'border-slate-700 focus:ring-violet-600/50 focus:border-violet-600'
+                : 'border-slate-700 focus:ring-fuchsia-600/50 focus:border-fuchsia-600'
+            }`}
           >
             {advertisers.map((a) => (
               <option key={`${a.site_id}-${a.advertiser_id}`} value={`${a.site_id}|${a.advertiser_id}`}>
@@ -440,7 +447,6 @@ const MercadoLibreProductAds: React.FC = () => {
               onChange={(e) => {
                 setDateFrom(e.target.value);
                 setCampaignOffset(0);
-                setAdsOffset(0);
               }}
               className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white"
             />
@@ -453,7 +459,6 @@ const MercadoLibreProductAds: React.FC = () => {
               onChange={(e) => {
                 setDateTo(e.target.value);
                 setCampaignOffset(0);
-                setAdsOffset(0);
               }}
               className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white"
             />
@@ -475,7 +480,7 @@ const MercadoLibreProductAds: React.FC = () => {
             type="button"
             onClick={() => setRefreshTick((t) => t + 1)}
             disabled={loadingData}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-yellow-600 hover:bg-yellow-500 text-slate-950 font-semibold text-sm disabled:opacity-50"
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-slate-950 font-semibold text-sm disabled:opacity-50 ${btnPrimary}`}
           >
             {loadingData ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
             Actualizar
@@ -483,13 +488,21 @@ const MercadoLibreProductAds: React.FC = () => {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500 flex items-center gap-2">
+      <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
         <CalendarRange size={14} />
-        Los datos de métricas suelen actualizarse una vez al día (referencia API Mercado Ads). Período máximo consultable: 90 días.
+        Los datos suelen actualizarse una vez al día. Período máximo consultable en la API: 90 días (Display desde sep/2022 según documentación).
         {selectedAdvertiserLabel ? <span className="text-slate-600">· {selectedAdvertiserLabel}</span> : null}
       </p>
 
-      <div className="rounded-2xl border border-emerald-800/50 bg-gradient-to-br from-emerald-950/40 to-slate-900/80 p-4 sm:p-5 shadow-lg shadow-black/20">
+      {summaryPartial && kind === 'display' ? (
+        <p className="text-xs text-amber-400/90">
+          Nota: el resumen global suma métricas de hasta 200 campañas; si tenés más, los KPI pueden ser parciales.
+        </p>
+      ) : null}
+
+      <div
+        className={`rounded-2xl border bg-gradient-to-br to-slate-900/80 p-4 sm:p-5 shadow-lg shadow-black/20 ${ringClass}`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
           <div>
             <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -497,9 +510,8 @@ const MercadoLibreProductAds: React.FC = () => {
               Exportar métricas
             </h2>
             <p className="text-xs text-slate-400 mt-1 max-w-xl">
-              Descargá <strong className="text-slate-300">todas las campañas</strong> y{' '}
-              <strong className="text-slate-300">todas las publicaciones</strong> del período (Excel o CSV). Para una sola
-              campaña usá los iconos en la tabla de abajo.
+              Descargá todas las <strong className="text-slate-300">campañas</strong> del período (Excel o CSV). Para una
+              sola campaña usá los iconos en la tabla.
             </p>
           </div>
           {exportingFull ? (
@@ -522,7 +534,7 @@ const MercadoLibreProductAds: React.FC = () => {
             type="button"
             disabled={loadingData || exportingFull}
             onClick={() => void handleExportExcelFull()}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-800/90 hover:bg-emerald-700 text-emerald-50 text-sm font-semibold border border-emerald-600/50 disabled:opacity-40"
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-emerald-50 text-sm font-semibold border disabled:opacity-40 ${btnSecondary}`}
           >
             <FileSpreadsheet size={18} />
             Excel · período completo
@@ -547,16 +559,20 @@ const MercadoLibreProductAds: React.FC = () => {
           </button>
         </div>
         <p className="text-[11px] text-slate-500 mt-3">
-          Excel incluye hojas <strong className="text-slate-500">Resumen</strong>, <strong className="text-slate-500">Campañas</strong> y{' '}
-          <strong className="text-slate-500">Publicaciones</strong>. CSV separador <strong className="text-slate-500">;</strong>.{' '}
-          <em>Período completo</em> recorre todas las filas (puede tardar).
+          Excel incluye hojas <strong className="text-slate-500">Resumen</strong> y <strong className="text-slate-500">Campañas</strong>.
+          CSV separador <strong className="text-slate-500">;</strong>.
         </p>
       </div>
 
-      <div className="rounded-xl border border-yellow-900/35 bg-yellow-950/15 px-4 py-3 text-xs text-slate-400 leading-relaxed">
-        <span className="font-semibold text-yellow-200/90">Vista de datos:</span> tablas por campaña y por publicación en el
-        centro; <span className="text-slate-500">resumen de KPIs del período al final</span>. Exportación masiva arriba; una
-        campaña suelta en cada fila.
+      <div
+        className={`rounded-xl border px-4 py-3 text-xs text-slate-400 leading-relaxed ${
+          cfg.theme === 'violet' ? 'border-violet-900/35 bg-violet-950/15' : 'border-fuchsia-900/35 bg-fuchsia-950/15'
+        }`}
+      >
+        <span className={`font-semibold ${cfg.theme === 'violet' ? 'text-violet-200/90' : 'text-fuchsia-200/90'}`}>
+          Vista de datos:
+        </span>{' '}
+        tabla por campaña; KPIs del período al final. Exportación masiva arriba.
       </div>
 
       {dataError && (
@@ -570,11 +586,11 @@ const MercadoLibreProductAds: React.FC = () => {
         <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Megaphone size={18} className="text-yellow-500 shrink-0" /> Métricas por campaña
+              <cfg.Icon size={18} className="shrink-0 text-yellow-500" /> Métricas por campaña
             </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-              Cada fila es una <strong className="text-slate-400">campaña</strong> de Product Ads. Mostramos costo, ventas
-              atribuidas, ROAS, ACOS, clicks e impresiones de esa campaña en el período elegido.
+              Cada fila es una <strong className="text-slate-400">campaña</strong> de {cfg.shortLabel}. Costo, ventas
+              atribuidas, ROAS, ACOS, impresiones y clics en el período elegido (según API Mercado Ads).
             </p>
           </div>
           <span className="text-xs text-slate-500 shrink-0">{campaignTotal} campañas en total</span>
@@ -585,9 +601,8 @@ const MercadoLibreProductAds: React.FC = () => {
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-800">
                 <th className="pb-2 pr-4">Campaña</th>
                 <th className="pb-2 pr-4">Estado</th>
-                <th className="pb-2 pr-4 text-right">Presup. día</th>
                 <th className="pb-2 pr-4 text-right">Costo</th>
-                <th className="pb-2 pr-4 text-right">Ventas</th>
+                <th className="pb-2 pr-4 text-right">Ventas atrib.</th>
                 <th className="pb-2 pr-4 text-right">ROAS</th>
                 <th className="pb-2 pr-4 text-right">ACOS</th>
                 <th className="pb-2 pr-4 text-right">Clicks</th>
@@ -605,7 +620,7 @@ const MercadoLibreProductAds: React.FC = () => {
               {campaigns.map((c) => {
                 const m = c.metrics || {};
                 return (
-                  <tr key={c.id} className="border-b border-slate-800/60 hover:bg-slate-800/30">
+                  <tr key={String(c.id)} className="border-b border-slate-800/60 hover:bg-slate-800/30">
                     <td className="py-2.5 pr-4 max-w-[220px]">
                       <span className="text-white font-medium truncate block">{c.name || c.id}</span>
                       <span className="text-[10px] text-slate-600">#{c.id}</span>
@@ -619,7 +634,6 @@ const MercadoLibreProductAds: React.FC = () => {
                         {c.status}
                       </span>
                     </td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{toNum(c.budget).toLocaleString('es-AR')}</td>
                     <td className="py-2.5 pr-4 text-right tabular-nums">${formatMoneyAr(toNum(m.cost))}</td>
                     <td className="py-2.5 pr-4 text-right tabular-nums">${formatMoneyAr(toNum(m.total_amount))}</td>
                     <td className="py-2.5 pr-4 text-right tabular-nums">{formatRoas(toNum(m.roas))}</td>
@@ -633,7 +647,7 @@ const MercadoLibreProductAds: React.FC = () => {
                           title="Descargar CSV solo con esta campaña"
                           className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors"
                           onClick={() => {
-                            downloadSingleCampaignCsv(c, { dateFrom, dateTo });
+                            downloadSingleBrandDisplayCampaignCsv(c, { dateFrom, dateTo });
                             showToast('success', 'CSV de la campaña descargado');
                           }}
                         >
@@ -646,12 +660,13 @@ const MercadoLibreProductAds: React.FC = () => {
                           className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
                           onClick={() => {
                             if (advertiserId === '') return;
-                            downloadSingleCampaignExcel(c, {
+                            downloadSingleBrandDisplayCampaignExcel(c, {
                               accountLabel: accountLabelForExport,
                               siteId,
                               advertiserId: advertiserId as number,
                               dateFrom,
-                              dateTo
+                              dateTo,
+                              productTitle: cfg.productTitle
                             });
                             showToast('success', 'Excel de la campaña descargado');
                           }}
@@ -667,108 +682,22 @@ const MercadoLibreProductAds: React.FC = () => {
           </table>
         </div>
         {campaigns.length === 0 && !loadingData && (
-          <p className="text-sm text-slate-500 py-6 text-center">No hay campañas en esta página o sin actividad en el período.</p>
+          <p className="text-sm text-slate-500 py-6 text-center">No hay campañas en esta página o sin datos en el período.</p>
         )}
-        {campaignTotal > CAMPAIGN_LIMIT && (
+        {campaignTotal > PAGE && (
           <div className="flex justify-center gap-2 mt-4">
             <button
               type="button"
               disabled={campaignOffset === 0 || loadingData}
-              onClick={() => setCampaignOffset((o) => Math.max(0, o - CAMPAIGN_LIMIT))}
+              onClick={() => setCampaignOffset((o) => Math.max(0, o - PAGE))}
               className="px-3 py-1.5 rounded-lg bg-slate-800 text-sm disabled:opacity-40"
             >
               Anterior
             </button>
             <button
               type="button"
-              disabled={campaignOffset + CAMPAIGN_LIMIT >= campaignTotal || loadingData}
-              onClick={() => setCampaignOffset((o) => o + CAMPAIGN_LIMIT)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 text-sm disabled:opacity-40"
-            >
-              Siguiente
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-        <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <BarChart3 size={18} className="text-cyan-400 shrink-0" /> Métricas por publicación (anuncios)
-            </h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-              Cada fila es una <strong className="text-slate-400">publicación</strong> que está en publicidad: el rendimiento
-              del anuncio de ese ítem (mismas métricas que arriba, pero a nivel ítem).
-            </p>
-          </div>
-          <span className="text-xs text-slate-500 shrink-0">{adsTotal} publicaciones en total</span>
-        </div>
-        <div className="overflow-x-auto -mx-2">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-800">
-                <th className="pb-2 pr-3">Publicación</th>
-                <th className="pb-2 pr-3">Estado</th>
-                <th className="pb-2 pr-3 text-right">Costo</th>
-                <th className="pb-2 pr-3 text-right">Ventas</th>
-                <th className="pb-2 pr-3 text-right">ROAS</th>
-                <th className="pb-2 pr-3 text-right">Clicks</th>
-                <th className="pb-2 text-right">Impres.</th>
-                <th className="pb-2 w-10" />
-              </tr>
-            </thead>
-            <tbody className="text-slate-300">
-              {ads.map((row) => {
-                const m = row.metrics || {};
-                return (
-                  <tr key={row.item_id} className="border-b border-slate-800/60 hover:bg-slate-800/30">
-                    <td className="py-2.5 pr-3 max-w-[280px]">
-                      <span className="text-white line-clamp-2">{row.title || row.item_id}</span>
-                      <span className="text-[10px] text-slate-600 block">{row.item_id}</span>
-                    </td>
-                    <td className="py-2.5 pr-3 text-xs capitalize">{row.status}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums">${formatMoneyAr(toNum(m.cost))}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums">${formatMoneyAr(toNum(m.total_amount))}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums">{formatRoas(toNum(m.roas))}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums">{toNum(m.clicks).toLocaleString('es-AR')}</td>
-                    <td className="py-2.5 text-right tabular-nums">{toNum(m.prints).toLocaleString('es-AR')}</td>
-                    <td className="py-2.5">
-                      {row.permalink ? (
-                        <a
-                          href={row.permalink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-cyan-400 hover:text-cyan-300 inline-flex"
-                          aria-label="Abrir en Mercado Libre"
-                        >
-                          <ExternalLink size={16} />
-                        </a>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {ads.length === 0 && !loadingData && (
-          <p className="text-sm text-slate-500 py-6 text-center">No hay anuncios con datos en el período seleccionado.</p>
-        )}
-        {adsTotal > ADS_LIMIT && (
-          <div className="flex justify-center gap-2 mt-4">
-            <button
-              type="button"
-              disabled={adsOffset === 0 || loadingData}
-              onClick={() => setAdsOffset((o) => Math.max(0, o - ADS_LIMIT))}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 text-sm disabled:opacity-40"
-            >
-              Anterior
-            </button>
-            <button
-              type="button"
-              disabled={adsOffset + ADS_LIMIT >= adsTotal || loadingData}
-              onClick={() => setAdsOffset((o) => o + ADS_LIMIT)}
+              disabled={campaignOffset + PAGE >= campaignTotal || loadingData}
+              onClick={() => setCampaignOffset((o) => o + PAGE)}
               className="px-3 py-1.5 rounded-lg bg-slate-800 text-sm disabled:opacity-40"
             >
               Siguiente
@@ -781,7 +710,7 @@ const MercadoLibreProductAds: React.FC = () => {
         <summary className="px-4 py-3.5 cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-semibold text-slate-100 select-none [&::-webkit-details-marker]:hidden">
           <span className="flex items-center gap-2 min-w-0">
             <BookOpen size={18} className="text-yellow-500 shrink-0" aria-hidden />
-            <span className="truncate">Glosario: significado de las métricas de marketing</span>
+            <span className="truncate">Glosario breve</span>
           </span>
           <ChevronDown
             size={18}
@@ -790,12 +719,8 @@ const MercadoLibreProductAds: React.FC = () => {
           />
         </summary>
         <div className="px-4 pb-4 pt-0 border-t border-slate-800/80">
-          <p className="text-xs text-slate-500 mt-3 mb-4">
-            Definiciones orientativas para leer los números de Product Ads. Los cálculos exactos y la atribución los define
-            Mercado Libre en su plataforma.
-          </p>
-          <dl className="space-y-4 text-sm">
-            {MARKETING_GLOSSARY.map((item) => (
+          <dl className="space-y-4 text-sm mt-3">
+            {cfg.glossary.map((item) => (
               <div key={item.term} className="border-b border-slate-800/60 pb-4 last:border-0 last:pb-0">
                 <dt className="text-yellow-500/95 font-semibold mb-1">{item.term}</dt>
                 <dd className="text-slate-400 leading-relaxed">{item.text}</dd>
@@ -809,53 +734,52 @@ const MercadoLibreProductAds: React.FC = () => {
         <div>
           <h3 className="text-base font-bold text-white">Métricas resumidas del período</h3>
           <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-            Totales consolidados del rango de fechas (no reemplaza el desglose por campaña ni por publicación de las tablas).
-            Pasá el mouse por cada tarjeta para una ayuda breve.
+            Totales consolidados del rango (origen: resumen de API cuando existe; si no, coherente con las filas cargadas).
           </p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
             {
               label: 'Inversión',
-              value: `$${formatMoneyAr(totals.cost)}`,
+              value: `$${formatMoneyAr(totalsExport.cost)}`,
               sub: 'Costo publicitario',
               icon: Wallet,
-              hint: 'Dinero gastado en publicidad en el período. Ver glosario arriba para más detalle.'
+              hint: 'Suma de costo / presupuesto consumido en el período.'
             },
             {
               label: 'Ventas atrib.',
-              value: `$${formatMoneyAr(totals.totalAmount)}`,
-              sub: 'Importe total',
+              value: `$${formatMoneyAr(totalsExport.totalAmount)}`,
+              sub: 'Importe',
               icon: TrendingUp,
-              hint: 'Ventas que Mercado Libre asocia a tus anuncios en el período (atribución de la plataforma).'
+              hint: 'Importe atribuido según el modelo de la API en pantalla.'
             },
             {
               label: 'ROAS',
-              value: formatRoas(totals.roas),
+              value: formatRoas(totalsExport.roas),
               sub: 'Retorno / inversión',
               icon: BarChart3,
-              hint: 'Return On Ad Spend: pesos de venta por cada peso invertido en publicidad.'
+              hint: 'Retorno sobre inversión publicitaria cuando hay costo e importe.'
             },
             {
               label: 'ACOS',
-              value: formatPct(totals.acos),
+              value: formatPct(totalsExport.acos),
               sub: 'Costo / ventas',
               icon: Percent,
-              hint: 'Advertising Cost of Sales: % del facturado atribuido que representa el gasto en ads.'
+              hint: 'Porcentaje del facturado atribuido que representa el gasto.'
             },
             {
               label: 'Impresiones',
-              value: totals.prints.toLocaleString('es-AR'),
+              value: totalsExport.prints.toLocaleString('es-AR'),
               sub: 'Prints',
               icon: Eye,
-              hint: 'Veces que se mostró tu anuncio. En la API suelen llamarse “prints”.'
+              hint: 'Impresiones agregadas del resumen o de las filas visibles.'
             },
             {
               label: 'Clicks',
-              value: totals.clicks.toLocaleString('es-AR'),
-              sub: `CTR ${formatPct(totals.ctr)}`,
+              value: totalsExport.clicks.toLocaleString('es-AR'),
+              sub: `CTR ${formatPct(totalsExport.ctr)}`,
               icon: MousePointerClick,
-              hint: 'Clics en el anuncio. CTR = clicks ÷ impresiones (qué tan clickeable es el anuncio).'
+              hint: 'Clics y CTR derivados del resumen o de las filas cargadas.'
             }
           ].map((card) => (
             <div
@@ -873,14 +797,15 @@ const MercadoLibreProductAds: React.FC = () => {
           ))}
         </div>
       </div>
-
-      <div className="rounded-xl border border-slate-800 bg-slate-900/30 px-4 py-3 text-xs text-slate-500">
-        <strong className="text-slate-400">Cómo usar estas métricas:</strong> compará campañas en la primera tabla y
-        publicaciones en la segunda; cruzá ROAS y ACOS para ver dónde conviene subir o bajar presencia, y revisá presupuesto
-        diario en Mercado Libre.
-      </div>
     </div>
   );
 };
 
-export default MercadoLibreProductAds;
+export const MercadoLibreBrandAds: React.FC = () => <MercadoLibreBrandDisplayAdsInner kind="brand" />;
+export const MercadoLibreDisplayAds: React.FC = () => <MercadoLibreBrandDisplayAdsInner kind="display" />;
+
+const MercadoLibreBrandDisplayAds: React.FC<MercadoLibreBrandDisplayAdsProps> = ({ kind }) => (
+  <MercadoLibreBrandDisplayAdsInner kind={kind} />
+);
+
+export default MercadoLibreBrandDisplayAds;

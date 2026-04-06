@@ -163,6 +163,50 @@ export function downloadAdsCsv(ads: any[], baseName: string) {
   downloadTextFile(buildCsv(rows, ADS_CSV_COLS), `${baseName}_publicaciones.csv`);
 }
 
+/** Una sola campaña: CSV con la fila de métricas del período visible. */
+export function downloadSingleCampaignCsv(campaign: any, opts: { dateFrom: string; dateTo: string }) {
+  const id = safeFilenamePart(String(campaign?.id ?? 'campaña'));
+  const base = `Campaña_${id}_${opts.dateFrom}_${opts.dateTo}`;
+  downloadTextFile(buildCsv([campaignRow(campaign)], CAMPAIGN_CSV_COLS), `${base}.csv`);
+}
+
+/** Una sola campaña: Excel con resumen + hoja Métricas (una fila). */
+export function downloadSingleCampaignExcel(
+  campaign: any,
+  opts: {
+    accountLabel: string;
+    siteId: string;
+    advertiserId: number;
+    dateFrom: string;
+    dateTo: string;
+  }
+) {
+  const wb = XLSX.utils.book_new();
+  const id = campaign?.id ?? '';
+  const name = (campaign?.name ?? '').toString();
+  const resumen: (string | number)[][] = [
+    ['Campaña individual — Product Ads'],
+    ['ID campaña', id],
+    ['Nombre', name],
+    ['Período desde', opts.dateFrom],
+    ['Período hasta', opts.dateTo],
+    ['Cuenta', opts.accountLabel],
+    ['Site', opts.siteId],
+    ['ID anunciante', opts.advertiserId],
+    [],
+    ['Exportado', new Date().toLocaleString('es-AR')],
+    [],
+    ['Nota', 'Métricas del período seleccionado solo para esta campaña.']
+  ];
+  const ws0 = XLSX.utils.aoa_to_sheet(resumen);
+  XLSX.utils.book_append_sheet(wb, ws0, 'Resumen');
+  const row = campaignRow(campaign);
+  const ws1 = XLSX.utils.json_to_sheet([row]);
+  XLSX.utils.book_append_sheet(wb, ws1, 'Métricas');
+  const fname = `Campaña_${safeFilenamePart(String(id))}_${opts.dateFrom}_${opts.dateTo}.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
+
 export function downloadProductAdsExcel(params: {
   meta: ProductAdsExportMeta;
   metricsSummary: Record<string, number> | null;
