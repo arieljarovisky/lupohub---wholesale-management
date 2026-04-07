@@ -372,6 +372,31 @@ const MercadoLibreProductAds: React.FC = () => {
     }
   };
 
+  const handleExportAdsCsvCurrent = () => {
+    try {
+      const base = buildExportBaseName(siteId, dateFrom, dateTo);
+      downloadAdsCsv(ads, `${base}_vista_solo_anuncios`);
+      showToast('success', 'CSV listo: solo publicaciones/anuncios de la vista actual');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al exportar anuncios');
+    }
+  };
+
+  const handleExportAdsCsvFull = async () => {
+    if (advertiserId === '') return;
+    setExportingFull(true);
+    try {
+      const allAds = await fetchAllAdsForExport(siteId, advertiserId, dateFrom, dateTo);
+      const base = buildExportBaseName(siteId, dateFrom, dateTo);
+      downloadAdsCsv(allAds, `${base}_completo_solo_anuncios`);
+      showToast('success', `CSV listo: ${allAds.length} publicaciones del período completo`);
+    } catch (e: any) {
+      showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar anuncios');
+    } finally {
+      setExportingFull(false);
+    }
+  };
+
   if (loadingAdv) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
@@ -545,6 +570,24 @@ const MercadoLibreProductAds: React.FC = () => {
           >
             <Download size={18} />
             CSV · período completo
+          </button>
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={handleExportAdsCsvCurrent}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-900/70 hover:bg-indigo-800 text-indigo-100 text-sm font-medium border border-indigo-700/70 disabled:opacity-40"
+          >
+            <Download size={18} />
+            CSV anuncios · vista actual
+          </button>
+          <button
+            type="button"
+            disabled={loadingData || exportingFull}
+            onClick={() => void handleExportAdsCsvFull()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-900/70 hover:bg-indigo-800 text-indigo-100 text-sm font-medium border border-indigo-700/70 disabled:opacity-40"
+          >
+            <Download size={18} />
+            CSV anuncios · período completo
           </button>
         </div>
         <p className="text-[11px] text-slate-500 mt-3">
