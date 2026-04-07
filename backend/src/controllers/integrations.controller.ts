@@ -1566,7 +1566,33 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
 
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = async (orderId: string) => {
+  // Lock efimero para evitar doble procesamiento concurrente del mismo orderId.
+  await execute(
+    `CREATE TABLE IF NOT EXISTS integration_order_locks (
+      platform TEXT NOT NULL,
+      external_order_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (platform, external_order_id)
+    )`
+  );
+  const lockPlatform = 'mercadolibre';
+  let lockAcquired = false;
   try {
+    try {
+      await execute(
+        `INSERT INTO integration_order_locks (platform, external_order_id) VALUES (?, ?)`,
+        [lockPlatform, orderId]
+      );
+      lockAcquired = true;
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (msg.includes('UNIQUE constraint failed') || msg.includes('SQLITE_CONSTRAINT')) {
+        console.log(`[ML Order] Orden ${orderId} en procesamiento concurrente, omitiendo`);
+        return;
+      }
+      throw e;
+    }
+
     // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
     const alreadyProcessed = await get(
       `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`,
@@ -1757,6 +1783,17 @@ const processMercadoLibreOrder = async (orderId: string) => {
     }
   } catch (error: any) {
     console.error('[ML Order] Error procesando orden:', error.message);
+  } finally {
+    if (lockAcquired) {
+      try {
+        await execute(
+          `DELETE FROM integration_order_locks WHERE platform = ? AND external_order_id = ?`,
+          [lockPlatform, orderId]
+        );
+      } catch {
+        // No romper flujo por falla al limpiar lock efimero.
+      }
+    }
   }
 };
 
