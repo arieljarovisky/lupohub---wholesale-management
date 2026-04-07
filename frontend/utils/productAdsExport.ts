@@ -96,9 +96,15 @@ function campaignRow(c: any): Record<string, unknown> {
 
 function adRow(row: any): Record<string, unknown> {
   const m = row.metrics || {};
+  const description =
+    row.description ??
+    row.item_description ??
+    row.item?.description ??
+    '';
   return {
     'Item ID': row.item_id ?? '',
     Título: row.title ?? '',
+    Descripción: description,
     Estado: row.status ?? '',
     'ID campaña': row.campaign_id ?? '',
     Precio: row.price ?? '',
@@ -139,6 +145,7 @@ const CAMPAIGN_CSV_COLS: { key: string; header: string }[] = [
 const ADS_CSV_COLS: { key: string; header: string }[] = [
   { key: 'Item ID', header: 'Item ID' },
   { key: 'Título', header: 'Título' },
+  { key: 'Descripción', header: 'Descripción' },
   { key: 'Estado', header: 'Estado' },
   { key: 'ID campaña', header: 'ID campaña' },
   { key: 'Precio', header: 'Precio' },
