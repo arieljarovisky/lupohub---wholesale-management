@@ -147,6 +147,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
   const [potenciar, setPotenciar] = useState<RecRow[]>([]);
   const [revisar, setRevisar] = useState<RecRow[]>([]);
   const [sumar, setSumar] = useState<RecRow[]>([]);
+  const [lanzamientos, setLanzamientos] = useState<RecRow[]>([]);
   const [recStats, setRecStats] = useState<{ adsAnalyzed: number; stockFetched: number } | null>(null);
 
   useEffect(() => {
@@ -189,6 +190,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       setPotenciar(out.potenciar);
       setRevisar(out.revisar);
       setSumar(out.sumar);
+      setLanzamientos(out.lanzamientos);
       setRecStats(out.stats);
     } catch (e: unknown) {
       const ax = e && typeof e === 'object' ? (e as { message?: string; response?: { data?: { message?: string } } }) : null;
@@ -198,6 +200,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       setPotenciar([]);
       setRevisar([]);
       setSumar([]);
+      setLanzamientos([]);
       setRecStats(null);
       showToast('error', msg);
     } finally {
@@ -255,9 +258,13 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
   const topPotenciar = potenciar.slice(0, 3);
   const topSumar = sumar.slice(0, 3);
   const topRevisar = revisar.slice(0, 2);
+  const topLanzamientos = lanzamientos.slice(0, 3);
 
   const accionesSugeridas = useMemo(() => {
     const out: string[] = [];
+    if (topLanzamientos.length > 0) {
+      out.push(`Comunicá ${topLanzamientos.length} lanzamientos (publicaciones creadas en últimos 30 días).`);
+    }
     if (topPotenciar.length > 0) {
       out.push(`Subí inversión en ${topPotenciar.length} publicaciones con mejor ROAS para capturar más demanda.`);
     }
@@ -271,14 +278,14 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       out.push('Generá recomendaciones para ver un plan accionable del período elegido.');
     }
     return out;
-  }, [topPotenciar.length, topSumar.length, topRevisar.length]);
+  }, [topLanzamientos.length, topPotenciar.length, topSumar.length, topRevisar.length]);
 
   const ideasComunicacion = useMemo(() => {
     const ideas: Array<{ title: string; text: string }> = [];
-    if (topPotenciar[0]) {
+    if (topLanzamientos[0]) {
       ideas.push({
         title: 'Idea lanzamiento',
-        text: `Novedad destacada: ${topPotenciar[0].title}. Aprovechá stock disponible y envío rápido.`
+        text: `Lanzamiento recomendado: ${topLanzamientos[0].title}. Está dentro de los últimos 30 días, ideal para comunicar como novedad.`
       });
     }
     if (topSumar[0]) {
@@ -294,7 +301,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       });
     }
     return ideas;
-  }, [topPotenciar, topSumar, topRevisar]);
+  }, [topLanzamientos, topPotenciar, topSumar, topRevisar]);
 
   return (
     <div className="space-y-8">

@@ -20,6 +20,7 @@ export type MlStockRow = {
   totalStock: number;
   soldTotal: number;
   permalink?: string;
+  dateCreated?: string | null;
 };
 
 function toNum(v: unknown): number {
@@ -140,13 +141,23 @@ export async function fetchMlStockForRecs(maxItems = 1500): Promise<MlStockRow[]
         title: (it.title ?? '').toString(),
         totalStock: toNum(it.totalStock),
         soldTotal: toNum(it.soldTotal),
-        permalink: it.permalink
+        permalink: it.permalink,
+        dateCreated: (it.dateCreated ?? it.date_created ?? null) as string | null
       });
     }
     offset += page;
     if (batch.length === 0) break;
   }
   return out.slice(0, maxItems);
+}
+
+function isCreatedInLastDays(rawDate: string | null | undefined, days: number): boolean {
+  if (!rawDate) return false;
+  const d = new Date(rawDate);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  return diffMs >= 0 && diffMs <= days * 24 * 60 * 60 * 1000;
 }
 
 /** Publicaciones con demanda orgánica y stock que no aparecen en métricas de Product Ads del período. */
@@ -187,6 +198,7 @@ export async function loadProductAdsRecommendations(
   potenciar: RecRow[];
   revisar: RecRow[];
   sumar: RecRow[];
+  lanzamientos: RecRow[];
   stats: { adsAnalyzed: number; stockFetched: number };
 }> {
   const [ads, stock] = await Promise.all([
@@ -195,10 +207,27 @@ export async function loadProductAdsRecommendations(
   ]);
   const { potenciar, revisar, advertisedIds } = computeRecommendationsFromAds(ads);
   const sumar = computeStockCandidates(stock, advertisedIds);
+  const lanzamientos = stock
+    .filter((s) => isCreatedInLastDays(s.dateCreated, 30))
+    .sort((a, b) => b.soldTotal - a.soldTotal || b.totalStock - a.totalStock)
+    .slice(0, 15)
+    .map((s) => ({
+      itemId: s.id,
+      title: s.title,
+      permalink: s.permalink,
+      cost: 0,
+      clicks: 0,
+      prints: 0,
+      totalAmount: 0,
+      roas: 0,
+      acos: 0,
+      reason: `Lanzamiento (creado en últimos 30 días) con stock ${s.totalStock} y ${s.soldTotal} ventas.`
+    }));
   return {
     potenciar,
     revisar,
     sumar,
+    lanzamientos,
     stats: { adsAnalyzed: ads.length, stockFetched: stock.length }
   };
 }
