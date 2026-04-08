@@ -41,6 +41,10 @@ const TIPS: { title: string; body: string }[] = [
   {
     title: 'Stock en LupoHub',
     body: 'Mantené sincronizado el inventario con ML para evitar ventas sin unidad y penalizaciones.'
+  },
+  {
+    title: 'Ofertas Relámpago',
+    body: 'Priorizá ítems con rotación y stock suficiente para el cupo del relámpago. Validá descuento mínimo y condiciones en la herramienta de promociones de Mercado Libre antes de postular.'
   }
 ];
 
@@ -148,6 +152,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
   const [revisar, setRevisar] = useState<RecRow[]>([]);
   const [sumar, setSumar] = useState<RecRow[]>([]);
   const [lanzamientos, setLanzamientos] = useState<RecRow[]>([]);
+  const [relampago, setRelampago] = useState<RecRow[]>([]);
   const [recStats, setRecStats] = useState<{ adsAnalyzed: number; stockFetched: number } | null>(null);
 
   useEffect(() => {
@@ -191,6 +196,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       setRevisar(out.revisar);
       setSumar(out.sumar);
       setLanzamientos(out.lanzamientos);
+      setRelampago(out.relampago);
       setRecStats(out.stats);
     } catch (e: unknown) {
       const ax = e && typeof e === 'object' ? (e as { message?: string; response?: { data?: { message?: string } } }) : null;
@@ -201,6 +207,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       setRevisar([]);
       setSumar([]);
       setLanzamientos([]);
+      setRelampago([]);
       setRecStats(null);
       showToast('error', msg);
     } finally {
@@ -259,11 +266,15 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
   const topSumar = sumar.slice(0, 3);
   const topRevisar = revisar.slice(0, 2);
   const topLanzamientos = lanzamientos.slice(0, 3);
+  const topRelampago = relampago.slice(0, 3);
 
   const accionesSugeridas = useMemo(() => {
     const out: string[] = [];
     if (topLanzamientos.length > 0) {
       out.push(`Comunicá ${topLanzamientos.length} lanzamientos (publicaciones creadas en últimos 30 días).`);
+    }
+    if (topRelampago.length > 0) {
+      out.push(`Postulá ${topRelampago.length} publicaciones a Oferta Relámpago (alta rotación y stock para cupo).`);
     }
     if (topPotenciar.length > 0) {
       out.push(`Subí inversión en ${topPotenciar.length} publicaciones con mejor ROAS para capturar más demanda.`);
@@ -278,7 +289,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       out.push('Generá recomendaciones para ver un plan accionable del período elegido.');
     }
     return out;
-  }, [topLanzamientos.length, topPotenciar.length, topSumar.length, topRevisar.length]);
+  }, [topLanzamientos.length, topRelampago.length, topPotenciar.length, topSumar.length, topRevisar.length]);
 
   const ideasComunicacion = useMemo(() => {
     const ideas: Array<{ title: string; text: string }> = [];
@@ -286,6 +297,12 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       ideas.push({
         title: 'Idea lanzamiento',
         text: `Lanzamiento recomendado: ${topLanzamientos[0].title}. Está dentro de los últimos 30 días, ideal para comunicar como novedad.`
+      });
+    }
+    if (topRelampago[0]) {
+      ideas.push({
+        title: 'Idea Oferta Relámpago',
+        text: `Relámpago sugerido: ${topRelampago[0].title}. Comunicá urgencia y stock limitado; la postulación y el % final los definís en Mercado Libre.`
       });
     }
     if (topSumar[0]) {
@@ -301,7 +318,7 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
       });
     }
     return ideas;
-  }, [topLanzamientos, topPotenciar, topSumar, topRevisar]);
+  }, [topLanzamientos, topRelampago, topPotenciar, topSumar, topRevisar]);
 
   return (
     <div className="space-y-8">
@@ -445,11 +462,21 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
             </p>
             <RecTable rows={sumar} kind="add" />
           </div>
+          <div>
+            <h3 className="text-sm font-bold text-violet-300/90 flex items-center gap-2 mb-3">
+              <Zap size={18} /> Ofertas Relámpago (sugerencias)
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              Publicaciones con buena rotación histórica y stock para soportar cupo; si además rinden en Product Ads, suman prioridad. La postulación y reglas las
+              cargás en Mercado Libre (promociones / Oferta Relámpago).
+            </p>
+            <RecTable rows={relampago} kind="add" />
+          </div>
         </div>
 
         <p className="text-[11px] text-slate-600 mt-6 leading-relaxed">
-          Criterios orientativos: ROAS “bueno” ≥ 2,2× con costo ≥ $200 y ≥ 3 clics; “revisar” si ROAS &lt; 1,3× o ≥ 15 clics sin ventas atribuidas. Ajustá
-          fechas si tenés pocas filas. Para ver el detalle completo de campañas, abrí{' '}
+          Criterios orientativos: ROAS “bueno” ≥ 2,2× con costo ≥ $200 y ≥ 3 clics; “revisar” si ROAS &lt; 1,3× o ≥ 15 clics sin ventas atribuidas. Relámpago: ≥ 4
+          unidades en stock y ≥ 2 ventas históricas (orientativo). Ajustá fechas si tenés pocas filas. Para ver el detalle completo de campañas, abrí{' '}
           <button type="button" onClick={() => go('mercadolibre_product_ads')} className="text-amber-500/90 hover:underline">
             Product Ads
           </button>

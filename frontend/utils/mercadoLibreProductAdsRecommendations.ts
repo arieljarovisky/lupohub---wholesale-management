@@ -21,6 +21,8 @@ export type MlStockRow = {
   soldTotal: number;
   permalink?: string;
   dateCreated?: string | null;
+  /** Precio actual de la publicación (API ML), si viene en stock. */
+  price?: number | null;
 };
 
 function toNum(v: unknown): number {
@@ -142,13 +144,66 @@ export async function fetchMlStockForRecs(maxItems = 1500): Promise<MlStockRow[]
         totalStock: toNum(it.totalStock),
         soldTotal: toNum(it.soldTotal),
         permalink: it.permalink,
-        dateCreated: (it.dateCreated ?? it.date_created ?? null) as string | null
+        dateCreated: (it.dateCreated ?? it.date_created ?? null) as string | null,
+        price: it.price != null ? toNum(it.price) : null
       });
     }
     offset += page;
     if (batch.length === 0) break;
   }
   return out.slice(0, maxItems);
+}
+
+/**
+ * Candidatas a Oferta Relámpago: buen equilibrio rotación + stock para soportar cupo y descuento.
+ * La postulación y reglas finales se configuran en Mercado Libre.
+ */
+export function computeRelampagoCandidates(
+  stock: MlStockRow[],
+  potenciar: RecRow[],
+  opts?: { minStock?: number; minSold?: number; limit?: number }
+): RecRow[] {
+  const minStock = opts?.minStock ?? 4;
+  const minSold = opts?.minSold ?? 2;
+  const limit = opts?.limit ?? 12;
+
+  const roasById = new Map<string, number>();
+  for (const p of potenciar) {
+    roasById.set(normalizeMlItemId(p.itemId), p.roas);
+  }
+
+  const scored = stock
+    .filter((s) => s.totalStock >= minStock && s.soldTotal >= minSold)
+    .map((s) => {
+      const roas = roasById.get(s.id) ?? 0;
+      const score = s.soldTotal * 15 + Math.min(s.totalStock, 80) * 2 + (roas >= 2.2 ? 40 : 0);
+      return { s, score, roas };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return scored.map(({ s, roas }) => {
+    const priceHint =
+      s.price != null && s.price > 0
+        ? ` Precio actual ~$${Math.round(s.price).toLocaleString('es-AR')}; probá un descuento agresivo respetando tu piso.`
+        : '';
+    const adsHint =
+      roas >= 2.2
+        ? ' Rinde bien en Product Ads: suele aguantar una promo fuerte si el margen lo permite.'
+        : '';
+    return {
+      itemId: s.id,
+      title: s.title,
+      permalink: s.permalink,
+      cost: 0,
+      clicks: 0,
+      prints: 0,
+      totalAmount: 0,
+      roas: 0,
+      acos: 0,
+      reason: `Oferta Relámpago: ${s.soldTotal} ventas históricas y stock ${s.totalStock} unidades.${adsHint}${priceHint} Postulá desde la herramienta de promociones en Mercado Libre.`
+    };
+  });
 }
 
 function isCreatedInLastDays(rawDate: string | null | undefined, days: number): boolean {
@@ -199,6 +254,7 @@ export async function loadProductAdsRecommendations(
   revisar: RecRow[];
   sumar: RecRow[];
   lanzamientos: RecRow[];
+  relampago: RecRow[];
   stats: { adsAnalyzed: number; stockFetched: number };
 }> {
   const [ads, stock] = await Promise.all([
@@ -207,6 +263,7 @@ export async function loadProductAdsRecommendations(
   ]);
   const { potenciar, revisar, advertisedIds } = computeRecommendationsFromAds(ads);
   const sumar = computeStockCandidates(stock, advertisedIds);
+  const relampago = computeRelampagoCandidates(stock, potenciar);
   const lanzamientos = stock
     .filter((s) => isCreatedInLastDays(s.dateCreated, 30))
     .sort((a, b) => b.soldTotal - a.soldTotal || b.totalStock - a.totalStock)
@@ -228,6 +285,7 @@ export async function loadProductAdsRecommendations(
     revisar,
     sumar,
     lanzamientos,
+    relampago,
     stats: { adsAnalyzed: ads.length, stockFetched: stock.length }
   };
 }
