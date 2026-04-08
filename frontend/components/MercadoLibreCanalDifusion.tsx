@@ -6,8 +6,6 @@ import {
   LayoutGrid,
   Package,
   Settings,
-  CheckCircle2,
-  Circle,
   ChevronDown,
   ChevronRight,
   Lightbulb,
@@ -27,36 +25,6 @@ interface MercadoLibreCanalDifusionProps {
   onNavigate?: (view: string) => void;
 }
 
-type CheckItem = { id: string; label: string; detail?: string };
-
-const BASE_CHECKLIST: CheckItem[] = [
-  {
-    id: 'integracion',
-    label: 'Conectar Mercado Libre en Configuración y sincronizar stock',
-    detail: 'Sin stock real y envíos al día, la difusión (orgánica o paga) no rinde.'
-  },
-  {
-    id: 'ventas',
-    label: 'Revisar ventas ML: tiempos de despacho y mensajes pendientes',
-    detail: 'La reputación y la tasa de cancelaciones afectan visibilidad y costos de ads.'
-  },
-  {
-    id: 'product_ads',
-    label: 'Medir Product Ads por ROAS/ACOS y pausar lo que no convierte',
-    detail: 'Priorizá publicaciones con buena ficha y stock antes de subir presupuesto.'
-  },
-  {
-    id: 'marca',
-    label: 'Evaluar Brand Ads si tenés catálogo y marca consolidada',
-    detail: 'Sirve para awareness; cruzalo con ventas y no solo con impresiones.'
-  },
-  {
-    id: 'display',
-    label: 'Usar Display Ads para campañas puntuales (lanzamientos, estacionalidad)',
-    detail: 'Combiná con ofertas claras en la tienda para no “quemar” presupuesto.'
-  }
-];
-
 const TIPS: { title: string; body: string }[] = [
   {
     title: 'Orden sugerido',
@@ -75,28 +43,6 @@ const TIPS: { title: string; body: string }[] = [
     body: 'Mantené sincronizado el inventario con ML para evitar ventas sin unidad y penalizaciones.'
   }
 ];
-
-const STORAGE_KEY = 'lupo_ml_canal_difusion_checks';
-
-function loadChecks(): Set<string> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    const arr = Array.isArray(parsed) ? parsed : [];
-    return new Set(arr.filter((x): x is string => typeof x === 'string'));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveChecks(set: Set<string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
-  } catch {
-    /* ignore */
-  }
-}
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -180,7 +126,6 @@ function RecTable({
 
 const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ onNavigate }) => {
   const { showToast } = useNotification();
-  const [done, setDone] = useState<Set<string>>(() => loadChecks());
   const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   const today = useMemo(() => new Date(), []);
@@ -262,22 +207,6 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
 
   const go = (view: string) => onNavigate?.(view);
 
-  const toggle = (id: string) => {
-    setDone((prev) => {
-      const next = new Set<string>(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      saveChecks(next);
-      return next;
-    });
-  };
-
-  const progress = useMemo(() => {
-    const total = BASE_CHECKLIST.length;
-    const n = BASE_CHECKLIST.filter((c) => done.has(c.id)).length;
-    return { n, total, pct: total ? Math.round((n / total) * 100) : 0 };
-  }, [done]);
-
   const links = [
     {
       view: 'mercadolibre_orders',
@@ -323,6 +252,50 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
     }
   ];
 
+  const topPotenciar = potenciar.slice(0, 3);
+  const topSumar = sumar.slice(0, 3);
+  const topRevisar = revisar.slice(0, 2);
+
+  const accionesSugeridas = useMemo(() => {
+    const out: string[] = [];
+    if (topPotenciar.length > 0) {
+      out.push(`Subí inversión en ${topPotenciar.length} publicaciones con mejor ROAS para capturar más demanda.`);
+    }
+    if (topSumar.length > 0) {
+      out.push(`Probá campañas en ${topSumar.length} publicaciones con ventas orgánicas y stock disponible.`);
+    }
+    if (topRevisar.length > 0) {
+      out.push(`Revisá o pausá ${topRevisar.length} publicaciones con bajo retorno para evitar gasto ineficiente.`);
+    }
+    if (out.length === 0) {
+      out.push('Generá recomendaciones para ver un plan accionable del período elegido.');
+    }
+    return out;
+  }, [topPotenciar.length, topSumar.length, topRevisar.length]);
+
+  const ideasComunicacion = useMemo(() => {
+    const ideas: Array<{ title: string; text: string }> = [];
+    if (topPotenciar[0]) {
+      ideas.push({
+        title: 'Idea lanzamiento',
+        text: `Novedad destacada: ${topPotenciar[0].title}. Aprovechá stock disponible y envío rápido.`
+      });
+    }
+    if (topSumar[0]) {
+      ideas.push({
+        title: 'Idea producto en promoción',
+        text: `Oferta recomendada: ${topSumar[0].title}. Ya tiene demanda orgánica, ideal para empujar conversión.`
+      });
+    }
+    if (topRevisar[0]) {
+      ideas.push({
+        title: 'Idea cupón selectivo',
+        text: `Activá cupón por tiempo limitado en ${topRevisar[0].title} para recuperar conversión sin subir puja.`
+      });
+    }
+    return ideas;
+  }, [topPotenciar, topSumar, topRevisar]);
+
   return (
     <div className="space-y-8">
       <div className="rounded-2xl border border-slate-700/80 bg-gradient-to-br from-slate-900/90 to-slate-950 p-6 md:p-8">
@@ -356,6 +329,25 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
             {recLoading ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
             {recLoading ? 'Analizando…' : 'Generar recomendaciones'}
           </button>
+        </div>
+
+        <div className="mb-6 rounded-xl border border-slate-700/70 bg-slate-900/40 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-200 font-semibold">Canal de difusión de Mercado Libre</p>
+              <p className="text-xs text-slate-500 mt-1">
+                La publicación de comunicaciones se hace desde Mercado Libre. Desde LupoHub te guiamos con qué comunicar y qué artículos impulsar.
+              </p>
+            </div>
+            <a
+              href="https://www.mercadolibre.com.ar/ventas"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+            >
+              Abrir panel de vendedor <ExternalLink size={14} />
+            </a>
+          </div>
         </div>
 
         {advLoading && (
@@ -458,6 +450,35 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
         </p>
       </div>
 
+      <div className="rounded-2xl border border-slate-700/80 bg-slate-900/50 p-6 md:p-8">
+        <h2 className="text-lg font-bold text-white mb-4">Asistente para canal de difusión</h2>
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4">
+            <h3 className="text-sm font-semibold text-amber-200 mb-3">Qué hacer ahora</h3>
+            <ul className="space-y-2">
+              {accionesSugeridas.map((a) => (
+                <li key={a} className="text-sm text-slate-300">- {a}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4">
+            <h3 className="text-sm font-semibold text-cyan-200 mb-3">Ideas para comunicar hoy</h3>
+            {ideasComunicacion.length === 0 ? (
+              <p className="text-sm text-slate-500">Generá recomendaciones para crear mensajes sugeridos automáticamente.</p>
+            ) : (
+              <div className="space-y-3">
+                {ideasComunicacion.map((idea) => (
+                  <div key={idea.title} className="border border-slate-700 rounded-lg p-3 bg-slate-950/40">
+                    <p className="text-xs text-slate-500 mb-1">{idea.title}</p>
+                    <p className="text-sm text-slate-300">{idea.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
           <Lightbulb className="text-amber-400 shrink-0" size={22} />
@@ -480,54 +501,6 @@ const MercadoLibreCanalDifusion: React.FC<MercadoLibreCanalDifusionProps> = ({ o
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-700/80 bg-slate-900/50 p-6 md:p-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <h2 className="text-lg font-bold text-white">Qué hacer (prioridad sugerida)</h2>
-          <div className="flex items-center gap-3">
-            <div className="h-2 flex-1 sm:w-40 bg-slate-800 rounded-full overflow-hidden min-w-[120px]">
-              <div
-                className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-300"
-                style={{ width: `${progress.pct}%` }}
-              />
-            </div>
-            <span className="text-sm text-slate-400 tabular-nums whitespace-nowrap">
-              {progress.n}/{progress.total}
-            </span>
-          </div>
-        </div>
-        <ul className="space-y-4">
-          {BASE_CHECKLIST.map((item) => {
-            const isDone = done.has(item.id);
-            return (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => toggle(item.id)}
-                  className="w-full flex gap-3 text-left group"
-                >
-                  <span className="shrink-0 mt-0.5 text-amber-400">
-                    {isDone ? <CheckCircle2 size={22} /> : <Circle size={22} className="text-slate-600" />}
-                  </span>
-                  <span>
-                    <span
-                      className={`font-medium ${isDone ? 'text-slate-500 line-through' : 'text-slate-100 group-hover:text-white'}`}
-                    >
-                      {item.label}
-                    </span>
-                    {item.detail && (
-                      <p className="text-sm text-slate-500 mt-1 leading-snug">{item.detail}</p>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        <p className="text-xs text-slate-600 mt-6">
-          El progreso se guarda en este navegador (localStorage). Podés desmarcar ítems cuando quieras volver a revisarlos.
-        </p>
       </div>
 
       <div>
