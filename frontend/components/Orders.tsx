@@ -12,7 +12,26 @@ import {
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   normalizeSkuForPrint,
+  type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
+
+/** Lista para factura/remito: transportes del cliente o, si no tiene, el catálogo global. */
+function transporteOptionsForCustomer(customer: Customer | undefined, allTransportes: Transporte[]): Transporte[] {
+  const c = customer?.transportes;
+  if (c && c.length > 0) return c;
+  return allTransportes;
+}
+
+function pickInitialTransporteId(prev: ManualFacturaFields | undefined, opts: Transporte[]): string {
+  if (!opts.length) return '';
+  if (prev?.transporteId && opts.some((o) => o.id === prev.transporteId)) return prev.transporteId;
+  if (prev?.transporteName) {
+    const byName = opts.find((o) => o.name === prev.transporteName);
+    if (byName) return byName.id;
+  }
+  if (opts.length === 1) return opts[0].id;
+  return '';
+}
 
 interface OrdersProps {
   orders: Order[];
@@ -89,7 +108,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
-  const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>>(() => {
+  const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, ManualFacturaFields>>(() => {
     try {
       const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
       return raw ? JSON.parse(raw) : {};
@@ -101,6 +120,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [facturaTransportNumber, setFacturaTransportNumber] = useState('');
   const [facturaRemitoNumber, setFacturaRemitoNumber] = useState('');
   const [facturaSaleCondition, setFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
+  /** '' = imprimir todos los transportes asignados al cliente (si hay más de uno). */
+  const [facturaTransporteId, setFacturaTransporteId] = useState('');
+  const [emitirFacturaTransporteId, setEmitirFacturaTransporteId] = useState('');
 
   useEffect(() => {
     if (!ncOrder) {
@@ -509,19 +531,30 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
       saleCondition: initialSaleCondition,
     };
+    const transporteOpts = transporteOptionsForCustomer(customer, transportes);
     setFacturaPreviewOrder(order);
     setFacturaTransportNumber((manual.transportNumber ?? '').toString());
     setFacturaRemitoNumber((manual.remitoNumber ?? '').toString());
     setFacturaSaleCondition(String(manual.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días');
+    setFacturaTransporteId(pickInitialTransporteId(prev, transporteOpts));
   };
 
   const confirmOpenFactura = () => {
     if (!facturaPreviewOrder) return;
-    const manual = {
+    const cust = customers.find((c) => c.id === facturaPreviewOrder.customerId);
+    const transporteOpts = transporteOptionsForCustomer(cust, transportes);
+    const manual: ManualFacturaFields = {
       transportNumber: facturaTransportNumber.trim(),
       remitoNumber: facturaRemitoNumber.trim(),
       saleCondition: facturaSaleCondition.trim() || '30 días',
     };
+    if (facturaTransporteId) {
+      const t = transporteOpts.find((o) => o.id === facturaTransporteId);
+      if (t) {
+        manual.transporteId = t.id;
+        manual.transporteName = t.name;
+      }
+    }
     setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [facturaPreviewOrder.id]: manual }));
     const html = buildFacturaHtml(facturaPreviewOrder, manual);
     if (html) {
@@ -932,8 +965,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           e.stopPropagation();
                           setOrderToEmitFactura(order);
                           setEmitirFacturaTipo('auto');
-                          const prev = manualFacturaDataByOrder[order.id]?.saleCondition?.toLowerCase() || '';
-                          setEmitirFacturaSaleCondition(prev.includes('60') ? '60 días' : '30 días');
+                          const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition?.toLowerCase() || '';
+                          setEmitirFacturaSaleCondition(prevSale.includes('60') ? '60 días' : '30 días');
+                          const custEmit = customers.find((c) => c.id === order.customerId);
+                          const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
+                          setEmitirFacturaTransporteId(pickInitialTransporteId(manualFacturaDataByOrder[order.id], optsEmit));
                           setShowEmitirFacturaModal(true);
                         }}
                         disabled={!!emitiendoFacturaId}
@@ -1184,7 +1220,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               </label>
             </div>
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Condición de venta</label>
-            <div className="mb-6">
+            <div className="mb-4">
               <select
                 value={emitirFacturaSaleCondition}
                 onChange={(e) => setEmitirFacturaSaleCondition((e.target.value === '60 días' ? '60 días' : '30 días'))}
@@ -1194,6 +1230,30 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <option value="60 días">60 días</option>
               </select>
             </div>
+            {(() => {
+              const custE = customers.find((c) => c.id === orderToEmitFactura.customerId);
+              const optsE = transporteOptionsForCustomer(custE, transportes);
+              return (
+                <div className="mb-6">
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte (en la factura impresa)</label>
+                  <select
+                    value={emitirFacturaTransporteId}
+                    onChange={(e) => setEmitirFacturaTransporteId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    <option value="">{optsE.length > 1 ? 'Todos los asignados al cliente' : '— Sin especificar —'}</option>
+                    {optsE.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{t.address ? ` — ${t.address}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {optsE.length === 0 && (
+                    <p className="text-xs text-amber-400/95 mt-2">No hay transportes cargados. En Configuración → Remitos cargá transportes y asignalos al cliente en Clientes.</p>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
@@ -1209,10 +1269,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   if (!orderToEmitFactura) return;
                   const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
                   setEmitiendoFacturaId(orderToEmitFactura.id);
-                  const manual = {
+                  const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
+                  const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
+                  const manual: ManualFacturaFields = {
                     ...(manualFacturaDataByOrder[orderToEmitFactura.id] || {}),
                     saleCondition: emitirFacturaSaleCondition,
                   };
+                  if (emitirFacturaTransporteId) {
+                    const t = optsEmit.find((o) => o.id === emitirFacturaTransporteId);
+                    if (t) {
+                      manual.transporteId = t.id;
+                      manual.transporteName = t.name;
+                    }
+                  } else {
+                    delete manual.transporteId;
+                    delete manual.transporteName;
+                  }
                   setManualFacturaDataByOrder((prev) => ({
                     ...prev,
                     [orderToEmitFactura.id]: manual
@@ -1247,6 +1319,33 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               Pedido #{facturaPreviewOrder.id} — {facturaPreviewOrder.customerBusinessName || getCustomerName(facturaPreviewOrder)}
             </p>
             <div className="space-y-3 mb-6">
+              {(() => {
+                const custF = customers.find((c) => c.id === facturaPreviewOrder.customerId);
+                const optsF = transporteOptionsForCustomer(custF, transportes);
+                return (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Transporte (factura impresa)</label>
+                    <select
+                      value={facturaTransporteId}
+                      onChange={(e) => setFacturaTransporteId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
+                      <option value="">{optsF.length > 1 ? 'Todos los asignados al cliente' : '— Sin especificar —'}</option>
+                      {optsF.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}{t.address ? ` — ${t.address}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {optsF.length === 0 && (
+                      <p className="text-xs text-amber-400/95 mt-1.5">No hay transportes. Cargalos en Configuración → Remitos y asignalos al cliente.</p>
+                    )}
+                    {optsF.length > 1 && (
+                      <p className="text-[10px] text-slate-500 mt-1">Si elegís un transporte, solo ese nombre se imprime. Si no, se listan todos los del cliente.</p>
+                    )}
+                  </div>
+                );
+              })()}
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">N° Transporte</label>
                 <input

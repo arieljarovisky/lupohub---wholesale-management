@@ -420,7 +420,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
             {transportes.length > 0 && (
               <div>
-                <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (express para despacho)</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (factura, remitos y despacho)</label>
+                <p className="text-[10px] text-slate-500 mb-2 ml-1">Si el cliente usa varios, marcá todos; al imprimir la factura podés elegir uno o listar todos.</p>
                 <div className="flex flex-wrap gap-2">
                   {transportes.map(t => (
                     <label key={t.id} className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-750 transition">
@@ -1290,7 +1291,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
               {transportes.length > 0 && (
                 <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (express para despacho)</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (factura, remitos y despacho)</label>
+                  <p className="text-[10px] text-slate-500 mb-2 ml-1">Si el cliente usa varios, marcá todos; al imprimir la factura podés elegir uno o listar todos.</p>
                   <div className="flex flex-wrap gap-2">
                     {transportes.map(t => (
                       <label key={t.id} className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-750 transition">

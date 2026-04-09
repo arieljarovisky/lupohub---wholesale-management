@@ -75,7 +75,22 @@ export function sortOrderItemsForPrint(items: OrderItem[], products: Product[]):
   });
 }
 
-export type ManualFacturaFields = { remitoNumber?: string; transportNumber?: string; saleCondition?: string };
+export type ManualFacturaFields = {
+  remitoNumber?: string;
+  transportNumber?: string;
+  saleCondition?: string;
+  /** Transporte elegido para imprimir en la factura (nombre del express). */
+  transporteName?: string;
+  transporteId?: string;
+};
+
+function escapeHtmlText(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 export function normalizeSkuForPrint(raw: unknown): string {
   return String(raw ?? '').trim().replace(/-/g, '');
@@ -170,6 +185,11 @@ export function buildWholesaleFacturaHtml(params: {
   const condicionIvaEmisor = (remitente.condicionIva || remitente.condicion_iva || 'Responsable Inscripto').toString().trim();
   const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
   const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
+  const manualTransporteName = (manual?.transporteName ?? '').toString().trim();
+  const transportesCliente = (customer?.transportes ?? [])
+    .map((t) => (t.name ?? '').toString().trim())
+    .filter(Boolean);
+  const transporteNombreFactura = manualTransporteName || (transportesCliente.length ? transportesCliente.join(', ') : '');
   const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
   const saleConditionRaw = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim().toLowerCase();
   const saleCondition = saleConditionRaw.includes('60') ? '60 días' : '30 días';
@@ -303,8 +323,9 @@ export function buildWholesaleFacturaHtml(params: {
             ${condicionIvaReceptor ? `<div><strong>Condición frente al IVA:</strong> ${condicionIvaReceptor}</div>` : ''}
           </div>
           <div class="block">
-            ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
-            ${remitoNumber ? `<div><strong>N° Remito:</strong> ${remitoNumber}</div>` : ''}
+            ${transporteNombreFactura ? `<div><strong>Transporte:</strong> ${escapeHtmlText(transporteNombreFactura)}</div>` : ''}
+            ${transportNumber ? `<div><strong>N° Transporte:</strong> ${escapeHtmlText(transportNumber)}</div>` : ''}
+            ${remitoNumber ? `<div><strong>N° Remito:</strong> ${escapeHtmlText(remitoNumber)}</div>` : ''}
             <div><strong>Condición de venta:</strong> ${saleCondition}</div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
-import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml } from '../utils/wholesaleInvoiceHtml';
+import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
@@ -190,18 +190,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         return;
       }
 
-      let manualFromLs: { remitoNumber?: string; transportNumber?: string; saleCondition?: string } | undefined;
+      let manualFromLs: ManualFacturaFields | undefined;
       try {
         const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw) as Record<string, { remitoNumber?: string; transportNumber?: string; saleCondition?: string }>;
+          const parsed = JSON.parse(raw) as Record<string, ManualFacturaFields>;
           manualFromLs = parsed[order.id];
         }
       } catch {
         /* ignore */
       }
       const customer = customers.find((c) => c.id === order.customerId);
-      const manual =
+      const manual: ManualFacturaFields =
         manualFromLs ??
         ({
           transportNumber: (customer?.transportNumber ?? '').toString().trim(),
