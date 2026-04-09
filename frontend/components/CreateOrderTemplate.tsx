@@ -150,24 +150,35 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setSelectedCustomerId(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
+    const getBaseArticleCode = (skuRaw: string) => {
+      const sku = String(skuRaw || '').trim();
+      if (!sku) return '';
+      const parts = sku.split('-').filter(Boolean);
+      // SKU variante típico: BASE-TALLE-COLOR -> mostrar/usar BASE para agrupar.
+      if (parts.length >= 3) return parts.slice(0, -2).join('-');
+      return sku;
+    };
+
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of initialOrder.items || []) {
       const sizeCode = String((item as any).sizeCode || '').trim();
       const colorName = String((item as any).colorName || '').trim() || 'Color';
-      const productCode = String((item as any).sku || '').trim() || 'SKU';
+      const rawSku = String((item as any).sku || '').trim();
       const price = Number(item.priceAtMoment || 0);
       const productId = String((item as any).productId || '');
       const variantId = String((item as any).variantId || '').trim();
       if (!sizeCode || !variantId) continue;
+      const productCode = getBaseArticleCode(rawSku) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
+      const colorCode = String((item as any).colorCode || '').trim() || colorName;
 
-      const key = `${productCode}__${colorName}`;
+      const key = `${productId || productCode}__${colorCode}`;
       if (!rowsByKey.has(key)) {
         rowsByKey.set(key, {
           id: `edit-${key}-${Math.random().toString(36).slice(2, 8)}`,
           productCode,
           productName: String((item as any).productName || productCode),
           productId,
-          colorCode: colorName,
+          colorCode,
           colorName,
           variantBySize: {},
           quantitiesBySize: {},
@@ -180,7 +191,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
       if (!row.price && price) row.price = price;
     }
-    setRows(Array.from(rowsByKey.values()));
+    const sorted = Array.from(rowsByKey.values()).sort((a, b) => {
+      const byCode = a.productCode.localeCompare(b.productCode, undefined, { numeric: true, sensitivity: 'base' });
+      if (byCode !== 0) return byCode;
+      return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    setRows(sorted);
   }, [initialOrder]);
 
   useEffect(() => {
