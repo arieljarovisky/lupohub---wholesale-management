@@ -61,6 +61,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [addingProduct, setAddingProduct] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState<string>('');
   const [addByCodeInput, setAddByCodeInput] = useState('');
   const [addByCodeError, setAddByCodeError] = useState<string | null>(null);
   /** Código del artículo al que se están agregando colores (para mostrar carga en el botón). */
@@ -359,6 +360,22 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const n = Math.max(0, Number(value));
     if (isNaN(n)) return;
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, price: n } : r));
+  };
+
+  /** Aplica un descuento porcentual sobre el precio actual de todas las filas. */
+  const applyGlobalDiscount = () => {
+    const parsed = Number(globalDiscountPercent);
+    if (!Number.isFinite(parsed)) {
+      showToast('error', 'Ingresá un descuento válido.');
+      return;
+    }
+    const discount = Math.min(100, Math.max(0, parsed));
+    const factor = 1 - (discount / 100);
+    setRows(prev => prev.map(r => ({
+      ...r,
+      price: Math.round(Math.max(0, r.price * factor) * 100) / 100
+    })));
+    showToast('success', `Descuento global del ${discount}% aplicado a todos los artículos.`);
   };
 
   /** Precio del producto según la lista de precios (products ya vienen con precio de la lista seleccionada). */
@@ -702,6 +719,28 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/30 active:scale-[0.98] transition touch-manipulation"
         >
           <Plus size={22} strokeWidth={2.5} /> Agregar artículo
+        </button>
+      </div>
+
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+        <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">Descuento global (%)</label>
+        <input
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={globalDiscountPercent}
+          onChange={(e) => setGlobalDiscountPercent(e.target.value)}
+          placeholder="Ej: 10"
+          className="w-full sm:w-36 h-10 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 text-sm text-white font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+        />
+        <button
+          type="button"
+          onClick={applyGlobalDiscount}
+          disabled={!rows.length}
+          className="h-10 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 text-sm font-semibold border border-slate-600 transition"
+        >
+          Aplicar a todos
         </button>
       </div>
 
