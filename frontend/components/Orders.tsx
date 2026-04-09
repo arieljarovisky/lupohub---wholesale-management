@@ -86,6 +86,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
   const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
@@ -930,21 +931,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          showConfirm({
-                            title: 'Emitir factura AFIP',
-                            message: `Se emitirá Factura ${tipoFactura} para ${order.customerBusinessName || customer?.businessName || customer?.name || 'este cliente'}.\n\nCondición IVA del cliente: ${condicionIva}.\n\nSolo corresponde Factura A si el cliente es Responsable Inscripto. Si no es así, cancelá y editá la ficha del cliente en Clientes (campo Condición de IVA) antes de emitir.\n\n¿Continuar?`,
-                            confirmLabel: `Emitir Factura ${tipoFactura}`,
-                            onConfirm: () => {
-                              setEmitiendoFacturaId(order.id);
-                              api.emitirFactura(order.id)
-                                .then((res) => {
-                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
-                                  showToast('success', `Factura ${tipoFactura} emitida. CAE ${res.cae}`);
-                                })
-                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
-                                .finally(() => setEmitiendoFacturaId(null));
-                            }
-                          });
+                          setOrderToEmitFactura(order);
+                          setEmitirFacturaTipo('auto');
+                          const prev = manualFacturaDataByOrder[order.id]?.saleCondition?.toLowerCase() || '';
+                          setEmitirFacturaSaleCondition(prev.includes('60') ? '60 días' : '30 días');
+                          setShowEmitirFacturaModal(true);
                         }}
                         disabled={!!emitiendoFacturaId}
                         className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
@@ -1161,6 +1152,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
             <p className="text-sm text-slate-400 mb-4">Pedido #{orderToEmitFactura.id} — {orderToEmitFactura.customerBusinessName || getCustomerName(orderToEmitFactura)}</p>
+            <p className="text-xs text-slate-500 mb-4">
+              Condición IVA del cliente: {customers.find(c => c.id === orderToEmitFactura.customerId)?.condicionIva || 'No informada'}.
+              Solo corresponde Factura A si el cliente es Responsable Inscripto.
+            </p>
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tipo de comprobante</label>
             <div className="space-y-2 mb-6">
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
@@ -1179,6 +1174,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <span className="text-slate-500 text-xs">(Consumidor final / Monotributo)</span>
               </label>
             </div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Condición de venta</label>
+            <div className="mb-6">
+              <select
+                value={emitirFacturaSaleCondition}
+                onChange={(e) => setEmitirFacturaSaleCondition((e.target.value === '60 días' ? '60 días' : '30 días'))}
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+              >
+                <option value="30 días">30 días</option>
+                <option value="60 días">60 días</option>
+              </select>
+            </div>
             <div className="flex gap-3 justify-end">
               <button type="button" onClick={() => { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); }} disabled={!!emitiendoFacturaId} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50">Cancelar</button>
               <button
@@ -1187,6 +1193,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   if (!orderToEmitFactura) return;
                   const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
                   setEmitiendoFacturaId(orderToEmitFactura.id);
+                  setManualFacturaDataByOrder((prev) => ({
+                    ...prev,
+                    [orderToEmitFactura.id]: {
+                      ...(prev[orderToEmitFactura.id] || {}),
+                      saleCondition: emitirFacturaSaleCondition
+                    }
+                  }));
                   api.emitirFactura(orderToEmitFactura.id, cbteTipo != null ? { cbteTipo } : undefined)
                     .then((res) => {
                       onFacturaEmitida?.(orderToEmitFactura.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
