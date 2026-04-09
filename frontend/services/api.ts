@@ -57,7 +57,7 @@ export const api = {
       priceListId: created.priceListId ?? undefined
     } as User;
   },
-  updateUser: async (id: string, data: { priceListId?: string | null }): Promise<User> => {
+  updateUser: async (id: string, data: { priceListId?: string | null; commissionPercentage?: number }): Promise<User> => {
     const updated = await request<any>(`/users/${id}`, 'PATCH', data);
     return {
       id: updated.id,
@@ -1387,6 +1387,11 @@ export const api = {
     if (params?.hasta) queryParams.append('hasta', params.hasta);
     const qs = queryParams.toString();
     return await request<any[]>(`/payments${qs ? '?' + qs : ''}`, 'GET') as any;
+  },
+  importPaymentsExcel: async (files: File[]): Promise<{ message: string; files: number; candidates: number; imported: number; duplicated: number; notFound: { customerName: string; count: number }[] }> => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+    return requestFormData('/payments/import-excel', formData, 120000);
   },
 
   createPayment: async (payload: {

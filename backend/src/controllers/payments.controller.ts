@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import * as XLSX from 'xlsx';
 
 const canManagePayments = (role?: string) =>
   role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
@@ -136,6 +137,123 @@ export const createPayment = async (req: any, res: Response) => {
   } catch (e: any) {
     console.error('createPayment:', e);
     res.status(500).json({ message: 'Error creando pago', detail: e?.message });
+  }
+};
+
+function normalizeNameForMatch(v: unknown): string {
+  return String(v ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function normalizeReceiptNumber(v: unknown): string {
+  return String(v ?? '').trim().replace(/\s+/g, '');
+}
+
+function toSqlDate(value: any): string | null {
+  if (!value) return null;
+  if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+/** Importar pagos desde uno o más Excel (filas REC). */
+export const importPaymentsFromExcel = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (!files.length) {
+      return res.status(400).json({ message: 'Subí al menos un archivo Excel (.xlsx/.xls)' });
+    }
+
+    const customers = (await query(
+      `SELECT id, business_name, name, seller_id FROM customers`
+    )) as { id: string; business_name?: string | null; name?: string | null; seller_id?: string | null }[];
+
+    const customerByNorm = new Map<string, { id: string; seller_id?: string | null }>();
+    for (const c of customers) {
+      const k1 = normalizeNameForMatch(c.business_name);
+      const k2 = normalizeNameForMatch(c.name);
+      if (k1 && !customerByNorm.has(k1)) customerByNorm.set(k1, { id: c.id, seller_id: c.seller_id ?? null });
+      if (k2 && !customerByNorm.has(k2)) customerByNorm.set(k2, { id: c.id, seller_id: c.seller_id ?? null });
+    }
+
+    let candidates = 0;
+    let imported = 0;
+    let duplicated = 0;
+    const notFoundNames = new Map<string, number>();
+
+    for (const f of files) {
+      const wb = XLSX.read(f.buffer, { type: 'buffer', cellDates: true });
+      for (const sheetName of wb.SheetNames) {
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: null });
+        for (const r of rows) {
+          const tComp = String(r.T_COMP ?? '').trim().toUpperCase();
+          if (tComp !== 'REC') continue;
+          candidates++;
+
+          const customerName = String(r.RAZON_SOC ?? '').trim();
+          const customer = customerByNorm.get(normalizeNameForMatch(customerName));
+          if (!customer) {
+            notFoundNames.set(customerName, (notFoundNames.get(customerName) || 0) + 1);
+            continue;
+          }
+
+          const receiptNumber = normalizeReceiptNumber(r.N_COMP);
+          const date = toSqlDate(r.FECHA_EMIS ?? r.FECHA_APL ?? r.FECHA);
+          const amountRaw = Number(r.HABER) || Number(r.IMPORTE) || 0;
+          const amount = Math.round(Math.abs(amountRaw) * 100) / 100;
+
+          if (!receiptNumber || !date || !Number.isFinite(amount) || amount <= 0) continue;
+
+          const exists = await get(
+            `SELECT id FROM payments
+             WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+             LIMIT 1`,
+            [customer.id, receiptNumber, date, amount]
+          );
+          if (exists) {
+            duplicated++;
+            continue;
+          }
+
+          await execute(
+            `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
+             VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+            [
+              uuidv4(),
+              customer.id,
+              customer.seller_id ?? null,
+              receiptNumber,
+              date,
+              amount,
+              `Importado desde Excel (${f.originalname})`,
+            ]
+          );
+          imported++;
+        }
+      }
+    }
+
+    return res.json({
+      message: 'Importación de pagos finalizada',
+      files: files.length,
+      candidates,
+      imported,
+      duplicated,
+      notFound: Array.from(notFoundNames.entries()).map(([customerName, count]) => ({ customerName, count })),
+    });
+  } catch (e: any) {
+    console.error('importPaymentsFromExcel:', e);
+    res.status(500).json({ message: 'Error importando pagos desde Excel', detail: e?.message });
   }
 };
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml } from '../utils/wholesaleInvoiceHtml';
@@ -28,6 +28,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+  const paymentsExcelInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
@@ -96,6 +98,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       showToast('success', 'Descarga iniciada');
     } catch (err: any) {
       showToast('error', err?.message || 'Error exportando facturación');
+    }
+  };
+
+  const handleImportPaymentsExcel = async (filesList: FileList | null) => {
+    const files = filesList ? Array.from(filesList) : [];
+    if (files.length === 0) return;
+    setImportingPaymentsExcel(true);
+    try {
+      const res = await api.importPaymentsExcel(files);
+      const importedMsg = `Importación finalizada: ${res.imported} importados, ${res.duplicated} duplicados, ${res.notFound?.length || 0} clientes sin match.`;
+      showToast('success', importedMsg);
+      await loadPayments();
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando pagos desde Excel');
+    } finally {
+      setImportingPaymentsExcel(false);
+      if (paymentsExcelInputRef.current) paymentsExcelInputRef.current.value = '';
     }
   };
 
@@ -258,6 +277,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
+          </button>
+          <input
+            ref={paymentsExcelInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="hidden"
+            onChange={(e) => { void handleImportPaymentsExcel(e.target.files); }}
+          />
+          <button
+            type="button"
+            disabled={importingPaymentsExcel}
+            onClick={() => paymentsExcelInputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-700 text-white text-sm font-bold shadow-lg shadow-indigo-900/40 hover:bg-indigo-600 disabled:opacity-50"
+          >
+            {importingPaymentsExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            Importar pagos (Excel)
           </button>
         </div>
       </div>

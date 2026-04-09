@@ -109,7 +109,7 @@ interface SettingsProps {
   onRefreshData?: () => void;
   role: Role;
   users?: User[];
-  onUpdateUser?: (user: User) => void;
+  onUpdateUser?: (user: User) => void | Promise<void>;
   onCreateUser?: (user: User) => void | Promise<void>;
   onDeleteUser?: (id: string) => void | Promise<void>;
   orders?: Order[];
@@ -653,13 +653,13 @@ const Settings: React.FC<SettingsProps> = ({
     setTimeout(() => setSaved(false), 3000);
   };
 
-  const updateCommission = (userId: string, value: string) => {
+  const updateCommission = async (userId: string, value: string) => {
     const user = users.find(u => u.id === userId);
     if (user && onUpdateUser) {
-      onUpdateUser({
+      await Promise.resolve(onUpdateUser({
         ...user,
         commissionPercentage: parseFloat(value) || 0
-      });
+      }));
     }
   };
 

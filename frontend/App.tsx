@@ -432,8 +432,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
+  const handleUpdateUser = async (updatedUser: User) => {
+    const previous = [...users];
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    try {
+      const saved = await api.updateUser(updatedUser.id, {
+        priceListId: updatedUser.priceListId ?? null,
+        commissionPercentage: updatedUser.commissionPercentage ?? 0
+      });
+      setUsers(prev => prev.map(u => u.id === saved.id ? saved : u));
+    } catch (err: any) {
+      setUsers(previous);
+      showToast('error', err?.message || 'No se pudo guardar la comisión del vendedor');
+    }
   };
 
   /** SKU base para agrupar variantes (ej. "4050001-130-111" -> "4050001"). */
