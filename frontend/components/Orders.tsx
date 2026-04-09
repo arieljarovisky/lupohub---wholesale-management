@@ -396,10 +396,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
           </div>
         </div>` : ''}
-        <div class="footer">
-          ${caiFooterHtml}
-          <div class="muted">Página ${idx + 1} de ${pages.length}</div>
-        </div>
+        ${caiFooterHtml ? `<div class="footer">${caiFooterHtml}</div>` : ''}
       </section>`;
     }).join('');
 
