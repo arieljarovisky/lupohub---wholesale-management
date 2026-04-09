@@ -77,6 +77,10 @@ export function sortOrderItemsForPrint(items: OrderItem[], products: Product[]):
 
 export type ManualFacturaFields = { remitoNumber?: string; transportNumber?: string; saleCondition?: string };
 
+function normalizeSkuForPrint(raw: unknown): string {
+  return String(raw ?? '').trim().replace(/-/g, '');
+}
+
 export function buildWholesaleFacturaHtml(params: {
   order: Order;
   customer?: Customer;
@@ -129,7 +133,7 @@ export function buildWholesaleFacturaHtml(params: {
       const importe = Math.round(qty * unit * 100) / 100;
       const variantId = i.variantId ?? i.productId;
       const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
-      const sku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
+      const sku = normalizeSkuForPrint(localProduct?.sku ?? i.sku ?? '');
       const name = (i.productName ?? '').toString().trim();
       const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
@@ -167,7 +171,8 @@ export function buildWholesaleFacturaHtml(params: {
   const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
   const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
   const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
-  const saleCondition = (manual?.saleCondition ?? customer?.saleCondition ?? 'Cuenta Corriente').toString().trim();
+  const saleConditionRaw = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim().toLowerCase();
+  const saleCondition = saleConditionRaw.includes('60') ? '60 días' : '30 días';
   const dirCliente = clienteDir || '';
   const ptoVta = String(inv.puntoVta ?? '').padStart(5, '0');
   const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');

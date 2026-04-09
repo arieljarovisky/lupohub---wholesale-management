@@ -34,16 +34,7 @@ interface OrdersProps {
   refreshOrders?: () => void;
 }
 
-const CONDICIONES_VENTA_FACTURA = [
-  'Contado',
-  'Tarjeta de Débito',
-  'Tarjeta de Crédito',
-  'Cuenta Corriente',
-  'Cheque',
-  'Transferencia Bancaria',
-  'Otra',
-  'Otros medios de pago electrónico',
-];
+const CONDICIONES_VENTA_FACTURA = ['30 días', '60 días'] as const;
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 
 /** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
@@ -106,7 +97,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [facturaPreviewOrder, setFacturaPreviewOrder] = useState<Order | null>(null);
   const [facturaTransportNumber, setFacturaTransportNumber] = useState('');
   const [facturaRemitoNumber, setFacturaRemitoNumber] = useState('');
-  const [facturaSaleCondition, setFacturaSaleCondition] = useState('Cuenta Corriente');
+  const [facturaSaleCondition, setFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
 
   useEffect(() => {
     if (!ncOrder) {
@@ -495,25 +486,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!order.invoice) return;
     const customer = customers.find(c => c.id === order.customerId);
     const prev = manualFacturaDataByOrder[order.id];
-    if (prev) {
-      const html = buildFacturaHtml(order, prev);
-      if (!html) return;
-      const w = window.open('', '_blank');
-      if (w) {
-        w.document.write(html);
-        w.document.close();
-      }
-      return;
-    }
+    const initialSaleCondition: '30 días' | '60 días' =
+      String(prev?.saleCondition ?? customer?.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días';
     const manual = prev ?? {
       transportNumber: (customer?.transportNumber ?? '').toString().trim(),
       remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
-      saleCondition: (customer?.saleCondition ?? 'Cuenta Corriente').toString().trim(),
+      saleCondition: initialSaleCondition,
     };
     setFacturaPreviewOrder(order);
     setFacturaTransportNumber((manual.transportNumber ?? '').toString());
     setFacturaRemitoNumber((manual.remitoNumber ?? '').toString());
-    setFacturaSaleCondition((manual.saleCondition ?? 'Cuenta Corriente').toString() || 'Cuenta Corriente');
+    setFacturaSaleCondition(String(manual.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días');
   };
 
   const confirmOpenFactura = () => {
@@ -521,7 +504,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const manual = {
       transportNumber: facturaTransportNumber.trim(),
       remitoNumber: facturaRemitoNumber.trim(),
-      saleCondition: facturaSaleCondition.trim() || 'Cuenta Corriente',
+      saleCondition: facturaSaleCondition.trim() || '30 días',
     };
     setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [facturaPreviewOrder.id]: manual }));
     const html = buildFacturaHtml(facturaPreviewOrder, manual);
