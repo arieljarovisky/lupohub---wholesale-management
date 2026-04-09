@@ -258,13 +258,33 @@ export const fillPriceListFromBase = async (req: Request, res: Response) => {
     const exists = await get('SELECT id FROM price_lists WHERE id = ?', [id]);
     if (!exists) return res.status(404).json({ message: 'Lista de precios no encontrada' });
     const products = await query(
-      `SELECT id, COALESCE(base_price, 0) AS base_price FROM products`
+      `SELECT
+         p.id,
+         COALESCE(
+           NULLIF(p.base_price, 0),
+           (
+             SELECT MAX(pli.price)
+             FROM price_list_items pli
+             WHERE pli.product_id = p.id AND pli.price > 0
+           ),
+           0
+         ) AS source_price
+       FROM products p`
     );
     await execute('DELETE FROM price_list_items WHERE price_list_id = ?', [id]);
     let count = 0;
+    let skippedWithoutBase = 0;
     for (const p of products || []) {
-      const price = Math.round(Number(p.base_price ?? 0) * factor * 100) / 100;
-      if (price < 0) continue;
+      const source = Number((p as any).source_price ?? 0);
+      if (!Number.isFinite(source) || source <= 0) {
+        skippedWithoutBase++;
+        continue;
+      }
+      const price = Math.round(source * factor * 100) / 100;
+      if (!Number.isFinite(price) || price <= 0) {
+        skippedWithoutBase++;
+        continue;
+      }
       await execute(
         `INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`,
         [uuidv4(), id, p.id, price]
@@ -275,7 +295,7 @@ export const fillPriceListFromBase = async (req: Request, res: Response) => {
       `SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ? ORDER BY product_id`,
       [id]
     );
-    res.json({ items: items || [], count });
+    res.json({ items: items || [], count, skippedWithoutBase });
   } catch (error: any) {
     console.error('fillPriceListFromBase:', error);
     res.status(500).json({ message: 'Error rellenando la lista' });

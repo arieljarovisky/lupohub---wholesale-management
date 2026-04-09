@@ -107,7 +107,7 @@ export const api = {
   duplicatePriceList: async (id: string, newName: string): Promise<import('../types').PriceList> => {
     return request<any>(`/price-lists/${id}/duplicate`, 'POST', { name: newName });
   },
-  fillPriceListFromBase: async (id: string, multiplier?: number): Promise<{ items: { productId: string; price: number }[]; count: number }> => {
+  fillPriceListFromBase: async (id: string, multiplier?: number): Promise<{ items: { productId: string; price: number }[]; count: number; skippedWithoutBase?: number }> => {
     return request<any>(`/price-lists/${id}/fill-from-base`, 'POST', multiplier != null ? { multiplier } : {});
   },
   setPriceListItemsBySku: async (id: string, items: { sku: string; price: number }[]): Promise<{ items: { productId: string; price: number }[]; imported: number; notFound?: string[] }> => {

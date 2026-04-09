@@ -1148,10 +1148,14 @@ const Settings: React.FC<SettingsProps> = ({
                       const mult = input?.value ? parseFloat(input.value) : 1;
                       if (!editingPriceList) return;
                       try {
-                        const { items, count } = await api.fillPriceListFromBase(editingPriceList.id, mult);
+                        const { items, count, skippedWithoutBase } = await api.fillPriceListFromBase(editingPriceList.id, mult) as any;
                         const fullItems = await api.getPriceListItems(editingPriceList.id);
                         setPriceListItems(fullItems.map(i => ({ productId: i.productId, price: i.price, sku: i.sku, name: i.name })));
-                        showToast('success', `Se cargaron ${count} productos`);
+                        if (Number(skippedWithoutBase || 0) > 0) {
+                          showToast('success', `Se cargaron ${count} productos. Omitidos sin precio base: ${skippedWithoutBase}.`);
+                        } else {
+                          showToast('success', `Se cargaron ${count} productos`);
+                        }
                       } catch (err: any) {
                         showToast('error', (err as any)?.message || 'Error');
                       }
