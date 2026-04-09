@@ -58,6 +58,7 @@ const add_no_stock_impact_orders_1 = require("./database/add_no_stock_impact_ord
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
 const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
 const add_external_credit_notes_table_1 = require("./database/add_external_credit_notes_table");
+const add_customer_multimedia_ledger_1 = require("./database/add_customer_multimedia_ledger");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -155,6 +156,7 @@ function initDatabase() {
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
                 yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
                 yield (0, add_external_credit_notes_table_1.addExternalCreditNotesTable)();
+                yield (0, add_customer_multimedia_ledger_1.addCustomerMultimediaLedger)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

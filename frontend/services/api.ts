@@ -587,7 +587,10 @@ export const api = {
         saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
         condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
         transportes: r.transportes ?? [],
-        priceListId: r.priceListId ?? r.price_list_id ?? undefined
+        priceListId: r.priceListId ?? r.price_list_id ?? undefined,
+        legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
+        accountZone: r.accountZone ?? r.account_zone ?? undefined,
+        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');
   },
@@ -622,6 +625,36 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Excel estilo Multimedias: hoja Resumen + una hoja por cliente con historial de cuenta. */
+  exportMultimediaHistorial: async (): Promise<void> => {
+    const blob = await getBlob('/customers/multimedia-historial/export', 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `historial_clientes_multimedias_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  importMultimediaHistorial: async (
+    file: File
+  ): Promise<{
+    message: string;
+    sheetsProcessed: number;
+    customersUpdated: number;
+    rowsInserted: number;
+    notFoundSheets: string[];
+    notFoundCount: number;
+    skippedNotYourCustomer: string[];
+    skippedCount: number;
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestFormData('/customers/multimedia-historial/import', formData, 180000);
+  },
+
   /** Quita pendientes de pedidos ya despachados para un cliente (ajusta quantity a picked). */
   clearCustomerDispatchedPendings: async (customerId: string): Promise<{ message: string; ordersUpdated: number; itemsAdjusted: number; itemsRemoved: number }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');
@@ -645,7 +678,10 @@ export const api = {
         remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
         saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
         condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
-        priceListId: r.priceListId ?? undefined
+        priceListId: r.priceListId ?? undefined,
+        legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
+        accountZone: r.accountZone ?? r.account_zone ?? undefined,
+        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined
       } as Customer;
     } catch {
       return null;
@@ -669,7 +705,10 @@ export const api = {
         saleCondition: customer.saleCondition,
         condicionIva: customer.condicionIva,
         transporteIds: customer.transportes?.map(t => t.id) ?? [],
-        priceListId: customer.priceListId
+        priceListId: customer.priceListId,
+        legacyCode: customer.legacyCode,
+        accountZone: customer.accountZone,
+        accountSellerLabel: customer.accountSellerLabel
       });
       return {
         id: created.id,
@@ -686,7 +725,10 @@ export const api = {
         saleCondition: created.saleCondition ?? created.sale_condition ?? undefined,
         condicionIva: created.condicionIva ?? created.condicion_iva ?? undefined,
         transportes: created.transportes ?? [],
-        priceListId: created.priceListId ?? created.price_list_id ?? undefined
+        priceListId: created.priceListId ?? created.price_list_id ?? undefined,
+        legacyCode: created.legacyCode ?? created.legacy_code ?? undefined,
+        accountZone: created.accountZone ?? created.account_zone ?? undefined,
+        accountSellerLabel: created.accountSellerLabel ?? created.account_seller_label ?? undefined
       } as Customer;
     }, customer, 'createCustomer');
   },
@@ -701,7 +743,7 @@ export const api = {
     return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
   },
 
-  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; transportNumber?: string; remitoNumber?: string; saleCondition?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null }): Promise<Customer> => {
+  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; transportNumber?: string; remitoNumber?: string; saleCondition?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null; legacyCode?: string; accountZone?: string; accountSellerLabel?: string }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
     return {
       id: updated.id,
@@ -718,7 +760,10 @@ export const api = {
       saleCondition: updated.saleCondition ?? updated.sale_condition ?? undefined,
       condicionIva: updated.condicionIva ?? updated.condicion_iva ?? undefined,
       transportes: updated.transportes ?? [],
-      priceListId: updated.priceListId ?? updated.price_list_id ?? undefined
+      priceListId: updated.priceListId ?? updated.price_list_id ?? undefined,
+      legacyCode: updated.legacyCode ?? updated.legacy_code ?? undefined,
+      accountZone: updated.accountZone ?? updated.account_zone ?? undefined,
+      accountSellerLabel: updated.accountSellerLabel ?? updated.account_seller_label ?? undefined
     } as Customer;
   },
 

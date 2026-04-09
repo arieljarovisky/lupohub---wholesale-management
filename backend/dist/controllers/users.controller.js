@@ -108,9 +108,22 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const existing = yield (0, db_1.get)('SELECT id FROM users WHERE id = ?', [id]);
         if (!existing)
             return res.status(404).json({ message: 'Usuario no encontrado' });
+        let didUpdate = false;
         if (body.priceListId !== undefined) {
             const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
             yield (0, db_1.execute)('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+            didUpdate = true;
+        }
+        if (body.commissionPercentage !== undefined) {
+            const commission = Number(body.commissionPercentage);
+            if (!Number.isFinite(commission) || commission < 0 || commission > 100) {
+                return res.status(400).json({ message: 'commissionPercentage debe estar entre 0 y 100' });
+            }
+            yield (0, db_1.execute)('UPDATE users SET commission_percentage = ? WHERE id = ?', [commission, id]);
+            didUpdate = true;
+        }
+        if (!didUpdate) {
+            return res.status(400).json({ message: 'No hay campos para actualizar' });
         }
         const updated = yield (0, db_1.get)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?`, [id]);
         res.json(updated);

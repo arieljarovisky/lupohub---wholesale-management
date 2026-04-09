@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,9 +42,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPayment = exports.listPayments = void 0;
+exports.importPaymentsFromExcel = exports.createPayment = exports.listPayments = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
+const XLSX = __importStar(require("xlsx"));
 const canManagePayments = (role) => role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
 const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -144,3 +178,107 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.createPayment = createPayment;
+function normalizeNameForMatch(v) {
+    return String(v !== null && v !== void 0 ? v : '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+}
+function normalizeReceiptNumber(v) {
+    return String(v !== null && v !== void 0 ? v : '').trim().replace(/\s+/g, '');
+}
+function toSqlDate(value) {
+    if (!value)
+        return null;
+    if (value instanceof Date && !isNaN(value.getTime()))
+        return value.toISOString().slice(0, 10);
+    const d = new Date(value);
+    if (isNaN(d.getTime()))
+        return null;
+    return d.toISOString().slice(0, 10);
+}
+/** Importar pagos desde uno o más Excel (filas REC). */
+const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const user = req.user;
+        if (!user || !canManagePayments(user.role)) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const files = req.files || [];
+        if (!files.length) {
+            return res.status(400).json({ message: 'Subí al menos un archivo Excel (.xlsx/.xls)' });
+        }
+        const customers = (yield (0, db_1.query)(`SELECT id, business_name, name, seller_id FROM customers`));
+        const customerByNorm = new Map();
+        for (const c of customers) {
+            const k1 = normalizeNameForMatch(c.business_name);
+            const k2 = normalizeNameForMatch(c.name);
+            if (k1 && !customerByNorm.has(k1))
+                customerByNorm.set(k1, { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null });
+            if (k2 && !customerByNorm.has(k2))
+                customerByNorm.set(k2, { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
+        }
+        let candidates = 0;
+        let imported = 0;
+        let duplicated = 0;
+        const notFoundNames = new Map();
+        for (const f of files) {
+            const wb = XLSX.read(f.buffer, { type: 'buffer', cellDates: true });
+            for (const sheetName of wb.SheetNames) {
+                const ws = wb.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+                for (const r of rows) {
+                    const tComp = String((_c = r.T_COMP) !== null && _c !== void 0 ? _c : '').trim().toUpperCase();
+                    if (tComp !== 'REC')
+                        continue;
+                    candidates++;
+                    const customerName = String((_d = r.RAZON_SOC) !== null && _d !== void 0 ? _d : '').trim();
+                    const customer = customerByNorm.get(normalizeNameForMatch(customerName));
+                    if (!customer) {
+                        notFoundNames.set(customerName, (notFoundNames.get(customerName) || 0) + 1);
+                        continue;
+                    }
+                    const receiptNumber = normalizeReceiptNumber(r.N_COMP);
+                    const date = toSqlDate((_f = (_e = r.FECHA_EMIS) !== null && _e !== void 0 ? _e : r.FECHA_APL) !== null && _f !== void 0 ? _f : r.FECHA);
+                    const amountRaw = Number(r.HABER) || Number(r.IMPORTE) || 0;
+                    const amount = Math.round(Math.abs(amountRaw) * 100) / 100;
+                    if (!receiptNumber || !date || !Number.isFinite(amount) || amount <= 0)
+                        continue;
+                    const exists = yield (0, db_1.get)(`SELECT id FROM payments
+             WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+             LIMIT 1`, [customer.id, receiptNumber, date, amount]);
+                    if (exists) {
+                        duplicated++;
+                        continue;
+                    }
+                    yield (0, db_1.execute)(`INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
+             VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)`, [
+                        (0, uuid_1.v4)(),
+                        customer.id,
+                        (_g = customer.seller_id) !== null && _g !== void 0 ? _g : null,
+                        receiptNumber,
+                        date,
+                        amount,
+                        `Importado desde Excel (${f.originalname})`,
+                    ]);
+                    imported++;
+                }
+            }
+        }
+        return res.json({
+            message: 'Importación de pagos finalizada',
+            files: files.length,
+            candidates,
+            imported,
+            duplicated,
+            notFound: Array.from(notFoundNames.entries()).map(([customerName, count]) => ({ customerName, count })),
+        });
+    }
+    catch (e) {
+        console.error('importPaymentsFromExcel:', e);
+        res.status(500).json({ message: 'Error importando pagos desde Excel', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.importPaymentsFromExcel = importPaymentsFromExcel;

@@ -117,6 +117,12 @@ export interface Customer {
   /** Transportes (express) asignados para despachar pedidos a este cliente */
   transportes?: Transporte[];
   priceListId?: string;
+  /** Código de cliente en sistema legacy (ej. Multimedias: 000809) */
+  legacyCode?: string;
+  /** Zona de cuenta corriente (ej. "01 - Caba") */
+  accountZone?: string;
+  /** Vendedor habitual en historial (ej. "27 - Colombo") */
+  accountSellerLabel?: string;
 }
 
 export interface OrderItem {

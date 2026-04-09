@@ -127,11 +127,11 @@ export const requestFormData = async <T = any>(path: string, formData: FormData,
 };
 
 /** GET que devuelve Blob (para descargar/ver archivos con auth). */
-export const getBlob = async (path: string): Promise<Blob> => {
+export const getBlob = async (path: string, timeoutMs = 60000): Promise<Blob> => {
   const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
   const headers: Record<string, string> = {};
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const response = await axios.get(url, { responseType: 'blob', headers, timeout: 60000 });
+  const response = await axios.get(url, { responseType: 'blob', headers, timeout: timeoutMs });
   return response.data;
 };
 

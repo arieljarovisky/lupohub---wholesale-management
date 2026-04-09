@@ -252,18 +252,37 @@ const fillPriceListFromBase = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const exists = yield (0, db_1.get)('SELECT id FROM price_lists WHERE id = ?', [id]);
         if (!exists)
             return res.status(404).json({ message: 'Lista de precios no encontrada' });
-        const products = yield (0, db_1.query)(`SELECT id, COALESCE(base_price, 0) AS base_price FROM products`);
+        const products = yield (0, db_1.query)(`SELECT
+         p.id,
+         COALESCE(
+           NULLIF(p.base_price, 0),
+           (
+             SELECT MAX(pli.price)
+             FROM price_list_items pli
+             WHERE pli.product_id = p.id AND pli.price > 0
+           ),
+           0
+         ) AS source_price
+       FROM products p`);
         yield (0, db_1.execute)('DELETE FROM price_list_items WHERE price_list_id = ?', [id]);
         let count = 0;
+        let skippedWithoutBase = 0;
         for (const p of products || []) {
-            const price = Math.round(Number((_b = p.base_price) !== null && _b !== void 0 ? _b : 0) * factor * 100) / 100;
-            if (price < 0)
+            const source = Number((_b = p.source_price) !== null && _b !== void 0 ? _b : 0);
+            if (!Number.isFinite(source) || source <= 0) {
+                skippedWithoutBase++;
                 continue;
+            }
+            const price = Math.round(source * factor * 100) / 100;
+            if (!Number.isFinite(price) || price <= 0) {
+                skippedWithoutBase++;
+                continue;
+            }
             yield (0, db_1.execute)(`INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`, [(0, uuid_1.v4)(), id, p.id, price]);
             count++;
         }
         const items = yield (0, db_1.query)(`SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ? ORDER BY product_id`, [id]);
-        res.json({ items: items || [], count });
+        res.json({ items: items || [], count, skippedWithoutBase });
     }
     catch (error) {
         console.error('fillPriceListFromBase:', error);

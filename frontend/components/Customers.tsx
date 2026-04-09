@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -106,7 +106,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newRemitoNumber, setNewRemitoNumber] = useState('');
   const [newSaleCondition, setNewSaleCondition] = useState('');
   const [newCondicionIva, setNewCondicionIva] = useState('');
+  const [newLegacyCode, setNewLegacyCode] = useState('');
+  const [newAccountZone, setNewAccountZone] = useState('');
+  const [newAccountSellerLabel, setNewAccountSellerLabel] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
+  const multimediaHistorialInputRef = useRef<HTMLInputElement>(null);
+  const [multimediaExporting, setMultimediaExporting] = useState(false);
+  const [multimediaImporting, setMultimediaImporting] = useState(false);
 
   const filteredCustomers = customers.filter(c => 
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -179,7 +185,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         remitoNumber: newRemitoNumber || undefined,
         saleCondition: newSaleCondition || undefined,
         condicionIva: newCondicionIva || undefined,
-        transporteIds: selectedTransporteIds
+        transporteIds: selectedTransporteIds,
+        legacyCode: newLegacyCode.trim() || undefined,
+        accountZone: newAccountZone.trim() || undefined,
+        accountSellerLabel: newAccountSellerLabel.trim() || undefined
       };
       Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
         setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data, transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })) } : prev);
@@ -195,6 +204,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewRemitoNumber('');
         setNewSaleCondition('');
         setNewCondicionIva('');
+        setNewLegacyCode('');
+        setNewAccountZone('');
+        setNewAccountSellerLabel('');
         setSelectedTransporteIds([]);
       }).catch(() => {});
       return;
@@ -214,6 +226,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       remitoNumber: newRemitoNumber || undefined,
       saleCondition: newSaleCondition || undefined,
       condicionIva: newCondicionIva || undefined,
+      legacyCode: newLegacyCode.trim() || undefined,
+      accountZone: newAccountZone.trim() || undefined,
+      accountSellerLabel: newAccountSellerLabel.trim() || undefined,
       transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' }))
     };
 
@@ -230,6 +245,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setNewRemitoNumber('');
     setNewSaleCondition('');
     setNewCondicionIva('');
+    setNewLegacyCode('');
+    setNewAccountZone('');
+    setNewAccountSellerLabel('');
     setSelectedTransporteIds([]);
   };
 
@@ -355,7 +373,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
             <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
             <button
-              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
               className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
             >
               <X size={20} />
@@ -442,9 +460,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCity} onChange={(e) => setNewCity(e.target.value)} placeholder="CABA" />
               </div>
             </div>
+            <div className="pt-3 border-t border-slate-800/80">
+              <p className="text-[10px] text-slate-500 uppercase font-black mb-2 ml-1">Cuenta corriente / Excel Multimedias</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Código legacy</label>
+                  <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono text-sm" value={newLegacyCode} onChange={(e) => setNewLegacyCode(e.target.value)} placeholder="Ej: 000809" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Zona (export)</label>
+                  <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" value={newAccountZone} onChange={(e) => setNewAccountZone(e.target.value)} placeholder="Ej: 02 - Interior" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Vendedor habitual (export)</label>
+                  <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" value={newAccountSellerLabel} onChange={(e) => setNewAccountSellerLabel(e.target.value)} placeholder="Ej: 27 - Colombo" />
+                </div>
+              </div>
+            </div>
           </div>
           <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
-            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
+            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
             <button onClick={handleSave} disabled={!newBusinessName || !newEmail} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all">
               <Save size={18} />
               {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
@@ -513,6 +548,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewRemitoNumber(selectedCustomer.remitoNumber || '');
                  setNewSaleCondition(selectedCustomer.saleCondition || '');
                  setNewCondicionIva(selectedCustomer.condicionIva || '');
+                 setNewLegacyCode(selectedCustomer.legacyCode || '');
+                 setNewAccountZone(selectedCustomer.accountZone || '');
+                 setNewAccountSellerLabel(selectedCustomer.accountSellerLabel || '');
                  setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
                  setEditingCustomer(selectedCustomer);
                }}
@@ -998,6 +1036,33 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setUpdatingCuit(false);
   };
 
+  const handleMultimediaHistorialImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setMultimediaImporting(true);
+    try {
+      const res = await api.importMultimediaHistorial(file);
+      showToast(
+        'success',
+        `${res.customersUpdated} cliente(s) actualizados, ${res.rowsInserted} filas de historial importadas.`
+      );
+      if (res.notFoundCount > 0) {
+        showToast(
+          'warning',
+          `${res.notFoundCount} hoja(s) sin cliente coincidente (revisá razón social o cargá el código legacy en el cliente).`
+        );
+      }
+      if (res.skippedCount > 0) {
+        showToast('info', `${res.skippedCount} hoja(s) omitidas (no son clientes asignados a tu usuario).`);
+      }
+      onRefreshData?.();
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error al importar el Excel de historial.');
+    }
+    setMultimediaImporting(false);
+  };
+
   // 3. List View (Default)
   return (
     <div className="space-y-6">
@@ -1018,6 +1083,48 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             className="hidden"
             onChange={handleCuitUpdateExcel}
           />
+          {canViewSaldos && (
+            <input
+              ref={multimediaHistorialInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleMultimediaHistorialImport}
+            />
+          )}
+          {canViewSaldos && (
+            <button
+              type="button"
+              onClick={async () => {
+                setMultimediaExporting(true);
+                try {
+                  await api.exportMultimediaHistorial();
+                  showToast('success', 'Excel de historial Multimedias descargado.');
+                } catch (err: any) {
+                  showToast('error', err?.message || 'Error al exportar.');
+                }
+                setMultimediaExporting(false);
+              }}
+              disabled={multimediaExporting}
+              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              title="Genera el mismo formato que el Excel historial_clientes_multimedias (Resumen + una hoja por cliente)"
+            >
+              {multimediaExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+              <span>{multimediaExporting ? 'Exportando…' : 'Exportar historial Multimedias'}</span>
+            </button>
+          )}
+          {canViewSaldos && (
+            <button
+              type="button"
+              onClick={() => multimediaHistorialInputRef.current?.click()}
+              disabled={multimediaImporting}
+              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              title="Importa movimientos desde el Excel; reemplaza el historial guardado por cada cliente que se pueda vincular"
+            >
+              {multimediaImporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+              <span>{multimediaImporting ? 'Importando…' : 'Importar historial Multimedias'}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => cuitUpdateInputRef.current?.click()}
@@ -1038,7 +1145,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <span>{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
           </button>
           <button 
-            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium"
           >
             <Plus size={18} />
@@ -1179,7 +1286,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -1333,11 +1440,28 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     />
                 </div>
               </div>
+              <div className="pt-3 border-t border-slate-800/80">
+                <p className="text-[10px] text-slate-500 uppercase font-black mb-2 ml-1">Cuenta corriente / Excel Multimedias</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Código legacy</label>
+                    <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono text-sm" value={newLegacyCode} onChange={(e) => setNewLegacyCode(e.target.value)} placeholder="Ej: 000809" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Zona (export)</label>
+                    <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" value={newAccountZone} onChange={(e) => setNewAccountZone(e.target.value)} placeholder="Ej: 02 - Interior" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Vendedor habitual (export)</label>
+                    <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" value={newAccountSellerLabel} onChange={(e) => setNewAccountSellerLabel(e.target.value)} placeholder="Ej: 27 - Colombo" />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar

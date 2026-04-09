@@ -1477,7 +1477,28 @@ exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
+    // Lock efimero para evitar doble procesamiento concurrente del mismo orderId.
+    yield (0, db_1.execute)(`CREATE TABLE IF NOT EXISTS integration_order_locks (
+      platform TEXT NOT NULL,
+      external_order_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (platform, external_order_id)
+    )`);
+    const lockPlatform = 'mercadolibre';
+    let lockAcquired = false;
     try {
+        try {
+            yield (0, db_1.execute)(`INSERT INTO integration_order_locks (platform, external_order_id) VALUES (?, ?)`, [lockPlatform, orderId]);
+            lockAcquired = true;
+        }
+        catch (e) {
+            const msg = String((e === null || e === void 0 ? void 0 : e.message) || '');
+            if (msg.includes('UNIQUE constraint failed') || msg.includes('SQLITE_CONSTRAINT')) {
+                console.log(`[ML Order] Orden ${orderId} en procesamiento concurrente, omitiendo`);
+                return;
+            }
+            throw e;
+        }
         // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
         const alreadyProcessed = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`, [`Orden ML: ${orderId}`]);
         if (alreadyProcessed) {
@@ -1623,6 +1644,16 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
     }
     catch (error) {
         console.error('[ML Order] Error procesando orden:', error.message);
+    }
+    finally {
+        if (lockAcquired) {
+            try {
+                yield (0, db_1.execute)(`DELETE FROM integration_order_locks WHERE platform = ? AND external_order_id = ?`, [lockPlatform, orderId]);
+            }
+            catch (_e) {
+                // No romper flujo por falla al limpiar lock efimero.
+            }
+        }
     }
 });
 // Enviar mensaje de agradecimiento al comprador de ML
@@ -3706,6 +3737,7 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
                         price: item.price,
                         totalStock,
                         soldTotal: item.sold_quantity || 0,
+                        dateCreated: item.date_created || item.start_time || null,
                         thumbnail: item.thumbnail,
                         permalink: item.permalink,
                         hasVariations: true,
@@ -3732,6 +3764,7 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
                         price: item.price,
                         totalStock: item.available_quantity || 0,
                         soldTotal: item.sold_quantity || 0,
+                        dateCreated: item.date_created || item.start_time || null,
                         thumbnail: item.thumbnail,
                         permalink: item.permalink,
                         hasVariations: false,
@@ -3783,6 +3816,7 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 price: first.price,
                 totalStock,
                 soldTotal,
+                dateCreated: first.dateCreated || null,
                 thumbnail: first.thumbnail,
                 permalink: first.permalink,
                 hasVariations: true,
@@ -4685,6 +4719,16 @@ const getMercadoLibreProductAdsAds = (req, res) => __awaiter(void 0, void 0, voi
             return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id.' });
         }
         const params = mlProductAdsForwardQuery(req);
+        // Documentación Product Ads: los filtros van como filters[nombre], no como query suelta.
+        // Sin esto, campaign_id se ignora y la búsqueda devuelve todos los anuncios (exportes por campaña incorrectos).
+        if (params.campaign_id) {
+            params['filters[campaign_id]'] = params.campaign_id;
+            delete params.campaign_id;
+        }
+        if (params.campaign_ids) {
+            params['filters[campaign_ids]'] = params.campaign_ids;
+            delete params.campaign_ids;
+        }
         const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/ads/search`;
         const r = yield axios_1.default.get(url, {
             headers: {

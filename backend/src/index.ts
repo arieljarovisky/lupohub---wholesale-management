@@ -45,6 +45,7 @@ import { addNoStockImpactToOrders } from './database/add_no_stock_impact_orders'
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
 import { addExternalInvoicesTable } from './database/add_external_invoices_table';
 import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
+import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_ledger';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -146,6 +147,7 @@ async function initDatabase() {
       await addCustomerInvoiceFields();
       await addExternalInvoicesTable();
       await addExternalCreditNotesTable();
+      await addCustomerMultimediaLedger();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

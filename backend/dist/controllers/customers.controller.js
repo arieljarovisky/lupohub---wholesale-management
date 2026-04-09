@@ -13,7 +13,7 @@ exports.clearDispatchedPendingsForCustomer = exports.exportSaldosPendientesCsv =
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 function toCustomer(row, transportes) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     return {
         id: row.id,
         sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : '',
@@ -30,6 +30,9 @@ function toCustomer(row, transportes) {
         saleCondition: (_m = row.sale_condition) !== null && _m !== void 0 ? _m : undefined,
         condicionIva: (_o = row.condicion_iva) !== null && _o !== void 0 ? _o : undefined,
         priceListId: (_p = row.price_list_id) !== null && _p !== void 0 ? _p : undefined,
+        legacyCode: (_q = row.legacy_code) !== null && _q !== void 0 ? _q : undefined,
+        accountZone: (_r = row.account_zone) !== null && _r !== void 0 ? _r : undefined,
+        accountSellerLabel: (_s = row.account_seller_label) !== null && _s !== void 0 ? _s : undefined,
         transportes: transportes !== null && transportes !== void 0 ? transportes : []
     };
 }
@@ -37,7 +40,8 @@ function toCustomer(row, transportes) {
 const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        const rows = yield (0, db_1.query)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id
+        const rows = yield (0, db_1.query)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
+              legacy_code, account_zone, account_seller_label
        FROM customers ORDER BY business_name ASC, name ASC`);
         const customers = (rows || []).map((r) => toCustomer(r));
         const ids = customers.map((c) => c.id);
@@ -68,7 +72,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.getCustomers = getCustomers;
 /** Crear cliente. */
 const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
     try {
         const body = req.body;
         const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
@@ -91,14 +95,17 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const saleCondition = ((_l = body.saleCondition) !== null && _l !== void 0 ? _l : '').toString().trim() || null;
         const condicionIva = ((_m = body.condicionIva) !== null && _m !== void 0 ? _m : '').toString().trim() || null;
         const priceListId = ((_o = body.priceListId) === null || _o === void 0 ? void 0 : _o.trim()) || null;
+        const legacyCode = ((_p = body.legacyCode) !== null && _p !== void 0 ? _p : '').toString().trim() || null;
+        const accountZone = ((_q = body.accountZone) !== null && _q !== void 0 ? _q : '').toString().trim() || null;
+        const accountSellerLabel = ((_r = body.accountSellerLabel) !== null && _r !== void 0 ? _r : '').toString().trim() || null;
         // Guardar nombre de contacto y razón social en columnas separadas:
         // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
         // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
         const sqlName = name || null;
         const sqlBusinessName = businessName || name || null;
-        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId]);
-        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`, [id]);
+        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel]);
+        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
         const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x) => x && typeof x === 'string') : [];
         for (const tid of transporteIds) {
             yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
@@ -118,7 +125,7 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.createCustomer = createCustomer;
 /** Actualizar cliente (ej. vendedor, razón social, price_list_id, etc.). */
 const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
     try {
         const { id } = req.params;
         const body = req.body;
@@ -179,6 +186,18 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             updates.push('price_list_id = ?');
             params.push(body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null);
         }
+        if (body.legacyCode !== undefined) {
+            updates.push('legacy_code = ?');
+            params.push(((_m = body.legacyCode) === null || _m === void 0 ? void 0 : _m.trim()) || null);
+        }
+        if (body.accountZone !== undefined) {
+            updates.push('account_zone = ?');
+            params.push(((_o = body.accountZone) === null || _o === void 0 ? void 0 : _o.trim()) || null);
+        }
+        if (body.accountSellerLabel !== undefined) {
+            updates.push('account_seller_label = ?');
+            params.push(((_p = body.accountSellerLabel) === null || _p === void 0 ? void 0 : _p.trim()) || null);
+        }
         if (updates.length > 0) {
             params.push(id);
             yield (0, db_1.execute)(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -190,7 +209,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
             }
         }
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => { var _a, _b; return ({ id: l.transporteId, name: (_a = l.transporteName) !== null && _a !== void 0 ? _a : l.transporteId, address: (_b = l.transporteAddress) !== null && _b !== void 0 ? _b : undefined }); });
         res.json(toCustomer(updated, transportes));
@@ -248,7 +267,7 @@ const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, fun
         }
         // Vincular usuario al cliente
         yield (0, db_1.execute)('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => {
             var _a, _b;

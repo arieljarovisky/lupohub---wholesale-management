@@ -207,7 +207,8 @@ export async function fetchAllAdsForSingleCampaignExport(
     list.push(...batch);
     offset += PAGE;
   }
-  return list;
+  const want = String(campaignId);
+  return list.filter((ad) => String(ad?.campaign_id ?? '') === want);
 }
 
 /** Una sola campaña: CSV de la campaña + CSV de cada anuncio/publicación de esa campaña. */

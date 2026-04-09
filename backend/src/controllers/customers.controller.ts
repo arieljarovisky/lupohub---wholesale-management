@@ -19,6 +19,9 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     saleCondition: row.sale_condition ?? undefined,
     condicionIva: row.condicion_iva ?? undefined,
     priceListId: row.price_list_id ?? undefined,
+    legacyCode: row.legacy_code ?? undefined,
+    accountZone: row.account_zone ?? undefined,
+    accountSellerLabel: row.account_seller_label ?? undefined,
     transportes: transportes ?? []
   };
 }
@@ -27,7 +30,8 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
 export const getCustomers = async (req: Request, res: Response) => {
   try {
     const rows = await query(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
+              legacy_code, account_zone, account_seller_label
        FROM customers ORDER BY business_name ASC, name ASC`
     );
     const customers = (rows || []).map((r: any) => toCustomer(r));
@@ -76,6 +80,9 @@ export const createCustomer = async (req: Request, res: Response) => {
       condicionIva?: string;
       transporteIds?: string[];
       priceListId?: string;
+      legacyCode?: string;
+      accountZone?: string;
+      accountSellerLabel?: string;
     };
     const name = (body.name ?? '').toString().trim();
     const businessName = (body.businessName ?? '').toString().trim();
@@ -98,6 +105,9 @@ export const createCustomer = async (req: Request, res: Response) => {
     const saleCondition = (body.saleCondition ?? '').toString().trim() || null;
     const condicionIva = (body.condicionIva ?? '').toString().trim() || null;
     const priceListId = body.priceListId?.trim() || null;
+    const legacyCode = (body.legacyCode ?? '').toString().trim() || null;
+    const accountZone = (body.accountZone ?? '').toString().trim() || null;
+    const accountSellerLabel = (body.accountSellerLabel ?? '').toString().trim() || null;
 
     // Guardar nombre de contacto y razón social en columnas separadas:
     // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
@@ -106,13 +116,13 @@ export const createCustomer = async (req: Request, res: Response) => {
     const sqlBusinessName = businessName || name || null;
 
     await execute(
-      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId]
+      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel]
     );
 
     const created = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
       [id]
     );
     const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x: string) => x && typeof x === 'string') : [];
@@ -153,6 +163,9 @@ export const updateCustomer = async (req: Request, res: Response) => {
       condicionIva?: string;
       transporteIds?: string[];
       priceListId?: string | null;
+      legacyCode?: string;
+      accountZone?: string;
+      accountSellerLabel?: string;
     };
     const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Cliente no encontrado' });
@@ -171,6 +184,9 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.condicionIva !== undefined) { updates.push('condicion_iva = ?'); params.push(body.condicionIva?.trim() || null); }
     if (body.sellerId !== undefined) { updates.push('seller_id = ?'); params.push(body.sellerId?.trim() || null); }
     if (body.priceListId !== undefined) { updates.push('price_list_id = ?'); params.push(body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null); }
+    if (body.legacyCode !== undefined) { updates.push('legacy_code = ?'); params.push(body.legacyCode?.trim() || null); }
+    if (body.accountZone !== undefined) { updates.push('account_zone = ?'); params.push(body.accountZone?.trim() || null); }
+    if (body.accountSellerLabel !== undefined) { updates.push('account_seller_label = ?'); params.push(body.accountSellerLabel?.trim() || null); }
     if (updates.length > 0) {
       params.push(id);
       await execute(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -183,7 +199,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(
@@ -262,7 +278,7 @@ export const attachUserToCustomer = async (req: Request, res: Response) => {
     await execute('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
 
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(

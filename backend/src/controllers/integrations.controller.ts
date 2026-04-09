@@ -4989,6 +4989,16 @@ export const getMercadoLibreProductAdsAds = async (req: Request, res: Response) 
       return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id.' });
     }
     const params = mlProductAdsForwardQuery(req);
+    // Documentación Product Ads: los filtros van como filters[nombre], no como query suelta.
+    // Sin esto, campaign_id se ignora y la búsqueda devuelve todos los anuncios (exportes por campaña incorrectos).
+    if (params.campaign_id) {
+      params['filters[campaign_id]'] = params.campaign_id;
+      delete params.campaign_id;
+    }
+    if (params.campaign_ids) {
+      params['filters[campaign_ids]'] = params.campaign_ids;
+      delete params.campaign_ids;
+    }
     const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/ads/search`;
     const r = await axios.get(url, {
       headers: {
