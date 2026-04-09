@@ -150,12 +150,25 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setSelectedCustomerId(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
-    const getBaseArticleCode = (skuRaw: string) => {
+    const productById = new Map(products.map((p) => [p.id, p]));
+    const getBaseArticleCode = (skuRaw: string, productIdRaw: string) => {
+      const product = productById.get(productIdRaw);
+      const fromProduct = String((product as any)?.base_sku || product?.sku || '').trim();
+      if (fromProduct) {
+        const parts = fromProduct.split('-').filter(Boolean);
+        if (parts.length >= 3) return parts.slice(0, -2).join('-');
+        const seven = fromProduct.replace(/\D/g, '').slice(0, 7);
+        return seven || fromProduct;
+      }
+
       const sku = String(skuRaw || '').trim();
       if (!sku) return '';
       const parts = sku.split('-').filter(Boolean);
       // SKU variante típico: BASE-TALLE-COLOR -> mostrar/usar BASE para agrupar.
       if (parts.length >= 3) return parts.slice(0, -2).join('-');
+      // SKU compacto numérico (ej. 0322389140903) -> código artículo = primeros 7 dígitos.
+      const digits = sku.replace(/\D/g, '');
+      if (digits.length >= 7) return digits.slice(0, 7);
       return sku;
     };
 
@@ -168,7 +181,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const productId = String((item as any).productId || '');
       const variantId = String((item as any).variantId || '').trim();
       if (!sizeCode || !variantId) continue;
-      const productCode = getBaseArticleCode(rawSku) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
+      const productCode = getBaseArticleCode(rawSku, productId) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
       const colorCode = String((item as any).colorCode || '').trim() || colorName;
 
       const key = `${productId || productCode}__${colorCode}`;
@@ -197,7 +210,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
-  }, [initialOrder]);
+  }, [initialOrder, products]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
