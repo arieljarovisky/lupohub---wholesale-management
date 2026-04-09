@@ -11,6 +11,7 @@ import {
   sortOrderItemsForPrint as sortItemsForFacturaPrint,
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
+  normalizeSkuForPrint,
 } from '../utils/wholesaleInvoiceHtml';
 
 interface OrdersProps {
@@ -273,9 +274,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const desc = (i.productName ?? '').toString().trim() || '—';
       const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
+      const codePrint = normalizeSkuForPrint(sku);
       return `<tr>
         <td class="col-c">${qty.toLocaleString('es-AR')}</td>
-        <td class="col-c col-code">${sku || '—'}</td>
+        <td class="col-c col-code">${codePrint || '—'}</td>
         <td class="col-desc">${desc}</td>
         <td class="col-c">${despachoCell}</td>
         <td class="col-r">$${formatMoneyAr(unit)}</td>

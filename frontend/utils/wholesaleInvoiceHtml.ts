@@ -77,7 +77,7 @@ export function sortOrderItemsForPrint(items: OrderItem[], products: Product[]):
 
 export type ManualFacturaFields = { remitoNumber?: string; transportNumber?: string; saleCondition?: string };
 
-function normalizeSkuForPrint(raw: unknown): string {
+export function normalizeSkuForPrint(raw: unknown): string {
   return String(raw ?? '').trim().replace(/-/g, '');
 }
 
