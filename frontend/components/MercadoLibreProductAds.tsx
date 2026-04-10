@@ -720,7 +720,10 @@ const MercadoLibreProductAds: React.FC = () => {
                                   dateFrom,
                                   dateTo
                                 });
-                                showToast('success', 'Excel generado: hojas General (campaña) y Detalle (publicaciones).');
+                                showToast(
+                                  'success',
+                                  'Excel generado: hoja Datos generales y hoja Detalle (abrilo en Excel para ver estilos).'
+                                );
                               } catch (e: any) {
                                 showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar Excel');
                               } finally {

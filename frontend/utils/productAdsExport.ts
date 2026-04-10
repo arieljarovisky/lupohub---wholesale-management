@@ -93,21 +93,44 @@ const ST_BORDER = {
   color: { argb: 'FF94A3B8' }
 };
 
+/** Relleno sólido compatible con Excel (fg + bg iguales evita lectores que “pierden” el color). */
+function solidFill(argb: string): ExcelJS.Fill {
+  return {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb },
+    bgColor: { argb }
+  };
+}
+
 function styleHeaderRow(row: ExcelJS.Row, colCount: number) {
-  row.height = 22;
+  row.height = 24;
   for (let c = 1; c <= colCount; c++) {
     const cell = row.getCell(c);
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1E40AF' }
-    };
+    cell.fill = solidFill('FF1E40AF');
     cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     cell.border = {
       top: ST_BORDER,
       left: ST_BORDER,
       bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+      right: ST_BORDER
+    };
+  }
+}
+
+/** Título de sección en 2 columnas (sin merge obligatorio: pintamos A y B). */
+function styleSectionHeaderRow(row: ExcelJS.Row) {
+  row.height = 22;
+  for (const c of [1, 2]) {
+    const cell = row.getCell(c);
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    cell.fill = solidFill('FF2563EB');
+    cell.alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'right', wrapText: true };
+    cell.border = {
+      top: ST_BORDER,
+      left: ST_BORDER,
+      bottom: { style: 'thin', color: { argb: 'FF1E3A8A' } },
       right: ST_BORDER
     };
   }
@@ -122,12 +145,30 @@ function styleDataCell(cell: ExcelJS.Cell, alt: boolean) {
   };
   cell.alignment = { vertical: 'middle', wrapText: true };
   if (alt) {
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFF1F5F9' }
-    };
+    cell.fill = solidFill('FFF1F5F9');
   }
+}
+
+function styleLabelValueRow(row: ExcelJS.Row, alt: boolean) {
+  const c1 = row.getCell(1);
+  const c2 = row.getCell(2);
+  c1.font = { bold: true, size: 11, name: 'Calibri', color: { argb: 'FF334155' } };
+  styleDataCell(c1, alt);
+  c2.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+  styleDataCell(c2, alt);
+  c2.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+}
+
+function coerceCellValue(v: unknown): string | number {
+  if (v === '' || v == null) return '';
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '') return '';
+    const n = Number(t.replace(/\s/g, '').replace(',', '.'));
+    if (!Number.isNaN(n) && /^[-+\d.,\sEe]+$/.test(t)) return n;
+  }
+  return String(v);
 }
 
 function campaignRow(c: any): Record<string, unknown> {
@@ -299,7 +340,7 @@ export async function downloadSingleCampaignCsv(
   downloadTextFile(combined, `${base}.csv`);
 }
 
-/** Una sola campaña: un solo Excel con hoja General (campaña + contexto) y hoja Detalle (publicaciones), con estilos. */
+/** Una sola campaña: hoja 1 solo datos generales (clave–valor); hoja 2 solo detalle (publicaciones); estilos visibles en Excel. */
 export async function downloadSingleCampaignExcel(
   campaign: any,
   opts: {
@@ -324,15 +365,38 @@ export async function downloadSingleCampaignExcel(
   workbook.creator = 'LupoHub';
   workbook.created = new Date();
 
-  const wsGen = workbook.addWorksheet('General', {
-    views: [{ state: 'frozen', ySplit: 11 }],
-    properties: { defaultRowHeight: 19 }
+  // Hoja 1 — únicamente generales (sin tabla horizontal de métricas)
+  const wsGen = workbook.addWorksheet('Datos generales', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    properties: { defaultRowHeight: 20 }
   });
-  wsGen.getColumn(1).width = 28;
-  wsGen.getColumn(2).width = 52;
+  wsGen.getColumn(1).width = 30;
+  wsGen.getColumn(2).width = 56;
 
-  const metaLines: [string, string | number][] = [
-    ['Campaña individual — Product Ads', ''],
+  let r = 1;
+  const titleRow = wsGen.getRow(r);
+  wsGen.mergeCells(r, 1, r, 2);
+  const titleCell = titleRow.getCell(1);
+  titleCell.value = 'Product Ads — datos generales de la campaña';
+  titleCell.font = { bold: true, size: 14, name: 'Calibri', color: { argb: 'FF0F172A' } };
+  titleCell.fill = solidFill('FFE2E8F0');
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  titleCell.border = {
+    top: ST_BORDER,
+    left: ST_BORDER,
+    bottom: ST_BORDER,
+    right: ST_BORDER
+  };
+  titleRow.height = 28;
+  r += 2;
+
+  const contextSection = wsGen.getRow(r);
+  contextSection.getCell(1).value = 'Información del reporte';
+  contextSection.getCell(2).value = '';
+  styleSectionHeaderRow(contextSection);
+  r++;
+
+  const contextPairs: [string, string | number][] = [
     ['ID campaña', id],
     ['Nombre', name],
     ['Período desde', opts.dateFrom],
@@ -340,45 +404,42 @@ export async function downloadSingleCampaignExcel(
     ['Cuenta', opts.accountLabel],
     ['Site', opts.siteId],
     ['ID anunciante', opts.advertiserId],
-    ['Publicaciones en hoja Detalle', ads.length],
-    ['Exportado', new Date().toLocaleString('es-AR')],
-    ['', '']
+    ['Cantidad de publicaciones (hoja Detalle)', ads.length],
+    ['Exportado', new Date().toLocaleString('es-AR')]
   ];
-  let r = 1;
-  for (const [a, b] of metaLines) {
+  contextPairs.forEach(([label, val], idx) => {
     const row = wsGen.getRow(r);
-    row.getCell(1).value = a;
-    row.getCell(2).value = b;
-    if (r === 1) {
-      row.getCell(1).font = { bold: true, size: 12, name: 'Calibri', color: { argb: 'FF0F172A' } };
-    }
+    row.getCell(1).value = label;
+    row.getCell(2).value = val;
+    styleLabelValueRow(row, idx % 2 === 1);
     r++;
-  }
-
-  const campHeaders = CAMPAIGN_CSV_COLS.map((c) => c.header);
-  const span = Math.max(campHeaders.length, 2);
-  wsGen.mergeCells(1, 1, 1, span);
-
-  const headerRow = wsGen.getRow(r);
-  campHeaders.forEach((h, i) => {
-    headerRow.getCell(i + 1).value = h;
   });
-  styleHeaderRow(headerRow, campHeaders.length);
-  campHeaders.forEach((_, i) => {
-    wsGen.getColumn(i + 1).width = i === 1 ? 32 : 14;
-  });
+
+  r += 1;
+  const metricsSection = wsGen.getRow(r);
+  metricsSection.getCell(1).value = 'Métricas de la campaña (período seleccionado)';
+  metricsSection.getCell(2).value = '';
+  styleSectionHeaderRow(metricsSection);
   r++;
 
-  const dataRow = wsGen.getRow(r);
-  CAMPAIGN_CSV_COLS.forEach((col, i) => {
-    const cell = dataRow.getCell(i + 1);
-    cell.value = cr[col.key] as string | number;
-    styleDataCell(cell, false);
+  CAMPAIGN_CSV_COLS.forEach((col, idx) => {
+    const row = wsGen.getRow(r);
+    row.getCell(1).value = col.header;
+    const v = coerceCellValue(cr[col.key]);
+    const c2 = row.getCell(2);
+    c2.value = v;
+    styleLabelValueRow(row, idx % 2 === 1);
+    if (typeof v === 'number') {
+      const intKeys = new Set(['Clicks', 'Impresiones', 'Unidades']);
+      c2.numFmt = intKeys.has(col.key) ? '#,##0' : '#,##0.00';
+    }
+    r++;
   });
 
+  // Hoja 2 — únicamente detalle (tabla de publicaciones)
   const wsDet = workbook.addWorksheet('Detalle', {
     views: [{ state: 'frozen', ySplit: 1 }],
-    properties: { defaultRowHeight: 19 }
+    properties: { defaultRowHeight: 20 }
   });
   const adHeaders = ADS_CSV_COLS.map((c) => c.header);
   const detHeader = wsDet.getRow(1);
@@ -386,23 +447,49 @@ export async function downloadSingleCampaignExcel(
     detHeader.getCell(i + 1).value = h;
   });
   styleHeaderRow(detHeader, adHeaders.length);
+
   const colW = [14, 36, 28, 12, 14, 10, 40, 12, 10, 12, 14, 10, 10, 10, 10];
   adHeaders.forEach((_, i) => {
     wsDet.getColumn(i + 1).width = colW[i] ?? 14;
   });
 
+  const numFmt2 = '#,##0.00';
+  const numFmt0 = '#,##0';
+  // Columnas 1-based según ADS_CSV_COLS: Precio=6, Costo=7, Clicks=8, Impresiones=9, Ventas=10, ROAS=11, ACOS=12, CVR=13, CPC=14
+  const detailDecimals = new Set([6, 7, 10, 11, 12, 13, 14]);
+  const detailIntegers = new Set([8, 9]);
+
   if (ads.length === 0) {
     const row = wsDet.getRow(2);
-    row.getCell(1).value = 'Sin publicaciones con métricas en el período para esta campaña.';
-    row.getCell(1).font = { italic: true, color: { argb: 'FF64748B' }, name: 'Calibri' };
+    wsDet.mergeCells(2, 1, 2, adHeaders.length);
+    const c = row.getCell(1);
+    c.value = 'Sin publicaciones con métricas en el período para esta campaña.';
+    c.font = { italic: true, size: 11, name: 'Calibri', color: { argb: 'FF64748B' } };
+    c.fill = solidFill('FFF8FAFC');
+    c.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    c.border = {
+      top: ST_BORDER,
+      left: ST_BORDER,
+      bottom: ST_BORDER,
+      right: ST_BORDER
+    };
   } else {
     const adsData = ads.map(adRow);
+    wsDet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: adHeaders.length }
+    };
     adsData.forEach((ar, idx) => {
       const row = wsDet.getRow(2 + idx);
       ADS_CSV_COLS.forEach((col, i) => {
-        const cell = row.getCell(i + 1);
-        cell.value = ar[col.key] as string | number;
+        const colIdx = i + 1;
+        const cell = row.getCell(colIdx);
+        cell.value = coerceCellValue(ar[col.key]);
         styleDataCell(cell, idx % 2 === 1);
+        if (typeof cell.value === 'number') {
+          if (detailDecimals.has(colIdx)) cell.numFmt = numFmt2;
+          else if (detailIntegers.has(colIdx)) cell.numFmt = numFmt0;
+        }
       });
     });
   }
