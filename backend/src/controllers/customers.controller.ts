@@ -737,10 +737,28 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
   res.send('\uFEFF' + csv);
 };
 
+type MergedResumenRow = {
+  customerId: string;
+  legacy_code: unknown;
+  account_zone: unknown;
+  account_seller_label: unknown;
+  seller_id: unknown;
+  businessName: string;
+  contactName: string;
+  cuit: string;
+  saldoPendiente: number;
+  pedidosPendientes: number;
+  seller_name?: string;
+  /** Líneas importadas en customer_multimedia_entries (como en export historial Multimedias). */
+  movementCountExcel: number;
+};
+
 /**
  * Excel una sola hoja "Resumen" con el mismo encabezado que historial Multimedias/Tango:
  * Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos, Hoja.
- * Los importes son saldos pendientes de cobro en LupoHub (pedidos impagos − pagos).
+ * Saldo final = (LupoHub: pedidos pendientes IVA incl. − pagos) + (último saldo cuenta importada Excel).
+ * Movimientos = líneas en historial importado + cantidad de pedidos pendientes (misma idea que cartera unificada).
+ * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
  */
 export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: Response) => {
   const user = (req as any).user;
@@ -809,7 +827,6 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     ) t
     LEFT JOIN users u ON u.id = t.seller_id
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -850,7 +867,6 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     ) t
     LEFT JOIN users u ON u.id = t.seller_id
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -861,20 +877,110 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     rows = (await query(sqlSimple, paramsSimple)) as any[];
   }
 
+  const sqlMultimediaSaldos = `
+    SELECT
+      c.id AS customerId,
+      c.legacy_code,
+      c.account_zone,
+      c.account_seller_label,
+      c.seller_id,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      CAST(e.saldo AS DECIMAL(16,2)) AS lastSaldo,
+      cnt.cnt AS movementCount,
+      u.name AS seller_name
+    FROM customer_multimedia_entries e
+    INNER JOIN (
+      SELECT customer_id, MAX(line_order) AS max_lo
+      FROM customer_multimedia_entries
+      GROUP BY customer_id
+    ) mx ON mx.customer_id = e.customer_id AND e.line_order = mx.max_lo
+    INNER JOIN (
+      SELECT customer_id, COUNT(*) AS cnt
+      FROM customer_multimedia_entries
+      GROUP BY customer_id
+    ) cnt ON cnt.customer_id = e.customer_id
+    INNER JOIN customers c ON c.id = e.customer_id
+    LEFT JOIN users u ON u.id = c.seller_id
+    WHERE 1=1 ${sellerFilter}
+  `;
+
+  let mmRows: any[] = [];
+  try {
+    mmRows = (await query(sqlMultimediaSaldos, baseParams)) as any[];
+  } catch {
+    mmRows = [];
+  }
+
+  const byId = new Map<string, MergedResumenRow>();
+  for (const r of rows) {
+    const id = String(r.customerId);
+    byId.set(id, {
+      customerId: id,
+      legacy_code: r.legacy_code,
+      account_zone: r.account_zone,
+      account_seller_label: r.account_seller_label,
+      seller_id: r.seller_id,
+      businessName: String(r.businessName ?? ''),
+      contactName: String(r.contactName ?? ''),
+      cuit: String(r.cuit ?? ''),
+      saldoPendiente: Number(r.saldoPendiente) || 0,
+      pedidosPendientes: Number(r.pedidosPendientes) || 0,
+      seller_name: r.seller_name,
+      movementCountExcel: 0
+    });
+  }
+  for (const m of mmRows) {
+    const id = String(m.customerId);
+    const excelSaldo = Number(m.lastSaldo) || 0;
+    const mmCnt = Number(m.movementCount) || 0;
+    const existing = byId.get(id);
+    if (existing) {
+      existing.saldoPendiente = Math.round((existing.saldoPendiente + excelSaldo) * 100) / 100;
+      existing.movementCountExcel = mmCnt;
+    } else {
+      byId.set(id, {
+        customerId: id,
+        legacy_code: m.legacy_code,
+        account_zone: m.account_zone,
+        account_seller_label: m.account_seller_label,
+        seller_id: m.seller_id,
+        businessName: String(m.businessName ?? ''),
+        contactName: String(m.contactName ?? ''),
+        cuit: String(m.cuit ?? ''),
+        saldoPendiente: Math.round(excelSaldo * 100) / 100,
+        pedidosPendientes: 0,
+        seller_name: m.seller_name,
+        movementCountExcel: mmCnt
+      });
+    }
+  }
+
+  const mergedList = [...byId.values()]
+    .filter((r) => r.saldoPendiente > 0.01)
+    .sort((a, b) =>
+      (a.businessName || '').localeCompare(b.businessName || '', 'es') ||
+      (a.contactName || '').localeCompare(b.contactName || '', 'es')
+    );
+
   const resumenRows: (string | number)[][] = [
     ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos', 'Hoja'],
   ];
-  for (const r of rows) {
+  for (const r of mergedList) {
     const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
-    const code =
-      (r.legacy_code && String(r.legacy_code).trim()) ||
+    const legacyTrim = r.legacy_code != null ? String(r.legacy_code).trim() : '';
+    const code: string =
+      legacyTrim ||
       padLegacyCode(String(r.customerId || '').replace(/-/g, '').slice(0, 6) || '0');
-    const vendedor =
-      (r.account_seller_label && String(r.account_seller_label).trim()) ||
+    const vendedor: string =
+      (r.account_seller_label != null && String(r.account_seller_label).trim() !== ''
+        ? String(r.account_seller_label).trim()
+        : '') ||
       (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '');
-    const zona = (r.account_zone && String(r.account_zone).trim()) || '';
+    const zona: string = r.account_zone != null ? String(r.account_zone).trim() : '';
     const saldoFinal = Number(r.saldoPendiente) || 0;
-    const movs = Number(r.pedidosPendientes) || 0;
+    const movs = (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
     const sheetNm = excelSheetName(code, displayName).slice(0, 31);
     resumenRows.push([code, displayName, vendedor, zona, saldoFinal, movs, sheetNm]);
   }
