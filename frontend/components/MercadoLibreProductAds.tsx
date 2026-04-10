@@ -636,11 +636,14 @@ const MercadoLibreProductAds: React.FC = () => {
                 <th className="pb-2 pr-4 text-right">ACOS</th>
                 <th className="pb-2 pr-4 text-right">Clicks</th>
                 <th className="pb-2 pr-2 text-right">Impres.</th>
-                <th className="pb-2 pl-2 text-right w-[100px]">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500 leading-tight block">
-                    Solo esta
-                    <br />
-                    campaña
+                <th className="pb-2 pl-2 text-right min-w-[168px] align-bottom">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400 font-black block">
+                    Esta campaña
+                  </span>
+                  <span className="text-[9px] text-slate-600 normal-case font-normal leading-snug block mt-1 max-w-[200px] ml-auto">
+                    <strong className="text-emerald-500/90">Excel</strong> = archivo .xlsx con{' '}
+                    <strong className="text-slate-400">2 pestañas</strong> (Datos generales + Detalle) y estilos.{' '}
+                    <strong className="text-slate-500">CSV</strong> = una sola hoja, sin colores ni pestañas.
                   </span>
                 </th>
               </tr>
@@ -671,43 +674,13 @@ const MercadoLibreProductAds: React.FC = () => {
                     <td className="py-2.5 pr-4 text-right tabular-nums">{toNum(m.clicks).toLocaleString('es-AR')}</td>
                     <td className="py-2.5 pr-2 text-right tabular-nums">{toNum(m.prints).toLocaleString('es-AR')}</td>
                     <td className="py-2.5 pl-2 text-right align-middle">
-                      <div className="inline-flex items-center gap-0.5 justify-end">
+                      <div className="inline-flex items-stretch gap-1.5 justify-end">
                         <button
                           type="button"
-                          title="Descargar CSV: un solo archivo (secciones General y Detalle)"
+                          title="Excel (.xlsx): 2 pestañas — Datos generales y Detalle — con colores y bordes. Recomendado."
+                          aria-label="Descargar Excel con dos hojas y estilos"
                           disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
-                          className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
-                          onClick={() => {
-                            if (advertiserId === '') return;
-                            void (async () => {
-                              setExportingSingleCampaignId(c.id);
-                              try {
-                                await downloadSingleCampaignCsv(c, {
-                                  dateFrom,
-                                  dateTo,
-                                  siteId,
-                                  advertiserId: advertiserId as number
-                                });
-                                showToast('success', 'CSV listo: un solo archivo con sección campaña y sección publicaciones.');
-                              } catch (e: any) {
-                                showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar CSV');
-                              } finally {
-                                setExportingSingleCampaignId(null);
-                              }
-                            })();
-                          }}
-                        >
-                          {exportingSingleCampaignId === c.id ? (
-                            <Loader2 size={16} className="text-emerald-400/90 animate-spin" aria-hidden />
-                          ) : (
-                            <Download size={16} className="text-emerald-400/90" aria-hidden />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          title="Descargar Excel: un archivo con hojas General y Detalle"
-                          disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
-                          className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
+                          className="flex flex-col items-center justify-center gap-0.5 px-2.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border-2 border-emerald-600/55 shadow-sm shadow-emerald-950/20 transition-colors disabled:opacity-40 min-w-[4.5rem]"
                           onClick={() => {
                             if (advertiserId === '') return;
                             void (async () => {
@@ -722,7 +695,7 @@ const MercadoLibreProductAds: React.FC = () => {
                                 });
                                 showToast(
                                   'success',
-                                  'Excel generado: hoja Datos generales y hoja Detalle (abrilo en Excel para ver estilos).'
+                                  'Descargado .xlsx: abrí el archivo y mirá las pestañas inferiores «Datos generales» y «Detalle». Los estilos se ven mejor en Excel de escritorio que en Google Sheets.'
                                 );
                               } catch (e: any) {
                                 showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar Excel');
@@ -733,10 +706,49 @@ const MercadoLibreProductAds: React.FC = () => {
                           }}
                         >
                           {exportingSingleCampaignId === c.id ? (
-                            <Loader2 size={16} className="text-emerald-400/90 animate-spin" aria-hidden />
+                            <Loader2 size={16} className="text-emerald-400 animate-spin" aria-hidden />
                           ) : (
-                            <FileSpreadsheet size={16} className="text-emerald-400/90" aria-hidden />
+                            <FileSpreadsheet size={16} className="text-emerald-400" aria-hidden />
                           )}
+                          <span className="text-[9px] font-black text-emerald-300 leading-none tracking-tight">Excel</span>
+                          <span className="text-[8px] text-slate-500 leading-none">2 hojas</span>
+                        </button>
+                        <button
+                          type="button"
+                          title="CSV: texto plano, una sola hoja al abrirlo; sin pestañas ni formato. Útil para importar a otros sistemas."
+                          aria-label="Descargar CSV una sola hoja sin formato"
+                          disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
+                          className="flex flex-col items-center justify-center gap-0.5 px-2.5 py-2 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-400 border border-slate-600/50 transition-colors disabled:opacity-40 min-w-[4.25rem]"
+                          onClick={() => {
+                            if (advertiserId === '') return;
+                            void (async () => {
+                              setExportingSingleCampaignId(c.id);
+                              try {
+                                await downloadSingleCampaignCsv(c, {
+                                  dateFrom,
+                                  dateTo,
+                                  siteId,
+                                  advertiserId: advertiserId as number
+                                });
+                                showToast(
+                                  'warning',
+                                  'CSV = una sola hoja y sin estilos (así es el formato). Para 2 pestañas y colores usá el botón Excel (.xlsx) al lado.'
+                                );
+                              } catch (e: any) {
+                                showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar CSV');
+                              } finally {
+                                setExportingSingleCampaignId(null);
+                              }
+                            })();
+                          }}
+                        >
+                          {exportingSingleCampaignId === c.id ? (
+                            <Loader2 size={16} className="text-slate-500 animate-spin" aria-hidden />
+                          ) : (
+                            <Download size={16} className="text-slate-500" aria-hidden />
+                          )}
+                          <span className="text-[9px] font-bold text-slate-500 leading-none">CSV</span>
+                          <span className="text-[8px] text-slate-600 leading-none">1 hoja</span>
                         </button>
                       </div>
                     </td>

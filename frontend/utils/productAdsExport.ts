@@ -313,7 +313,10 @@ export async function fetchAllAdsForSingleCampaignExport(
   return list.filter((ad) => String(ad?.campaign_id ?? '') === want);
 }
 
-/** Una sola campaña: un solo CSV con sección general (campaña) y sección detalle (publicaciones). */
+/**
+ * Una sola campaña: un CSV con dos bloques de texto (general + detalle).
+ * Al abrirlo en Excel/Sheets siempre es **una sola hoja** y **sin estilos** (limitación del .csv).
+ */
 export async function downloadSingleCampaignCsv(
   campaign: any,
   opts: { dateFrom: string; dateTo: string; siteId: string; advertiserId: number }
