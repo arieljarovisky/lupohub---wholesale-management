@@ -1,13 +1,16 @@
 import { Request, Response } from 'express';
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
-import { query, execute } from '../database/db';
+import { query, execute, get } from '../database/db';
 import {
   parseCustomerSheetRows,
   parseSheetName,
   parseArgentineDateDisplay,
   sqlDateToDisplay,
   excelSheetName,
+  parseResumenCodeToCliente,
+  padLegacyCode,
+  normalizeCuitDigits,
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
 
@@ -23,17 +26,29 @@ function canManage(role?: string): boolean {
   return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
 
-function padLegacyCode(code: string): string {
-  const t = code.trim();
-  if (/^\d+$/.test(t) && t.length < 6) return t.padStart(6, '0');
-  return t;
+function tryFuzzyNameMatch(
+  normSheet: string,
+  customerByNorm: Map<string, { id: string; seller_id: string | null }>
+): { id: string; seller_id: string | null } | null {
+  if (!normSheet || normSheet.length < 5) return null;
+  if (customerByNorm.has(normSheet)) return customerByNorm.get(normSheet)!;
+  for (const [k, v] of customerByNorm) {
+    if (k.length < 5) continue;
+    if (normSheet === k) return v;
+    if (normSheet.startsWith(k) || k.startsWith(normSheet)) return v;
+    if (k.length >= 8 && normSheet.includes(k)) return v;
+    if (normSheet.length >= 8 && k.includes(normSheet)) return v;
+  }
+  return null;
 }
 
 async function resolveCustomerForSheet(
   sheetName: string,
   parsed: ReturnType<typeof parseCustomerSheetRows>,
   customerByLegacy: Map<string, { id: string; seller_id: string | null }>,
-  customerByNorm: Map<string, { id: string; seller_id: string | null }>
+  customerByNorm: Map<string, { id: string; seller_id: string | null }>,
+  customerByCuit: Map<string, { id: string; seller_id: string | null }>,
+  resumenByCode: Map<string, string>
 ): Promise<{ id: string; seller_id: string | null } | null> {
   const fromName = parseSheetName(sheetName);
   const codeCandidates = new Set<string>();
@@ -43,11 +58,33 @@ async function resolveCustomerForSheet(
     const hit = customerByLegacy.get(c) || customerByLegacy.get(c.replace(/^0+/, '') || '0');
     if (hit) return hit;
   }
+
+  const cuitParsed = normalizeCuitDigits(parsed?.cuitFromSheet || '');
+  if (cuitParsed.length >= 8) {
+    const byCuit = customerByCuit.get(cuitParsed);
+    if (byCuit) return byCuit;
+  }
+
+  for (const c of codeCandidates) {
+    const resumenCliente = resumenByCode.get(c);
+    if (resumenCliente) {
+      const nr = normalizeNameForMatch(resumenCliente);
+      if (nr && customerByNorm.has(nr)) return customerByNorm.get(nr)!;
+      const fuzzyR = tryFuzzyNameMatch(nr, customerByNorm);
+      if (fuzzyR) return fuzzyR;
+    }
+  }
+
   const normTitle = normalizeNameForMatch(parsed?.businessNameFromTitle || '');
   if (normTitle && customerByNorm.has(normTitle)) return customerByNorm.get(normTitle)!;
+  const fuzzyTitle = tryFuzzyNameMatch(normTitle, customerByNorm);
+  if (fuzzyTitle) return fuzzyTitle;
+
   if (fromName?.restName) {
     const n = normalizeNameForMatch(fromName.restName);
     if (n && customerByNorm.has(n)) return customerByNorm.get(n)!;
+    const fuzzyN = tryFuzzyNameMatch(n, customerByNorm);
+    if (fuzzyN) return fuzzyN;
   }
   return null;
 }
@@ -190,12 +227,33 @@ export const importMultimediaHistorial = async (req: Request, res: Response) => 
     }
 
     const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
+
+    let resumenByCode = new Map<string, string>();
+    const resumenWs = wb.Sheets['Resumen'];
+    if (resumenWs) {
+      const resumenMatrix = XLSX.utils.sheet_to_json(resumenWs, { header: 1, defval: '' }) as (
+        | string
+        | number
+        | null
+        | undefined
+      )[][];
+      resumenByCode = parseResumenCodeToCliente(resumenMatrix);
+    }
+
     const customers = (await query(
-      `SELECT id, business_name, name, seller_id, legacy_code FROM customers`
-    )) as { id: string; business_name?: string | null; name?: string | null; seller_id?: string | null; legacy_code?: string | null }[];
+      `SELECT id, business_name, name, seller_id, legacy_code, cuit FROM customers`
+    )) as {
+      id: string;
+      business_name?: string | null;
+      name?: string | null;
+      seller_id?: string | null;
+      legacy_code?: string | null;
+      cuit?: string | null;
+    }[];
 
     const customerByLegacy = new Map<string, { id: string; seller_id: string | null }>();
     const customerByNorm = new Map<string, { id: string; seller_id: string | null }>();
+    const customerByCuit = new Map<string, { id: string; seller_id: string | null }>();
     for (const c of customers) {
       if (c.legacy_code) {
         const lc = String(c.legacy_code).trim();
@@ -208,6 +266,10 @@ export const importMultimediaHistorial = async (req: Request, res: Response) => 
       const k2 = normalizeNameForMatch(c.name);
       if (k1 && !customerByNorm.has(k1)) customerByNorm.set(k1, { id: c.id, seller_id: c.seller_id ?? null });
       if (k2 && !customerByNorm.has(k2)) customerByNorm.set(k2, { id: c.id, seller_id: c.seller_id ?? null });
+      const cu = normalizeCuitDigits(c.cuit);
+      if (cu.length >= 8 && !customerByCuit.has(cu)) {
+        customerByCuit.set(cu, { id: c.id, seller_id: c.seller_id ?? null });
+      }
     }
 
     let sheetsProcessed = 0;
@@ -224,7 +286,14 @@ export const importMultimediaHistorial = async (req: Request, res: Response) => 
       const parsed = parseCustomerSheetRows(matrix);
       if (!parsed) continue;
 
-      const cust = await resolveCustomerForSheet(sheetName, parsed, customerByLegacy, customerByNorm);
+      const cust = await resolveCustomerForSheet(
+        sheetName,
+        parsed,
+        customerByLegacy,
+        customerByNorm,
+        customerByCuit,
+        resumenByCode
+      );
       if (!cust) {
         notFound.push(sheetName);
         continue;
@@ -292,5 +361,63 @@ export const importMultimediaHistorial = async (req: Request, res: Response) => 
   } catch (e: any) {
     console.error('importMultimediaHistorial:', e);
     res.status(500).json({ message: 'Error importando historial', detail: e?.message });
+  }
+};
+
+/** GET /customers/:id/multimedia-ledger — movimientos importados (Excel Tango/Multimedias) para la ficha del cliente. */
+export const getCustomerMultimediaLedger = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canManage(user.role)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+    const { id } = req.params;
+    const cust = (await get(
+      `SELECT id, seller_id, business_name, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      [id]
+    )) as {
+      id: string;
+      seller_id: string | null;
+      business_name: string | null;
+      legacy_code: string | null;
+      account_zone: string | null;
+      account_seller_label: string | null;
+    } | undefined;
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const entries = (await query(
+      `SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
+       FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`,
+      [id]
+    )) as any[];
+    let lastSaldo = 0;
+    if (entries.length > 0) {
+      lastSaldo = Number(entries[entries.length - 1].saldo) || 0;
+    }
+    res.json({
+      customerId: id,
+      legacyCode: cust.legacy_code ?? null,
+      accountZone: cust.account_zone ?? null,
+      accountSellerLabel: cust.account_seller_label ?? null,
+      movementCount: entries.length,
+      lastSaldo,
+      entries: entries.map((e) => ({
+        lineOrder: e.line_order,
+        lineDate: e.line_date,
+        tipo: e.tipo,
+        numero: e.numero,
+        edc: e.edc,
+        vto: e.vto,
+        importe: e.importe != null ? Number(e.importe) : null,
+        saldo: e.saldo != null ? Number(e.saldo) : null,
+        detalle: e.detalle,
+        paginaPdf: e.pagina_pdf
+      }))
+    });
+  } catch (e: any) {
+    console.error('getCustomerMultimediaLedger:', e);
+    res.status(500).json({ message: 'Error leyendo historial importado', detail: e?.message });
   }
 };

@@ -1,16 +1,30 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, importCustomers, bulkUpdateCuit, attachUserToCustomer, getSaldosPendientes, exportSaldosPendientesCsv, clearDispatchedPendingsForCustomer } from '../controllers/customers.controller';
-import { exportMultimediaHistorial, importMultimediaHistorial } from '../controllers/multimediaHistorial.controller';
+import {
+  getCustomers,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  importCustomers,
+  bulkUpdateCuit,
+  attachUserToCustomer,
+  getSaldosPendientes,
+  exportSaldosPendientesCsv,
+  exportSaldosPendientesMultimediasXlsx,
+  clearDispatchedPendingsForCustomer
+} from '../controllers/customers.controller';
+import { exportMultimediaHistorial, importMultimediaHistorial, getCustomerMultimediaLedger } from '../controllers/multimediaHistorial.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+router.get('/saldos-pendientes/export-multimedias', authMiddleware as any, exportSaldosPendientesMultimediasXlsx as any);
 router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
 router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);
 router.post('/multimedia-historial/import', authMiddleware as any, upload.single('file'), importMultimediaHistorial as any);
+router.get('/:id/multimedia-ledger', authMiddleware as any, getCustomerMultimediaLedger as any);
 router.get('/', authMiddleware as any, getCustomers as any);
 router.post('/', authMiddleware as any, createCustomer as any);
 router.post('/import', authMiddleware as any, importCustomers as any);

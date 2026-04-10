@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importMultimediaHistorial = exports.exportMultimediaHistorial = void 0;
+exports.getCustomerMultimediaLedger = exports.importMultimediaHistorial = exports.exportMultimediaHistorial = void 0;
 const XLSX = __importStar(require("xlsx"));
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
@@ -57,32 +57,68 @@ function normalizeNameForMatch(v) {
 function canManage(role) {
     return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
-function padLegacyCode(code) {
-    const t = code.trim();
-    if (/^\d+$/.test(t) && t.length < 6)
-        return t.padStart(6, '0');
-    return t;
+function tryFuzzyNameMatch(normSheet, customerByNorm) {
+    if (!normSheet || normSheet.length < 5)
+        return null;
+    if (customerByNorm.has(normSheet))
+        return customerByNorm.get(normSheet);
+    for (const [k, v] of customerByNorm) {
+        if (k.length < 5)
+            continue;
+        if (normSheet === k)
+            return v;
+        if (normSheet.startsWith(k) || k.startsWith(normSheet))
+            return v;
+        if (k.length >= 8 && normSheet.includes(k))
+            return v;
+        if (normSheet.length >= 8 && k.includes(normSheet))
+            return v;
+    }
+    return null;
 }
-function resolveCustomerForSheet(sheetName, parsed, customerByLegacy, customerByNorm) {
+function resolveCustomerForSheet(sheetName, parsed, customerByLegacy, customerByNorm, customerByCuit, resumenByCode) {
     return __awaiter(this, void 0, void 0, function* () {
         const fromName = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName);
         const codeCandidates = new Set();
         if (parsed === null || parsed === void 0 ? void 0 : parsed.code)
-            codeCandidates.add(padLegacyCode(parsed.code));
+            codeCandidates.add((0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code));
         if (fromName === null || fromName === void 0 ? void 0 : fromName.code)
-            codeCandidates.add(padLegacyCode(fromName.code));
+            codeCandidates.add((0, multimediaHistorialExcel_1.padLegacyCode)(fromName.code));
         for (const c of codeCandidates) {
             const hit = customerByLegacy.get(c) || customerByLegacy.get(c.replace(/^0+/, '') || '0');
             if (hit)
                 return hit;
         }
+        const cuitParsed = (0, multimediaHistorialExcel_1.normalizeCuitDigits)((parsed === null || parsed === void 0 ? void 0 : parsed.cuitFromSheet) || '');
+        if (cuitParsed.length >= 8) {
+            const byCuit = customerByCuit.get(cuitParsed);
+            if (byCuit)
+                return byCuit;
+        }
+        for (const c of codeCandidates) {
+            const resumenCliente = resumenByCode.get(c);
+            if (resumenCliente) {
+                const nr = normalizeNameForMatch(resumenCliente);
+                if (nr && customerByNorm.has(nr))
+                    return customerByNorm.get(nr);
+                const fuzzyR = tryFuzzyNameMatch(nr, customerByNorm);
+                if (fuzzyR)
+                    return fuzzyR;
+            }
+        }
         const normTitle = normalizeNameForMatch((parsed === null || parsed === void 0 ? void 0 : parsed.businessNameFromTitle) || '');
         if (normTitle && customerByNorm.has(normTitle))
             return customerByNorm.get(normTitle);
+        const fuzzyTitle = tryFuzzyNameMatch(normTitle, customerByNorm);
+        if (fuzzyTitle)
+            return fuzzyTitle;
         if (fromName === null || fromName === void 0 ? void 0 : fromName.restName) {
             const n = normalizeNameForMatch(fromName.restName);
             if (n && customerByNorm.has(n))
                 return customerByNorm.get(n);
+            const fuzzyN = tryFuzzyNameMatch(n, customerByNorm);
+            if (fuzzyN)
+                return fuzzyN;
         }
         return null;
     });
@@ -193,7 +229,7 @@ const exportMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.exportMultimediaHistorial = exportMultimediaHistorial;
 /** POST multipart file → importa movimientos por cliente */
 const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -204,15 +240,22 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
             return res.status(400).json({ message: 'Subí un archivo .xlsx (campo file)' });
         }
         const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
-        const customers = (yield (0, db_1.query)(`SELECT id, business_name, name, seller_id, legacy_code FROM customers`));
+        let resumenByCode = new Map();
+        const resumenWs = wb.Sheets['Resumen'];
+        if (resumenWs) {
+            const resumenMatrix = XLSX.utils.sheet_to_json(resumenWs, { header: 1, defval: '' });
+            resumenByCode = (0, multimediaHistorialExcel_1.parseResumenCodeToCliente)(resumenMatrix);
+        }
+        const customers = (yield (0, db_1.query)(`SELECT id, business_name, name, seller_id, legacy_code, cuit FROM customers`));
         const customerByLegacy = new Map();
         const customerByNorm = new Map();
+        const customerByCuit = new Map();
         for (const c of customers) {
             if (c.legacy_code) {
                 const lc = String(c.legacy_code).trim();
                 if (lc) {
                     customerByLegacy.set(lc, { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null });
-                    customerByLegacy.set(padLegacyCode(lc), { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
+                    customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
                 }
             }
             const k1 = normalizeNameForMatch(c.business_name);
@@ -221,6 +264,10 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                 customerByNorm.set(k1, { id: c.id, seller_id: (_c = c.seller_id) !== null && _c !== void 0 ? _c : null });
             if (k2 && !customerByNorm.has(k2))
                 customerByNorm.set(k2, { id: c.id, seller_id: (_d = c.seller_id) !== null && _d !== void 0 ? _d : null });
+            const cu = (0, multimediaHistorialExcel_1.normalizeCuitDigits)(c.cuit);
+            if (cu.length >= 8 && !customerByCuit.has(cu)) {
+                customerByCuit.set(cu, { id: c.id, seller_id: (_e = c.seller_id) !== null && _e !== void 0 ? _e : null });
+            }
         }
         let sheetsProcessed = 0;
         let customersUpdated = 0;
@@ -237,7 +284,7 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
             const parsed = (0, multimediaHistorialExcel_1.parseCustomerSheetRows)(matrix);
             if (!parsed)
                 continue;
-            const cust = yield resolveCustomerForSheet(sheetName, parsed, customerByLegacy, customerByNorm);
+            const cust = yield resolveCustomerForSheet(sheetName, parsed, customerByLegacy, customerByNorm, customerByCuit, resumenByCode);
             if (!cust) {
                 notFound.push(sheetName);
                 continue;
@@ -247,8 +294,8 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                 continue;
             }
             sheetsProcessed++;
-            const legacy = padLegacyCode(parsed.code || ((_e = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _e === void 0 ? void 0 : _e.code) || '');
-            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_f = parsed.zona) === null || _f === void 0 ? void 0 : _f.trim()) || null, ((_g = parsed.vendedorHabitual) === null || _g === void 0 ? void 0 : _g.trim()) || null, cust.id]);
+            const legacy = (0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code || ((_f = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _f === void 0 ? void 0 : _f.code) || '');
+            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_g = parsed.zona) === null || _g === void 0 ? void 0 : _g.trim()) || null, ((_h = parsed.vendedorHabitual) === null || _h === void 0 ? void 0 : _h.trim()) || null, cust.id]);
             customersUpdated++;
             yield (0, db_1.execute)(`DELETE FROM customer_multimedia_entries WHERE customer_id = ?`, [cust.id]);
             let order = 0;
@@ -267,19 +314,19 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                     order++,
                     lineDate,
                     tipo,
-                    ((_h = m.numero) === null || _h === void 0 ? void 0 : _h.trim()) || null,
-                    ((_j = m.edc) === null || _j === void 0 ? void 0 : _j.trim()) || null,
+                    ((_j = m.numero) === null || _j === void 0 ? void 0 : _j.trim()) || null,
+                    ((_k = m.edc) === null || _k === void 0 ? void 0 : _k.trim()) || null,
                     vto,
                     m.importe,
                     m.saldo,
-                    ((_k = m.detalle) === null || _k === void 0 ? void 0 : _k.trim()) || null,
-                    ((_l = m.paginaPdf) === null || _l === void 0 ? void 0 : _l.trim()) || null,
+                    ((_l = m.detalle) === null || _l === void 0 ? void 0 : _l.trim()) || null,
+                    ((_m = m.paginaPdf) === null || _m === void 0 ? void 0 : _m.trim()) || null,
                 ]);
                 rowsInserted++;
             }
             if (legacy) {
                 customerByLegacy.set(legacy, cust);
-                customerByLegacy.set(padLegacyCode(legacy), cust);
+                customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(legacy), cust);
             }
         }
         res.json({
@@ -299,3 +346,51 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
     }
 });
 exports.importMultimediaHistorial = importMultimediaHistorial;
+/** GET /customers/:id/multimedia-ledger — movimientos importados (Excel Tango/Multimedias) para la ficha del cliente. */
+const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const user = req.user;
+        if (!user || !canManage(user.role)) {
+            return res.status(403).json({ message: 'Sin permiso' });
+        }
+        const { id } = req.params;
+        const cust = (yield (0, db_1.get)(`SELECT id, seller_id, business_name, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]));
+        if (!cust)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
+       FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
+        let lastSaldo = 0;
+        if (entries.length > 0) {
+            lastSaldo = Number(entries[entries.length - 1].saldo) || 0;
+        }
+        res.json({
+            customerId: id,
+            legacyCode: (_a = cust.legacy_code) !== null && _a !== void 0 ? _a : null,
+            accountZone: (_b = cust.account_zone) !== null && _b !== void 0 ? _b : null,
+            accountSellerLabel: (_c = cust.account_seller_label) !== null && _c !== void 0 ? _c : null,
+            movementCount: entries.length,
+            lastSaldo,
+            entries: entries.map((e) => ({
+                lineOrder: e.line_order,
+                lineDate: e.line_date,
+                tipo: e.tipo,
+                numero: e.numero,
+                edc: e.edc,
+                vto: e.vto,
+                importe: e.importe != null ? Number(e.importe) : null,
+                saldo: e.saldo != null ? Number(e.saldo) : null,
+                detalle: e.detalle,
+                paginaPdf: e.pagina_pdf
+            }))
+        });
+    }
+    catch (e) {
+        console.error('getCustomerMultimediaLedger:', e);
+        res.status(500).json({ message: 'Error leyendo historial importado', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.getCustomerMultimediaLedger = getCustomerMultimediaLedger;

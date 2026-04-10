@@ -10,10 +10,12 @@ const multimediaHistorial_controller_1 = require("../controllers/multimediaHisto
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
+router.get('/saldos-pendientes/export-multimedias', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesMultimediasXlsx);
 router.get('/saldos-pendientes/export', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesCsv);
 router.get('/saldos-pendientes', auth_1.authMiddleware, customers_controller_1.getSaldosPendientes);
 router.get('/multimedia-historial/export', auth_1.authMiddleware, multimediaHistorial_controller_1.exportMultimediaHistorial);
 router.post('/multimedia-historial/import', auth_1.authMiddleware, upload.single('file'), multimediaHistorial_controller_1.importMultimediaHistorial);
+router.get('/:id/multimedia-ledger', auth_1.authMiddleware, multimediaHistorial_controller_1.getCustomerMultimediaLedger);
 router.get('/', auth_1.authMiddleware, customers_controller_1.getCustomers);
 router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);
 router.post('/import', auth_1.authMiddleware, customers_controller_1.importCustomers);

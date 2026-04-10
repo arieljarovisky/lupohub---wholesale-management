@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,9 +42,11 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearDispatchedPendingsForCustomer = exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.clearDispatchedPendingsForCustomer = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+const XLSX = __importStar(require("xlsx"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
+const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
 function toCustomer(row, transportes) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     return {
@@ -704,6 +739,149 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
     res.send('\uFEFF' + csv);
 });
 exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
+/**
+ * Excel una sola hoja "Resumen" con el mismo encabezado que historial Multimedias/Tango:
+ * Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos, Hoja.
+ * Los importes son saldos pendientes de cobro en LupoHub (pedidos impagos − pagos).
+ */
+const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = req.user;
+    if (!user || !roleCanViewSaldos(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+    }
+    const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const baseParams = user.role === 'SELLER' ? [user.id] : [];
+    const paymentsJoin = user.role === 'SELLER'
+        ? `LEFT JOIN (
+      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      FROM payments p
+      INNER JOIN customers c2 ON c2.id = p.customer_id
+      WHERE (p.seller_id = ? OR c2.seller_id = ?)
+      GROUP BY p.customer_id
+    ) pay ON pay.customer_id = t.customerId`
+        : `LEFT JOIN (
+      SELECT customer_id, SUM(amount) AS total_pagos
+      FROM payments
+      GROUP BY customer_id
+    ) pay ON pay.customer_id = t.customerId`;
+    const payParams = user.role === 'SELLER' ? [user.id, user.id] : [];
+    const paramsWithNc = [...baseParams, ...payParams];
+    const paramsSimple = [...baseParams, ...payParams];
+    const sqlWithNc = `
+    SELECT
+      t.customerId,
+      t.legacy_code,
+      t.account_zone,
+      t.account_seller_label,
+      t.seller_id,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes,
+      u.name AS seller_name
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.legacy_code,
+        c.account_zone,
+        c.account_seller_label,
+        c.seller_id,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
+    ) t
+    LEFT JOIN users u ON u.id = t.seller_id
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
+  `;
+    const sqlSimple = `
+    SELECT
+      t.customerId,
+      t.legacy_code,
+      t.account_zone,
+      t.account_seller_label,
+      t.seller_id,
+      t.businessName,
+      t.contactName,
+      t.cuit,
+      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      t.pedidosPendientes,
+      u.name AS seller_name
+    FROM (
+      SELECT
+        c.id AS customerId,
+        c.legacy_code,
+        c.account_zone,
+        c.account_seller_label,
+        c.seller_id,
+        c.business_name AS businessName,
+        c.name AS contactName,
+        c.cuit,
+        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes
+      FROM customers c
+      INNER JOIN orders o ON o.customer_id = c.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+        ${sellerFilter}
+      GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
+    ) t
+    LEFT JOIN users u ON u.id = t.seller_id
+    ${paymentsJoin}
+    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    ORDER BY t.businessName ASC, t.contactName ASC
+  `;
+    let rows;
+    try {
+        rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
+    }
+    catch (_a) {
+        rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
+    }
+    const resumenRows = [
+        ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos', 'Hoja'],
+    ];
+    for (const r of rows) {
+        const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
+        const code = (r.legacy_code && String(r.legacy_code).trim()) ||
+            (0, multimediaHistorialExcel_1.padLegacyCode)(String(r.customerId || '').replace(/-/g, '').slice(0, 6) || '0');
+        const vendedor = (r.account_seller_label && String(r.account_seller_label).trim()) ||
+            (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '');
+        const zona = (r.account_zone && String(r.account_zone).trim()) || '';
+        const saldoFinal = Number(r.saldoPendiente) || 0;
+        const movs = Number(r.pedidosPendientes) || 0;
+        const sheetNm = (0, multimediaHistorialExcel_1.excelSheetName)(code, displayName).slice(0, 31);
+        resumenRows.push([code, displayName, vendedor, zona, saldoFinal, movs, sheetNm]);
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumenRows), 'Resumen');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="saldos_pendientes_resumen_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(buf);
+});
+exports.exportSaldosPendientesMultimediasXlsx = exportSaldosPendientesMultimediasXlsx;
 /** Quita pendientes de pedidos ya despachados para un cliente:
  *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
  *  - Elimina renglones con quantity <= 0

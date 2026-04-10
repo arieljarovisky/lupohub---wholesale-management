@@ -17,10 +17,55 @@ export interface MultimediaMovementRow {
 export interface ParsedCustomerSheet {
   code: string;
   businessNameFromTitle: string;
+  /** CUIT leído de la fila de cabecera (si la columna existe en el Excel). */
+  cuitFromSheet: string;
   vendedorHabitual: string;
   zona: string;
   saldoFinalHeader: number | null;
   movements: MultimediaMovementRow[];
+}
+
+/** Igual que en import Multimedias: código numérico corto rellenado a 6. */
+export function padLegacyCode(code: string): string {
+  const t = code.trim();
+  if (/^\d+$/.test(t) && t.length < 6) return t.padStart(6, '0');
+  return t;
+}
+
+/** Solo dígitos, para matchear CUIT (11 u 8–11). */
+export function normalizeCuitDigits(v: unknown): string {
+  return String(v ?? '').replace(/\D/g, '');
+}
+
+/**
+ * Hoja "Resumen": primera columna código, segunda cliente (como en historial Multimedias).
+ * Devuelve mapa código normalizado → nombre de cliente en el Excel.
+ */
+export function parseResumenCodeToCliente(
+  rows: (string | number | null | undefined)[][]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!rows?.length) return map;
+  let headerRow = -1;
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const a = cellStr(rows[r]?.[0]).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (a === 'codigo' || a === 'código') {
+      headerRow = r;
+      break;
+    }
+  }
+  if (headerRow < 0) return map;
+  for (let r = headerRow + 1; r < rows.length; r++) {
+    const codeRaw = cellStr(rows[r]?.[0]);
+    const cliente = cellStr(rows[r]?.[1]);
+    if (!codeRaw && !cliente) continue;
+    if (codeRaw) {
+      const code = padLegacyCode(codeRaw);
+      if (cliente) map.set(code, cliente);
+      else map.set(code, '');
+    }
+  }
+  return map;
 }
 
 function cellStr(v: unknown): string {
@@ -89,6 +134,7 @@ export function parseCustomerSheetRows(rows: (string | number | null | undefined
 
   let vendedorHabitual = '';
   let zona = '';
+  let cuitFromSheet = '';
   let saldoFinalHeader: number | null = null;
   const r1 = rows[1] || [];
   for (let i = 0; i < r1.length; i += 2) {
@@ -99,6 +145,7 @@ export function parseCustomerSheetRows(rows: (string | number | null | undefined
       if (c) code = c;
     } else if (label.includes('vendedor')) vendedorHabitual = cellStr(val);
     else if (label.includes('zona')) zona = cellStr(val);
+    else if (label.includes('cuit')) cuitFromSheet = normalizeCuitDigits(val);
     else if (label.includes('saldo final')) saldoFinalHeader = cellNum(val);
   }
 
@@ -115,6 +162,7 @@ export function parseCustomerSheetRows(rows: (string | number | null | undefined
     return {
       code,
       businessNameFromTitle,
+      cuitFromSheet,
       vendedorHabitual,
       zona,
       saldoFinalHeader,
@@ -144,6 +192,7 @@ export function parseCustomerSheetRows(rows: (string | number | null | undefined
   return {
     code,
     businessNameFromTitle,
+    cuitFromSheet,
     vendedorHabitual,
     zona,
     saldoFinalHeader,

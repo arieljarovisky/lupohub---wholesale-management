@@ -3,11 +3,59 @@
  * Formato Excel "historial_clientes_multimedias": hoja Resumen + una hoja por cliente.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.padLegacyCode = padLegacyCode;
+exports.normalizeCuitDigits = normalizeCuitDigits;
+exports.parseResumenCodeToCliente = parseResumenCodeToCliente;
 exports.parseArgentineDateDisplay = parseArgentineDateDisplay;
 exports.sqlDateToDisplay = sqlDateToDisplay;
 exports.parseSheetName = parseSheetName;
 exports.parseCustomerSheetRows = parseCustomerSheetRows;
 exports.excelSheetName = excelSheetName;
+/** Igual que en import Multimedias: código numérico corto rellenado a 6. */
+function padLegacyCode(code) {
+    const t = code.trim();
+    if (/^\d+$/.test(t) && t.length < 6)
+        return t.padStart(6, '0');
+    return t;
+}
+/** Solo dígitos, para matchear CUIT (11 u 8–11). */
+function normalizeCuitDigits(v) {
+    return String(v !== null && v !== void 0 ? v : '').replace(/\D/g, '');
+}
+/**
+ * Hoja "Resumen": primera columna código, segunda cliente (como en historial Multimedias).
+ * Devuelve mapa código normalizado → nombre de cliente en el Excel.
+ */
+function parseResumenCodeToCliente(rows) {
+    var _a, _b, _c;
+    const map = new Map();
+    if (!(rows === null || rows === void 0 ? void 0 : rows.length))
+        return map;
+    let headerRow = -1;
+    for (let r = 0; r < Math.min(rows.length, 30); r++) {
+        const a = cellStr((_a = rows[r]) === null || _a === void 0 ? void 0 : _a[0]).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (a === 'codigo' || a === 'código') {
+            headerRow = r;
+            break;
+        }
+    }
+    if (headerRow < 0)
+        return map;
+    for (let r = headerRow + 1; r < rows.length; r++) {
+        const codeRaw = cellStr((_b = rows[r]) === null || _b === void 0 ? void 0 : _b[0]);
+        const cliente = cellStr((_c = rows[r]) === null || _c === void 0 ? void 0 : _c[1]);
+        if (!codeRaw && !cliente)
+            continue;
+        if (codeRaw) {
+            const code = padLegacyCode(codeRaw);
+            if (cliente)
+                map.set(code, cliente);
+            else
+                map.set(code, '');
+        }
+    }
+    return map;
+}
 function cellStr(v) {
     if (v == null || v === '')
         return '';
@@ -82,6 +130,7 @@ function parseCustomerSheetRows(rows) {
     }
     let vendedorHabitual = '';
     let zona = '';
+    let cuitFromSheet = '';
     let saldoFinalHeader = null;
     const r1 = rows[1] || [];
     for (let i = 0; i < r1.length; i += 2) {
@@ -96,6 +145,8 @@ function parseCustomerSheetRows(rows) {
             vendedorHabitual = cellStr(val);
         else if (label.includes('zona'))
             zona = cellStr(val);
+        else if (label.includes('cuit'))
+            cuitFromSheet = normalizeCuitDigits(val);
         else if (label.includes('saldo final'))
             saldoFinalHeader = cellNum(val);
     }
@@ -112,6 +163,7 @@ function parseCustomerSheetRows(rows) {
         return {
             code,
             businessNameFromTitle,
+            cuitFromSheet,
             vendedorHabitual,
             zona,
             saldoFinalHeader,
@@ -140,6 +192,7 @@ function parseCustomerSheetRows(rows) {
     return {
         code,
         businessNameFromTitle,
+        cuitFromSheet,
         vendedorHabitual,
         zona,
         saldoFinalHeader,

@@ -625,6 +625,45 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Hoja única "Resumen" como Multimedias/Tango: saldos pendientes de cobro en LupoHub por cliente. */
+  exportSaldosPendientesMultimedias: async (): Promise<void> => {
+    const blob = await getBlob('/customers/saldos-pendientes/export-multimedias', 90000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saldos_pendientes_resumen_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Movimientos de cuenta importados del Excel (Tango/Multimedias) para la ficha del cliente. */
+  getCustomerMultimediaLedger: async (
+    customerId: string
+  ): Promise<{
+    customerId: string;
+    legacyCode: string | null;
+    accountZone: string | null;
+    accountSellerLabel: string | null;
+    movementCount: number;
+    lastSaldo: number;
+    entries: Array<{
+      lineOrder: number;
+      lineDate: string;
+      tipo: string;
+      numero: string | null;
+      edc: string | null;
+      vto: string | null;
+      importe: number | null;
+      saldo: number | null;
+      detalle: string | null;
+      paginaPdf: string | null;
+    }>;
+  }> => {
+    return await request(`/customers/${encodeURIComponent(customerId)}/multimedia-ledger`, 'GET');
+  },
+
   /** Excel estilo Multimedias: hoja Resumen + una hoja por cliente con historial de cuenta. */
   exportMultimediaHistorial: async (): Promise<void> => {
     const blob = await getBlob('/customers/multimedia-historial/export', 120000);

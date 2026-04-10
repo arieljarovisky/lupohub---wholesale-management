@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -94,6 +94,29 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     loadSaldos();
   }, [canViewSaldos, role]);
 
+  useEffect(() => {
+    if (!selectedCustomer?.id || !canViewSaldos) {
+      setMultimediaLedger(null);
+      return;
+    }
+    let cancelled = false;
+    setMultimediaLedgerLoading(true);
+    api
+      .getCustomerMultimediaLedger(selectedCustomer.id)
+      .then((d) => {
+        if (!cancelled) setMultimediaLedger(d);
+      })
+      .catch(() => {
+        if (!cancelled) setMultimediaLedger(null);
+      })
+      .finally(() => {
+        if (!cancelled) setMultimediaLedgerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.id, canViewSaldos]);
+
   // Form State
   const [newBusinessName, setNewBusinessName] = useState('');
   const [newContactName, setNewContactName] = useState('');
@@ -113,6 +136,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const multimediaHistorialInputRef = useRef<HTMLInputElement>(null);
   const [multimediaExporting, setMultimediaExporting] = useState(false);
   const [multimediaImporting, setMultimediaImporting] = useState(false);
+  const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
+  const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
+  const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
 
   const filteredCustomers = customers.filter(c => 
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -289,6 +315,89 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       averageTicket,
       lastOrderDate: customerOrders.length > 0 ? customerOrders[0].date : 'N/A'
     };
+  };
+
+  type LedgerEntry = NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number];
+
+  const migratedBuckets = useMemo(() => {
+    const entries = multimediaLedger?.entries;
+    if (!entries?.length) return null;
+    const recibos: LedgerEntry[] = [];
+    const facturas: LedgerEntry[] = [];
+    const pedidosTango: LedgerEntry[] = [];
+    const otros: LedgerEntry[] = [];
+    for (const e of entries) {
+      const u = `${e.tipo} ${e.detalle || ''}`.toUpperCase();
+      if (/RECIBO|COBRO|PAGO|NC\s*A|INGRESO/i.test(u)) recibos.push(e);
+      else if (/FACT|FCA|FCE|NOTA\s*DE\s*CR|COMPROBANTE|CREDITO|DEBITO|NC\s*D/i.test(u)) facturas.push(e);
+      else if (/PEDIDO|REMITO|PRESUP|PREFACT|ORDEN/i.test(u)) pedidosTango.push(e);
+      else otros.push(e);
+    }
+    return { recibos, facturas, pedidosTango, otros };
+  }, [multimediaLedger]);
+
+  const pendingShipLines = useMemo(() => {
+    if (!selectedCustomer) return [] as { order: Order; item: OrderItem; pendiente: number }[];
+    const customerOrders = orders.filter((o) => o.customerId === selectedCustomer.id);
+    const out: { order: Order; item: OrderItem; pendiente: number }[] = [];
+    for (const o of customerOrders) {
+      for (const it of o.items || []) {
+        const pend = Math.max(0, Number(it.quantity || 0) - Number(it.picked || 0));
+        if (pend > 0) out.push({ order: o, item: it, pendiente: pend });
+      }
+    }
+    return out;
+  }, [selectedCustomer?.id, orders]);
+
+  const formatLedgerDate = (sql: string) => {
+    const m = String(sql || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return sql || '—';
+    return `${m[3]}/${m[2]}/${m[1]}`;
+  };
+
+  const renderLedgerTable = (title: string, icon: React.ReactNode, rows: LedgerEntry[]) => {
+    if (rows.length === 0) return null;
+    return (
+      <div className="rounded-2xl border border-slate-700/80 overflow-hidden bg-slate-950/40">
+        <div className="px-4 py-2.5 border-b border-slate-700/80 flex items-center gap-2 bg-slate-900/60">
+          {icon}
+          <span className="text-xs font-black text-slate-300 uppercase tracking-wide">{title}</span>
+          <span className="text-[10px] text-slate-500 ml-auto">{rows.length} mov.</span>
+        </div>
+        <div className="overflow-x-auto max-h-56 overflow-y-auto">
+          <table className="min-w-full text-xs text-left">
+            <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-950">
+              <tr>
+                <th className="px-3 py-2">Fecha</th>
+                <th className="px-3 py-2">Tipo</th>
+                <th className="px-3 py-2">Número</th>
+                <th className="px-3 py-2 text-right">Importe</th>
+                <th className="px-3 py-2 text-right">Saldo</th>
+                <th className="px-3 py-2">Detalle</th>
+              </tr>
+            </thead>
+            <tbody className="text-slate-300 divide-y divide-slate-800/80">
+              {rows.map((e, idx) => (
+                <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
+                  <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
+                  <td className="px-3 py-1.5">{e.tipo}</td>
+                  <td className="px-3 py-1.5 font-mono text-[11px]">{e.numero ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {e.saldo != null ? `$${Number(e.saldo).toLocaleString('es-AR')}` : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={e.detalle || ''}>
+                    {e.detalle || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   // --- VIEWS ---
@@ -862,12 +971,98 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         </div>
         )}
 
+        {canViewSaldos && (
+          <div className="mt-8 space-y-4">
+            <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.25em] flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
+              Cuenta corriente importada (Tango / Multimedias)
+            </h3>
+            {multimediaLedgerLoading ? (
+              <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+                <Loader2 className="animate-spin" size={18} aria-hidden />
+                Cargando historial importado…
+              </div>
+            ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-400">
+                  Último saldo en archivo importado:{' '}
+                  <span className="text-amber-200 font-bold tabular-nums">
+                    ${Number(multimediaLedger.lastSaldo).toLocaleString('es-AR')}
+                  </span>
+                  <span className="text-slate-500"> · {multimediaLedger.movementCount} movimientos</span>
+                  {multimediaLedger.legacyCode ? (
+                    <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
+                  ) : null}
+                </p>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {migratedBuckets &&
+                    renderLedgerTable('Recibos / pagos', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, migratedBuckets.recibos)}
+                  {migratedBuckets &&
+                    renderLedgerTable(
+                      'Facturas y comprobantes',
+                      <FileText size={16} className="text-sky-400 shrink-0" aria-hidden />,
+                      migratedBuckets.facturas
+                    )}
+                  {migratedBuckets &&
+                    renderLedgerTable(
+                      'Pedidos (sistema anterior)',
+                      <Package size={16} className="text-violet-400 shrink-0" aria-hidden />,
+                      migratedBuckets.pedidosTango
+                    )}
+                </div>
+                {migratedBuckets && migratedBuckets.otros.length > 0
+                  ? renderLedgerTable(
+                      'Otros movimientos',
+                      <Clock size={16} className="text-slate-400 shrink-0" aria-hidden />,
+                      migratedBuckets.otros
+                    )
+                  : null}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 leading-relaxed">
+                No hay movimientos importados para este cliente. Desde la cartera importá el Excel de Multimedias: se intenta
+                vincular por <strong className="text-slate-400">código legacy</strong>,{' '}
+                <strong className="text-slate-400">razón social</strong> (nombre parecido),{' '}
+                <strong className="text-slate-400">CUIT</strong> cargado en el cliente o en la fila del Excel, y la columna{' '}
+                <strong className="text-slate-400">Cliente</strong> de la hoja Resumen del archivo.
+              </p>
+            )}
+          </div>
+        )}
+
+        {pendingShipLines.length > 0 && (
+          <div className="mt-8 bg-slate-900 rounded-3xl border border-amber-900/35 overflow-hidden">
+            <div className="p-4 border-b border-amber-900/25 flex items-center gap-2">
+              <Package size={18} className="text-amber-400 shrink-0" aria-hidden />
+              <h3 className="font-bold text-white text-sm">Artículos pendientes de envío</h3>
+              <span className="text-xs text-amber-200/80 ml-auto tabular-nums">{pendingShipLines.length} línea(s)</span>
+            </div>
+            <div className="divide-y divide-slate-800 max-h-64 overflow-y-auto">
+              {pendingShipLines.map(({ order, item, pendiente }, i) => (
+                <div
+                  key={`${order.id}-${item.productId ?? i}-${i}`}
+                  className="px-4 py-2.5 flex flex-wrap gap-2 justify-between text-sm"
+                >
+                  <div className="min-w-0">
+                    <span className="text-slate-500 text-xs">Pedido #{order.id}</span>
+                    <p className="text-slate-200 truncate">{lineTitleForItem(item)}</p>
+                    <p className="text-[11px] text-slate-500">{lineMetaForItem(item)}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-amber-300 font-bold tabular-nums">{pendiente} u. pend.</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Orders List Section */}
         <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h3 className="font-bold text-white flex items-center gap-2">
-                   <ShoppingBag size={20} className="text-blue-500"/> Historial de Pedidos
+                   <ShoppingBag size={20} className="text-blue-500"/> Pedidos en LupoHub
                 </h3>
                 <span className="text-xs font-bold text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
                   {visibleOrders.length} / {stats.orders.length} pedidos
@@ -1050,13 +1245,21 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       if (res.notFoundCount > 0) {
         showToast(
           'warning',
-          `${res.notFoundCount} hoja(s) sin cliente coincidente (revisá razón social o cargá el código legacy en el cliente).`
+          `${res.notFoundCount} hoja(s) sin cliente coincidente. Revisá CUIT en el cliente, razón social, código legacy o la hoja Resumen del Excel.`
         );
       }
       if (res.skippedCount > 0) {
         showToast('info', `${res.skippedCount} hoja(s) omitidas (no son clientes asignados a tu usuario).`);
       }
       onRefreshData?.();
+      if (selectedCustomer) {
+        try {
+          const ledger = await api.getCustomerMultimediaLedger(selectedCustomer.id);
+          setMultimediaLedger(ledger);
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Error al importar el Excel de historial.');
     }
@@ -1091,6 +1294,27 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               className="hidden"
               onChange={handleMultimediaHistorialImport}
             />
+          )}
+          {canViewSaldos && (
+            <button
+              type="button"
+              onClick={async () => {
+                setSaldosMultimediasExporting(true);
+                try {
+                  await api.exportSaldosPendientesMultimedias();
+                  showToast('success', 'Excel descargado: hoja Resumen con saldos pendientes de cobro (formato Multimedias).');
+                } catch (err: any) {
+                  showToast('error', err?.message || 'Error al exportar.');
+                }
+                setSaldosMultimediasExporting(false);
+              }}
+              disabled={saldosMultimediasExporting}
+              className="bg-amber-900/40 text-amber-100 px-4 py-2 rounded-lg hover:bg-amber-900/55 border border-amber-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              title="Una hoja Resumen: código, cliente, vendedor, zona, saldo pendiente LupoHub (pedidos impagos − pagos), cantidad de pedidos"
+            >
+              {saldosMultimediasExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+              <span>{saldosMultimediasExporting ? 'Exportando…' : 'Excel saldos pendientes (Resumen)'}</span>
+            </button>
           )}
           {canViewSaldos && (
             <button
