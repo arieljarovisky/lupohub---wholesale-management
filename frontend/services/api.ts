@@ -72,6 +72,19 @@ export const api = {
     await request<void>(`/users/${id}`, 'DELETE');
   },
 
+  importSellers: async (payload: {
+    sellers: Array<{ name: string; email: string; password?: string; commissionPercentage?: number }>;
+    defaultPassword: string;
+  }): Promise<{
+    message: string;
+    created: number;
+    skipped: number;
+    errors: Array<{ row: number; email?: string; message: string }>;
+    errorCount: number;
+  }> => {
+    return await request('/users/import', 'POST', payload);
+  },
+
   // --- PRICE LISTS (solo ADMIN) ---
   getPriceLists: async (): Promise<import('../types').PriceList[]> => {
     const rows = await request<any[]>('/price-lists', 'GET');
@@ -662,6 +675,13 @@ export const api = {
     }>;
   }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/multimedia-ledger`, 'GET');
+  },
+
+  /** Último saldo de cuenta importada (Excel) por cliente — para cards de cartera. */
+  getMultimediaSaldosSummary: async (): Promise<
+    Array<{ customerId: string; lastSaldo: number; movementCount: number }>
+  > => {
+    return await request('/customers/multimedia-saldos-summary', 'GET');
   },
 
   /** Excel estilo Multimedias: hoja Resumen + una hoja por cliente con historial de cuenta. */

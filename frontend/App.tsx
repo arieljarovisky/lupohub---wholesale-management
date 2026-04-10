@@ -417,8 +417,21 @@ const App: React.FC = () => {
       });
       const fetchedUsers = await api.getUsers();
       setUsers(fetchedUsers);
+      const roleLabel =
+        newUser.role === Role.SELLER
+          ? 'Vendedor'
+          : newUser.role === Role.WAREHOUSE
+            ? 'Depósito'
+            : newUser.role === Role.CUSTOMER
+              ? 'Cliente'
+              : 'Administrador';
+      showToast(
+        'success',
+        `${roleLabel} creado: puede ingresar con el email y la contraseña que definiste.`
+      );
     } catch (err: any) {
-      showToast('error', err?.message || 'Error al crear usuario');
+      const msg = err?.response?.data?.message || err?.message || 'Error al crear usuario';
+      showToast('error', msg);
     }
   };
 

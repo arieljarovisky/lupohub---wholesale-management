@@ -75,6 +75,89 @@ export const createUser = async (req: Request, res: Response) => {
   }
 };
 
+type SellerImportBodyRow = {
+  name?: string;
+  email?: string;
+  password?: string;
+  commissionPercentage?: number;
+};
+
+/** Importar vendedores (rol SELLER) en lote. Solo ADMIN. */
+export const importSellers = async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden importar vendedores' });
+    }
+    const body = req.body as { sellers?: SellerImportBodyRow[]; defaultPassword?: string };
+    const rows = Array.isArray(body.sellers) ? body.sellers : [];
+    const defaultPassword = (body.defaultPassword ?? '').toString();
+    if (rows.length === 0) {
+      return res.status(400).json({ message: 'Enviá un array sellers con al menos una fila' });
+    }
+    if (!defaultPassword || defaultPassword.length < 4) {
+      return res.status(400).json({
+        message: 'Definí defaultPassword (mínimo 4 caracteres) para las filas sin contraseña propia'
+      });
+    }
+
+    let created = 0;
+    let skipped = 0;
+    const errors: { row: number; email?: string; message: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const name = (r.name ?? '').toString().trim();
+      const email = (r.email ?? '').toString().trim().toLowerCase();
+      const rowNum = i + 1;
+      if (!name) {
+        errors.push({ row: rowNum, message: 'Falta nombre' });
+        continue;
+      }
+      if (!email || !email.includes('@')) {
+        errors.push({ row: rowNum, message: 'Email inválido o faltante' });
+        continue;
+      }
+      const password = (r.password ?? '').toString().trim() || defaultPassword;
+      const commission =
+        r.commissionPercentage != null && Number.isFinite(Number(r.commissionPercentage))
+          ? Math.min(100, Math.max(0, Number(r.commissionPercentage)))
+          : 0;
+
+      const existing = await get('SELECT id FROM users WHERE email = ?', [email]);
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      const id = uuidv4();
+      try {
+        await execute(
+          `INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, 'SELLER', ?)`,
+          [id, name, email, password, commission]
+        );
+        created++;
+      } catch (e: any) {
+        if (e?.code === 'ER_DUP_ENTRY') {
+          skipped++;
+        } else {
+          errors.push({ row: rowNum, email, message: e?.message || 'Error insertando' });
+        }
+      }
+    }
+
+    res.json({
+      message: 'Importación de vendedores finalizada',
+      created,
+      skipped,
+      errors: errors.slice(0, 30),
+      errorCount: errors.length
+    });
+  } catch (error: any) {
+    console.error('importSellers:', error);
+    res.status(500).json({ message: 'Error importando vendedores', detail: error?.message });
+  }
+};
+
 /** Eliminar usuario. Solo ADMIN. No se puede eliminar a uno mismo. */
 export const deleteUser = async (req: Request, res: Response) => {
   try {

@@ -421,3 +421,47 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     res.status(500).json({ message: 'Error leyendo historial importado', detail: e?.message });
   }
 };
+
+/** GET /customers/multimedia-saldos-summary — último saldo por cliente (Excel importado) para las cards de cartera. */
+export const getMultimediaSaldosSummary = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canManage(user.role)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+    const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const params: any[] = user.role === 'SELLER' ? [user.id] : [];
+
+    const rows = (await query(
+      `SELECT
+         e.customer_id AS customerId,
+         CAST(e.saldo AS DECIMAL(16,2)) AS lastSaldo,
+         cnt.cnt AS movementCount
+       FROM customer_multimedia_entries e
+       INNER JOIN (
+         SELECT customer_id, MAX(line_order) AS max_lo
+         FROM customer_multimedia_entries
+         GROUP BY customer_id
+       ) mx ON mx.customer_id = e.customer_id AND e.line_order = mx.max_lo
+       INNER JOIN (
+         SELECT customer_id, COUNT(*) AS cnt
+         FROM customer_multimedia_entries
+         GROUP BY customer_id
+       ) cnt ON cnt.customer_id = e.customer_id
+       INNER JOIN customers c ON c.id = e.customer_id
+       WHERE 1=1${sellerFilter}`,
+      params
+    )) as any[];
+
+    res.json(
+      (rows || []).map((r) => ({
+        customerId: r.customerId,
+        lastSaldo: Number(r.lastSaldo) || 0,
+        movementCount: Number(r.movementCount) || 0
+      }))
+    );
+  } catch (e: any) {
+    console.error('getMultimediaSaldosSummary:', e);
+    res.status(500).json({ message: 'Error leyendo saldos importados', detail: e?.message });
+  }
+};

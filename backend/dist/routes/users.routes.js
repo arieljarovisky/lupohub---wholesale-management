@@ -6,6 +6,7 @@ const users_controller_1 = require("../controllers/users.controller");
 const router = (0, express_1.Router)();
 router.use(auth_1.authMiddleware);
 router.get('/', users_controller_1.listUsers);
+router.post('/import', users_controller_1.importSellers);
 router.post('/', users_controller_1.createUser);
 router.patch('/:id', users_controller_1.updateUser);
 router.delete('/:id', users_controller_1.deleteUser);

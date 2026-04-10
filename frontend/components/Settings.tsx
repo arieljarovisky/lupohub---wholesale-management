@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
 import { api } from '../services/api';
@@ -6,6 +6,7 @@ import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../ser
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
+import { parseSellersExcel } from '../utils/sellersImportUtils';
 
 /** Exporta la lista de precios a Excel en el formato esperado por la importación (Código, Precio). */
 function exportPriceListExcel(items: { sku?: string; price: number; productId: string }[], listName: string) {
@@ -18,6 +19,17 @@ function exportPriceListExcel(items: { sku?: string; price: number; productId: s
 }
 
 /** Descarga plantilla Excel con todos los artículos (Código + Precio vacío) para completar y importar. */
+function downloadSellersImportTemplate() {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['Nombre', 'Email', 'Contraseña (opcional)', 'Comisión % (opcional)'],
+    ['María García', 'maria@vendedora.com', '', '5'],
+    ['Juan Pérez', 'juan@vendedora.com', 'MiClave123', '']
+  ]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Vendedores');
+  XLSX.writeFile(wb, 'plantilla-importar-vendedores.xlsx');
+}
+
 function downloadPriceListTemplate(products: { sku: string; name?: string }[]) {
   const rows = products.map(p => ({ Código: p.sku, Precio: '' }));
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -491,6 +503,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [newUserRole, setNewUserRole] = useState<Role>(Role.SELLER);
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [defaultSellerImportPassword, setDefaultSellerImportPassword] = useState('');
+  const [sellerExcelImporting, setSellerExcelImporting] = useState(false);
+  const sellersImportInputRef = useRef<HTMLInputElement>(null);
 
   // Price lists (solo ADMIN)
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -663,6 +678,47 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleSellersExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!defaultSellerImportPassword || defaultSellerImportPassword.length < 4) {
+      showToast(
+        'error',
+        'Completá la contraseña por defecto (mín. 4 caracteres) para las filas sin columna Contraseña en el Excel.'
+      );
+      return;
+    }
+    setSellerExcelImporting(true);
+    try {
+      const rows = await parseSellersExcel(file);
+      if (rows.length === 0) {
+        showToast(
+          'warning',
+          'No se encontraron filas válidas. Necesitás columnas de nombre y email, o nombre y código de vendedor (cabecera en la primera fila).'
+        );
+        return;
+      }
+      const res = await api.importSellers({ sellers: rows, defaultPassword: defaultSellerImportPassword });
+      showToast(
+        'success',
+        `Importación lista: ${res.created} vendedor(es) creado(s). Omitidos (email ya existía): ${res.skipped}.`
+      );
+      if (res.errorCount > 0) {
+        const first = res.errors?.[0];
+        showToast(
+          'warning',
+          `${res.errorCount} fila(s) con error${first ? ` (ej. fila ${first.row}: ${first.message})` : ''}.`
+        );
+      }
+      onRefreshData?.();
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || err?.message || 'Error importando vendedores');
+    } finally {
+      setSellerExcelImporting(false);
+    }
+  };
+
   const handleCreateUser = async () => {
     if (!newUserName || !newUserEmail || !newUserPass || !onCreateUser) return;
     
@@ -782,10 +838,15 @@ const Settings: React.FC<SettingsProps> = ({
         <div className="space-y-8">
            {/* CREATE USER FORM */}
            <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
                 <Plus className="bg-blue-600 rounded p-0.5 text-white" size={20} />
                 Alta de Nuevo Usuario
               </h3>
+              <p className="text-sm text-slate-400 mb-4">
+                Para <strong className="text-slate-300">vendedores</strong>, dejá el rol en{' '}
+                <strong className="text-slate-300">Vendedor</strong> (valor por defecto). Luego podés asignarlos a clientes
+                en la cartera y cargarles comisión en la pestaña <strong className="text-slate-300">Comisiones</strong>.
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
                  <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nombre Completo</label>
@@ -854,6 +915,59 @@ const Settings: React.FC<SettingsProps> = ({
                       </button>
                     </div>
                  </div>
+              </div>
+           </div>
+
+           <div className="bg-slate-800/90 rounded-3xl border border-slate-700 border-dashed p-6 shadow-xl">
+              <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                <FileSpreadsheet className="text-emerald-400" size={20} />
+                Importar vendedores desde Excel
+              </h3>
+              <p className="text-sm text-slate-400 mb-4">
+                Primera hoja del archivo: columnas reconocidas por nombre (ej. <strong className="text-slate-300">Nombre</strong>,{' '}
+                <strong className="text-slate-300">Vendedor</strong>, <strong className="text-slate-300">Email</strong>, opcional{' '}
+                <strong className="text-slate-300">Contraseña</strong> y <strong className="text-slate-300">Comisión %</strong>). Si no hay
+                email pero hay <strong className="text-slate-300">Código</strong> de vendedor, se genera un email{' '}
+                <code className="text-xs text-slate-500">vendedor.&lt;número&gt;@importado.lupohub.local</code>.
+              </p>
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 items-stretch sm:items-end">
+                <div className="space-y-1 flex-1 min-w-[200px]">
+                  <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
+                    Contraseña por defecto (filas sin columna contraseña)
+                  </label>
+                  <input
+                    type="password"
+                    value={defaultSellerImportPassword}
+                    onChange={(e) => setDefaultSellerImportPassword(e.target.value)}
+                    placeholder="Ej: CambiarAlIngresar1"
+                    autoComplete="new-password"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <input
+                  ref={sellersImportInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={handleSellersExcelImport}
+                />
+                <button
+                  type="button"
+                  onClick={() => downloadSellersImportTemplate()}
+                  className="px-4 py-3 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm font-semibold whitespace-nowrap"
+                >
+                  <Download className="inline mr-2" size={16} />
+                  Descargar plantilla
+                </button>
+                <button
+                  type="button"
+                  disabled={sellerExcelImporting}
+                  onClick={() => sellersImportInputRef.current?.click()}
+                  className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {sellerExcelImporting ? <Loader2 size={18} className="animate-spin" /> : <FileUp size={18} />}
+                  {sellerExcelImporting ? 'Importando…' : 'Elegir Excel e importar'}
+                </button>
               </div>
            </div>
 

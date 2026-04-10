@@ -13,7 +13,12 @@ import {
   exportSaldosPendientesMultimediasXlsx,
   clearDispatchedPendingsForCustomer
 } from '../controllers/customers.controller';
-import { exportMultimediaHistorial, importMultimediaHistorial, getCustomerMultimediaLedger } from '../controllers/multimediaHistorial.controller';
+import {
+  exportMultimediaHistorial,
+  importMultimediaHistorial,
+  getCustomerMultimediaLedger,
+  getMultimediaSaldosSummary
+} from '../controllers/multimediaHistorial.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -24,6 +29,7 @@ router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendi
 router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);
 router.post('/multimedia-historial/import', authMiddleware as any, upload.single('file'), importMultimediaHistorial as any);
+router.get('/multimedia-saldos-summary', authMiddleware as any, getMultimediaSaldosSummary as any);
 router.get('/:id/multimedia-ledger', authMiddleware as any, getCustomerMultimediaLedger as any);
 router.get('/', authMiddleware as any, getCustomers as any);
 router.post('/', authMiddleware as any, createCustomer as any);

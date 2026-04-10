@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateUser = exports.deleteUser = exports.createUser = exports.listUsers = void 0;
+exports.updateUser = exports.deleteUser = exports.importSellers = exports.createUser = exports.listUsers = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 /** Listar usuarios (sin password). Solo ADMIN. */
@@ -68,6 +68,77 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.createUser = createUser;
+/** Importar vendedores (rol SELLER) en lote. Solo ADMIN. */
+const importSellers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+            return res.status(403).json({ message: 'Solo administradores pueden importar vendedores' });
+        }
+        const body = req.body;
+        const rows = Array.isArray(body.sellers) ? body.sellers : [];
+        const defaultPassword = ((_b = body.defaultPassword) !== null && _b !== void 0 ? _b : '').toString();
+        if (rows.length === 0) {
+            return res.status(400).json({ message: 'Enviá un array sellers con al menos una fila' });
+        }
+        if (!defaultPassword || defaultPassword.length < 4) {
+            return res.status(400).json({
+                message: 'Definí defaultPassword (mínimo 4 caracteres) para las filas sin contraseña propia'
+            });
+        }
+        let created = 0;
+        let skipped = 0;
+        const errors = [];
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const name = ((_c = r.name) !== null && _c !== void 0 ? _c : '').toString().trim();
+            const email = ((_d = r.email) !== null && _d !== void 0 ? _d : '').toString().trim().toLowerCase();
+            const rowNum = i + 1;
+            if (!name) {
+                errors.push({ row: rowNum, message: 'Falta nombre' });
+                continue;
+            }
+            if (!email || !email.includes('@')) {
+                errors.push({ row: rowNum, message: 'Email inválido o faltante' });
+                continue;
+            }
+            const password = ((_e = r.password) !== null && _e !== void 0 ? _e : '').toString().trim() || defaultPassword;
+            const commission = r.commissionPercentage != null && Number.isFinite(Number(r.commissionPercentage))
+                ? Math.min(100, Math.max(0, Number(r.commissionPercentage)))
+                : 0;
+            const existing = yield (0, db_1.get)('SELECT id FROM users WHERE email = ?', [email]);
+            if (existing) {
+                skipped++;
+                continue;
+            }
+            const id = (0, uuid_1.v4)();
+            try {
+                yield (0, db_1.execute)(`INSERT INTO users (id, name, email, password, role, commission_percentage) VALUES (?, ?, ?, ?, 'SELLER', ?)`, [id, name, email, password, commission]);
+                created++;
+            }
+            catch (e) {
+                if ((e === null || e === void 0 ? void 0 : e.code) === 'ER_DUP_ENTRY') {
+                    skipped++;
+                }
+                else {
+                    errors.push({ row: rowNum, email, message: (e === null || e === void 0 ? void 0 : e.message) || 'Error insertando' });
+                }
+            }
+        }
+        res.json({
+            message: 'Importación de vendedores finalizada',
+            created,
+            skipped,
+            errors: errors.slice(0, 30),
+            errorCount: errors.length
+        });
+    }
+    catch (error) {
+        console.error('importSellers:', error);
+        res.status(500).json({ message: 'Error importando vendedores', detail: error === null || error === void 0 ? void 0 : error.message });
+    }
+});
+exports.importSellers = importSellers;
 /** Eliminar usuario. Solo ADMIN. No se puede eliminar a uno mismo. */
 const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;

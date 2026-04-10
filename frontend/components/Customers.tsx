@@ -76,6 +76,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     pedidosPendientes: number;
   }>>([]);
   const [saldosLoading, setSaldosLoading] = useState(false);
+  const [ledgerSaldosById, setLedgerSaldosById] = useState<
+    Record<string, { lastSaldo: number; movementCount: number }>
+  >({});
 
   const loadSaldos = () => {
     if (!canViewSaldos) return;
@@ -90,8 +93,28 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       .finally(() => setSaldosLoading(false));
   };
 
+  const loadLedgerSaldos = () => {
+    if (!canViewSaldos) return;
+    api
+      .getMultimediaSaldosSummary()
+      .then((rows) => {
+        const m: Record<string, { lastSaldo: number; movementCount: number }> = {};
+        for (const r of rows) {
+          m[r.customerId] = {
+            lastSaldo: Number(r.lastSaldo) || 0,
+            movementCount: Number(r.movementCount) || 0
+          };
+        }
+        setLedgerSaldosById(m);
+      })
+      .catch(() => {
+        setLedgerSaldosById({});
+      });
+  };
+
   useEffect(() => {
     loadSaldos();
+    loadLedgerSaldos();
   }, [canViewSaldos, role]);
 
   useEffect(() => {
@@ -1252,6 +1275,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         showToast('info', `${res.skippedCount} hoja(s) omitidas (no son clientes asignados a tu usuario).`);
       }
       onRefreshData?.();
+      loadLedgerSaldos();
       if (selectedCustomer) {
         try {
           const ledger = await api.getCustomerMultimediaLedger(selectedCustomer.id);
@@ -1397,6 +1421,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
           {filteredCustomers.map(customer => {
             const saldo = saldosRows.find((r) => r.customerId === customer.id);
+            const ledgerCard = ledgerSaldosById[customer.id];
+            const deudaPedidos = Number(saldo?.saldoPendiente ?? 0);
             return (
             <div 
               key={customer.id} 
@@ -1436,24 +1462,46 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <p className="text-sm text-slate-400 mb-2 truncate">{customer.name}</p>
 
                 {canViewSaldos && (
-                  <div
-                    className="mb-2 space-y-1"
-                    title="Saldo = pedidos con cobro pendiente (IVA incl.) menos pagos registrados en Facturación → Cargar pago."
-                  >
-                    <div className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]">
-                      <span className="text-amber-300/90 font-semibold">Deuda neta:</span>
-                      <span className="text-amber-300 font-bold tabular-nums">
-                        {saldosLoading
-                          ? '...'
-                          : `$${Number(saldo?.saldoPendiente || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                      </span>
-                    </div>
-                    {!saldosLoading && saldo && (Number(saldo.totalPagos) > 0 || Number(saldo.totalCargosPendiente) > 0) && (
-                      <div className="text-[10px] text-slate-500 tabular-nums">
-                        Cargos IVA: ${Number(saldo.totalCargosPendiente ?? saldo.saldoPendiente).toLocaleString('es-AR', { minimumFractionDigits: 2 })} · Pagos: $
-                        {Number(saldo.totalPagos ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  <div className="mb-2 space-y-1.5">
+                    {ledgerCard && ledgerCard.movementCount > 0 && (
+                      <div
+                        className="inline-flex flex-wrap items-center gap-x-2 gap-y-0 rounded-full bg-sky-500/12 border border-sky-600/35 px-2.5 py-1 text-[11px]"
+                        title="Último saldo de la columna Saldo del Excel de cuenta corriente importado (Tango/Multimedias)."
+                      >
+                        <span className="text-sky-300/95 font-semibold">Saldo cuenta (importado):</span>
+                        <span className="text-sky-100 font-bold tabular-nums">
+                          $
+                          {Number(ledgerCard.lastSaldo).toLocaleString('es-AR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })}
+                        </span>
+                        <span className="text-sky-500/80 text-[10px]">({ledgerCard.movementCount} mov.)</span>
                       </div>
                     )}
+                    <div
+                      className="inline-flex flex-col gap-0.5 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]"
+                      title="Pedidos con cobro pendiente en LupoHub (IVA incl.) menos pagos cargados en Facturación."
+                    >
+                      <div className="inline-flex items-center gap-2">
+                        <span className="text-amber-300/90 font-semibold">Deuda pedidos (LupoHub):</span>
+                        <span className="text-amber-300 font-bold tabular-nums">
+                          {saldosLoading
+                            ? '...'
+                            : `$${deudaPedidos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </span>
+                      </div>
+                      {!saldosLoading && saldo && (Number(saldo.totalPagos) > 0 || Number(saldo.totalCargosPendiente) > 0) && (
+                        <div className="text-[10px] text-slate-500 tabular-nums pl-0">
+                          Cargos IVA: $
+                          {Number(saldo.totalCargosPendiente ?? saldo.saldoPendiente).toLocaleString('es-AR', {
+                            minimumFractionDigits: 2
+                          })}{' '}
+                          · Pagos: $
+                          {Number(saldo.totalPagos ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
