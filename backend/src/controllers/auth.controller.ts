@@ -26,7 +26,9 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Contraseña incorrecta' });
     }
 
-    const { password: _pwd, ...safeUser } = user;
+    const { password: _pwd, ...rest } = user;
+    const safeUser =
+      rest.role === 'SELLER' ? { ...rest, priceListId: undefined } : rest;
     const secret = JWT_SECRET();
     const token = jwt.sign(
       { id: safeUser.id, email: safeUser.email, role: safeUser.role },
@@ -72,7 +74,17 @@ export const refreshToken = async (req: Request, res: Response) => {
       secret,
       { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
     );
-    return res.json({ token: newToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, commissionPercentage: user.commissionPercentage, priceListId: user.priceListId ?? undefined } });
+    return res.json({
+      token: newToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        commissionPercentage: user.commissionPercentage,
+        priceListId: user.role === 'SELLER' ? undefined : user.priceListId ?? undefined
+      }
+    });
   } catch {
     return res.status(401).json({ message: 'Token inválido' });
   }

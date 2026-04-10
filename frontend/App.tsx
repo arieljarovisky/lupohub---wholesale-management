@@ -208,10 +208,9 @@ const App: React.FC = () => {
         setAttributes([]);
         setTransportes([]);
       } else {
-      const effectivePriceListId = currentUser?.role === Role.SELLER ? currentUser.priceListId : undefined;
       const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
       const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
-        api.getProductsAll(effectivePriceListId ? { priceListId: effectivePriceListId } : {}),
+        api.getProductsAll({}),
         api.getOrders(orderParams),
         api.getColors(),
         api.getSizes(),
@@ -274,7 +273,7 @@ const App: React.FC = () => {
       if (currentUser.role === Role.CUSTOMER) {
         api.getProductsAll({ priceListId: myCustomer?.priceListId ?? undefined }).then(setProducts);
       } else if (currentUser.role === Role.SELLER) {
-        api.getProductsAll({ priceListId: currentUser.priceListId ?? undefined }).then(setProducts);
+        api.getProductsAll({}).then(setProducts);
       } else {
         api.getProductsAll({ priceListId: priceListId ?? undefined }).then(setProducts);
       }
@@ -282,13 +281,13 @@ const App: React.FC = () => {
       if (currentUser.role === Role.CUSTOMER) {
         api.getProductsAll({ priceListId: myCustomer?.priceListId ?? undefined }).then(setProducts);
       } else if (currentUser.role === Role.SELLER) {
-        api.getProductsAll({ priceListId: currentUser.priceListId ?? undefined }).then(setProducts);
+        api.getProductsAll({}).then(setProducts);
       } else {
         api.getProductsAll({}).then(setProducts);
       }
     }
     prevCreateOrderViewRef.current = inCreateOrderView;
-  }, [inCreateOrderView, createOrderPriceListId, currentUser?.role, currentUser?.priceListId, myCustomer?.priceListId]);
+  }, [inCreateOrderView, createOrderPriceListId, currentUser?.role, myCustomer?.priceListId]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

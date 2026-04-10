@@ -9,7 +9,8 @@ export const listUsers = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Solo administradores pueden listar usuarios' });
     }
     const rows = await query(
-      `SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId
+      `SELECT id, name, email, role, commission_percentage AS commissionPercentage,
+              CASE WHEN role = 'SELLER' THEN NULL ELSE price_list_id END AS priceListId
        FROM users ORDER BY name`
     );
     res.json(rows);
@@ -184,7 +185,7 @@ export const deleteUser = async (req: Request, res: Response) => {
   }
 };
 
-/** Actualizar usuario (ej. price_list_id para vendedores). Solo ADMIN. */
+/** Actualizar usuario (price_list_id solo para roles que no sean SELLER). Solo ADMIN. */
 export const updateUser = async (req: Request, res: Response) => {
   try {
     if ((req as any).user?.role !== 'ADMIN') {
@@ -192,13 +193,18 @@ export const updateUser = async (req: Request, res: Response) => {
     }
     const { id } = req.params;
     const body = req.body as { priceListId?: string | null; commissionPercentage?: number | null };
-    const existing = await get('SELECT id FROM users WHERE id = ?', [id]);
+    const existing = await get('SELECT id, role FROM users WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Usuario no encontrado' });
+    const userRole = String((existing as { role?: string }).role ?? '');
 
     let didUpdate = false;
     if (body.priceListId !== undefined) {
-      const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
-      await execute('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+      if (userRole === 'SELLER') {
+        await execute('UPDATE users SET price_list_id = NULL WHERE id = ?', [id]);
+      } else {
+        const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
+        await execute('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+      }
       didUpdate = true;
     }
     if (body.commissionPercentage !== undefined) {
@@ -209,11 +215,16 @@ export const updateUser = async (req: Request, res: Response) => {
       await execute('UPDATE users SET commission_percentage = ? WHERE id = ?', [commission, id]);
       didUpdate = true;
     }
+    if (didUpdate && userRole === 'SELLER') {
+      await execute('UPDATE users SET price_list_id = NULL WHERE id = ?', [id]);
+    }
     if (!didUpdate) {
       return res.status(400).json({ message: 'No hay campos para actualizar' });
     }
     const updated = await get(
-      `SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?`,
+      `SELECT id, name, email, role, commission_percentage AS commissionPercentage,
+              CASE WHEN role = 'SELLER' THEN NULL ELSE price_list_id END AS priceListId
+       FROM users WHERE id = ?`,
       [id]
     );
     res.json(updated);

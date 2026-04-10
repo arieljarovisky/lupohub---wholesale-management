@@ -973,7 +973,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 Comisión: {u.commissionPercentage}%
                              </div>
                           )}
-                          {(u.role === Role.SELLER || u.role === Role.CUSTOMER) && (
+                          {u.role === Role.CUSTOMER && (
                              <div className="mt-2">
                                 <label className="text-[10px] font-black text-slate-500 uppercase">Lista de precios</label>
                                 <select
