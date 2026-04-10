@@ -4138,6 +4138,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     let item: any = null;
     let resolvedItemId = '';
     let catalogItemCandidates: string[] = [];
+    let userProductItemCandidates: string[] = [];
     const triedCandidates = [...candidates];
     for (const candidate of candidates) {
       try {
@@ -4179,6 +4180,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         mlToken.user_id,
         mlToken.access_token
       );
+      userProductItemCandidates = upCandidates;
       for (const candidate of upCandidates) {
         if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
         try {
@@ -4197,6 +4199,69 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
     if (!item || item.error) {
       return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
+    }
+    // Caso UP (MLAU...): devolver TODAS las variantes de todos los items del user_product_id.
+    if (userProductItemCandidates.length > 1) {
+      const byVariationId: Record<string, { variationId: string; sku: string; color: string; size: string; stock: number }> = {};
+      for (const candidate of userProductItemCandidates.slice(0, 120)) {
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          const it = itemRes?.data;
+          if (!it || it.error) continue;
+
+          if (Array.isArray(it.variations) && it.variations.length > 0) {
+            for (const v of it.variations) {
+              const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+              const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+              const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+              let color = '';
+              let size = '';
+              (v.attribute_combinations || []).forEach((attr: any) => {
+                const id = (attr.id || '').toString().toUpperCase();
+                const name = (attr.value_name || attr.name || '').toString().trim();
+                if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+                if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
+              });
+              byVariationId[String(v.id)] = {
+                variationId: String(v.id),
+                sku,
+                color,
+                size,
+                stock: v.available_quantity || 0
+              };
+            }
+          } else {
+            const attrs = Array.isArray(it.attributes) ? it.attributes : [];
+            const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+            const sku = (it.seller_sku ?? it.seller_custom_field ?? (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '')).toString().trim();
+            const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
+            const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
+            const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+            byVariationId[String(it.id)] = {
+              variationId: String(it.id),
+              sku,
+              color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
+              size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
+              stock: it.available_quantity || 0
+            };
+          }
+        } catch {
+          // ignorar ítem inválido y continuar
+        }
+      }
+      const upVariations = Object.values(byVariationId);
+      if (upVariations.length > 1) {
+        return res.json({
+          variations: upVariations,
+          singleProduct: false,
+          itemId: item.id,
+          requestedItemId: String(req.params.itemId || ''),
+          resolvedItemId,
+          resolvedFromUserProduct: true
+        });
+      }
     }
     if (item.variations && item.variations.length > 0) {
       const variations = item.variations.map((v: any) => {
