@@ -29,6 +29,26 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+
+  const parseMoneyInput = (raw: string): number => {
+    const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/\$/g, '');
+    if (!s) return 0;
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+      // Formato típico AR: 1.234.567,89
+      const normalized = s.replace(/\./g, '').replace(',', '.');
+      const n = Number(normalized);
+      return Number.isFinite(n) ? n : NaN;
+    }
+    if (hasComma) {
+      // Ej: 1234,56
+      const n = Number(s.replace(',', '.'));
+      return Number.isFinite(n) ? n : NaN;
+    }
+    const n = Number(s);
+    return Number.isFinite(n) ? n : NaN;
+  };
   const paymentsExcelInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -543,11 +563,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               <button
                 onClick={async () => {
                   try {
-                    const amount = parseFloat(String(payAmount || '0').replace(',', '.'));
+                    const amount = parseMoneyInput(payAmount || '0');
                     if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
-                    if (Number.isNaN(amount) || amount < 0) { showToast('error', 'Importe inválido'); return; }
+                    if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
                     await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),

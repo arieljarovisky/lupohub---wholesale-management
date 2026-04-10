@@ -81,6 +81,7 @@ export type ManualFacturaFields = {
   saleCondition?: string;
   /** Transporte elegido para imprimir en la factura (nombre del express). */
   transporteName?: string;
+  transporteAddress?: string;
   transporteId?: string;
 };
 
@@ -184,10 +185,19 @@ export function buildWholesaleFacturaHtml(params: {
   const condicionIvaReceptor = (customer?.condicionIva || 'Consumidor Final').toString().trim();
   const transportNumber = (manual?.transportNumber ?? customer?.transportNumber ?? '').toString().trim();
   const manualTransporteName = (manual?.transporteName ?? '').toString().trim();
+  const manualTransporteAddress = (manual?.transporteAddress ?? '').toString().trim();
+  const manualTransporteLabel = manualTransporteName
+    ? (manualTransporteAddress ? `${manualTransporteName} — ${manualTransporteAddress}` : manualTransporteName)
+    : '';
   const transportesCliente = (customer?.transportes ?? [])
-    .map((t) => (t.name ?? '').toString().trim())
+    .map((t) => {
+      const name = (t.name ?? '').toString().trim();
+      const address = (t.address ?? '').toString().trim();
+      if (!name) return '';
+      return address ? `${name} — ${address}` : name;
+    })
     .filter(Boolean);
-  const transporteNombreFactura = manualTransporteName || (transportesCliente.length ? transportesCliente.join(', ') : '');
+  const transporteNombreFactura = manualTransporteLabel || (transportesCliente.length ? transportesCliente.join(', ') : '');
   const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
   const saleConditionRaw = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim().toLowerCase();
   const saleCondition = saleConditionRaw.includes('60') ? '60 días' : '30 días';

@@ -553,6 +553,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       if (t) {
         manual.transporteId = t.id;
         manual.transporteName = t.name;
+        manual.transporteAddress = t.address;
       }
     }
     setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [facturaPreviewOrder.id]: manual }));
@@ -1280,10 +1281,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     if (t) {
                       manual.transporteId = t.id;
                       manual.transporteName = t.name;
+                      manual.transporteAddress = t.address;
                     }
                   } else {
                     delete manual.transporteId;
                     delete manual.transporteName;
+                    delete manual.transporteAddress;
                   }
                   setManualFacturaDataByOrder((prev) => ({
                     ...prev,
