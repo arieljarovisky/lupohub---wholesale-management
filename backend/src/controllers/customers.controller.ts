@@ -593,6 +593,150 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Cartera unificada por cliente: max(0, C + M − P).
+ * C = suma pedidos con cobro pendiente (IVA incl.), M = último saldo cuenta importada (Tango/Multimedias), P = recibos en Facturación.
+ * Los pagos se aplican al total (no solo a pedidos LupoHub), para que un recibo descuente también de la cuenta importada.
+ */
+export const getCarteraTotals = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  if (!user || !roleCanViewSaldos(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para ver saldos' });
+  }
+  const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+  const baseParams: any[] = user.role === 'SELLER' ? [user.id] : [];
+
+  const paymentsSubquery =
+    user.role === 'SELLER'
+      ? `SELECT p.customer_id, SUM(p.amount) AS total_pagos
+         FROM payments p
+         INNER JOIN customers c2 ON c2.id = p.customer_id
+         WHERE (p.seller_id = ? OR c2.seller_id = ?)
+         GROUP BY p.customer_id`
+      : `SELECT customer_id, SUM(amount) AS total_pagos
+         FROM payments
+         GROUP BY customer_id`;
+  const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
+  const paramsWithNc = [...baseParams, ...payParams];
+  const paramsSimple = [...baseParams, ...payParams];
+
+  /** Preferir saldo de la última fila (import PDF escribe ahí SALDO DEL CLIENTE); si NULL, último saldo intermedio. */
+  const mmSubquery = `
+    SELECT
+      agg.customer_id,
+      CAST(COALESCE(
+        (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+         FROM customer_multimedia_entries e_lo
+         WHERE e_lo.customer_id = agg.customer_id
+         ORDER BY e_lo.line_order DESC
+         LIMIT 1),
+        (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+         FROM customer_multimedia_entries e2
+         WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+         ORDER BY e2.line_order DESC
+         LIMIT 1),
+        0
+      ) AS DECIMAL(16,2)) AS last_saldo
+    FROM (
+      SELECT customer_id
+      FROM customer_multimedia_entries
+      GROUP BY customer_id
+    ) agg`;
+
+  const sqlWithNc = `
+    SELECT
+      c.id AS customerId,
+      ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ROUND(GREATEST(0, COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendienteUnificado
+    FROM customers c
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargos
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+      GROUP BY o.customer_id
+    ) oc ON oc.customer_id = c.id
+    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    WHERE 1=1 ${sellerFilter}
+      AND (
+        COALESCE(oc.cargos, 0) > 0.005
+        OR COALESCE(mm.last_saldo, 0) > 0.005
+        OR COALESCE(pay.total_pagos, 0) > 0.005
+      )
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  const sqlSimple = `
+    SELECT
+      c.id AS customerId,
+      ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
+      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ROUND(GREATEST(0, COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendienteUnificado
+    FROM customers c
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(o.total * 1.21, 2)) AS cargos
+      FROM orders o
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+      GROUP BY o.customer_id
+    ) oc ON oc.customer_id = c.id
+    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    WHERE 1=1 ${sellerFilter}
+      AND (
+        COALESCE(oc.cargos, 0) > 0.005
+        OR COALESCE(mm.last_saldo, 0) > 0.005
+        OR COALESCE(pay.total_pagos, 0) > 0.005
+      )
+    ORDER BY c.business_name ASC, c.name ASC
+  `;
+
+  try {
+    const rows = await query(sqlWithNc, paramsWithNc);
+    return res.json(
+      (rows as any[]).map((r) => ({
+        customerId: r.customerId,
+        orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+        multimediaSaldo: Number(r.multimediaSaldo) || 0,
+        totalPagos: Number(r.totalPagos) || 0,
+        saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+      }))
+    );
+  } catch (e: any) {
+    console.warn('[cartera-totals] consulta con NC falló, reintentando sin NC:', e?.message);
+    try {
+      const rows = await query(sqlSimple, paramsSimple);
+      return res.json(
+        (rows as any[]).map((r) => ({
+          customerId: r.customerId,
+          orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+          multimediaSaldo: Number(r.multimediaSaldo) || 0,
+          totalPagos: Number(r.totalPagos) || 0,
+          saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+        }))
+      );
+    } catch (e2: any) {
+      console.error('getCarteraTotals:', e2);
+      return res.status(500).json({ message: 'Error listando totales de cartera' });
+    }
+  }
+};
+
 /** Exporta saldos pendientes en CSV (UTF-8 con BOM para Excel). */
 export const exportSaldosPendientesCsv = async (req: Request, res: Response) => {
   const user = (req as any).user;
@@ -748,6 +892,11 @@ type MergedResumenRow = {
   contactName: string;
   cuit: string;
   saldoPendiente: number;
+  /** Cargos pedidos LupoHub (IVA incl.) antes de unificar con cuenta importada. */
+  totalCargosPendiente: number;
+  /** Recibos en Facturación (misma base que getCarteraTotals). */
+  totalPagos: number;
+  multimediaSaldo: number;
   pedidosPendientes: number;
   seller_name?: string;
   /** Líneas importadas en customer_multimedia_entries (como en export historial Multimedias). */
@@ -756,7 +905,7 @@ type MergedResumenRow = {
 
 /**
  * Excel una sola hoja "Resumen" estilizada: Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos.
- * Saldo final = (LupoHub: pedidos pendientes IVA incl. − pagos) + (último saldo cuenta importada Excel).
+ * Saldo final = max(0, C + M − P): pedidos pendientes IVA + último saldo cuenta importada − pagos registrados.
  * Movimientos = líneas en historial importado + cantidad de pedidos pendientes (misma idea que cartera unificada).
  * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
  */
@@ -784,6 +933,22 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
   const paramsWithNc = [...baseParams, ...payParams];
   const paramsSimple = [...baseParams, ...payParams];
+
+  const payMmJoin =
+    user.role === 'SELLER'
+      ? `LEFT JOIN (
+      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      FROM payments p
+      INNER JOIN customers c2 ON c2.id = p.customer_id
+      WHERE (p.seller_id = ? OR c2.seller_id = ?)
+      GROUP BY p.customer_id
+    ) pay_mm ON pay_mm.customer_id = c.id`
+      : `LEFT JOIN (
+      SELECT customer_id, SUM(amount) AS total_pagos
+      FROM payments
+      GROUP BY customer_id
+    ) pay_mm ON pay_mm.customer_id = c.id`;
+  const mmParams = [...baseParams, ...payParams];
 
   const sqlWithNc = `
     SELECT
@@ -887,14 +1052,21 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       c.business_name AS businessName,
       c.name AS contactName,
       c.cuit,
-      CAST(COALESCE((
-        SELECT CAST(e2.saldo AS DECIMAL(16,2))
-        FROM customer_multimedia_entries e2
-        WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-        ORDER BY e2.line_order DESC
-        LIMIT 1
-      ), 0) AS DECIMAL(16,2)) AS lastSaldo,
+      CAST(COALESCE(
+        (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+         FROM customer_multimedia_entries e_lo
+         WHERE e_lo.customer_id = agg.customer_id
+         ORDER BY e_lo.line_order DESC
+         LIMIT 1),
+        (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+         FROM customer_multimedia_entries e2
+         WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+         ORDER BY e2.line_order DESC
+         LIMIT 1),
+        0
+      ) AS DECIMAL(16,2)) AS lastSaldo,
       agg.cnt AS movementCount,
+      ROUND(COALESCE(pay_mm.total_pagos, 0), 2) AS totalPagos,
       u.name AS seller_name
     FROM (
       SELECT customer_id, COUNT(*) AS cnt
@@ -903,12 +1075,13 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     ) agg
     INNER JOIN customers c ON c.id = agg.customer_id
     LEFT JOIN users u ON u.id = c.seller_id
+    ${payMmJoin}
     WHERE 1=1 ${sellerFilter}
   `;
 
   let mmRows: any[] = [];
   try {
-    mmRows = (await query(sqlMultimediaSaldos, baseParams)) as any[];
+    mmRows = (await query(sqlMultimediaSaldos, mmParams)) as any[];
   } catch {
     mmRows = [];
   }
@@ -916,6 +1089,8 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   const byId = new Map<string, MergedResumenRow>();
   for (const r of rows) {
     const id = String(r.customerId);
+    const C = Number(r.totalCargosPendiente) || 0;
+    const P = Number(r.totalPagos) || 0;
     byId.set(id, {
       customerId: id,
       legacy_code: r.legacy_code,
@@ -925,7 +1100,10 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       businessName: String(r.businessName ?? ''),
       contactName: String(r.contactName ?? ''),
       cuit: String(r.cuit ?? ''),
-      saldoPendiente: Number(r.saldoPendiente) || 0,
+      totalCargosPendiente: C,
+      totalPagos: P,
+      multimediaSaldo: 0,
+      saldoPendiente: Math.round(Math.max(0, C + 0 - P) * 100) / 100,
       pedidosPendientes: Number(r.pedidosPendientes) || 0,
       seller_name: r.seller_name,
       movementCountExcel: 0
@@ -935,9 +1113,15 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     const id = String(m.customerId);
     const excelSaldo = Number(m.lastSaldo) || 0;
     const mmCnt = Number(m.movementCount) || 0;
+    const Pmm = Number(m.totalPagos) || 0;
     const existing = byId.get(id);
+    const C = existing?.totalCargosPendiente ?? 0;
+    const P = existing?.totalPagos ?? Pmm;
+    const unified = Math.round(Math.max(0, C + excelSaldo - P) * 100) / 100;
     if (existing) {
-      existing.saldoPendiente = Math.round((existing.saldoPendiente + excelSaldo) * 100) / 100;
+      existing.multimediaSaldo = excelSaldo;
+      existing.totalPagos = P;
+      existing.saldoPendiente = unified;
       existing.movementCountExcel = mmCnt;
     } else {
       byId.set(id, {
@@ -949,7 +1133,10 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         businessName: String(m.businessName ?? ''),
         contactName: String(m.contactName ?? ''),
         cuit: String(m.cuit ?? ''),
-        saldoPendiente: Math.round(excelSaldo * 100) / 100,
+        totalCargosPendiente: 0,
+        totalPagos: Pmm,
+        multimediaSaldo: excelSaldo,
+        saldoPendiente: Math.round(Math.max(0, 0 + excelSaldo - Pmm) * 100) / 100,
         pedidosPendientes: 0,
         seller_name: m.seller_name,
         movementCountExcel: mmCnt

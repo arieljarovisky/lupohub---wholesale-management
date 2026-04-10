@@ -608,6 +608,22 @@ export const api = {
     }, [], 'getCustomers');
   },
 
+  /**
+   * Cartera unificada: max(0, pedidos pendientes IVA + saldo cuenta importada − recibos en Facturación).
+   * Solo clientes con algún cargo, saldo importado o pago registrado.
+   */
+  getCarteraTotals: async (): Promise<
+    Array<{
+      customerId: string;
+      orderCargosPendientes: number;
+      multimediaSaldo: number;
+      totalPagos: number;
+      saldoPendienteUnificado: number;
+    }>
+  > => {
+    return await request('/customers/cartera-totals', 'GET');
+  },
+
   /** Saldos: pedidos impagos (IVA incl.) menos pagos/recibos cargados en Facturación. */
   getSaldosPendientes: async (): Promise<Array<{
     customerId: string;

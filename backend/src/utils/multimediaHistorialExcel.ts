@@ -79,12 +79,56 @@ function cellStr(v: unknown): string {
   return String(v).trim();
 }
 
+/**
+ * Montos estilo Argentina en PDF/Excel: miles con punto y decimales con coma (952.536,52, 108.911,30),
+ * o US (259,742.24). También 108911,30 sin separador de miles.
+ */
+export function parseArgentineMoneyDisplay(s: string): number | null {
+  const raw = String(s ?? '').trim();
+  if (!raw) return null;
+  let t = raw.replace(/\s/g, '');
+  const neg = t.startsWith('-');
+  if (neg) t = t.slice(1);
+  if (!t) return null;
+
+  // US: 1,234.56 o 259,742.24 (coma miles, punto decimal)
+  if (/^\d{1,3}(,\d{3})*\.\d{2}$/.test(t)) {
+    const n = parseFloat(t.replace(/,/g, ''));
+    if (!Number.isFinite(n)) return null;
+    const v = Math.round(n * 100) / 100;
+    return neg ? -v : v;
+  }
+
+  // AR: 952.536,52 — puntos miles, coma decimal
+  if (/^\d{1,3}(\.\d{3})*,\d{1,4}$/.test(t)) {
+    const lastComma = t.lastIndexOf(',');
+    const intPart = t.slice(0, lastComma).replace(/\./g, '');
+    const decPart = t.slice(lastComma + 1);
+    const n = parseFloat(`${intPart}.${decPart}`);
+    if (!Number.isFinite(n)) return null;
+    const v = Math.round(n * 100) / 100;
+    return neg ? -v : v;
+  }
+
+  // Sin puntos de miles: 108911,30
+  if (/^\d+,\d{1,4}$/.test(t)) {
+    const lastComma = t.lastIndexOf(',');
+    const n = parseFloat(`${t.slice(0, lastComma)}.${t.slice(lastComma + 1)}`);
+    if (!Number.isFinite(n)) return null;
+    const v = Math.round(n * 100) / 100;
+    return neg ? -v : v;
+  }
+
+  const n = parseFloat(t.replace(/,/g, ''));
+  if (!Number.isFinite(n)) return null;
+  const v = Math.round(n * 100) / 100;
+  return neg ? -v : v;
+}
+
 function cellNum(v: unknown): number | null {
   if (v == null || v === '') return null;
   if (typeof v === 'number' && Number.isFinite(v)) return v;
-  const s = String(v).replace(/\s/g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : null;
+  return parseArgentineMoneyDisplay(String(v));
 }
 
 /** Parsea fechas tipo 31/12/2014, 13/04/15, 22/08/25 */

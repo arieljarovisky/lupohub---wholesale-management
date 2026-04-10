@@ -9,6 +9,7 @@ import {
   bulkUpdateCuit,
   attachUserToCustomer,
   getSaldosPendientes,
+  getCarteraTotals,
   exportSaldosPendientesCsv,
   exportSaldosPendientesMultimediasXlsx,
   clearDispatchedPendingsForCustomer,
@@ -28,6 +29,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/saldos-pendientes/export-multimedias', authMiddleware as any, exportSaldosPendientesMultimediasXlsx as any);
 router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
 router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
+router.get('/cartera-totals', authMiddleware as any, getCarteraTotals as any);
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);
 router.post('/multimedia-historial/import', authMiddleware as any, upload.single('file'), importMultimediaHistorial as any);
 router.get('/multimedia-saldos-summary', authMiddleware as any, getMultimediaSaldosSummary as any);

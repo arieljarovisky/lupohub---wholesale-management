@@ -41,34 +41,23 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   onUpdateUser
 }) => {
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
-  const [saldosRows, setSaldosRows] = useState<
-    Array<{ customerId: string; saldoPendiente: number; businessName?: string }>
-  >([]);
-  const [ledgerByCustomer, setLedgerByCustomer] = useState<Record<string, { lastSaldo: number; movementCount: number }>>({});
+  const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
 
   const loadSaldosCartera = useCallback(() => {
     setSaldosLoading(true);
-    Promise.all([api.getSaldosPendientes().catch(() => [] as any[]), api.getMultimediaSaldosSummary().catch(() => [])])
-      .then(([srows, lrows]) => {
-        setSaldosRows(
-          (srows as any[]).map((r) => ({
-            customerId: r.customerId,
-            saldoPendiente: Number(r.saldoPendiente) || 0,
-            businessName: r.businessName
-          }))
-        );
-        const m: Record<string, { lastSaldo: number; movementCount: number }> = {};
-        for (const r of lrows as Array<{ customerId: string; lastSaldo: number; movementCount: number }>) {
-          m[r.customerId] = {
-            lastSaldo: Number(r.lastSaldo) || 0,
-            movementCount: Number(r.movementCount) || 0
-          };
+    api
+      .getCarteraTotals()
+      .then((rows) => {
+        const m: Record<string, number> = {};
+        for (const r of rows) {
+          m[r.customerId] = Number(r.saldoPendienteUnificado) || 0;
         }
-        setLedgerByCustomer(m);
+        setCarteraByCustomer(m);
       })
+      .catch(() => setCarteraByCustomer({}))
       .finally(() => setSaldosLoading(false));
   }, []);
 
@@ -91,11 +80,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const customersForSeller = (sellerId: string) => customers.filter((c) => c.sellerId === sellerId);
   const ordersForSeller = (sellerId: string) => orders.filter((o) => o.sellerId === sellerId);
 
-  const unifiedSaldoForCustomer = (customerId: string) => {
-    const l = saldosRows.find((r) => r.customerId === customerId);
-    const le = ledgerByCustomer[customerId];
-    return (Number(l?.saldoPendiente) || 0) + (Number(le?.lastSaldo) || 0);
-  };
+  const unifiedSaldoForCustomer = (customerId: string) => carteraByCustomer[customerId] ?? 0;
 
   const totalSaldoCarteraForSeller = (sellerId: string) => {
     const ids = customersForSeller(sellerId).map((c) => c.id);
@@ -121,7 +106,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const commission = sales * (rate / 100);
     const saldoTotal = totalSaldoCarteraForSeller(sid);
     return { custs, ords, sales, rate, commission, saldoTotal };
-  }, [selectedSellerId, orders, users, customers, saldosRows, ledgerByCustomer, currentUser]);
+  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser]);
 
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);

@@ -63,58 +63,54 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [savingAccessUser, setSavingAccessUser] = useState(false);
 
   const canViewSaldos = role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.DEPOSITO;
-  const [saldosRows, setSaldosRows] = useState<Array<{
-    customerId: string;
-    businessName: string;
-    contactName: string;
-    cuit: string;
-    city: string;
-    email: string;
-    saldoPendiente: number;
-    totalCargosPendiente?: number;
-    totalPagos?: number;
-    pedidosPendientes: number;
-  }>>([]);
-  const [saldosLoading, setSaldosLoading] = useState(false);
-  const [ledgerSaldosById, setLedgerSaldosById] = useState<
-    Record<string, { lastSaldo: number; movementCount: number }>
+  /** max(0, pedidos LupoHub + cuenta importada − recibos Facturación) por cliente */
+  const [carteraById, setCarteraById] = useState<
+    Record<
+      string,
+      {
+        saldoPendienteUnificado: number;
+        orderCargosPendientes: number;
+        multimediaSaldo: number;
+        totalPagos: number;
+      }
+    >
   >({});
+  const [saldosLoading, setSaldosLoading] = useState(false);
 
-  const loadSaldos = () => {
+  const loadCarteraTotals = () => {
     if (!canViewSaldos) return;
     setSaldosLoading(true);
     api
-      .getSaldosPendientes()
-      .then(setSaldosRows)
+      .getCarteraTotals()
+      .then((rows) => {
+        const m: Record<
+          string,
+          {
+            saldoPendienteUnificado: number;
+            orderCargosPendientes: number;
+            multimediaSaldo: number;
+            totalPagos: number;
+          }
+        > = {};
+        for (const r of rows) {
+          m[r.customerId] = {
+            saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0,
+            orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+            multimediaSaldo: Number(r.multimediaSaldo) || 0,
+            totalPagos: Number(r.totalPagos) || 0
+          };
+        }
+        setCarteraById(m);
+      })
       .catch(() => {
-        showToast('error', 'No se pudieron cargar los saldos pendientes.');
-        setSaldosRows([]);
+        showToast('error', 'No se pudieron cargar los saldos de cartera.');
+        setCarteraById({});
       })
       .finally(() => setSaldosLoading(false));
   };
 
-  const loadLedgerSaldos = () => {
-    if (!canViewSaldos) return;
-    api
-      .getMultimediaSaldosSummary()
-      .then((rows) => {
-        const m: Record<string, { lastSaldo: number; movementCount: number }> = {};
-        for (const r of rows) {
-          m[r.customerId] = {
-            lastSaldo: Number(r.lastSaldo) || 0,
-            movementCount: Number(r.movementCount) || 0
-          };
-        }
-        setLedgerSaldosById(m);
-      })
-      .catch(() => {
-        setLedgerSaldosById({});
-      });
-  };
-
   useEffect(() => {
-    loadSaldos();
-    loadLedgerSaldos();
+    loadCarteraTotals();
   }, [canViewSaldos, role]);
 
   useEffect(() => {
@@ -194,18 +190,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return false;
   };
 
-  const getDeudaLupo = (c: Customer) => {
-    const r = saldosRows.find((x) => x.customerId === c.id);
-    return Number(r?.saldoPendiente ?? 0);
+  /** Un solo saldo: pedidos + cuenta importada − recibos (Facturación). */
+  const getSaldoPendienteTotal = (c: Customer) => {
+    const t = carteraById[c.id];
+    return t != null ? Number(t.saldoPendienteUnificado) || 0 : 0;
   };
-
-  const getSaldoExcel = (c: Customer) => {
-    const le = ledgerSaldosById[c.id];
-    return Number(le?.lastSaldo ?? 0);
-  };
-
-  /** Un solo saldo pendiente por cliente: cuenta importada (Excel) + deuda pedidos en LupoHub */
-  const getSaldoPendienteTotal = (c: Customer) => getDeudaLupo(c) + getSaldoExcel(c);
 
   const displayCustomers = useMemo(() => {
     let list = customers.filter((c) => matchesSearch(c, searchTerm));
@@ -255,8 +244,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     sellerFilterId,
     sortPreset,
     role,
-    saldosRows,
-    ledgerSaldosById,
+    carteraById,
     users
   ]);
 
@@ -500,11 +488,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const renderLedgerTable = (title: string, icon: React.ReactNode, rows: LedgerEntry[]) => {
     if (rows.length === 0) return null;
     return (
-      <div className="rounded-2xl border border-slate-700/80 overflow-hidden bg-slate-950/40">
-        <div className="px-4 py-2.5 border-b border-slate-700/80 flex items-center gap-2 bg-slate-900/60">
+      <div className="rounded-2xl border border-slate-600/60 overflow-hidden bg-slate-950/50 shadow-inner shadow-black/20">
+        <div className="px-4 py-3 border-b border-slate-700/70 flex items-center gap-2 bg-gradient-to-r from-slate-900/95 to-slate-950/90">
           {icon}
-          <span className="text-xs font-black text-slate-300 uppercase tracking-wide">{title}</span>
-          <span className="text-[10px] text-slate-500 ml-auto">{rows.length} mov.</span>
+          <span className="text-xs font-black text-slate-100 uppercase tracking-[0.12em]">{title}</span>
+          <span className="text-[10px] text-slate-500 ml-auto tabular-nums">{rows.length} mov.</span>
         </div>
         <div className="overflow-x-auto max-h-56 overflow-y-auto">
           <table className="min-w-full text-xs text-left">
@@ -941,13 +929,44 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         </div>
 
         {canViewSaldos && (
-          <div className="mt-6 rounded-3xl border border-slate-600/40 bg-slate-900/80 p-5 shadow-lg">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2 text-slate-300">
-                <Wallet size={20} className="text-slate-400 shrink-0" />
-                <span className="text-xs font-black uppercase tracking-[0.2em]">Saldo pendiente</span>
+          <div className="mt-6 rounded-3xl border border-amber-500/35 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 p-6 shadow-xl shadow-black/30 ring-1 ring-amber-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-amber-100/90">
+                  <Wallet size={22} className="text-amber-400 shrink-0" aria-hidden />
+                  <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente unificado</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
+                  Pedidos LupoHub con cobro pendiente, más el último saldo de cuenta importada (Tango / Multimedias), menos los
+                  recibos cargados en Facturación.
+                </p>
+                {selectedCustomer && carteraById[selectedCustomer.id] && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
+                    <span>
+                      Pedidos: $
+                      {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span>
+                      Cuenta importada: $
+                      {carteraById[selectedCustomer.id].multimediaSaldo.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span className="text-emerald-500/90">
+                      − Recibos: $
+                      {carteraById[selectedCustomer.id].totalPagos.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                  </div>
+                )}
               </div>
-              <p className="text-2xl font-black text-white tabular-nums">
+              <p className="text-3xl font-black text-white tabular-nums sm:text-right shrink-0">
                 $
                 {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
                   minimumFractionDigits: 2,
@@ -1132,20 +1151,37 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         )}
 
         {canViewSaldos && (
-          <div className="mt-8 space-y-4">
-            <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.25em] flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
-              Detalle de cuenta importada (Tango / Multimedias)
-            </h3>
+          <div className="mt-10 space-y-5">
+            <div className="rounded-3xl border border-slate-600/50 bg-gradient-to-b from-slate-900/90 to-slate-950 p-6 shadow-lg ring-1 ring-white/5">
+              <div className="flex flex-col gap-2 border-b border-slate-700/60 pb-4 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 ring-1 ring-amber-400/30">
+                    <Building2 size={22} className="text-amber-300" aria-hidden />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white tracking-tight">
+                      Cuenta corriente histórica
+                    </h3>
+                    <p className="text-[11px] text-slate-500 uppercase tracking-[0.2em] font-semibold">
+                      Tango · Multimedias · importación Excel
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
+                  Historial de movimientos tal como viene del archivo. Los recibos que cargás hoy en Facturación no se listan
+                  acá: impactan en el <strong className="text-slate-300">saldo unificado</strong> de arriba.
+                </p>
+              </div>
             {multimediaLedgerLoading ? (
               <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
                 <Loader2 className="animate-spin" size={18} aria-hidden />
                 Cargando historial importado…
               </div>
             ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-400">
-                  {multimediaLedger.movementCount} movimientos en archivo
+              <div className="space-y-5">
+                <p className="text-xs text-slate-400 font-medium">
+                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos en
+                  archivo
                   {multimediaLedger.legacyCode ? (
                     <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
                   ) : null}
@@ -1168,8 +1204,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
                 {migratedBuckets && migratedBuckets.otros.length > 0
                   ? renderLedgerTable(
-                      'Otros movimientos',
-                      <Clock size={16} className="text-slate-400 shrink-0" aria-hidden />,
+                      'Movimientos sin clasificar',
+                      <Clock size={16} className="text-amber-400/90 shrink-0" aria-hidden />,
                       migratedBuckets.otros
                     )
                   : null}
@@ -1183,6 +1219,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <strong className="text-slate-400">Cliente</strong> de la hoja Resumen del archivo.
               </p>
             )}
+            </div>
           </div>
         )}
 
@@ -1408,7 +1445,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         showToast('info', `${res.skippedCount} hoja(s) omitidas (no son clientes asignados a tu usuario).`);
       }
       onRefreshData?.();
-      loadLedgerSaldos();
+      loadCarteraTotals();
       if (selectedCustomer) {
         try {
           const ledger = await api.getCustomerMultimediaLedger(selectedCustomer.id);

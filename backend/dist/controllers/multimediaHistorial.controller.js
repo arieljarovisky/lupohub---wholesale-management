@@ -364,10 +364,18 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
         let lastSaldo = 0;
-        for (let i = entries.length - 1; i >= 0; i--) {
-            if (entries[i].saldo != null) {
-                lastSaldo = Number(entries[i].saldo) || 0;
-                break;
+        if (entries.length > 0) {
+            const tail = entries[entries.length - 1];
+            if (tail.saldo != null) {
+                lastSaldo = Number(tail.saldo) || 0;
+            }
+            else {
+                for (let i = entries.length - 1; i >= 0; i--) {
+                    if (entries[i].saldo != null) {
+                        lastSaldo = Number(entries[i].saldo) || 0;
+                        break;
+                    }
+                }
             }
         }
         res.json({
@@ -408,13 +416,19 @@ const getMultimediaSaldosSummary = (req, res) => __awaiter(void 0, void 0, void 
         const params = user.role === 'SELLER' ? [user.id] : [];
         const rows = (yield (0, db_1.query)(`SELECT
          agg.customer_id AS customerId,
-         CAST(COALESCE((
-           SELECT CAST(e2.saldo AS DECIMAL(16,2))
-           FROM customer_multimedia_entries e2
-           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-           ORDER BY e2.line_order DESC
-           LIMIT 1
-         ), 0) AS DECIMAL(16,2)) AS lastSaldo,
+         CAST(COALESCE(
+           (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+            FROM customer_multimedia_entries e_lo
+            WHERE e_lo.customer_id = agg.customer_id
+            ORDER BY e_lo.line_order DESC
+            LIMIT 1),
+           (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+            FROM customer_multimedia_entries e2
+            WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+            ORDER BY e2.line_order DESC
+            LIMIT 1),
+           0
+         ) AS DECIMAL(16,2)) AS lastSaldo,
          agg.cnt AS movementCount
        FROM (
          SELECT customer_id, COUNT(*) AS cnt

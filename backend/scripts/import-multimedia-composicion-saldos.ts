@@ -19,7 +19,11 @@ import path from 'path';
 import { PDFParse } from 'pdf-parse';
 import { execute, get, query } from '../src/database/db';
 import { v4 as uuidv4 } from 'uuid';
-import { padLegacyCode, parseArgentineDateDisplay } from '../src/utils/multimediaHistorialExcel';
+import {
+  padLegacyCode,
+  parseArgentineDateDisplay,
+  parseArgentineMoneyDisplay
+} from '../src/utils/multimediaHistorialExcel';
 
 function normalizeNameForMatch(v: unknown): string {
   return String(v ?? '')
@@ -29,12 +33,7 @@ function normalizeNameForMatch(v: unknown): string {
     .replace(/[^A-Z0-9]/g, '');
 }
 
-function parseAmount(s: string): number | null {
-  const clean = String(s || '').trim().replace(/,/g, '');
-  if (!clean) return null;
-  const n = parseFloat(clean);
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
-}
+const parseAmount = parseArgentineMoneyDisplay;
 
 /** Líneas de movimiento del PDF composición de saldos */
 function parseMovementLine(line: string): {
@@ -123,8 +122,9 @@ function extractClientBlock(fullText: string, clientCode: string): { name: strin
     if (!inBlock) continue;
 
     if (/^SALDO DEL CLIENTE\s*:/i.test(line)) {
-      const sm = line.match(/([\d.,]+)\s*$/);
-      if (sm) saldoFinal = parseAmount(sm[1]);
+      const rest = line.replace(/^SALDO\s+DEL\s+CLIENTE\s*:?\s*/i, '').trim();
+      const sm = rest.match(/-?[\d.,]+/);
+      if (sm) saldoFinal = parseAmount(sm[0]);
       continue;
     }
     if (/^MULTIMEDIAS/i.test(line) || /^FECHA DE EMISION/i.test(line) || /^COMPOSICION DE SALDOS/i.test(line)) {
@@ -133,6 +133,12 @@ function extractClientBlock(fullText: string, clientCode: string): { name: strin
     if (/^--\s*\d+\s+of\s+\d+\s*--$/i.test(line)) continue;
 
     collected.push(line);
+  }
+
+  if (saldoFinal == null) {
+    const blob = collected.join('\n');
+    const m = blob.match(/SALDO\s+DEL\s+CLIENTE\s*:?\s*(-?[\d.,]+)/i);
+    if (m) saldoFinal = parseAmount(m[1]);
   }
 
   return { name: clientName, lines: collected, saldoFinal };
