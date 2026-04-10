@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, TrendingUp, Percent, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot } from 'lucide-react';
-import { Attribute, Role, ApiConfig, User, Order, PriceList } from '../types';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot } from 'lucide-react';
+import { Attribute, Role, ApiConfig, User, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
 import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
@@ -124,7 +124,6 @@ interface SettingsProps {
   onUpdateUser?: (user: User) => void | Promise<void>;
   onCreateUser?: (user: User) => void | Promise<void>;
   onDeleteUser?: (id: string) => void | Promise<void>;
-  orders?: Order[];
   currentUser?: User;
   transportes?: import('../types').Transporte[];
   onCreateTransporte?: (name: string, address?: string) => void | Promise<void>;
@@ -136,12 +135,12 @@ interface SettingsProps {
 
 const Settings: React.FC<SettingsProps> = ({
   attributes, onCreateAttribute, onDeleteAttribute, onRefreshData, role,
-  users = [], onUpdateUser, onCreateUser, onDeleteUser, orders = [], currentUser,
+  users = [], onUpdateUser, onCreateUser, onDeleteUser, currentUser,
   transportes = [], onCreateTransporte, onUpdateTransporte, onDeleteTransporte,
   initialTab
 }) => {
   const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'sellers' | 'users' | 'pricelists' | 'transportes' | 'facturacion'>(initialTab ?? (role === Role.WAREHOUSE ? 'sizes' : 'users'));
+  const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'users' | 'pricelists' | 'transportes' | 'facturacion'>(initialTab ?? (role === Role.WAREHOUSE ? 'sizes' : 'users'));
   useEffect(() => {
     if (initialTab) setActiveTab(initialTab);
   }, [initialTab]);
@@ -584,8 +583,6 @@ const Settings: React.FC<SettingsProps> = ({
 
   const sizes = attributes.filter(a => a.type === 'size');
   const colors = attributes.filter(a => a.type === 'color');
-  const sellers = users.filter(u => u.role === Role.SELLER);
-
   const handleCreateAttribute = async () => {
     if (!newName) return;
     const nameTrim = newName.trim();
@@ -666,16 +663,6 @@ const Settings: React.FC<SettingsProps> = ({
 
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
-  };
-
-  const updateCommission = async (userId: string, value: string) => {
-    const user = users.find(u => u.id === userId);
-    if (user && onUpdateUser) {
-      await Promise.resolve(onUpdateUser({
-        ...user,
-        commissionPercentage: parseFloat(value) || 0
-      }));
-    }
   };
 
   const handleSellersExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -774,14 +761,6 @@ const Settings: React.FC<SettingsProps> = ({
               USUARIOS DEL SISTEMA
             </button>
             <button
-              onClick={() => setActiveTab('sellers')}
-              className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
-                activeTab === 'sellers' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
-              }`}
-            >
-              COMISIONES
-            </button>
-            <button
               onClick={() => setActiveTab('pricelists')}
               className={`pb-3 pt-2 px-3 sm:px-4 text-xs font-bold transition-all border-b-2 whitespace-nowrap min-h-[44px] touch-manipulation ${
                 activeTab === 'pricelists' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500'
@@ -845,7 +824,7 @@ const Settings: React.FC<SettingsProps> = ({
               <p className="text-sm text-slate-400 mb-4">
                 Para <strong className="text-slate-300">vendedores</strong>, dejá el rol en{' '}
                 <strong className="text-slate-300">Vendedor</strong> (valor por defecto). Luego podés asignarlos a clientes
-                en la cartera y cargarles comisión en la pestaña <strong className="text-slate-300">Comisiones</strong>.
+                en la cartera y definir comisiones en el menú <strong className="text-slate-300">Vendedores</strong>.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
                  <div className="space-y-1">
@@ -1492,66 +1471,6 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
         </Modal>
-      )}
-
-      {role === Role.ADMIN && activeTab === 'sellers' && (
-        <div className="space-y-4">
-           {sellers.map(seller => {
-             const sellerSales = orders
-               .filter(o => o.sellerId === seller.id)
-               .reduce((sum, o) => sum + o.total, 0);
-             const commissionRate = seller.commissionPercentage || 0;
-             const commissionAmount = sellerSales * (commissionRate / 100);
-
-             return (
-               <div key={seller.id} className="bg-slate-800 rounded-3xl border border-slate-700 p-5 md:p-6 shadow-lg flex flex-col gap-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                       <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white shadow-xl rotate-3">
-                          <UserIcon size={28} />
-                       </div>
-                       <div>
-                          <h4 className="font-black text-white text-xl tracking-tight">{seller.name}</h4>
-                          <p className="text-xs text-slate-500 font-medium">{seller.email}</p>
-                       </div>
-                    </div>
-                    <div className="bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-700 flex flex-col items-end">
-                       <span className="text-[8px] font-black text-slate-500 uppercase">Estado</span>
-                       <span className="text-[10px] font-bold text-green-400 flex items-center gap-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div> ACTIVO
-                       </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-                     <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-                        <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1"><DollarSign size={10}/> Ventas Totales</p>
-                        <p className="text-lg font-black text-white">${sellerSales.toLocaleString()}</p>
-                     </div>
-                     
-                     <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-                        <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1"><Percent size={10} /> Tasa Comisión</p>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="number" 
-                            step="0.1"
-                            value={commissionRate}
-                            onChange={(e) => updateCommission(seller.id, e.target.value)}
-                            className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-1 text-center text-white font-black text-md focus:ring-2 focus:ring-blue-500 outline-none"
-                          />
-                          <span className="text-slate-400 font-bold">%</span>
-                        </div>
-                     </div>
-
-                     <div className="bg-indigo-900/20 p-4 rounded-2xl border border-indigo-800/50">
-                        <p className="text-[10px] font-black text-indigo-400 uppercase mb-1 flex items-center gap-1"><TrendingUp size={10}/> Ganancia Vendedor</p>
-                        <p className="text-lg font-black text-indigo-300">${commissionAmount.toLocaleString()}</p>
-                     </div>
-                  </div>
-               </div>
-             );
-           })}
-        </div>
       )}
 
       {role === Role.ADMIN && activeTab === 'integrations' && (

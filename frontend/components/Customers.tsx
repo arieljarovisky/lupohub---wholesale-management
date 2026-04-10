@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -1564,37 +1564,42 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <p className="text-sm text-slate-400 mb-2 truncate">{customer.name}</p>
 
                 {canViewSaldos && (
-                  <div className="mb-2 space-y-1.5">
-                    {ledgerCard && ledgerCard.movementCount > 0 && (
-                      <div
-                        className="inline-flex flex-wrap items-center gap-x-2 gap-y-0 rounded-full bg-sky-500/12 border border-sky-600/35 px-2.5 py-1 text-[11px]"
-                        title="Último saldo de la columna Saldo del Excel de cuenta corriente importado (Tango/Multimedias)."
-                      >
-                        <span className="text-sky-300/95 font-semibold">Saldo cuenta (importado):</span>
-                        <span className="text-sky-100 font-bold tabular-nums">
+                  <div
+                    className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px] space-y-2"
+                    title="Cuenta importada desde Excel (Tango/Multimedias) y deuda de pedidos calculada en LupoHub."
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide border-b border-slate-700/60 pb-1.5">
+                      <Wallet size={12} className="text-slate-500 shrink-0" />
+                      Saldos
+                    </div>
+                    {ledgerCard && ledgerCard.movementCount > 0 ? (
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                        <span className="text-sky-300/90 font-medium shrink-0">Cuenta (Excel)</span>
+                        <span className="text-sky-100 font-bold tabular-nums text-right">
                           $
                           {Number(ledgerCard.lastSaldo).toLocaleString('es-AR', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                           })}
+                          <span className="text-sky-500/85 font-normal text-[10px] ml-1">
+                            ({ledgerCard.movementCount} mov.)
+                          </span>
                         </span>
-                        <span className="text-sky-500/80 text-[10px]">({ledgerCard.movementCount} mov.)</span>
                       </div>
-                    )}
+                    ) : null}
                     <div
-                      className="inline-flex flex-col gap-0.5 rounded-full bg-amber-500/10 border border-amber-600/25 px-2.5 py-1 text-[11px]"
-                      title="Pedidos con cobro pendiente en LupoHub (IVA incl.) menos pagos cargados en Facturación."
+                      className={`flex flex-col gap-0.5 ${ledgerCard && ledgerCard.movementCount > 0 ? 'pt-1 border-t border-slate-700/50' : ''}`}
                     >
-                      <div className="inline-flex items-center gap-2">
-                        <span className="text-amber-300/90 font-semibold">Deuda pedidos (LupoHub):</span>
-                        <span className="text-amber-300 font-bold tabular-nums">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                        <span className="text-amber-300/90 font-medium shrink-0">Pedidos (LupoHub)</span>
+                        <span className="text-amber-200 font-bold tabular-nums text-right">
                           {saldosLoading
                             ? '...'
                             : `$${deudaPedidos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </span>
                       </div>
                       {!saldosLoading && saldo && (Number(saldo.totalPagos) > 0 || Number(saldo.totalCargosPendiente) > 0) && (
-                        <div className="text-[10px] text-slate-500 tabular-nums pl-0">
+                        <div className="text-[10px] text-slate-500 tabular-nums">
                           Cargos IVA: $
                           {Number(saldo.totalCargosPendiente ?? saldo.saldoPendiente).toLocaleString('es-AR', {
                             minimumFractionDigits: 2

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone, Sparkles, LayoutGrid, Radio } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone, Sparkles, LayoutGrid, Radio, Percent } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
 import { api } from './services/api';
@@ -49,6 +49,7 @@ const MercadoLibreDisplayAds = lazyWithReload(() =>
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
+const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
@@ -162,6 +163,7 @@ const App: React.FC = () => {
         stock_history: [Role.ADMIN, Role.WAREHOUSE],
         despachos: [Role.ADMIN],
         customers: [Role.ADMIN, Role.SELLER],
+        sellers: [Role.ADMIN, Role.SELLER],
         visits: [Role.ADMIN, Role.SELLER],
         catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
         settings: [Role.ADMIN]
@@ -725,6 +727,7 @@ const App: React.FC = () => {
     { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE] },
     { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
     { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
+    { id: 'sellers', icon: Percent, label: 'Vendedores', roles: [Role.ADMIN, Role.SELLER] },
     { id: 'catalogs', icon: BookOpen, label: 'Catálogos', roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
   ];
 
@@ -748,6 +751,7 @@ const App: React.FC = () => {
     ]},
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
+      { id: 'sellers', label: 'Vendedores', icon: Percent, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
       { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO] },
@@ -792,6 +796,7 @@ const App: React.FC = () => {
                  {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
+                 {baseView === 'sellers' && (currentUser.role === Role.SELLER ? 'Mis comisiones' : 'Vendedores y comisiones')}
                  {baseView === 'catalogs' && 'Catálogos'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
@@ -872,6 +877,17 @@ const App: React.FC = () => {
               />
             </Suspense>
           )}
+          {baseView === 'sellers' && (
+            <Suspense fallback={<ViewFallback />}>
+              <SellersCommissions
+                orders={orders}
+                users={users}
+                role={currentUser.role}
+                currentUser={currentUser}
+                onUpdateUser={currentUser.role === Role.ADMIN ? handleUpdateUser : undefined}
+              />
+            </Suspense>
+          )}
           {baseView === 'visits' && (
             <Suspense fallback={<ViewFallback />}>
               <Visits visits={MOCK_VISITS} role={currentUser.role} />
@@ -894,7 +910,6 @@ const App: React.FC = () => {
                 onUpdateUser={handleUpdateUser}
                 onCreateUser={handleCreateUser}
                 onDeleteUser={handleDeleteUser}
-                orders={orders}
                 currentUser={currentUser}
                 transportes={transportes}
                 onCreateTransporte={async (name, address) => {

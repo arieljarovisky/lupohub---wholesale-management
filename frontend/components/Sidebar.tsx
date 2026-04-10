@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Megaphone, Sparkles, LayoutGrid, Radio } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Megaphone, Sparkles, LayoutGrid, Radio, Percent } from 'lucide-react';
 import { Role } from '../types';
 
 interface SidebarProps {
@@ -43,6 +43,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       title: 'CRM',
       items: [
         { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
+        { id: 'sellers', label: 'Vendedores', icon: Percent, roles: [Role.ADMIN, Role.SELLER], color: 'indigo' },
         { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       ]
     },
