@@ -211,6 +211,30 @@ function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
         }
     });
 }
+/** Resuelve IDs de item a partir de un user_product_id (ej. MLAU...). */
+function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const up = (userProductId || '').toString().trim();
+        if (!up)
+            return [];
+        try {
+            const res = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` },
+                params: { user_product_id: up, limit: 50, offset: 0 },
+                validateStatus: () => true
+            });
+            if (res.status >= 400 || !res.data)
+                return [];
+            const rows = Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.results) ? res.data.results : [];
+            const itemIds = rows.map((x) => String(x || '').trim()).filter(Boolean);
+            return Array.from(new Set(itemIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
+        }
+        catch (_b) {
+            return [];
+        }
+    });
+}
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 function putTnVariantWithRetry(url_1, body_1, headers_1) {
     return __awaiter(this, arguments, void 0, function* (url, body, headers, maxRetries = 2) {
@@ -3892,6 +3916,27 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 }
             }
         }
+        // Si tampoco apareció, intentar resolver como user_product_id (UP), ej. MLAU...
+        if (!item || item.error) {
+            const upCandidates = yield resolveMercadoLibreUserProductItems(String(req.params.itemId || ''), mlToken.user_id, mlToken.access_token);
+            for (const candidate of upCandidates) {
+                if (!triedCandidates.includes(candidate))
+                    triedCandidates.push(candidate);
+                try {
+                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+                        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                    });
+                    if ((itemRes === null || itemRes === void 0 ? void 0 : itemRes.data) && !itemRes.data.error) {
+                        item = itemRes.data;
+                        resolvedItemId = candidate;
+                        break;
+                    }
+                }
+                catch (_l) {
+                    // probar siguiente candidato
+                }
+            }
+        }
         if (!item || item.error) {
             return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
         }
@@ -3940,7 +3985,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     if ((d === null || d === void 0 ? void 0 : d.id) && !byItemId[d.id])
                         byItemId[d.id] = d;
                 }
-                catch (_l) {
+                catch (_m) {
                     // ignorar item inválido y seguir
                 }
             }

@@ -41,9 +41,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearDispatchedPendingsForCustomer = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
+exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesCsv = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.getCustomers = void 0;
 const XLSX = __importStar(require("xlsx"));
+const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
@@ -740,11 +744,13 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
 });
 exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
 /**
- * Excel una sola hoja "Resumen" con el mismo encabezado que historial Multimedias/Tango:
- * Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos, Hoja.
- * Los importes son saldos pendientes de cobro en LupoHub (pedidos impagos − pagos).
+ * Excel una sola hoja "Resumen" estilizada: Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos.
+ * Saldo final = (LupoHub: pedidos pendientes IVA incl. − pagos) + (último saldo cuenta importada Excel).
+ * Movimientos = líneas en historial importado + cantidad de pedidos pendientes (misma idea que cartera unificada).
+ * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
  */
 const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -809,7 +815,6 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     ) t
     LEFT JOIN users u ON u.id = t.seller_id
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     const sqlSimple = `
@@ -849,39 +854,354 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     ) t
     LEFT JOIN users u ON u.id = t.seller_id
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     let rows;
     try {
         rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
     }
-    catch (_a) {
+    catch (_g) {
         rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
     }
-    const resumenRows = [
-        ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos', 'Hoja'],
-    ];
-    for (const r of rows) {
-        const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
-        const code = (r.legacy_code && String(r.legacy_code).trim()) ||
-            (0, multimediaHistorialExcel_1.padLegacyCode)(String(r.customerId || '').replace(/-/g, '').slice(0, 6) || '0');
-        const vendedor = (r.account_seller_label && String(r.account_seller_label).trim()) ||
-            (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '');
-        const zona = (r.account_zone && String(r.account_zone).trim()) || '';
-        const saldoFinal = Number(r.saldoPendiente) || 0;
-        const movs = Number(r.pedidosPendientes) || 0;
-        const sheetNm = (0, multimediaHistorialExcel_1.excelSheetName)(code, displayName).slice(0, 31);
-        resumenRows.push([code, displayName, vendedor, zona, saldoFinal, movs, sheetNm]);
+    const sqlMultimediaSaldos = `
+    SELECT
+      c.id AS customerId,
+      c.legacy_code,
+      c.account_zone,
+      c.account_seller_label,
+      c.seller_id,
+      c.business_name AS businessName,
+      c.name AS contactName,
+      c.cuit,
+      CAST(e.saldo AS DECIMAL(16,2)) AS lastSaldo,
+      cnt.cnt AS movementCount,
+      u.name AS seller_name
+    FROM customer_multimedia_entries e
+    INNER JOIN (
+      SELECT customer_id, MAX(line_order) AS max_lo
+      FROM customer_multimedia_entries
+      GROUP BY customer_id
+    ) mx ON mx.customer_id = e.customer_id AND e.line_order = mx.max_lo
+    INNER JOIN (
+      SELECT customer_id, COUNT(*) AS cnt
+      FROM customer_multimedia_entries
+      GROUP BY customer_id
+    ) cnt ON cnt.customer_id = e.customer_id
+    INNER JOIN customers c ON c.id = e.customer_id
+    LEFT JOIN users u ON u.id = c.seller_id
+    WHERE 1=1 ${sellerFilter}
+  `;
+    let mmRows = [];
+    try {
+        mmRows = (yield (0, db_1.query)(sqlMultimediaSaldos, baseParams));
     }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumenRows), 'Resumen');
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    catch (_h) {
+        mmRows = [];
+    }
+    const byId = new Map();
+    for (const r of rows) {
+        const id = String(r.customerId);
+        byId.set(id, {
+            customerId: id,
+            legacy_code: r.legacy_code,
+            account_zone: r.account_zone,
+            account_seller_label: r.account_seller_label,
+            seller_id: r.seller_id,
+            businessName: String((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
+            contactName: String((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
+            cuit: String((_c = r.cuit) !== null && _c !== void 0 ? _c : ''),
+            saldoPendiente: Number(r.saldoPendiente) || 0,
+            pedidosPendientes: Number(r.pedidosPendientes) || 0,
+            seller_name: r.seller_name,
+            movementCountExcel: 0
+        });
+    }
+    for (const m of mmRows) {
+        const id = String(m.customerId);
+        const excelSaldo = Number(m.lastSaldo) || 0;
+        const mmCnt = Number(m.movementCount) || 0;
+        const existing = byId.get(id);
+        if (existing) {
+            existing.saldoPendiente = Math.round((existing.saldoPendiente + excelSaldo) * 100) / 100;
+            existing.movementCountExcel = mmCnt;
+        }
+        else {
+            byId.set(id, {
+                customerId: id,
+                legacy_code: m.legacy_code,
+                account_zone: m.account_zone,
+                account_seller_label: m.account_seller_label,
+                seller_id: m.seller_id,
+                businessName: String((_d = m.businessName) !== null && _d !== void 0 ? _d : ''),
+                contactName: String((_e = m.contactName) !== null && _e !== void 0 ? _e : ''),
+                cuit: String((_f = m.cuit) !== null && _f !== void 0 ? _f : ''),
+                saldoPendiente: Math.round(excelSaldo * 100) / 100,
+                pedidosPendientes: 0,
+                seller_name: m.seller_name,
+                movementCountExcel: mmCnt
+            });
+        }
+    }
+    const mergedList = [...byId.values()]
+        .filter((r) => r.saldoPendiente > 0.01)
+        .sort((a, b) => (a.businessName || '').localeCompare(b.businessName || '', 'es') ||
+        (a.contactName || '').localeCompare(b.contactName || '', 'es'));
+    const borderThin = {
+        style: 'thin',
+        color: { argb: 'FF94A3B8' }
+    };
+    const workbook = new exceljs_1.default.Workbook();
+    workbook.creator = 'LupoHub';
+    workbook.created = new Date();
+    const ws = workbook.addWorksheet('Resumen', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+        properties: { defaultRowHeight: 19 }
+    });
+    ws.columns = [
+        { key: 'codigo', width: 14 },
+        { key: 'cliente', width: 44 },
+        { key: 'vendedor', width: 24 },
+        { key: 'zona', width: 18 },
+        { key: 'saldo', width: 16 },
+        { key: 'movs', width: 13 }
+    ];
+    const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos'];
+    const headerRow = ws.addRow(headerTitles);
+    headerRow.height = 26;
+    headerRow.eachCell((cell, colNumber) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+        cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF1E40AF' }
+        };
+        cell.alignment = {
+            vertical: 'middle',
+            horizontal: colNumber >= 5 ? 'right' : 'left',
+            wrapText: true
+        };
+        cell.border = {
+            top: borderThin,
+            left: borderThin,
+            bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+            right: borderThin
+        };
+    });
+    let rowNum = 2;
+    for (const r of mergedList) {
+        const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
+        const legacyTrim = r.legacy_code != null ? String(r.legacy_code).trim() : '';
+        const code = legacyTrim ||
+            (0, multimediaHistorialExcel_1.padLegacyCode)(String(r.customerId || '').replace(/-/g, '').slice(0, 6) || '0');
+        const vendedor = (r.account_seller_label != null && String(r.account_seller_label).trim() !== ''
+            ? String(r.account_seller_label).trim()
+            : '') ||
+            (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '');
+        const zona = r.account_zone != null ? String(r.account_zone).trim() : '';
+        const saldoFinal = Number(r.saldoPendiente) || 0;
+        const movs = (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
+        const dataRow = ws.addRow([code, displayName, vendedor, zona, saldoFinal, movs]);
+        const zebra = rowNum % 2 === 0;
+        dataRow.eachCell((cell, colNumber) => {
+            cell.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+            if (zebra) {
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFF1F5F9' }
+                };
+            }
+            cell.border = {
+                top: borderThin,
+                left: borderThin,
+                bottom: borderThin,
+                right: borderThin
+            };
+            cell.alignment = {
+                vertical: 'middle',
+                horizontal: colNumber >= 5 ? 'right' : 'left',
+                wrapText: colNumber === 2 || colNumber === 3
+            };
+            if (colNumber === 5) {
+                cell.numFmt = '#,##0.00';
+            }
+            if (colNumber === 6) {
+                cell.numFmt = '0';
+            }
+        });
+        rowNum++;
+    }
+    if (mergedList.length > 0) {
+        ws.autoFilter = {
+            from: { row: 1, column: 1 },
+            to: { row: mergedList.length + 1, column: 6 }
+        };
+    }
+    const out = yield workbook.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="saldos_pendientes_resumen_${new Date().toISOString().slice(0, 10)}.xlsx"`);
     res.send(buf);
 });
 exports.exportSaldosPendientesMultimediasXlsx = exportSaldosPendientesMultimediasXlsx;
+function normResumenHeader(s) {
+    return String(s !== null && s !== void 0 ? s : '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+function normalizeNameForCustomerMatch(v) {
+    return String(v !== null && v !== void 0 ? v : '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+}
+function cellStrResumenCell(v) {
+    if (v == null || v === '')
+        return '';
+    if (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v))
+        return String(Math.trunc(v));
+    return String(v).trim();
+}
+/**
+ * POST multipart file — hoja Resumen Multimedias: asigna customers.seller_id según "Vendedor habitual"
+ * (código numérico) vinculado al usuario vendedor.{codigo}@importado.lupohub.local.
+ * Cliente: por legacy_code (columna Código) o por nombre (columna Cliente).
+ */
+const assignCustomerSellersFromResumen = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const authUser = req.user;
+        if (!authUser || authUser.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Solo administradores pueden asignar vendedores en lote' });
+        }
+        const file = req.file;
+        if (!(file === null || file === void 0 ? void 0 : file.buffer)) {
+            return res.status(400).json({ message: 'Subí un archivo .xlsx (campo file)' });
+        }
+        const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        if (!ws)
+            return res.status(400).json({ message: 'El archivo no tiene hojas' });
+        const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        let headerRow = -1;
+        let codigoCol = -1;
+        let vendCol = -1;
+        let clienteCol = -1;
+        for (let r = 0; r < Math.min(15, matrix.length); r++) {
+            const h = matrix[r].map((c) => normResumenHeader(String(c !== null && c !== void 0 ? c : '')));
+            const ci = h.findIndex((x) => x === 'codigo');
+            const vi = h.findIndex((x) => x.includes('vendedor') && x.includes('habitual'));
+            const cl = h.findIndex((x) => x.includes('cliente') && !x.includes('vendedor'));
+            if (ci >= 0 && vi >= 0) {
+                headerRow = r;
+                codigoCol = ci;
+                vendCol = vi;
+                clienteCol = cl >= 0 ? cl : 1;
+                break;
+            }
+        }
+        if (headerRow < 0) {
+            return res.status(400).json({
+                message: 'No se encontró formato Resumen (columnas Código y Vendedor habitual). Usá el Excel historial Multimedias.',
+            });
+        }
+        const custRows = (yield (0, db_1.query)(`SELECT id, legacy_code, business_name, name FROM customers`));
+        const legacyToId = new Map();
+        const normToId = new Map();
+        for (const c of custRows) {
+            const lc = (c.legacy_code && String(c.legacy_code).trim()) || '';
+            if (lc) {
+                legacyToId.set(lc, c.id);
+                legacyToId.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), c.id);
+                const strip = lc.replace(/^0+/, '') || '0';
+                legacyToId.set(strip, c.id);
+                const digits = lc.replace(/\D/g, '');
+                if (digits && /^\d+$/.test(digits)) {
+                    legacyToId.set(digits, c.id);
+                    legacyToId.set((0, multimediaHistorialExcel_1.padLegacyCode)(digits), c.id);
+                }
+            }
+            const bn = normalizeNameForCustomerMatch(c.business_name);
+            if (bn)
+                normToId.set(bn, c.id);
+            const nm = normalizeNameForCustomerMatch(c.name);
+            if (nm)
+                normToId.set(nm, c.id);
+        }
+        let rowsProcessed = 0;
+        let customersUpdated = 0;
+        let skippedNoSeller = 0;
+        let skippedNoCustomer = 0;
+        let skippedNoVendedorCell = 0;
+        for (let i = headerRow + 1; i < matrix.length; i++) {
+            const row = matrix[i];
+            const codigoRaw = cellStrResumenCell(row[codigoCol]);
+            const vendRaw = cellStrResumenCell(row[vendCol]);
+            const clienteRaw = clienteCol >= 0 ? cellStrResumenCell(row[clienteCol]) : '';
+            if (!codigoRaw && !clienteRaw)
+                continue;
+            rowsProcessed++;
+            if (!vendRaw) {
+                skippedNoVendedorCell++;
+                continue;
+            }
+            const vm = vendRaw.match(/^(\d+)\s*[-–—]\s*(.+)$/u);
+            const vendCode = vm ? vm[1].trim().replace(/^0+/, '') || vm[1].trim() || '0' : null;
+            if (!vendCode) {
+                skippedNoSeller++;
+                continue;
+            }
+            const sellerEmail = `vendedor.${vendCode}@importado.lupohub.local`;
+            const sellerRow = yield (0, db_1.get)(`SELECT id FROM users WHERE email = ? AND role = 'SELLER'`, [sellerEmail]);
+            if (!(sellerRow === null || sellerRow === void 0 ? void 0 : sellerRow.id)) {
+                skippedNoSeller++;
+                continue;
+            }
+            let customerId;
+            if (codigoRaw) {
+                const t = codigoRaw.trim();
+                const tryKeys = new Set([t]);
+                const digits = t.replace(/\D/g, '');
+                if (digits) {
+                    tryKeys.add(digits);
+                    tryKeys.add((0, multimediaHistorialExcel_1.padLegacyCode)(digits));
+                    tryKeys.add(digits.replace(/^0+/, '') || '0');
+                }
+                for (const k of tryKeys) {
+                    const hit = legacyToId.get(k);
+                    if (hit) {
+                        customerId = hit;
+                        break;
+                    }
+                }
+            }
+            if (!customerId && clienteRaw) {
+                customerId = normToId.get(normalizeNameForCustomerMatch(clienteRaw));
+            }
+            if (!customerId) {
+                skippedNoCustomer++;
+                continue;
+            }
+            yield (0, db_1.execute)(`UPDATE customers SET seller_id = ? WHERE id = ?`, [sellerRow.id, customerId]);
+            customersUpdated++;
+        }
+        res.json({
+            message: 'Asignación de vendedores desde Resumen finalizada',
+            rowsProcessed,
+            customersUpdated,
+            skippedNoSeller,
+            skippedNoCustomer,
+            skippedNoVendedorCell,
+        });
+    }
+    catch (e) {
+        console.error('assignCustomerSellersFromResumen:', e);
+        res.status(500).json({ message: 'Error asignando vendedores', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.assignCustomerSellersFromResumen = assignCustomerSellersFromResumen;
 /** Quita pendientes de pedidos ya despachados para un cliente:
  *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
  *  - Elimina renglones con quantity <= 0

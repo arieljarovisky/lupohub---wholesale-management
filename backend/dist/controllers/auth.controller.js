@@ -43,7 +43,8 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (String(user.password) !== String(password)) {
             return res.status(401).json({ message: 'Contraseña incorrecta' });
         }
-        const { password: _pwd } = user, safeUser = __rest(user, ["password"]);
+        const { password: _pwd } = user, rest = __rest(user, ["password"]);
+        const safeUser = rest.role === 'SELLER' ? Object.assign(Object.assign({}, rest), { priceListId: undefined }) : rest;
         const secret = JWT_SECRET();
         const token = jsonwebtoken_1.default.sign({ id: safeUser.id, email: safeUser.email, role: safeUser.role }, secret, { expiresIn: JWT_EXPIRES_IN });
         return res.json({ user: safeUser, token });
@@ -77,7 +78,17 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return res.status(401).json({ message: 'Usuario no encontrado' });
         }
         const newToken = jsonwebtoken_1.default.sign({ id: user.id, email: user.email, role: user.role }, secret, { expiresIn: JWT_EXPIRES_IN });
-        return res.json({ token: newToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, commissionPercentage: user.commissionPercentage, priceListId: (_b = user.priceListId) !== null && _b !== void 0 ? _b : undefined } });
+        return res.json({
+            token: newToken,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                commissionPercentage: user.commissionPercentage,
+                priceListId: user.role === 'SELLER' ? undefined : (_b = user.priceListId) !== null && _b !== void 0 ? _b : undefined
+            }
+        });
     }
     catch (_c) {
         return res.status(401).json({ message: 'Token inválido' });

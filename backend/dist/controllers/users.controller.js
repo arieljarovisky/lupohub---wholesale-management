@@ -19,7 +19,8 @@ const listUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden listar usuarios' });
         }
-        const rows = yield (0, db_1.query)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId
+        const rows = yield (0, db_1.query)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage,
+              CASE WHEN role = 'SELLER' THEN NULL ELSE price_list_id END AS priceListId
        FROM users ORDER BY name`);
         res.json(rows);
     }
@@ -167,22 +168,28 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.deleteUser = deleteUser;
-/** Actualizar usuario (ej. price_list_id para vendedores). Solo ADMIN. */
+/** Actualizar usuario (price_list_id solo para roles que no sean SELLER). Solo ADMIN. */
 const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden actualizar usuarios' });
         }
         const { id } = req.params;
         const body = req.body;
-        const existing = yield (0, db_1.get)('SELECT id FROM users WHERE id = ?', [id]);
+        const existing = yield (0, db_1.get)('SELECT id, role FROM users WHERE id = ?', [id]);
         if (!existing)
             return res.status(404).json({ message: 'Usuario no encontrado' });
+        const userRole = String((_b = existing.role) !== null && _b !== void 0 ? _b : '');
         let didUpdate = false;
         if (body.priceListId !== undefined) {
-            const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
-            yield (0, db_1.execute)('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+            if (userRole === 'SELLER') {
+                yield (0, db_1.execute)('UPDATE users SET price_list_id = NULL WHERE id = ?', [id]);
+            }
+            else {
+                const plId = body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null;
+                yield (0, db_1.execute)('UPDATE users SET price_list_id = ? WHERE id = ?', [plId, id]);
+            }
             didUpdate = true;
         }
         if (body.commissionPercentage !== undefined) {
@@ -193,10 +200,15 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             yield (0, db_1.execute)('UPDATE users SET commission_percentage = ? WHERE id = ?', [commission, id]);
             didUpdate = true;
         }
+        if (didUpdate && userRole === 'SELLER') {
+            yield (0, db_1.execute)('UPDATE users SET price_list_id = NULL WHERE id = ?', [id]);
+        }
         if (!didUpdate) {
             return res.status(400).json({ message: 'No hay campos para actualizar' });
         }
-        const updated = yield (0, db_1.get)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage, price_list_id AS priceListId FROM users WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, name, email, role, commission_percentage AS commissionPercentage,
+              CASE WHEN role = 'SELLER' THEN NULL ELSE price_list_id END AS priceListId
+       FROM users WHERE id = ?`, [id]);
         res.json(updated);
     }
     catch (error) {

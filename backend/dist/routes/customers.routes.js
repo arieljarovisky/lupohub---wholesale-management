@@ -16,6 +16,7 @@ router.get('/saldos-pendientes', auth_1.authMiddleware, customers_controller_1.g
 router.get('/multimedia-historial/export', auth_1.authMiddleware, multimediaHistorial_controller_1.exportMultimediaHistorial);
 router.post('/multimedia-historial/import', auth_1.authMiddleware, upload.single('file'), multimediaHistorial_controller_1.importMultimediaHistorial);
 router.get('/multimedia-saldos-summary', auth_1.authMiddleware, multimediaHistorial_controller_1.getMultimediaSaldosSummary);
+router.post('/assign-sellers-resumen', auth_1.authMiddleware, upload.single('file'), customers_controller_1.assignCustomerSellersFromResumen);
 router.get('/:id/multimedia-ledger', auth_1.authMiddleware, multimediaHistorial_controller_1.getCustomerMultimediaLedger);
 router.get('/', auth_1.authMiddleware, customers_controller_1.getCustomers);
 router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);

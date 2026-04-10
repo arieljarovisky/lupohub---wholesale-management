@@ -160,6 +160,32 @@ async function resolveMercadoLibreCatalogProductItems(productId: string, accessT
   }
 }
 
+/** Resuelve IDs de item a partir de un user_product_id (ej. MLAU...). */
+async function resolveMercadoLibreUserProductItems(
+  userProductId: string,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const up = (userProductId || '').toString().trim();
+  if (!up) return [];
+  try {
+    const res = await axios.get(
+      `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+      {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        params: { user_product_id: up, limit: 50, offset: 0 },
+        validateStatus: () => true
+      }
+    );
+    if (res.status >= 400 || !res.data) return [];
+    const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+    const itemIds = rows.map((x: any) => String(x || '').trim()).filter(Boolean);
+    return Array.from(new Set(itemIds.flatMap((id: string) => mercadoLibreItemIdCandidates(id))));
+  } catch {
+    return [];
+  }
+}
+
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
 async function putTnVariantWithRetry(
   url: string,
@@ -4131,6 +4157,29 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     if (!item || item.error) {
       catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
       for (const candidate of catalogItemCandidates) {
+        if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
+        try {
+          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+          });
+          if (itemRes?.data && !itemRes.data.error) {
+            item = itemRes.data;
+            resolvedItemId = candidate;
+            break;
+          }
+        } catch {
+          // probar siguiente candidato
+        }
+      }
+    }
+    // Si tampoco apareció, intentar resolver como user_product_id (UP), ej. MLAU...
+    if (!item || item.error) {
+      const upCandidates = await resolveMercadoLibreUserProductItems(
+        String(req.params.itemId || ''),
+        mlToken.user_id,
+        mlToken.access_token
+      );
+      for (const candidate of upCandidates) {
         if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
         try {
           const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
