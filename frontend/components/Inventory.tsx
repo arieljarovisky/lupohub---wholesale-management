@@ -20,6 +20,8 @@ import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
+import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
+import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
 function InventoryViewSwitch(
   props: { view: 'mine' | 'ml' | 'tn'; ml: React.ReactNode; tn: React.ReactNode; mine: React.ReactNode }
@@ -1248,18 +1250,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleLoadMlVariations = async () => {
-    const id = linkMlId.trim();
+    const id = normalizeMercadoLibreItemId(linkMlId);
     if (!id) return;
     setLoadingMlVariations(true);
     setLinkMlVariations(null);
     try {
       const res = await api.getMercadoLibreItemVariations(id);
       setLinkMlVariations(res.variations || []);
+      const variantFromUrl = extractMercadoLibreVariationIdFromUrl(linkMlId);
       const skuToMatch = (linkExternalSku || linkingVariant?.sku || '').toString().trim();
       const match = (res.variations || []).find(
         (v) => v.sku && skuToMatch && v.sku.trim() === skuToMatch
       );
-      if (match) setLinkMlVariantId(String(match.variationId));
+      if (variantFromUrl && (res.variations || []).some((v) => String(v.variationId) === variantFromUrl)) {
+        setLinkMlVariantId(variantFromUrl);
+      } else if (match) setLinkMlVariantId(String(match.variationId));
       else if (res.variations?.length === 1) setLinkMlVariantId(String(res.variations[0].variationId));
     } catch (e) {
       console.error(e);
@@ -1270,18 +1275,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleLoadTnVariants = async () => {
-    const id = linkTnId.trim();
-    if (!id) return;
+    const id = normalizeTiendaNubeProductId(linkTnId);
+    if (!id || !/^\d+$/.test(id)) {
+      showToast('error', 'No se pudo obtener el ID del producto. Pegá el link de la publicación o el número de producto TN.');
+      return;
+    }
     setLoadingTnVariants(true);
     setLinkTnVariants(null);
     try {
       const res = await api.getTiendaNubeProductVariants(id);
       setLinkTnVariants(res.variants || []);
+      const variantFromUrl = extractTiendaNubeVariantFromUrl(linkTnId);
       const skuToMatch = (linkExternalSku || linkingVariant?.sku || '').toString().trim();
       const match = (res.variants || []).find(
         (v) => v.sku && skuToMatch && v.sku.trim() === skuToMatch
       );
-      if (match) setLinkTnVariantId(String(match.variantId));
+      if (variantFromUrl && (res.variants || []).some((v) => String(v.variantId) === variantFromUrl)) {
+        setLinkTnVariantId(variantFromUrl);
+      } else if (match) setLinkTnVariantId(String(match.variantId));
       else if (res.variants?.length === 1) setLinkTnVariantId(String(res.variants[0].variantId));
     } catch (e) {
       console.error(e);
@@ -1475,7 +1486,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   }, [showBulkLinkModal, bulkLinkGroupKey]);
 
   const handleBulkLoadMl = async () => {
-    const id = bulkLinkMlId.trim();
+    const id = normalizeMercadoLibreItemId(bulkLinkMlId);
     if (!id) return;
     setBulkLinkLoading(true);
     try {
@@ -1492,8 +1503,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleBulkLoadTn = async () => {
-    const id = bulkLinkTnId.trim();
-    if (!id) return;
+    const id = normalizeTiendaNubeProductId(bulkLinkTnId);
+    if (!id || !/^\d+$/.test(id)) {
+      showToast('error', 'No se pudo obtener el ID del producto TN desde el texto pegado.');
+      return;
+    }
     setBulkLinkLoading(true);
     try {
       const res = await api.getTiendaNubeProductVariants(id);
@@ -1509,10 +1523,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleBulkLoadBothAndMatch = async () => {
-    const mlId = bulkLinkMlId.trim();
-    const tnId = bulkLinkTnId.trim();
-    if (!mlId || !tnId) {
-      showToast('info', 'Ingresá ambos IDs (ML y TN) para cargar y emparejar todo.');
+    const mlId = normalizeMercadoLibreItemId(bulkLinkMlId);
+    const tnId = normalizeTiendaNubeProductId(bulkLinkTnId);
+    if (!mlId || !tnId || !/^\d+$/.test(tnId)) {
+      showToast('info', 'Ingresá ambos enlaces o IDs (ML y TN) para cargar y emparejar todo.');
       return;
     }
     setBulkLinkLoading(true);
@@ -1586,8 +1600,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
       const res = await api.bulkLinkVariants({
         productId: bulkLinkProductId,
-        mercadoLibreItemId: bulkLinkMlId.trim() || undefined,
-        tiendaNubeProductId: bulkLinkTnId.trim() || undefined,
+        mercadoLibreItemId: normalizeMercadoLibreItemId(bulkLinkMlId) || undefined,
+        tiendaNubeProductId: (() => {
+          const n = normalizeTiendaNubeProductId(bulkLinkTnId);
+          return /^\d+$/.test(n) ? n : bulkLinkTnId.trim() || undefined;
+        })(),
         links
       });
       const updated = (res as any)?.updated ?? links.length;
@@ -1669,12 +1686,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (!linkingVariant) return;
     try {
       setLinkSaveStockFromML(null);
+      const tnResolved = (() => {
+        const t = linkTnId.trim();
+        if (!t) return '';
+        const n = normalizeTiendaNubeProductId(t);
+        return /^\d+$/.test(n) ? n : '';
+      })();
+      const mlResolved = linkMlId.trim() ? normalizeMercadoLibreItemId(linkMlId) || linkMlId.trim() : '';
       // 1. Update Variant External IDs (si hay Item ML, el backend trae el stock de ML y lo guarda en inventario)
       const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
-        tiendaNubeProductId: linkTnId.trim() || undefined,
-        mercadoLibreVariantId: linkMlVariantId || linkMlId || undefined,
-        mercadoLibreItemId: linkMlId || undefined,
+        tiendaNubeProductId: tnResolved || undefined,
+        mercadoLibreVariantId: linkMlVariantId || mlResolved || undefined,
+        mercadoLibreItemId: mlResolved || undefined,
         externalSku: linkExternalSku.trim() || undefined
       } as { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string });
       const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
@@ -1711,13 +1735,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const groupKey = (v?.base_sku || (linkingVariant as any).base_sku || '').toString().trim();
       const parentProductId = (linkProduct?.id || '').toString().trim();
 
-      if (parentProductId && linkTnId) {
+      if (parentProductId && tnResolved) {
         await api.updateProductExternalIds(parentProductId, {
-          tiendaNubeId: linkTnId
+          tiendaNubeId: tnResolved
         });
-        if (linkMlId) {
+        if (mlResolved) {
              await api.updateProductExternalIds(parentProductId, {
-                mercadoLibreId: linkMlId
+                mercadoLibreId: mlResolved
              });
         }
       }
@@ -1743,14 +1767,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             ...(newStockFromML !== undefined && { stock: newStockFromML, stock_total: newStockFromML } as any),
             externalIds: {
               ...p.externalIds,
-              tiendaNube: linkTnId,
+              tiendaNube: tnResolved || linkTnId,
               tiendaNubeVariant: linkTnVariantId,
-              mercadoLibre: linkMlId
+              mercadoLibre: mlResolved || linkMlId
             },
             integrations: {
                 ...p.integrations,
-                tiendaNube: !!(linkTnId && linkTnVariantId),
-                mercadoLibre: !!linkMlId
+                tiendaNube: !!((tnResolved || linkTnId) && linkTnVariantId),
+                mercadoLibre: !!(mlResolved || linkMlId)
             }
           } : p)
         };
@@ -1853,15 +1877,36 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const handleAddVariantPublication = async () => {
     if (!linkingVariant?.id || !addPubProductId.trim()) {
-      showToast('error', 'Ingresá el ID de la publicación (producto/ítem)');
+      showToast('error', 'Ingresá el ID o el link de la publicación (producto/ítem)');
       return;
+    }
+    const mlProd = normalizeMercadoLibreItemId(addPubProductId);
+    const tnProd = normalizeTiendaNubeProductId(addPubProductId);
+    const externalProductId = addPubPlatform === 'mercadolibre' ? mlProd : tnProd;
+    if (addPubPlatform === 'mercadolibre' && !externalProductId) {
+      showToast('error', 'No se pudo obtener el ID de la publicación ML. Pegá el link o el MLA…');
+      return;
+    }
+    if (addPubPlatform === 'tiendanube' && (!externalProductId || !/^\d+$/.test(externalProductId))) {
+      showToast('error', 'No se pudo obtener el ID del producto TN. Pegá el link o el número.');
+      return;
+    }
+    let externalVariantId = addPubVariantId.trim();
+    if (!externalVariantId) {
+      if (addPubPlatform === 'tiendanube') {
+        externalVariantId =
+          extractTiendaNubeVariantFromUrl(addPubProductId) || extractTiendaNubeVariantFromUrl(addPubVariantId) || '';
+      } else {
+        externalVariantId =
+          extractMercadoLibreVariationIdFromUrl(addPubProductId) || extractMercadoLibreVariationIdFromUrl(addPubVariantId) || '';
+      }
     }
     setAddPubSaving(true);
     try {
       await api.addVariantPublication(linkingVariant.id, {
         platform: addPubPlatform,
-        externalProductId: addPubProductId.trim(),
-        externalVariantId: addPubVariantId.trim() || undefined,
+        externalProductId,
+        externalVariantId: externalVariantId || undefined,
         packSize: addPubPackSize
       });
       showToast('success', 'Publicación agregada. El stock se sincronizará a esta publicación.');
@@ -3587,7 +3632,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                  <div className="rounded-xl bg-slate-800/50 border border-slate-600/50 p-3">
                     <p className="text-[11px] text-slate-400 mb-1 font-semibold">¿Dónde obtengo los IDs?</p>
                     <p className="text-[10px] text-slate-500">
-                       Podés poner solo el <strong>ID del padre</strong> (publicación ML o producto TN) y tocar <strong>&quot;Cargar variantes&quot;</strong>: se listan las variantes y, si el SKU coincide con el de esta fila, se elige sola. También podés copiar IDs desde <strong>Vista Mercado Libre</strong> / <strong>Vista Tienda Nube</strong> (expandir la fila y usar el ícono copiar).
+                       Podés pegar el <strong>link de la publicación</strong> o el <strong>ID del padre</strong> (ML o TN) y tocar <strong>&quot;Cargar variantes&quot;</strong>: se listan las variantes y, si el SKU coincide con el de esta fila, se elige sola. También podés copiar IDs desde <strong>Vista Mercado Libre</strong> / <strong>Vista Tienda Nube</strong> (expandir la fila y usar el ícono copiar).
                     </p>
                  </div>
 
@@ -3600,13 +3645,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </h4>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
-                          <label className="text-[11px] text-slate-500 block mb-1">ID del producto</label>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID o link del producto</label>
                           <div className="flex gap-2">
                              <input 
                                type="text" 
                                value={linkTnId}
                                onChange={(e) => { setLinkTnId(e.target.value); setLinkTnVariants(null); }}
-                               placeholder="ID padre (grupo)"
+                               placeholder="Link o ID numérico TN"
                                className="flex-1 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500/70 outline-none font-mono text-sm"
                              />
                              <button
@@ -3658,13 +3703,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <p className="text-[10px] text-amber-200/90 bg-amber-900/30 border border-amber-700/50 rounded-lg px-2.5 py-2">Si esta variante tiene su propia publicación en ML (una por talle/color), poné solo el ID de esa publicación abajo y guardá. El stock se sincronizará con esa publicación.</p>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
-                          <label className="text-[11px] text-slate-500 block mb-1">ID publicación (ítem) ML</label>
+                          <label className="text-[11px] text-slate-500 block mb-1">ID o link de la publicación ML</label>
                           <div className="flex gap-2">
                              <input 
                                type="text" 
                                value={linkMlId}
                                onChange={(e) => { setLinkMlId(e.target.value); setLinkMlVariations(null); }}
-                               placeholder="Ej: MLA123..."
+                               placeholder="Link o MLA…"
                                className="flex-1 bg-slate-800/60 border border-slate-600/60 rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:border-amber-500/70 outline-none font-mono text-sm"
                              />
                              <button
@@ -3800,8 +3845,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 </select>
                              </div>
                              <div>
-                                <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID producto TN' : 'ID publicación (ítem) ML'}</label>
-                                <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'Ej: 198440687' : 'Ej: MLA1179934011'} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
+                                <label className="text-[11px] text-slate-500 block mb-1">{addPubPlatform === 'tiendanube' ? 'ID o link producto TN' : 'ID o link publicación ML'}</label>
+                                <input type="text" value={addPubProductId} onChange={(e) => setAddPubProductId(e.target.value)} placeholder={addPubPlatform === 'tiendanube' ? 'Link o número de producto' : 'Link o MLA…'} className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500 outline-none focus:border-indigo-500" />
                              </div>
                           </div>
                           <div>
@@ -3892,7 +3937,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             </div>
             <div className="p-4 overflow-y-auto overflow-x-auto flex-1 space-y-4 min-h-0 touch-scroll">
               <p className="text-sm text-slate-400">
-                Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Cargá los IDs de publicación ML y producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
+                Grupo: <strong className="text-white font-mono">{bulkLinkGroupKey}</strong>. Podés pegar el <strong>link</strong> o el ID de publicación ML y de producto TN. Como ML y TN usan el mismo SKU, se empareja primero por <strong>SKU</strong> y si no coincide por <strong>talle y color</strong>.
               </p>
               <p className="text-sm text-amber-200/90 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
                 <strong>Si cada variante es una publicación en ML</strong> (sin ID padre): no hace falta cargar &quot;ID publicación Mercado Libre&quot;. Escribí en la columna <strong>Variación ML</strong> el ID de cada publicación (ej. MLA3022605728) por fila y guardá.
@@ -3903,13 +3948,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-400">ID publicación Mercado Libre</label>
+                      <label className="text-xs font-semibold text-slate-400">Link o ID publicación ML</label>
                       <div className="flex gap-2">
                         <input
                           type="text"
                           value={bulkLinkMlId}
                           onChange={(e) => setBulkLinkMlId(e.target.value)}
-                          placeholder="MLA..."
+                          placeholder="Link o MLA…"
                           className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
                         />
                         <button type="button" onClick={handleBulkLoadMl} disabled={!bulkLinkMlId.trim() || bulkLinkLoading} className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50">
@@ -3918,13 +3963,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-400">ID producto Tienda Nube</label>
+                      <label className="text-xs font-semibold text-slate-400">Link o ID producto TN</label>
                       <div className="flex gap-2">
                         <input
                           type="text"
                           value={bulkLinkTnId}
                           onChange={(e) => setBulkLinkTnId(e.target.value)}
-                          placeholder="Ej: 12345"
+                          placeholder="Link o número"
                           className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
                         />
                         <button type="button" onClick={handleBulkLoadTn} disabled={!bulkLinkTnId.trim() || bulkLinkLoading} className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50">
@@ -3943,7 +3988,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       <Link size={16} />
                       Cargar y emparejar todo
                     </button>
-                    <span className="text-xs text-slate-500">Con ambos IDs cargados se emparejan automáticamente por SKU y talle/color.</span>
+                    <span className="text-xs text-slate-500">Con ambos enlaces o IDs cargados se emparejan automáticamente por SKU y talle/color.</span>
                   </div>
                   {(bulkLinkMlVariations.length > 0 || bulkLinkTnVariants.length > 0) && (
                     <button type="button" onClick={() => runBulkAutoMatch(bulkLinkVariants, bulkLinkMlVariations, bulkLinkTnVariants)} className="text-sm text-indigo-400 hover:text-indigo-300">

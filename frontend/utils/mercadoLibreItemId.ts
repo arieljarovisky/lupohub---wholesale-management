@@ -46,6 +46,26 @@ export function mercadoLibreItemIdCandidates(raw: unknown): string[] {
   return Array.from(new Set(out.filter(Boolean)));
 }
 
+/** ID de variación en query (?variation_id= en publicaciones con variaciones). */
+export function extractMercadoLibreVariationIdFromUrl(raw: unknown): string | undefined {
+  const s = (raw ?? '').toString().trim();
+  if (!/^https?:\/\//i.test(s)) return undefined;
+  try {
+    const u = new URL(s);
+    const v =
+      u.searchParams.get('variation_id') ||
+      u.searchParams.get('variationId') ||
+      u.searchParams.get('variation');
+    if (v) {
+      const t = v.trim();
+      if (/^\d+$/.test(t)) return t;
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 /** True si el texto buscado y el id de ítem se refieren al mismo listing (MLAU vs MLA, etc.). */
 export function mercadoLibreItemIdsMatch(searchRaw: string, itemId: string): boolean {
   const a = normalizeMercadoLibreItemId(searchRaw);

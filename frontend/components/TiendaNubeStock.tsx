@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
 import { api } from '../services/api';
+import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
 interface TNStockItem {
   id: string;
@@ -149,8 +150,14 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
     .filter(item => {
       if (!searchTerm) return true;
       const search = searchTerm.toLowerCase();
+      const raw = searchTerm.trim();
+      const tnProductFromUrl = normalizeTiendaNubeProductId(raw);
+      const tnVarFromUrl = extractTiendaNubeVariantFromUrl(raw);
       return (
         item.id.toLowerCase().includes(search) ||
+        (tnProductFromUrl && String(item.id) === tnProductFromUrl) ||
+        (tnVarFromUrl &&
+          (item.variations || []).some((v: { variationId?: number | string }) => String(v.variationId) === tnVarFromUrl)) ||
         item.title.toLowerCase().includes(search) ||
         (item.variations || []).some((v: { sku?: string }) => v.sku?.toLowerCase().includes(search))
       );
@@ -258,7 +265,7 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
-              placeholder="Buscar por ID, título o SKU..."
+              placeholder="Buscar por ID, link de la publicación, título o SKU..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
