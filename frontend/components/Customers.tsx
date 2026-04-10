@@ -173,10 +173,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     | 'business_desc'
     | 'contact_asc'
     | 'city_asc'
-    | 'deuda_desc'
-    | 'deuda_asc'
-    | 'excel_desc'
-    | 'excel_asc'
+    | 'saldo_desc'
+    | 'saldo_asc'
     | 'seller_asc';
   const [sortPreset, setSortPreset] = useState<SortPreset>('business_asc');
 
@@ -206,6 +204,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return Number(le?.lastSaldo ?? 0);
   };
 
+  /** Un solo saldo pendiente por cliente: cuenta importada (Excel) + deuda pedidos en LupoHub */
+  const getSaldoPendienteTotal = (c: Customer) => getDeudaLupo(c) + getSaldoExcel(c);
+
   const displayCustomers = useMemo(() => {
     let list = customers.filter((c) => matchesSearch(c, searchTerm));
     if (role === Role.ADMIN && sellerFilterId) {
@@ -228,17 +229,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         case 'city_asc':
           cmp = (a.city || '').localeCompare(b.city || '', 'es');
           break;
-        case 'deuda_desc':
-          cmp = getDeudaLupo(b) - getDeudaLupo(a);
+        case 'saldo_desc':
+          cmp = getSaldoPendienteTotal(b) - getSaldoPendienteTotal(a);
           break;
-        case 'deuda_asc':
-          cmp = getDeudaLupo(a) - getDeudaLupo(b);
-          break;
-        case 'excel_desc':
-          cmp = getSaldoExcel(b) - getSaldoExcel(a);
-          break;
-        case 'excel_asc':
-          cmp = getSaldoExcel(a) - getSaldoExcel(b);
+        case 'saldo_asc':
+          cmp = getSaldoPendienteTotal(a) - getSaldoPendienteTotal(b);
           break;
         case 'seller_asc': {
           const nameFor = (sid?: string) =>
@@ -945,6 +940,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         </div>
 
+        {canViewSaldos && (
+          <div className="mt-6 rounded-3xl border border-slate-600/40 bg-slate-900/80 p-5 shadow-lg">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-slate-300">
+                <Wallet size={20} className="text-slate-400 shrink-0" />
+                <span className="text-xs font-black uppercase tracking-[0.2em]">Saldo pendiente</span>
+              </div>
+              <p className="text-2xl font-black text-white tabular-nums">
+                $
+                {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                })}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Zona de configuración avanzada (lista de precios, vendedor asignado, acceso cliente) */}
         {role === Role.ADMIN && (
           <div className="mt-10 space-y-3">
@@ -1122,7 +1135,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <div className="mt-8 space-y-4">
             <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.25em] flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)]" />
-              Cuenta corriente importada (Tango / Multimedias)
+              Detalle de cuenta importada (Tango / Multimedias)
             </h3>
             {multimediaLedgerLoading ? (
               <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
@@ -1132,11 +1145,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
               <div className="space-y-4">
                 <p className="text-xs text-slate-400">
-                  Último saldo en archivo importado:{' '}
-                  <span className="text-amber-200 font-bold tabular-nums">
-                    ${Number(multimediaLedger.lastSaldo).toLocaleString('es-AR')}
-                  </span>
-                  <span className="text-slate-500"> · {multimediaLedger.movementCount} movimientos</span>
+                  {multimediaLedger.movementCount} movimientos en archivo
                   {multimediaLedger.legacyCode ? (
                     <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
                   ) : null}
@@ -1647,10 +1656,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <option value="city_asc">Orden: ciudad (A→Z)</option>
                 {canViewSaldos && (
                   <>
-                    <option value="deuda_desc">Orden: mayor deuda pedidos (LupoHub)</option>
-                    <option value="deuda_asc">Orden: menor deuda pedidos (LupoHub)</option>
-                    <option value="excel_desc">Orden: mayor saldo cuenta (Excel)</option>
-                    <option value="excel_asc">Orden: menor saldo cuenta (Excel)</option>
+                    <option value="saldo_desc">Orden: mayor saldo pendiente</option>
+                    <option value="saldo_asc">Orden: menor saldo pendiente</option>
                   </>
                 )}
                 {role === Role.ADMIN && users.some((u) => u.role === Role.SELLER) && (
@@ -1673,9 +1680,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
               ) : null}
               {group.customers.map((customer) => {
-            const saldo = saldosRows.find((r) => r.customerId === customer.id);
-            const ledgerCard = ledgerSaldosById[customer.id];
-            const deudaPedidos = Number(saldo?.saldoPendiente ?? 0);
+            const saldoPendienteTotal = getSaldoPendienteTotal(customer);
             return (
             <div 
               key={customer.id} 
@@ -1716,49 +1721,22 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
                 {canViewSaldos && (
                   <div
-                    className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px] space-y-2"
-                    title="Cuenta importada desde Excel (Tango/Multimedias) y deuda de pedidos calculada en LupoHub."
+                    className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px]"
+                    title="Suma del saldo de cuenta importada (Excel) y del saldo pendiente de pedidos en LupoHub."
                   >
-                    <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide border-b border-slate-700/60 pb-1.5">
-                      <Wallet size={12} className="text-slate-500 shrink-0" />
-                      Saldos
-                    </div>
-                    {ledgerCard && ledgerCard.movementCount > 0 ? (
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-                        <span className="text-sky-300/90 font-medium shrink-0">Cuenta (Excel)</span>
-                        <span className="text-sky-100 font-bold tabular-nums text-right">
-                          $
-                          {Number(ledgerCard.lastSaldo).toLocaleString('es-AR', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}
-                          <span className="text-sky-500/85 font-normal text-[10px] ml-1">
-                            ({ledgerCard.movementCount} mov.)
-                          </span>
-                        </span>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide">
+                        <Wallet size={12} className="text-slate-500 shrink-0" />
+                        Saldo pendiente
                       </div>
-                    ) : null}
-                    <div
-                      className={`flex flex-col gap-0.5 ${ledgerCard && ledgerCard.movementCount > 0 ? 'pt-1 border-t border-slate-700/50' : ''}`}
-                    >
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-                        <span className="text-amber-300/90 font-medium shrink-0">Pedidos (LupoHub)</span>
-                        <span className="text-amber-200 font-bold tabular-nums text-right">
-                          {saldosLoading
-                            ? '...'
-                            : `$${deudaPedidos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        </span>
-                      </div>
-                      {!saldosLoading && saldo && (Number(saldo.totalPagos) > 0 || Number(saldo.totalCargosPendiente) > 0) && (
-                        <div className="text-[10px] text-slate-500 tabular-nums">
-                          Cargos IVA: $
-                          {Number(saldo.totalCargosPendiente ?? saldo.saldoPendiente).toLocaleString('es-AR', {
-                            minimumFractionDigits: 2
-                          })}{' '}
-                          · Pagos: $
-                          {Number(saldo.totalPagos ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                        </div>
-                      )}
+                      <span className="text-white font-bold tabular-nums text-right">
+                        {saldosLoading
+                          ? '...'
+                          : `$${saldoPendienteTotal.toLocaleString('es-AR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })}`}
+                      </span>
                     </div>
                   </div>
                 )}
