@@ -630,7 +630,7 @@ const MercadoLibreProductAds: React.FC = () => {
                 <th className="pb-2 pr-4">Campaña</th>
                 <th className="pb-2 pr-4">Estado</th>
                 <th className="pb-2 pr-4 text-right">Presup. día</th>
-                <th className="pb-2 pr-4 text-right">Costo</th>
+                <th className="pb-2 pr-4 text-right">Total invertido</th>
                 <th className="pb-2 pr-4 text-right">Ventas</th>
                 <th className="pb-2 pr-4 text-right">ROAS</th>
                 <th className="pb-2 pr-4 text-right">ACOS</th>
@@ -802,8 +802,9 @@ const MercadoLibreProductAds: React.FC = () => {
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-800">
                 <th className="pb-2 pr-3">Publicación</th>
                 <th className="pb-2 pr-3">Estado</th>
-                <th className="pb-2 pr-3 text-right">Costo</th>
+                <th className="pb-2 pr-3 text-right">Total invertido</th>
                 <th className="pb-2 pr-3 text-right">Ventas</th>
+                <th className="pb-2 pr-3 text-right">Unid.</th>
                 <th className="pb-2 pr-3 text-right">ROAS</th>
                 <th className="pb-2 pr-3 text-right">Clicks</th>
                 <th className="pb-2 text-right">Impres.</th>
@@ -822,6 +823,7 @@ const MercadoLibreProductAds: React.FC = () => {
                     <td className="py-2.5 pr-3 text-xs capitalize">{row.status}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">${formatMoneyAr(toNum(m.cost))}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">${formatMoneyAr(toNum(m.total_amount))}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{toNum(m.units_quantity).toLocaleString('es-AR')}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{formatRoas(toNum(m.roas))}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{toNum(m.clicks).toLocaleString('es-AR')}</td>
                     <td className="py-2.5 text-right tabular-nums">{toNum(m.prints).toLocaleString('es-AR')}</td>

@@ -180,7 +180,7 @@ function campaignRow(c: any): Record<string, unknown> {
     Estrategia: c.strategy ?? '',
     Canal: c.channel ?? '',
     'Presupuesto diario': c.budget ?? '',
-    Costo: m.cost ?? '',
+    'Total invertido': m.cost ?? '',
     Clicks: m.clicks ?? '',
     Impresiones: m.prints ?? '',
     CTR: m.ctr ?? '',
@@ -211,10 +211,12 @@ function adRow(row: any): Record<string, unknown> {
     'ID campaña': row.campaign_id ?? '',
     Precio: row.price ?? '',
     URL: row.permalink ?? '',
-    Costo: m.cost ?? '',
+    'Total invertido': m.cost ?? '',
     Clicks: m.clicks ?? '',
     Impresiones: m.prints ?? '',
     'Ventas total': m.total_amount ?? '',
+    /** Unidades vendidas atribuidas (métrica `units_quantity` de Mercado Ads). */
+    'Unidades vendidas': m.units_quantity ?? '',
     ROAS: m.roas ?? '',
     ACOS: m.acos ?? '',
     CVR: m.cvr ?? '',
@@ -229,7 +231,7 @@ const CAMPAIGN_CSV_COLS: { key: string; header: string }[] = [
   { key: 'Estrategia', header: 'Estrategia' },
   { key: 'Canal', header: 'Canal' },
   { key: 'Presupuesto diario', header: 'Presupuesto diario' },
-  { key: 'Costo', header: 'Costo' },
+  { key: 'Total invertido', header: 'Total invertido' },
   { key: 'Clicks', header: 'Clicks' },
   { key: 'Impresiones', header: 'Impresiones' },
   { key: 'CTR', header: 'CTR' },
@@ -252,10 +254,11 @@ const ADS_CSV_COLS: { key: string; header: string }[] = [
   { key: 'ID campaña', header: 'ID campaña' },
   { key: 'Precio', header: 'Precio' },
   { key: 'URL', header: 'URL' },
-  { key: 'Costo', header: 'Costo' },
+  { key: 'Total invertido', header: 'Total invertido' },
   { key: 'Clicks', header: 'Clicks' },
   { key: 'Impresiones', header: 'Impresiones' },
   { key: 'Ventas total', header: 'Ventas total' },
+  { key: 'Unidades vendidas', header: 'Unidades vendidas' },
   { key: 'ROAS', header: 'ROAS' },
   { key: 'ACOS', header: 'ACOS' },
   { key: 'CVR', header: 'CVR' },
@@ -451,16 +454,16 @@ export async function downloadSingleCampaignExcel(
   });
   styleHeaderRow(detHeader, adHeaders.length);
 
-  const colW = [14, 36, 28, 12, 14, 10, 40, 12, 10, 12, 14, 10, 10, 10, 10];
+  const colW = [14, 36, 28, 12, 14, 10, 40, 12, 10, 12, 14, 12, 10, 10, 10, 10];
   adHeaders.forEach((_, i) => {
     wsDet.getColumn(i + 1).width = colW[i] ?? 14;
   });
 
   const numFmt2 = '#,##0.00';
   const numFmt0 = '#,##0';
-  // Columnas 1-based según ADS_CSV_COLS: Precio=6, Costo=7, Clicks=8, Impresiones=9, Ventas=10, ROAS=11, ACOS=12, CVR=13, CPC=14
-  const detailDecimals = new Set([6, 7, 10, 11, 12, 13, 14]);
-  const detailIntegers = new Set([8, 9]);
+  // 1-based: Precio=6, URL=7, Total invertido=8, Clicks=9, Impresiones=10, Ventas=11, Unidades=12, ROAS=13, ACOS=14, CVR=15, CPC=16
+  const detailDecimals = new Set([6, 8, 11, 13, 14, 15, 16]);
+  const detailIntegers = new Set([9, 10, 12]);
 
   if (ads.length === 0) {
     const row = wsDet.getRow(2);

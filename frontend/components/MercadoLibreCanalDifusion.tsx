@@ -81,7 +81,7 @@ function RecTable({
             {kind !== 'add' && (
               <>
                 <th className="py-2 pr-3 font-medium whitespace-nowrap">ROAS</th>
-                <th className="py-2 pr-3 font-medium whitespace-nowrap">Costo</th>
+                <th className="py-2 pr-3 font-medium whitespace-nowrap">Total invertido</th>
                 <th className="py-2 pr-3 font-medium whitespace-nowrap">Ventas atrib.</th>
                 <th className="py-2 pr-3 font-medium whitespace-nowrap">Clics</th>
               </>
