@@ -1503,7 +1503,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               }}
               disabled={saldosMultimediasExporting}
               className="bg-amber-900/40 text-amber-100 px-4 py-2 rounded-lg hover:bg-amber-900/55 border border-amber-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50"
-              title="Una hoja Resumen: código, cliente, vendedor, zona, saldo pendiente LupoHub (pedidos impagos − pagos), cantidad de pedidos"
+              title="Una hoja Resumen con formato: código, cliente, vendedor, zona, saldo pendiente unificado, movimientos (sin columna Hoja)"
             >
               {saldosMultimediasExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
               <span>{saldosMultimediasExporting ? 'Exportando…' : 'Excel saldos pendientes (Resumen)'}</span>

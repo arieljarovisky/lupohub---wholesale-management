@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
-import { excelSheetName, padLegacyCode } from '../utils/multimediaHistorialExcel';
+import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 
 function toCustomer(row: any, transportes?: { id: string; name: string; address?: string }[]) {
   return {
@@ -754,8 +755,7 @@ type MergedResumenRow = {
 };
 
 /**
- * Excel una sola hoja "Resumen" con el mismo encabezado que historial Multimedias/Tango:
- * Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos, Hoja.
+ * Excel una sola hoja "Resumen" estilizada: Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos.
  * Saldo final = (LupoHub: pedidos pendientes IVA incl. − pagos) + (último saldo cuenta importada Excel).
  * Movimientos = líneas en historial importado + cantidad de pedidos pendientes (misma idea que cartera unificada).
  * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
@@ -964,9 +964,52 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       (a.contactName || '').localeCompare(b.contactName || '', 'es')
     );
 
-  const resumenRows: (string | number)[][] = [
-    ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos', 'Hoja'],
+  const borderThin = {
+    style: 'thin' as const,
+    color: { argb: 'FF94A3B8' }
+  };
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'LupoHub';
+  workbook.created = new Date();
+  const ws = workbook.addWorksheet('Resumen', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    properties: { defaultRowHeight: 19 }
+  });
+
+  ws.columns = [
+    { key: 'codigo', width: 14 },
+    { key: 'cliente', width: 44 },
+    { key: 'vendedor', width: 24 },
+    { key: 'zona', width: 18 },
+    { key: 'saldo', width: 16 },
+    { key: 'movs', width: 13 }
   ];
+
+  const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos'];
+  const headerRow = ws.addRow(headerTitles);
+  headerRow.height = 26;
+  headerRow.eachCell((cell, colNumber) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E40AF' }
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: colNumber >= 5 ? 'right' : 'left',
+      wrapText: true
+    };
+    cell.border = {
+      top: borderThin,
+      left: borderThin,
+      bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+      right: borderThin
+    };
+  });
+
+  let rowNum = 2;
   for (const r of mergedList) {
     const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
     const legacyTrim = r.legacy_code != null ? String(r.legacy_code).trim() : '';
@@ -981,13 +1024,48 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     const zona: string = r.account_zone != null ? String(r.account_zone).trim() : '';
     const saldoFinal = Number(r.saldoPendiente) || 0;
     const movs = (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
-    const sheetNm = excelSheetName(code, displayName).slice(0, 31);
-    resumenRows.push([code, displayName, vendedor, zona, saldoFinal, movs, sheetNm]);
+
+    const dataRow = ws.addRow([code, displayName, vendedor, zona, saldoFinal, movs]);
+    const zebra = rowNum % 2 === 0;
+    dataRow.eachCell((cell, colNumber) => {
+      cell.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+      if (zebra) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF1F5F9' }
+        };
+      }
+      cell.border = {
+        top: borderThin,
+        left: borderThin,
+        bottom: borderThin,
+        right: borderThin
+      };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: colNumber >= 5 ? 'right' : 'left',
+        wrapText: colNumber === 2 || colNumber === 3
+      };
+      if (colNumber === 5) {
+        cell.numFmt = '#,##0.00';
+      }
+      if (colNumber === 6) {
+        cell.numFmt = '0';
+      }
+    });
+    rowNum++;
   }
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumenRows), 'Resumen');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  if (mergedList.length > 0) {
+    ws.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: mergedList.length + 1, column: 6 }
+    };
+  }
+
+  const out = await workbook.xlsx.writeBuffer();
+  const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader(
     'Content-Disposition',

@@ -638,7 +638,7 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  /** Hoja única "Resumen" como Multimedias/Tango: saldos pendientes de cobro en LupoHub por cliente. */
+  /** Hoja única "Resumen" estilizada (sin columna Hoja): código, cliente, vendedor, zona, saldo final, movimientos. */
   exportSaldosPendientesMultimedias: async (): Promise<void> => {
     const blob = await getBlob('/customers/saldos-pendientes/export-multimedias', 90000);
     const url = URL.createObjectURL(blob);
