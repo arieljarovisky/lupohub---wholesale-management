@@ -107,10 +107,8 @@ export function buildWholesaleFacturaHtml(params: {
   if (!order.invoice) return '';
   const inv = order.invoice;
 
-  const items = sortOrderItemsForPrint(
-    order.items.map((i) => enrichOrderItem(i, products)),
-    products
-  );
+  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
+  const items = sortOrderItemsForPrint(itemsOriginal, products);
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
@@ -420,8 +418,9 @@ export function buildWholesaleCreditNoteHtml(params: {
   const scope = nc.scope || 'total';
   const itemIdx = nc.itemIndex;
   let rows: string;
-  if (scope === 'item' && typeof itemIdx === 'number' && items[itemIdx]) {
-    const i = items[itemIdx];
+  if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
+    // itemIndex se guarda contra el orden original de order.items en backend.
+    const i = itemsOriginal[itemIdx];
     const price = Number(i.priceAtMoment ?? 0);
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
@@ -454,101 +453,144 @@ export function buildWholesaleCreditNoteHtml(params: {
     : `<span class="inv-logo-placeholder">${logoPlaceholderNc}</span>`;
 
   const scopeLabel = scope === 'item' ? 'Crédito por ítem' : 'Crédito total del pedido';
+  const cuitEmpresa = (remitente.cuit || '').toString();
+  const ingresosBrutosEmpresa = (remitente.ingresosBrutos || '901-2113373').toString();
+  const inicioActividadEmpresa = (remitente.inicioActividad || '13/06/2005').toString();
+  const razonEmpresa = (remitente.businessName || '—').toString();
+  const razonEmpresaLower = razonEmpresa.toLowerCase();
+  const dirEmpresa = razonEmpresaLower.includes('multimedia') || razonEmpresaLower.includes('multimedias') ? 'Murillo 630, CABA' : empresaDir || '';
+  const cuitCliente = (customer?.cuit || '').toString();
+  const ptoVtaNc = String(nc.puntoVta ?? '').padStart(5, '0');
+  const compNroNc = String(nc.cbteDesde ?? '').padStart(8, '0');
+  const cbteTipoNc = Number((nc as { cbteTipo?: number }).cbteTipo ?? (nc as { cbte_tipo?: number }).cbte_tipo ?? 0);
+  const letraNc = cbteTipoNc === 3 ? 'A' : cbteTipoNc === 13 ? 'C' : 'B';
+  const codigoNc = String(cbteTipoNc || 8).padStart(3, '0');
+  const periodDate = new Date(order.date);
+  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
+  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
+  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><style>
-      @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
+      @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; margin: 0; padding: 24px 16px 40px; color: #111827; background: #f3f4f6; font-size: 13px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .nc-doc { width: 100%; max-width: 190mm; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(17,24,39,0.08); padding: 28px 32px 32px; }
-      .nc-badge { display: inline-block; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #92400e; background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; padding: 5px 12px; border-radius: 999px; margin-bottom: 10px; }
-      .inv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 22px; padding-bottom: 20px; border-bottom: 3px solid #d97706; }
-      .inv-logo-wrap { min-height: 56px; display: flex; align-items: center; }
-      .inv-logo { max-height: 56px; max-width: 200px; width: auto; height: auto; object-fit: contain; display: block; }
-      .inv-logo-placeholder { font-size: 1.25rem; font-weight: 800; color: #111827; letter-spacing: -0.02em; }
-      .inv-meta { text-align: right; flex-shrink: 0; }
-      .inv-meta .inv-num { font-size: 1.15rem; font-weight: 800; color: #b45309; letter-spacing: -0.02em; }
-      .inv-meta .inv-fecha { font-size: 0.88rem; color: #6b7280; margin-top: 6px; font-weight: 600; }
-      .inv-meta .inv-scope { font-size: 0.75rem; color: #78716c; margin-top: 8px; }
-      .inv-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 28px; margin-bottom: 22px; padding: 16px 18px; background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 0.86rem; line-height: 1.55; }
-      .inv-datos strong { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 8px; font-weight: 700; }
-      .inv-table-wrap { margin-bottom: 22px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
-      .inv-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-      .inv-table thead { background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%); }
-      .inv-table th { text-align: left; padding: 11px 12px; font-weight: 700; color: #78350f; border-bottom: 2px solid #f59e0b; white-space: nowrap; }
-      .inv-table th:nth-child(2), .inv-table th:nth-child(3) { text-align: center; }
-      .inv-table th:nth-child(n+4) { text-align: right; }
-      .inv-table td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
-      .inv-table tbody tr:nth-child(even) td { background: #fafafa; }
-      .inv-table tbody tr:last-child td { border-bottom: none; }
-      .col-c { text-align: center; color: #4b5563; }
-      .col-r { text-align: right; font-variant-numeric: tabular-nums; }
-      .inv-summary { display: flex; justify-content: flex-end; margin-bottom: 24px; }
-      .inv-summary-inner { min-width: 260px; font-size: 0.86rem; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-      .inv-summary-inner .row { display: flex; justify-content: space-between; gap: 20px; padding: 9px 14px; border-bottom: 1px solid #f3f4f6; }
-      .inv-summary-inner .row:last-child { border-bottom: none; }
-      .inv-summary-inner .row.total { font-weight: 800; font-size: 1.02rem; background: linear-gradient(90deg, #fffbeb, #fef9c3); color: #92400e; border-top: 2px solid #fbbf24; }
-      .inv-footer { padding: 16px 18px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 0.78rem; color: #4b5563; }
-      .inv-cae { margin-bottom: 6px; color: #374151; font-variant-numeric: tabular-nums; }
-      .inv-cae strong { color: #111827; }
-      .no-print { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-      .no-print button { padding: 11px 22px; font-size: 0.92rem; cursor: pointer; border: none; border-radius: 8px; font-weight: 600; transition: transform 0.12s, box-shadow 0.12s; }
-      .no-print button:first-child { background: linear-gradient(180deg, #1f2937, #111827); color: #fff; box-shadow: 0 2px 8px rgba(17,24,39,0.25); }
-      .no-print button:first-child:hover { transform: translateY(-1px); }
-      .no-print button:last-child { background: #e5e7eb; color: #374151; }
-      .no-print button:last-child:hover { background: #d1d5db; }
-      @media print {
-        .no-print { display: none !important; }
-        body { background: #fff; padding: 0; }
-        .nc-doc { box-shadow: none; border-radius: 0; border: none; max-width: 100%; padding: 0; }
-        .inv-table tbody tr:nth-child(even) td { background: transparent; }
-        .inv-datos, .inv-footer, .inv-table-wrap, .inv-summary-inner { break-inside: avoid; }
-        .inv-table tr { page-break-inside: avoid; }
-      }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+      .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
+      .logo { min-height: 42px; display: flex; align-items: center; }
+      .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
+      .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
+      .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
+      .head-right { padding: 8px 10px; }
+      .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
+      .mini { font-size: 10px; }
+      .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
+      .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
+      .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
+      .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
+      .fact-title { font-size: 30px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 6px; }
+      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta div { margin-bottom: 4px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .block { padding: 8px 10px; border: 1px solid #111; min-height: 58px; }
+      .muted { color: #333; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; }
+      .boxrow .block { min-height: 46px; border-top: 0; }
+      .period-row { border: 1px solid #111; border-top: 0; padding: 6px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-weight: 700; }
+      .period-row span { font-weight: 400; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
+      tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+      .col-c { text-align: center; }
+      .col-r { text-align: right; }
+      .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .totals { border: 1px solid #111; }
+      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+      .totals .r:last-child { border-bottom: none; font-weight: 700; }
+      .footer { margin-top: 12px; font-size: 10px; }
+      .bottom-block { margin-top: auto; }
+      .no-print { margin-top: 14px; display: flex; gap: 10px; }
+      @media print { .no-print { display: none !important; } }
     </style></head><body>
-      <div class="nc-doc">
-        <div class="nc-badge">Nota de crédito</div>
-        <div class="inv-top">
-          <div class="inv-logo-wrap">${logoBlockNc}</div>
-          <div class="inv-meta">
-            <div class="inv-num">NOTA DE CRÉDITO Nº ${nroNota}</div>
-            <div class="inv-fecha">Fecha: ${fechaNota}</div>
-            <div class="inv-scope">${scopeLabel}</div>
+      <div class="sheet">
+        <div class="original">ORIGINAL</div>
+        <div class="topbar">
+          <div class="head-left">
+            <div class="logo">${logoBlockNc}</div>
+            <div class="issuer-title">${razonEmpresa}</div>
+            ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
+            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+          </div>
+          <div class="head-right">
+            <div class="fact-row">
+              <div class="letter-box">
+                <div class="l">${letraNc}</div>
+                <div class="mini">COD. ${codigoNc}</div>
+              </div>
+              <div>
+                <div class="fact-title">NOTA DE CRÉDITO</div>
+                <div class="fact-meta">
+                  <div><strong>Punto de Venta:</strong> ${ptoVtaNc} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNroNc}</div>
+                  <div><strong>Fecha de Emisión:</strong> ${fechaNota}</div>
+                  <div><strong>Alcance:</strong> ${scopeLabel}</div>
+                </div>
+              </div>
+            </div>
+            ${cuitEmpresa ? `<div><strong>CUIT:</strong> ${cuitEmpresa}</div>` : ''}
+            ${ingresosBrutosEmpresa ? `<div><strong>Ingresos Brutos:</strong> ${ingresosBrutosEmpresa}</div>` : ''}
+            ${inicioActividadEmpresa ? `<div><strong>Fecha de Inicio de Actividades:</strong> ${inicioActividadEmpresa}</div>` : ''}
           </div>
         </div>
-        <div class="inv-datos">
-          <div>
-            <strong>Datos empresa</strong>
-            ${remitente.businessName || '—'}<br>
-            ${empresaDir ? empresaDir + '<br>' : ''}${remitente.cuit ? 'CUIT ' + remitente.cuit + '<br>' : ''}${remitente.email ? remitente.email + '<br>' : ''}${remitente.phone ? remitente.phone : ''}
-          </div>
-          <div>
-            <strong>Datos cliente</strong>
-            ${clienteNombre}<br>
-            ${clienteDir ? clienteDir + '<br>' : ''}${customer?.cuit ? 'CUIT ' + customer.cuit + '<br>' : ''}${customer?.email ? customer.email + '<br>' : ''}${customer?.phone ? customer.phone : ''}
-          </div>
+
+        <div class="period-row">
+          <div>Período Facturado Desde: <span>${periodFrom}</span></div>
+          <div>Hasta: <span>${periodTo}</span></div>
+          <div>Fecha de Vto. para el pago: <span>${fechaNota}</span></div>
         </div>
-        <div class="inv-table-wrap">
-          <table class="inv-table">
-            <thead><tr><th>Producto / Descripción</th><th>Nº Despacho</th><th>Cantidad</th><th>Base</th><th>IVA</th><th>Total</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        <div class="inv-summary">
-          <div class="inv-summary-inner">
-            <div class="row"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
-            <div class="row"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>
-            <div class="row"><span>Retención</span><span>—</span></div>
-            <div class="row total"><span>Total NC</span><span>$${formatMoneyAr(totalComprobanteNc)}</span></div>
+
+        <div class="boxrow">
+          <div class="block">
+            <div><strong>Sr./es:</strong> ${clienteNombre}</div>
+            ${clienteDir ? `<div>${clienteDir}</div>` : ''}
+            ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
+          </div>
+          <div class="block">
+            <div><strong>Comprobante:</strong> NC</div>
           </div>
         </div>
-        <div class="inv-footer">
-          <div class="inv-cae"><strong>CAE:</strong> ${nc.cae} &nbsp;&nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
-          <p style="font-size: 0.72rem; margin: 8px 0 0; color: #6b7280;">Consultá en afip.gob.ar con tu CUIT, fecha ${fechaNota} y Pto. Vta. ${nc.puntoVta != null ? nc.puntoVta : ''}.</p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Producto / Descripción</th>
+              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
+              <th class="col-c" style="width: 70px;">CANT.</th>
+              <th class="col-r" style="width: 100px;">BASE</th>
+              <th class="col-r" style="width: 90px;">IVA</th>
+              <th class="col-r" style="width: 92px;">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+
+        <div class="bottom-block">
+          <div class="summary">
+            <div></div>
+            <div class="totals">
+              <div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>
+              <div class="r"><span>Total NC</span><span>$${formatMoneyAr(totalComprobanteNc)}</span></div>
+            </div>
+          </div>
+          <div class="footer">
+            <div><strong>CAE:</strong> ${nc.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+            <div class="muted">Consulta en afip.gob.ar con tu CUIT, fecha ${fechaNota} y Pto.Vta ${nc.puntoVta != null ? nc.puntoVta : ''}.</div>
+          </div>
         </div>
-      </div>
-      <div class="no-print">
-        <button type="button" onclick="window.print()">Imprimir / Guardar PDF</button>
-        <button type="button" onclick="window.close()">Cerrar</button>
+
+        <div class="no-print">
+          <button onclick="window.print()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 6px; font-weight: 700;">Descargar PDF / Imprimir</button>
+          <button onclick="window.close()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 6px;">Cerrar</button>
+        </div>
       </div>
     </body></html>`;
 }
