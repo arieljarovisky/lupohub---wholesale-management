@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -166,17 +166,111 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
 
-  const filteredCustomers = customers.filter(c => 
-    c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  /** Filtro por vendedor (solo ADMIN): '' = todos, '__none__' = sin vendedor, o id de usuario SELLER */
+  const [sellerFilterId, setSellerFilterId] = useState<string>('');
+  type SortPreset =
+    | 'business_asc'
+    | 'business_desc'
+    | 'contact_asc'
+    | 'city_asc'
+    | 'deuda_desc'
+    | 'deuda_asc'
+    | 'excel_desc'
+    | 'excel_asc'
+    | 'seller_asc';
+  const [sortPreset, setSortPreset] = useState<SortPreset>('business_asc');
+
+  const matchesSearch = (c: Customer, qRaw: string) => {
+    const q = qRaw.trim().toLowerCase();
+    if (!q) return true;
+    const inText = (s: string) => s.toLowerCase().includes(q);
+    if (inText(c.businessName) || inText(c.name)) return true;
+    if (c.email && inText(c.email)) return true;
+    if (c.city && inText(c.city)) return true;
+    if (c.legacyCode && String(c.legacyCode).toLowerCase().includes(q.replace(/\s/g, ''))) return true;
+    const qDigits = q.replace(/\D/g, '');
+    if (qDigits.length >= 4 && c.cuit) {
+      const cuitDigits = c.cuit.replace(/\D/g, '');
+      if (cuitDigits.includes(qDigits)) return true;
+    }
+    return false;
+  };
+
+  const getDeudaLupo = (c: Customer) => {
+    const r = saldosRows.find((x) => x.customerId === c.id);
+    return Number(r?.saldoPendiente ?? 0);
+  };
+
+  const getSaldoExcel = (c: Customer) => {
+    const le = ledgerSaldosById[c.id];
+    return Number(le?.lastSaldo ?? 0);
+  };
+
+  const displayCustomers = useMemo(() => {
+    let list = customers.filter((c) => matchesSearch(c, searchTerm));
+    if (role === Role.ADMIN && sellerFilterId) {
+      if (sellerFilterId === '__none__') list = list.filter((c) => !c.sellerId);
+      else list = list.filter((c) => c.sellerId === sellerFilterId);
+    }
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      switch (sortPreset) {
+        case 'business_asc':
+          cmp = a.businessName.localeCompare(b.businessName, 'es');
+          break;
+        case 'business_desc':
+          cmp = b.businessName.localeCompare(a.businessName, 'es');
+          break;
+        case 'contact_asc':
+          cmp = a.name.localeCompare(b.name, 'es');
+          break;
+        case 'city_asc':
+          cmp = (a.city || '').localeCompare(b.city || '', 'es');
+          break;
+        case 'deuda_desc':
+          cmp = getDeudaLupo(b) - getDeudaLupo(a);
+          break;
+        case 'deuda_asc':
+          cmp = getDeudaLupo(a) - getDeudaLupo(b);
+          break;
+        case 'excel_desc':
+          cmp = getSaldoExcel(b) - getSaldoExcel(a);
+          break;
+        case 'excel_asc':
+          cmp = getSaldoExcel(a) - getSaldoExcel(b);
+          break;
+        case 'seller_asc': {
+          const nameFor = (sid?: string) =>
+            sid ? users.find((u) => u.id === sid)?.name || 'Vendedor' : 'Sin vendedor';
+          const la = nameFor(a.sellerId).toLocaleLowerCase('es');
+          const lb = nameFor(b.sellerId).toLocaleLowerCase('es');
+          cmp = la.localeCompare(lb, 'es');
+          break;
+        }
+        default:
+          cmp = 0;
+      }
+      return cmp;
+    });
+    return sorted;
+  }, [
+    customers,
+    searchTerm,
+    sellerFilterId,
+    sortPreset,
+    role,
+    saldosRows,
+    ledgerSaldosById,
+    users
+  ]);
 
   const groupedForList = useMemo(() => {
     if (!groupBySeller || searchTerm.trim()) {
-      return [{ key: 'all', label: '', customers: filteredCustomers }];
+      return [{ key: 'all', label: '', customers: displayCustomers }];
     }
     const map = new Map<string, { label: string; customers: Customer[] }>();
-    for (const c of filteredCustomers) {
+    for (const c of displayCustomers) {
       const sid = c.sellerId || '__none__';
       const label =
         sid !== '__none__'
@@ -196,7 +290,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       return a.label.localeCompare(b.label, 'es');
     });
     return arr;
-  }, [groupBySeller, searchTerm, filteredCustomers, users]);
+  }, [groupBySeller, searchTerm, displayCustomers, users]);
 
   const currentCustomerUserEmail = (c: Customer | null) => {
     // De momento usamos el email del propio cliente como referencia visual.
@@ -1482,32 +1576,89 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
       <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
         {/* Toolbar */}
-        <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex flex-wrap items-center gap-3 justify-between">
-          <div className="relative max-w-md flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar por nombre o empresa..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white placeholder-slate-500 text-sm"
-            />
+        <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3 justify-between">
+            <div className="relative max-w-md flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="text"
+                placeholder="Buscar: razón social, contacto, email, ciudad, CUIT, código…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white placeholder-slate-500 text-sm"
+              />
+            </div>
+            {users.some((u) => u.role === Role.SELLER) && (
+              <button
+                type="button"
+                onClick={() => setGroupBySeller((v) => !v)}
+                className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition ${
+                  groupBySeller
+                    ? 'bg-blue-600/25 border-blue-500/50 text-blue-100'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
+                }`}
+                title={searchTerm.trim() ? 'Desactivá la búsqueda para ver grupos por vendedor' : 'Agrupa las tarjetas por vendedor asignado'}
+              >
+                <LayoutList size={16} />
+                Agrupar por vendedor
+              </button>
+            )}
           </div>
-          {users.some((u) => u.role === Role.SELLER) && (
-            <button
-              type="button"
-              onClick={() => setGroupBySeller((v) => !v)}
-              className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition ${
-                groupBySeller
-                  ? 'bg-blue-600/25 border-blue-500/50 text-blue-100'
-                  : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
-              }`}
-              title={searchTerm.trim() ? 'Desactivá la búsqueda para ver grupos por vendedor' : 'Agrupa las tarjetas por vendedor asignado'}
-            >
-              <LayoutList size={16} />
-              Agrupar por vendedor
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {role === Role.ADMIN && users.some((u) => u.role === Role.SELLER) && (
+              <div className="flex items-center gap-2 min-w-0">
+                <Filter size={14} className="text-slate-500 shrink-0" />
+                <label className="sr-only" htmlFor="customers-seller-filter">
+                  Filtrar por vendedor
+                </label>
+                <select
+                  id="customers-seller-filter"
+                  value={sellerFilterId}
+                  onChange={(e) => setSellerFilterId(e.target.value)}
+                  className="max-w-[min(100%,220px)] bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="">Todos los vendedores</option>
+                  <option value="__none__">Sin vendedor asignado</option>
+                  {users
+                    .filter((u) => u.role === Role.SELLER)
+                    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+            <div className="flex items-center gap-2 min-w-0 flex-1 sm:flex-initial">
+              <ArrowUpDown size={14} className="text-slate-500 shrink-0" />
+              <label className="sr-only" htmlFor="customers-sort">
+                Ordenar
+              </label>
+              <select
+                id="customers-sort"
+                value={sortPreset}
+                onChange={(e) => setSortPreset(e.target.value as SortPreset)}
+                className="flex-1 sm:min-w-[240px] sm:max-w-sm bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="business_asc">Orden: razón social (A→Z)</option>
+                <option value="business_desc">Orden: razón social (Z→A)</option>
+                <option value="contact_asc">Orden: contacto (A→Z)</option>
+                <option value="city_asc">Orden: ciudad (A→Z)</option>
+                {canViewSaldos && (
+                  <>
+                    <option value="deuda_desc">Orden: mayor deuda pedidos (LupoHub)</option>
+                    <option value="deuda_asc">Orden: menor deuda pedidos (LupoHub)</option>
+                    <option value="excel_desc">Orden: mayor saldo cuenta (Excel)</option>
+                    <option value="excel_asc">Orden: menor saldo cuenta (Excel)</option>
+                  </>
+                )}
+                {role === Role.ADMIN && users.some((u) => u.role === Role.SELLER) && (
+                  <option value="seller_asc">Orden: vendedor (A→Z)</option>
+                )}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* List Grid */}
@@ -1651,10 +1802,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               })}
             </React.Fragment>
           ))}
-          {filteredCustomers.length === 0 && (
+          {displayCustomers.length === 0 && (
             <div className="col-span-full py-16 text-center text-slate-500">
                <Users size={48} className="mx-auto text-slate-800 mb-4"/>
-               <p>No se encontraron clientes con ese criterio.</p>
+               <p>No hay clientes que coincidan con la búsqueda, el filtro de vendedor u orden aplicado.</p>
             </div>
           )}
         </div>
