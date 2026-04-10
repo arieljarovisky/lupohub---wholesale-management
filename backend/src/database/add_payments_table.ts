@@ -1,5 +1,27 @@
 import { execute, get } from './db';
 
+/** Evita doble inserción del mismo recibo (doble click o dos POST simultáneos). */
+async function ensurePaymentsNaturalUniqueIndex(): Promise<void> {
+  try {
+    await execute(
+      `CREATE UNIQUE INDEX uq_payments_client_recibo_fecha_importe
+       ON payments (customer_id, receipt_number(80), date, amount)`
+    );
+    console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado/ok');
+  } catch (e: any) {
+    const code = e?.code;
+    const msg = String(e?.message || '');
+    if (code === 'ER_DUP_KEYNAME' || msg.includes('Duplicate key name')) return;
+    if (code === 'ER_DUP_ENTRY' || msg.includes('Duplicate entry')) {
+      console.warn(
+        '[DB] No se aplicó índice único en payments: hay filas duplicadas (cliente+recibo+fecha+importe). Eliminá duplicados y reiniciá el servidor.'
+      );
+      return;
+    }
+    console.warn('[DB] ensurePaymentsNaturalUniqueIndex:', msg);
+  }
+}
+
 /** Tabla de pagos/recibos de clientes (cuenta corriente). */
 export async function addPaymentsTable(): Promise<void> {
   console.log('[DB] Verificando tabla payments...');
@@ -11,6 +33,7 @@ export async function addPaymentsTable(): Promise<void> {
     const exists = Number((row as any)?.cnt || 0) > 0;
     if (exists) {
       console.log('[DB] payments ya existe');
+      await ensurePaymentsNaturalUniqueIndex();
       return;
     }
 
@@ -34,6 +57,7 @@ export async function addPaymentsTable(): Promise<void> {
     `);
 
     console.log('[DB] Tabla payments creada');
+    await ensurePaymentsNaturalUniqueIndex();
   } catch (e: any) {
     console.error('[DB] Error creando tabla payments:', e?.message);
   }

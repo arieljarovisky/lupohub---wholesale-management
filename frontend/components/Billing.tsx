@@ -57,6 +57,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
+  const [paySubmitting, setPaySubmitting] = useState(false);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
 
   useEffect(() => {
@@ -561,13 +562,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <div className="p-5 border-t border-slate-800 flex gap-2">
               <button onClick={() => setShowPaymentModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl font-bold">Cancelar</button>
               <button
+                type="button"
+                disabled={paySubmitting}
                 onClick={async () => {
+                  if (paySubmitting) return;
                   try {
                     const amount = parseMoneyInput(payAmount || '0');
                     if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
+                    setPaySubmitting(true);
                     await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),
@@ -583,11 +588,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     loadPayments();
                   } catch (err: any) {
                     showToast('error', err?.response?.data?.message || err?.message || 'Error cargando pago');
+                  } finally {
+                    setPaySubmitting(false);
                   }
                 }}
-                className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black"
+                className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
               >
-                Guardar pago
+                {paySubmitting && <Loader2 size={18} className="animate-spin shrink-0" aria-hidden />}
+                {paySubmitting ? 'Guardando…' : 'Guardar pago'}
               </button>
             </div>
           </div>

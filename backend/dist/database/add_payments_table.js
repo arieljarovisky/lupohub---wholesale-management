@@ -11,6 +11,27 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.addPaymentsTable = addPaymentsTable;
 const db_1 = require("./db");
+/** Evita doble inserción del mismo recibo (doble click o dos POST simultáneos). */
+function ensurePaymentsNaturalUniqueIndex() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            yield (0, db_1.execute)(`CREATE UNIQUE INDEX uq_payments_client_recibo_fecha_importe
+       ON payments (customer_id, receipt_number(80), date, amount)`);
+            console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado/ok');
+        }
+        catch (e) {
+            const code = e === null || e === void 0 ? void 0 : e.code;
+            const msg = String((e === null || e === void 0 ? void 0 : e.message) || '');
+            if (code === 'ER_DUP_KEYNAME' || msg.includes('Duplicate key name'))
+                return;
+            if (code === 'ER_DUP_ENTRY' || msg.includes('Duplicate entry')) {
+                console.warn('[DB] No se aplicó índice único en payments: hay filas duplicadas (cliente+recibo+fecha+importe). Eliminá duplicados y reiniciá el servidor.');
+                return;
+            }
+            console.warn('[DB] ensurePaymentsNaturalUniqueIndex:', msg);
+        }
+    });
+}
 /** Tabla de pagos/recibos de clientes (cuenta corriente). */
 function addPaymentsTable() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -21,6 +42,7 @@ function addPaymentsTable() {
             const exists = Number((row === null || row === void 0 ? void 0 : row.cnt) || 0) > 0;
             if (exists) {
                 console.log('[DB] payments ya existe');
+                yield ensurePaymentsNaturalUniqueIndex();
                 return;
             }
             yield (0, db_1.execute)(`
@@ -42,6 +64,7 @@ function addPaymentsTable() {
       )
     `);
             console.log('[DB] Tabla payments creada');
+            yield ensurePaymentsNaturalUniqueIndex();
         }
         catch (e) {
             console.error('[DB] Error creando tabla payments:', e === null || e === void 0 ? void 0 : e.message);

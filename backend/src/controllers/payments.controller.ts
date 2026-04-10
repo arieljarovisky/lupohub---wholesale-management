@@ -110,12 +110,64 @@ export const createPayment = async (req: any, res: Response) => {
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
 
-    const id = uuidv4();
-    await execute(
-      `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, customerId, sellerId, orderId, invoiceId, receiptNumber, date, amount, notes]
+    const existing = await get(
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+       FROM payments
+       WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+       LIMIT 1`,
+      [customerId, receiptNumber, date, amount]
     );
+    if (existing) {
+      const row = existing;
+      return res.status(200).json({
+        id: row.id,
+        customerId: row.customer_id,
+        sellerId: row.seller_id ?? undefined,
+        orderId: row.order_id ?? undefined,
+        invoiceId: row.invoice_id ?? undefined,
+        receiptNumber: row.receipt_number,
+        date: row.date,
+        amount: Number(row.amount) || 0,
+        notes: row.notes ?? undefined,
+        createdAt: row.created_at
+      });
+    }
+
+    const id = uuidv4();
+    try {
+      await execute(
+        `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, customerId, sellerId, orderId, invoiceId, receiptNumber, date, amount, notes]
+      );
+    } catch (e: any) {
+      const dup =
+        e?.code === 'ER_DUP_ENTRY' || String(e?.message || '').includes('Duplicate entry');
+      if (dup) {
+        const rowDup = await get(
+          `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+           FROM payments
+           WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+           LIMIT 1`,
+          [customerId, receiptNumber, date, amount]
+        );
+        if (rowDup) {
+          return res.status(200).json({
+            id: rowDup.id,
+            customerId: rowDup.customer_id,
+            sellerId: rowDup.seller_id ?? undefined,
+            orderId: rowDup.order_id ?? undefined,
+            invoiceId: rowDup.invoice_id ?? undefined,
+            receiptNumber: rowDup.receipt_number,
+            date: rowDup.date,
+            amount: Number(rowDup.amount) || 0,
+            notes: rowDup.notes ?? undefined,
+            createdAt: rowDup.created_at
+          });
+        }
+      }
+      throw e;
+    }
 
     const row = await get(
       `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at

@@ -1592,14 +1592,14 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
 
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = async (orderId: string) => {
-  // Lock efimero para evitar doble procesamiento concurrente del mismo orderId.
+  // Lock efímero para evitar doble procesamiento concurrente del mismo orderId (MySQL en prod).
   await execute(
     `CREATE TABLE IF NOT EXISTS integration_order_locks (
-      platform TEXT NOT NULL,
-      external_order_id TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      platform VARCHAR(64) NOT NULL,
+      external_order_id VARCHAR(191) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (platform, external_order_id)
-    )`
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
   const lockPlatform = 'mercadolibre';
   let lockAcquired = false;
@@ -1612,7 +1612,12 @@ const processMercadoLibreOrder = async (orderId: string) => {
       lockAcquired = true;
     } catch (e: any) {
       const msg = String(e?.message || '');
-      if (msg.includes('UNIQUE constraint failed') || msg.includes('SQLITE_CONSTRAINT')) {
+      const dup =
+        msg.includes('UNIQUE constraint failed') ||
+        msg.includes('SQLITE_CONSTRAINT') ||
+        e?.code === 'ER_DUP_ENTRY' ||
+        msg.includes('Duplicate entry');
+      if (dup) {
         console.log(`[ML Order] Orden ${orderId} en procesamiento concurrente, omitiendo`);
         return;
       }

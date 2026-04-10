@@ -128,7 +128,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.listPayments = listPayments;
 /** Crear pago/recibo. */
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
@@ -154,21 +154,66 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const orderId = body.orderId ? String(body.orderId).trim() : null;
         const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
         const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
+        const existing = yield (0, db_1.get)(`SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+       FROM payments
+       WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+       LIMIT 1`, [customerId, receiptNumber, date, amount]);
+        if (existing) {
+            const row = existing;
+            return res.status(200).json({
+                id: row.id,
+                customerId: row.customer_id,
+                sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : undefined,
+                orderId: (_b = row.order_id) !== null && _b !== void 0 ? _b : undefined,
+                invoiceId: (_c = row.invoice_id) !== null && _c !== void 0 ? _c : undefined,
+                receiptNumber: row.receipt_number,
+                date: row.date,
+                amount: Number(row.amount) || 0,
+                notes: (_d = row.notes) !== null && _d !== void 0 ? _d : undefined,
+                createdAt: row.created_at
+            });
+        }
         const id = (0, uuid_1.v4)();
-        yield (0, db_1.execute)(`INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, customerId, sellerId, orderId, invoiceId, receiptNumber, date, amount, notes]);
+        try {
+            yield (0, db_1.execute)(`INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, customerId, sellerId, orderId, invoiceId, receiptNumber, date, amount, notes]);
+        }
+        catch (e) {
+            const dup = (e === null || e === void 0 ? void 0 : e.code) === 'ER_DUP_ENTRY' || String((e === null || e === void 0 ? void 0 : e.message) || '').includes('Duplicate entry');
+            if (dup) {
+                const rowDup = yield (0, db_1.get)(`SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+           FROM payments
+           WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+           LIMIT 1`, [customerId, receiptNumber, date, amount]);
+                if (rowDup) {
+                    return res.status(200).json({
+                        id: rowDup.id,
+                        customerId: rowDup.customer_id,
+                        sellerId: (_e = rowDup.seller_id) !== null && _e !== void 0 ? _e : undefined,
+                        orderId: (_f = rowDup.order_id) !== null && _f !== void 0 ? _f : undefined,
+                        invoiceId: (_g = rowDup.invoice_id) !== null && _g !== void 0 ? _g : undefined,
+                        receiptNumber: rowDup.receipt_number,
+                        date: rowDup.date,
+                        amount: Number(rowDup.amount) || 0,
+                        notes: (_h = rowDup.notes) !== null && _h !== void 0 ? _h : undefined,
+                        createdAt: rowDup.created_at
+                    });
+                }
+            }
+            throw e;
+        }
         const row = yield (0, db_1.get)(`SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
        FROM payments WHERE id = ?`, [id]);
         res.status(201).json({
             id: row.id,
             customerId: row.customer_id,
-            sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : undefined,
-            orderId: (_b = row.order_id) !== null && _b !== void 0 ? _b : undefined,
-            invoiceId: (_c = row.invoice_id) !== null && _c !== void 0 ? _c : undefined,
+            sellerId: (_j = row.seller_id) !== null && _j !== void 0 ? _j : undefined,
+            orderId: (_k = row.order_id) !== null && _k !== void 0 ? _k : undefined,
+            invoiceId: (_l = row.invoice_id) !== null && _l !== void 0 ? _l : undefined,
             receiptNumber: row.receipt_number,
             date: row.date,
             amount: Number(row.amount) || 0,
-            notes: (_d = row.notes) !== null && _d !== void 0 ? _d : undefined,
+            notes: (_m = row.notes) !== null && _m !== void 0 ? _m : undefined,
             createdAt: row.created_at
         });
     }
