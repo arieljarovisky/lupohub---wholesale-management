@@ -364,8 +364,11 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
         let lastSaldo = 0;
-        if (entries.length > 0) {
-            lastSaldo = Number(entries[entries.length - 1].saldo) || 0;
+        for (let i = entries.length - 1; i >= 0; i--) {
+            if (entries[i].saldo != null) {
+                lastSaldo = Number(entries[i].saldo) || 0;
+                break;
+            }
         }
         res.json({
             customerId: id,
@@ -404,21 +407,21 @@ const getMultimediaSaldosSummary = (req, res) => __awaiter(void 0, void 0, void 
         const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
         const params = user.role === 'SELLER' ? [user.id] : [];
         const rows = (yield (0, db_1.query)(`SELECT
-         e.customer_id AS customerId,
-         CAST(e.saldo AS DECIMAL(16,2)) AS lastSaldo,
-         cnt.cnt AS movementCount
-       FROM customer_multimedia_entries e
-       INNER JOIN (
-         SELECT customer_id, MAX(line_order) AS max_lo
-         FROM customer_multimedia_entries
-         GROUP BY customer_id
-       ) mx ON mx.customer_id = e.customer_id AND e.line_order = mx.max_lo
-       INNER JOIN (
+         agg.customer_id AS customerId,
+         CAST(COALESCE((
+           SELECT CAST(e2.saldo AS DECIMAL(16,2))
+           FROM customer_multimedia_entries e2
+           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+           ORDER BY e2.line_order DESC
+           LIMIT 1
+         ), 0) AS DECIMAL(16,2)) AS lastSaldo,
+         agg.cnt AS movementCount
+       FROM (
          SELECT customer_id, COUNT(*) AS cnt
          FROM customer_multimedia_entries
          GROUP BY customer_id
-       ) cnt ON cnt.customer_id = e.customer_id
-       INNER JOIN customers c ON c.id = e.customer_id
+       ) agg
+       INNER JOIN customers c ON c.id = agg.customer_id
        WHERE 1=1${sellerFilter}`, params));
         res.json((rows || []).map((r) => ({
             customerId: r.customerId,

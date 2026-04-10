@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { PDFParse } from 'pdf-parse';
+import mammoth from 'mammoth';
 import { execute, get, query } from '../src/database/db';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -61,6 +62,11 @@ function parseSellerMapArg(args: string[]): Map<string, string> {
   return out;
 }
 
+/** Normaliza espacios (Word suele meter saltos raros). */
+function normalizeReportLine(line: string): string {
+  return line.replace(/\s+/g, ' ').trim();
+}
+
 function parseCandidatesFromReportText(text: string): Candidate[] {
   const lines = text.split(/\r?\n/);
   const out: Candidate[] = [];
@@ -68,11 +74,12 @@ function parseCandidatesFromReportText(text: string): Candidate[] {
   let currentSellerName = '';
 
   const sellerHeaderRe = /^VENDEDOR\s*:\s*(\d+)\s+(.+?)\s*$/i;
-  // 02/03/2026 REC 0000100025515  CLIENTE ...   120,000.10
-  const recLineRe = /^(\d{2}\/\d{2}\/\d{4})\s+REC\s+(\d+)\s+(.+?)\s+([0-9][0-9,]*\.[0-9]{2})\s*$/i;
+  // 02/03/2026 REC 0000100025515  CLIENTE ...   120,000.10  (número de recibo puede ser alfanumérico)
+  const recLineRe =
+    /^(\d{2}\/\d{2}\/\d{4})\s+REC\s+(\S+)\s+(.+?)\s+([0-9][0-9,]*\.[0-9]{2})\s*$/i;
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    const line = normalizeReportLine(rawLine);
     if (!line) continue;
 
     const h = line.match(sellerHeaderRe);
@@ -101,6 +108,25 @@ function parseCandidatesFromReportText(text: string): Candidate[] {
   }
 
   return out;
+}
+
+async function extractTextFromFile(absPath: string): Promise<string> {
+  const ext = path.extname(absPath).toLowerCase();
+  const buf = fs.readFileSync(absPath);
+
+  if (ext === '.pdf') {
+    const parser = new PDFParse({ data: buf });
+    const parsed = await parser.getText();
+    await parser.destroy();
+    return parsed.text || '';
+  }
+
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ buffer: buf });
+    return result.value || '';
+  }
+
+  throw new Error(`Formato no soportado: ${ext}. Usá .pdf o .docx`);
 }
 
 function pickSellerId(
@@ -135,7 +161,7 @@ async function main() {
   const files = args.filter((a) => !a.startsWith('--'));
   if (files.length === 0) {
     throw new Error(
-      'Uso: ts-node scripts/import-seller-commissions.ts <reporte.pdf> [otro.pdf] [--apply] [--seller-map=14:uuid,19:uuid]'
+      'Uso: ts-node scripts/import-seller-commissions.ts <reporte.pdf|.docx> [otro...] [--apply] [--seller-map=14:uuid,19:uuid]'
     );
   }
 
@@ -157,11 +183,11 @@ async function main() {
   const allCandidates: Candidate[] = [];
   for (const f of files) {
     const abs = path.resolve(f);
-    const buf = fs.readFileSync(abs);
-    const parser = new PDFParse({ data: buf });
-    const parsed = await parser.getText();
-    const candidates = parseCandidatesFromReportText(parsed.text || '');
-    await parser.destroy();
+    if (!fs.existsSync(abs)) {
+      throw new Error(`No existe el archivo: ${abs}`);
+    }
+    const text = await extractTextFromFile(abs);
+    const candidates = parseCandidatesFromReportText(text);
     allCandidates.push(...candidates);
   }
 
@@ -192,7 +218,7 @@ async function main() {
 
     const sellerPick = pickSellerId(c, sellerMap, sellers, cust.seller_id);
     sellerMatchCount.set(sellerPick.matchedBy, (sellerMatchCount.get(sellerPick.matchedBy) || 0) + 1);
-    const notes = `Importado comisión vendedor PDF (${c.sellerCode} ${c.sellerName})`;
+    const notes = `Importado comisión vendedor (${c.sellerCode} ${c.sellerName})`;
 
     if (!dryRun) {
       await execute(

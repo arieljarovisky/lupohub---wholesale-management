@@ -14,7 +14,10 @@
     "create-cert-prod": "ts-node scripts/create-cert-prod.ts",
     "auth-web-service-prod": "ts-node scripts/auth-web-service-prod.ts",
     "delete-billing-by-cae": "ts-node scripts/delete-billing-by-cae.ts",
-    "delete-billing-by-cae:prod": "cross-env NODE_ENV=production ts-node scripts/delete-billing-by-cae.ts"
+    "delete-billing-by-cae:prod": "cross-env NODE_ENV=production ts-node scripts/delete-billing-by-cae.ts",
+    "import-multimedia-saldos": "ts-node scripts/import-multimedia-composicion-saldos.ts",
+    "import-seller-commissions": "ts-node scripts/import-seller-commissions.ts",
+    "import-pending-payments": "ts-node scripts/import-pending-payments.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",
@@ -25,6 +28,7 @@
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
+    "mammoth": "^1.12.0",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.9.2",
     "pdf-parse": "^2.4.5",

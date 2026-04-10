@@ -873,21 +873,21 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
       c.business_name AS businessName,
       c.name AS contactName,
       c.cuit,
-      CAST(e.saldo AS DECIMAL(16,2)) AS lastSaldo,
-      cnt.cnt AS movementCount,
+      CAST(COALESCE((
+        SELECT CAST(e2.saldo AS DECIMAL(16,2))
+        FROM customer_multimedia_entries e2
+        WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+        ORDER BY e2.line_order DESC
+        LIMIT 1
+      ), 0) AS DECIMAL(16,2)) AS lastSaldo,
+      agg.cnt AS movementCount,
       u.name AS seller_name
-    FROM customer_multimedia_entries e
-    INNER JOIN (
-      SELECT customer_id, MAX(line_order) AS max_lo
-      FROM customer_multimedia_entries
-      GROUP BY customer_id
-    ) mx ON mx.customer_id = e.customer_id AND e.line_order = mx.max_lo
-    INNER JOIN (
+    FROM (
       SELECT customer_id, COUNT(*) AS cnt
       FROM customer_multimedia_entries
       GROUP BY customer_id
-    ) cnt ON cnt.customer_id = e.customer_id
-    INNER JOIN customers c ON c.id = e.customer_id
+    ) agg
+    INNER JOIN customers c ON c.id = agg.customer_id
     LEFT JOIN users u ON u.id = c.seller_id
     WHERE 1=1 ${sellerFilter}
   `;
