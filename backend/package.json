@@ -12,7 +12,9 @@
     "merge-trifil:prod": "cross-env NODE_ENV=production ts-node scripts/merge-trifil-products.ts",
     "parse-tango": "node scripts/parse-tango-articulos.js",
     "create-cert-prod": "ts-node scripts/create-cert-prod.ts",
-    "auth-web-service-prod": "ts-node scripts/auth-web-service-prod.ts"
+    "auth-web-service-prod": "ts-node scripts/auth-web-service-prod.ts",
+    "delete-billing-by-cae": "ts-node scripts/delete-billing-by-cae.ts",
+    "delete-billing-by-cae:prod": "cross-env NODE_ENV=production ts-node scripts/delete-billing-by-cae.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",

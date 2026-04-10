@@ -674,7 +674,7 @@ const MercadoLibreProductAds: React.FC = () => {
                       <div className="inline-flex items-center gap-0.5 justify-end">
                         <button
                           type="button"
-                          title="Descargar CSV: campaña + anuncios por publicación"
+                          title="Descargar CSV: un solo archivo (secciones General y Detalle)"
                           disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
                           className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
                           onClick={() => {
@@ -688,10 +688,7 @@ const MercadoLibreProductAds: React.FC = () => {
                                   siteId,
                                   advertiserId: advertiserId as number
                                 });
-                                showToast(
-                                  'success',
-                                  'CSV listo: archivo de campaña y otro de publicaciones de esa campaña (si hay datos en el período).'
-                                );
+                                showToast('success', 'CSV listo: un solo archivo con sección campaña y sección publicaciones.');
                               } catch (e: any) {
                                 showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar CSV');
                               } finally {
@@ -708,7 +705,7 @@ const MercadoLibreProductAds: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          title="Descargar Excel: campaña + anuncios por publicación"
+                          title="Descargar Excel: un archivo con hojas General y Detalle"
                           disabled={advertiserId === '' || exportingSingleCampaignId === c.id}
                           className="p-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors disabled:opacity-40"
                           onClick={() => {
@@ -723,7 +720,7 @@ const MercadoLibreProductAds: React.FC = () => {
                                   dateFrom,
                                   dateTo
                                 });
-                                showToast('success', 'Excel generado con hojas Campaña y Anuncios');
+                                showToast('success', 'Excel generado: hojas General (campaña) y Detalle (publicaciones).');
                               } catch (e: any) {
                                 showToast('error', e?.response?.data?.message || e?.message || 'Error al exportar Excel');
                               } finally {

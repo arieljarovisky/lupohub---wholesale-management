@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { api } from '../services/api';
 
 export type ProductAdsExportMeta = {
@@ -67,6 +68,66 @@ export function downloadTextFile(content: string, filename: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadExcelBuffer(buffer: ArrayBuffer | Uint8Array | ReadonlyArray<number>, filename: string) {
+  const u8 =
+    buffer instanceof Uint8Array
+      ? buffer
+      : buffer instanceof ArrayBuffer
+        ? new Uint8Array(buffer)
+        : Uint8Array.from(buffer as number[]);
+  const blob = new Blob([u8], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const ST_BORDER = {
+  style: 'thin' as const,
+  color: { argb: 'FF94A3B8' }
+};
+
+function styleHeaderRow(row: ExcelJS.Row, colCount: number) {
+  row.height = 22;
+  for (let c = 1; c <= colCount; c++) {
+    const cell = row.getCell(c);
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E40AF' }
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    cell.border = {
+      top: ST_BORDER,
+      left: ST_BORDER,
+      bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+      right: ST_BORDER
+    };
+  }
+}
+
+function styleDataCell(cell: ExcelJS.Cell, alt: boolean) {
+  cell.border = {
+    top: ST_BORDER,
+    left: ST_BORDER,
+    bottom: ST_BORDER,
+    right: ST_BORDER
+  };
+  cell.alignment = { vertical: 'middle', wrapText: true };
+  if (alt) {
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF1F5F9' }
+    };
+  }
 }
 
 function campaignRow(c: any): Record<string, unknown> {
@@ -211,14 +272,13 @@ export async function fetchAllAdsForSingleCampaignExport(
   return list.filter((ad) => String(ad?.campaign_id ?? '') === want);
 }
 
-/** Una sola campaña: CSV de la campaña + CSV de cada anuncio/publicación de esa campaña. */
+/** Una sola campaña: un solo CSV con sección general (campaña) y sección detalle (publicaciones). */
 export async function downloadSingleCampaignCsv(
   campaign: any,
   opts: { dateFrom: string; dateTo: string; siteId: string; advertiserId: number }
 ) {
   const id = safeFilenamePart(String(campaign?.id ?? 'campaña'));
   const base = `Campaña_${id}_${opts.dateFrom}_${opts.dateTo}`;
-  downloadTextFile(buildCsv([campaignRow(campaign)], CAMPAIGN_CSV_COLS), `${base}_campaña.csv`);
   const ads = await fetchAllAdsForSingleCampaignExport(
     opts.siteId,
     opts.advertiserId,
@@ -226,12 +286,20 @@ export async function downloadSingleCampaignCsv(
     opts.dateFrom,
     opts.dateTo
   );
-  if (ads.length > 0) {
-    downloadAdsCsv(ads, base);
-  }
+  const stripBom = (s: string) => s.replace(/^\uFEFF/, '');
+  const generalBlock = stripBom(buildCsv([campaignRow(campaign)], CAMPAIGN_CSV_COLS));
+  const detailBlock =
+    ads.length > 0 ? stripBom(buildCsv(ads.map(adRow), ADS_CSV_COLS)) : 'Sin publicaciones con métricas en el período para esta campaña.';
+  const combined =
+    '\uFEFF' +
+    'SECCIÓN: GENERAL (campaña)\r\n' +
+    generalBlock +
+    '\r\n\r\nSECCIÓN: DETALLE (publicaciones)\r\n' +
+    detailBlock;
+  downloadTextFile(combined, `${base}.csv`);
 }
 
-/** Una sola campaña: Excel con resumen, métricas de campaña y hoja de anuncios por publicación. */
+/** Una sola campaña: un solo Excel con hoja General (campaña + contexto) y hoja Detalle (publicaciones), con estilos. */
 export async function downloadSingleCampaignExcel(
   campaign: any,
   opts: {
@@ -249,11 +317,22 @@ export async function downloadSingleCampaignExcel(
     opts.dateFrom,
     opts.dateTo
   );
-  const wb = XLSX.utils.book_new();
   const id = campaign?.id ?? '';
   const name = (campaign?.name ?? '').toString();
-  const resumen: (string | number)[][] = [
-    ['Campaña individual — Product Ads'],
+  const cr = campaignRow(campaign);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'LupoHub';
+  workbook.created = new Date();
+
+  const wsGen = workbook.addWorksheet('General', {
+    views: [{ state: 'frozen', ySplit: 11 }],
+    properties: { defaultRowHeight: 19 }
+  });
+  wsGen.getColumn(1).width = 28;
+  wsGen.getColumn(2).width = 52;
+
+  const metaLines: [string, string | number][] = [
+    ['Campaña individual — Product Ads', ''],
     ['ID campaña', id],
     ['Nombre', name],
     ['Período desde', opts.dateFrom],
@@ -261,28 +340,76 @@ export async function downloadSingleCampaignExcel(
     ['Cuenta', opts.accountLabel],
     ['Site', opts.siteId],
     ['ID anunciante', opts.advertiserId],
-    ['Anuncios / publicaciones en el archivo', ads.length],
-    [],
+    ['Publicaciones en hoja Detalle', ads.length],
     ['Exportado', new Date().toLocaleString('es-AR')],
-    [],
-    [
-      'Nota',
-      'Hoja Campaña: totales de la campaña. Hoja Anuncios: una fila por publicación con métricas del período (misma API que la tabla de publicaciones).'
-    ]
+    ['', '']
   ];
-  const ws0 = XLSX.utils.aoa_to_sheet(resumen);
-  XLSX.utils.book_append_sheet(wb, ws0, 'Resumen');
-  const row = campaignRow(campaign);
-  const ws1 = XLSX.utils.json_to_sheet([row]);
-  XLSX.utils.book_append_sheet(wb, ws1, 'Campaña');
-  const adsData = ads.map(adRow);
-  const ws2 =
-    adsData.length > 0
-      ? XLSX.utils.json_to_sheet(adsData)
-      : XLSX.utils.aoa_to_sheet([['Sin publicaciones con métricas en el período para esta campaña.']]);
-  XLSX.utils.book_append_sheet(wb, ws2, 'Anuncios');
+  let r = 1;
+  for (const [a, b] of metaLines) {
+    const row = wsGen.getRow(r);
+    row.getCell(1).value = a;
+    row.getCell(2).value = b;
+    if (r === 1) {
+      row.getCell(1).font = { bold: true, size: 12, name: 'Calibri', color: { argb: 'FF0F172A' } };
+    }
+    r++;
+  }
+
+  const campHeaders = CAMPAIGN_CSV_COLS.map((c) => c.header);
+  const span = Math.max(campHeaders.length, 2);
+  wsGen.mergeCells(1, 1, 1, span);
+
+  const headerRow = wsGen.getRow(r);
+  campHeaders.forEach((h, i) => {
+    headerRow.getCell(i + 1).value = h;
+  });
+  styleHeaderRow(headerRow, campHeaders.length);
+  campHeaders.forEach((_, i) => {
+    wsGen.getColumn(i + 1).width = i === 1 ? 32 : 14;
+  });
+  r++;
+
+  const dataRow = wsGen.getRow(r);
+  CAMPAIGN_CSV_COLS.forEach((col, i) => {
+    const cell = dataRow.getCell(i + 1);
+    cell.value = cr[col.key] as string | number;
+    styleDataCell(cell, false);
+  });
+
+  const wsDet = workbook.addWorksheet('Detalle', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    properties: { defaultRowHeight: 19 }
+  });
+  const adHeaders = ADS_CSV_COLS.map((c) => c.header);
+  const detHeader = wsDet.getRow(1);
+  adHeaders.forEach((h, i) => {
+    detHeader.getCell(i + 1).value = h;
+  });
+  styleHeaderRow(detHeader, adHeaders.length);
+  const colW = [14, 36, 28, 12, 14, 10, 40, 12, 10, 12, 14, 10, 10, 10, 10];
+  adHeaders.forEach((_, i) => {
+    wsDet.getColumn(i + 1).width = colW[i] ?? 14;
+  });
+
+  if (ads.length === 0) {
+    const row = wsDet.getRow(2);
+    row.getCell(1).value = 'Sin publicaciones con métricas en el período para esta campaña.';
+    row.getCell(1).font = { italic: true, color: { argb: 'FF64748B' }, name: 'Calibri' };
+  } else {
+    const adsData = ads.map(adRow);
+    adsData.forEach((ar, idx) => {
+      const row = wsDet.getRow(2 + idx);
+      ADS_CSV_COLS.forEach((col, i) => {
+        const cell = row.getCell(i + 1);
+        cell.value = ar[col.key] as string | number;
+        styleDataCell(cell, idx % 2 === 1);
+      });
+    });
+  }
+
+  const buf = await workbook.xlsx.writeBuffer();
   const fname = `Campaña_${safeFilenamePart(String(id))}_${opts.dateFrom}_${opts.dateTo}.xlsx`;
-  XLSX.writeFile(wb, fname);
+  downloadExcelBuffer(buf, fname);
 }
 
 export function downloadProductAdsExcel(params: {

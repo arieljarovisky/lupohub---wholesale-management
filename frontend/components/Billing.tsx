@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
@@ -125,6 +125,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       label: `${x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : ''} ${String(x.puntoVta).padStart(5, '0')}-${String(x.numeroDesde).padStart(8, '0')} — ${x.customerBusinessName || ''}`.trim(),
       customerId: x.customerId,
     }));
+
+  /** Facturas del modal de pago: solo las del cliente elegido (misma lista que la grilla según filtros actuales). */
+  const facturaOptionsForPayment = useMemo(() => {
+    if (!payCustomerId || payCustomerId === 'ALL') return [];
+    return facturaOptions.filter((f) => f.customerId === payCustomerId);
+  }, [items, payCustomerId]);
 
   const formatDate = (d: any) => {
     if (!d) return '';
@@ -263,8 +269,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               setPayAmount('');
               setPayNotes('');
               setPayInvoiceId('');
-              setPaySellerId('');
-              setPayCustomerId(customerId !== 'ALL' ? customerId : 'ALL');
+              const cid = customerId !== 'ALL' ? customerId : 'ALL';
+              setPayCustomerId(cid);
+              const pre = cid !== 'ALL' ? customers.find((c) => c.id === cid) : undefined;
+              setPaySellerId(pre?.sellerId || '');
               setPayDate(new Date().toISOString().slice(0, 10));
             }}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700"
@@ -466,7 +474,21 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cliente</label>
-                  <select value={payCustomerId} onChange={(e) => setPayCustomerId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none">
+                  <select
+                    value={payCustomerId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setPayCustomerId(id);
+                      setPayInvoiceId('');
+                      if (id === 'ALL' || !id) {
+                        setPaySellerId('');
+                      } else {
+                        const c = customers.find((x) => x.id === id);
+                        setPaySellerId(c?.sellerId || '');
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                  >
                     <option value="ALL">Seleccionar…</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>{c.businessName || c.name}</option>
@@ -477,16 +499,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Factura</label>
                   <select
                     value={payInvoiceId}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPayInvoiceId(val);
-                      const opt = facturaOptions.find((x) => x.invoiceId === val);
-                      if (opt?.customerId && payCustomerId === 'ALL') setPayCustomerId(opt.customerId);
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                    onChange={(e) => setPayInvoiceId(e.target.value)}
+                    disabled={payCustomerId === 'ALL'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="">(Opcional) Seleccionar factura…</option>
-                    {facturaOptions.map((f) => (
+                    <option value="">
+                      {payCustomerId === 'ALL'
+                        ? '(Elegí un cliente para ver sus facturas)'
+                        : facturaOptionsForPayment.length === 0
+                          ? '(Sin facturas en el listado actual — ampliá fechas o Actualizar)'
+                          : '(Opcional) Seleccionar factura…'}
+                    </option>
+                    {facturaOptionsForPayment.map((f) => (
                       <option key={f.invoiceId} value={f.invoiceId}>{f.label}</option>
                     ))}
                   </select>
