@@ -11,7 +11,8 @@ import {
   getSaldosPendientes,
   exportSaldosPendientesCsv,
   exportSaldosPendientesMultimediasXlsx,
-  clearDispatchedPendingsForCustomer
+  clearDispatchedPendingsForCustomer,
+  assignCustomerSellersFromResumen
 } from '../controllers/customers.controller';
 import {
   exportMultimediaHistorial,
@@ -30,6 +31,12 @@ router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as a
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);
 router.post('/multimedia-historial/import', authMiddleware as any, upload.single('file'), importMultimediaHistorial as any);
 router.get('/multimedia-saldos-summary', authMiddleware as any, getMultimediaSaldosSummary as any);
+router.post(
+  '/assign-sellers-resumen',
+  authMiddleware as any,
+  upload.single('file'),
+  assignCustomerSellersFromResumen as any
+);
 router.get('/:id/multimedia-ledger', authMiddleware as any, getCustomerMultimediaLedger as any);
 router.get('/', authMiddleware as any, getCustomers as any);
 router.post('/', authMiddleware as any, createCustomer as any);

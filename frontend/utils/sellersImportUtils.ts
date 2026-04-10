@@ -17,10 +17,73 @@ function slugEmailPart(s: string): string {
     .toLowerCase() || 'vendedor';
 }
 
+function normHeaderCell(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Hoja "Resumen" de historial_clientes_multimedias.xlsx: una fila por cliente,
+ * columna "Vendedor habitual" tipo "9 - CHARLY". Devuelve un vendedor por código único.
+ */
+function parseFromMultimediasResumen(rows: (string | number | null | undefined)[][]): SellerImportRow[] | null {
+  let headerRow = -1;
+  let vendedorCol = -1;
+  for (let r = 0; r < Math.min(12, rows.length); r++) {
+    const h = rows[r].map((c) => normHeaderCell(String(c ?? '')));
+    const codigoIdx = h.findIndex((x) => x === 'codigo');
+    const vendIdx = h.findIndex((x) => x.includes('vendedor') && x.includes('habitual'));
+    if (codigoIdx >= 0 && vendIdx >= 0) {
+      headerRow = r;
+      vendedorCol = vendIdx;
+      break;
+    }
+  }
+  if (headerRow < 0 || vendedorCol < 0) return null;
+
+  /** código legacy numérico → nombre para mostrar */
+  const byCode = new Map<string, string>();
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const raw = String(rows[i]?.[vendedorCol] ?? '').trim();
+    if (!raw) continue;
+    const m = raw.match(/^(\d+)\s*[-–—]\s*(.+)$/u);
+    if (m) {
+      const code = m[1].trim().replace(/^0+/, '') || m[1].trim() || '0';
+      const nm = m[2].trim();
+      if (!byCode.has(code)) byCode.set(code, nm);
+    } else {
+      const key = slugEmailPart(raw).replace(/\./g, '_') || `f${i}`;
+      if (!byCode.has(key)) byCode.set(key, raw);
+    }
+  }
+  if (byCode.size === 0) return null;
+
+  const items: SellerImportRow[] = [];
+  const usedEmails = new Set<string>();
+  for (const [code, displayName] of byCode) {
+    const local = /^\d+$/.test(code) ? code : slugEmailPart(code).replace(/\./g, '');
+    let email = `vendedor.${local}@importado.lupohub.local`;
+    let n = 0;
+    while (usedEmails.has(email)) {
+      n += 1;
+      email = `vendedor.${local}.${n}@importado.lupohub.local`;
+    }
+    usedEmails.add(email);
+    items.push({
+      name: displayName || `Vendedor ${code}`,
+      email
+    });
+  }
+  return items;
+}
+
 /**
  * Excel de vendedores: detecta columnas por cabecera (primera hoja).
- * Requiere al menos nombre y email, o nombre + código (genera email sintético).
- * Contraseña por fila opcional; si falta, el backend usa contraseña por defecto del formulario.
+ * Si es el Resumen de Multimedias/Tango (Código, Cliente, Vendedor habitual, …), extrae vendedores únicos.
+ * Si no, requiere nombre y email, o nombre + código (genera email sintético).
  */
 export async function parseSellersExcel(file: File): Promise<SellerImportRow[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -30,7 +93,10 @@ export async function parseSellersExcel(file: File): Promise<SellerImportRow[]> 
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
   if (rows.length === 0) return [];
 
-  const nameKw = ['nombre', 'vendedor', 'name', 'apellido', 'usuario', 'empleado', 'representante', 'vendedor habitual'];
+  const fromResumen = parseFromMultimediasResumen(rows);
+  if (fromResumen && fromResumen.length > 0) return fromResumen;
+
+  const nameKw = ['nombre', 'vendedor', 'name', 'apellido', 'usuario', 'empleado', 'representante'];
   const emailKw = ['e-mail', 'email', 'mail', 'correo', 'e mail', 'correo electrónico'];
   const pwdKw = ['contraseña', 'password', 'clave', 'pass', 'contraseña inicial'];
   const commissionKw = ['comisión', 'comision', 'commission', '% comisión', 'porcentaje', 'comision %'];

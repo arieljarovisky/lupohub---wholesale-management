@@ -890,6 +890,170 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   res.send(buf);
 };
 
+function normResumenHeader(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeNameForCustomerMatch(v: unknown): string {
+  return String(v ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function cellStrResumenCell(v: unknown): string {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v)) return String(Math.trunc(v));
+  return String(v).trim();
+}
+
+/**
+ * POST multipart file — hoja Resumen Multimedias: asigna customers.seller_id según "Vendedor habitual"
+ * (código numérico) vinculado al usuario vendedor.{codigo}@importado.lupohub.local.
+ * Cliente: por legacy_code (columna Código) o por nombre (columna Cliente).
+ */
+export const assignCustomerSellersFromResumen = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden asignar vendedores en lote' });
+    }
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file?.buffer) {
+      return res.status(400).json({ message: 'Subí un archivo .xlsx (campo file)' });
+    }
+    const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) return res.status(400).json({ message: 'El archivo no tiene hojas' });
+    const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as (string | number | null | undefined)[][];
+
+    let headerRow = -1;
+    let codigoCol = -1;
+    let vendCol = -1;
+    let clienteCol = -1;
+    for (let r = 0; r < Math.min(15, matrix.length); r++) {
+      const h = matrix[r].map((c) => normResumenHeader(String(c ?? '')));
+      const ci = h.findIndex((x) => x === 'codigo');
+      const vi = h.findIndex((x) => x.includes('vendedor') && x.includes('habitual'));
+      const cl = h.findIndex((x) => x.includes('cliente') && !x.includes('vendedor'));
+      if (ci >= 0 && vi >= 0) {
+        headerRow = r;
+        codigoCol = ci;
+        vendCol = vi;
+        clienteCol = cl >= 0 ? cl : 1;
+        break;
+      }
+    }
+    if (headerRow < 0) {
+      return res.status(400).json({
+        message: 'No se encontró formato Resumen (columnas Código y Vendedor habitual). Usá el Excel historial Multimedias.',
+      });
+    }
+
+    const custRows = (await query(`SELECT id, legacy_code, business_name, name FROM customers`)) as any[];
+    const legacyToId = new Map<string, string>();
+    const normToId = new Map<string, string>();
+    for (const c of custRows) {
+      const lc = (c.legacy_code && String(c.legacy_code).trim()) || '';
+      if (lc) {
+        legacyToId.set(lc, c.id);
+        legacyToId.set(padLegacyCode(lc), c.id);
+        const strip = lc.replace(/^0+/, '') || '0';
+        legacyToId.set(strip, c.id);
+        const digits = lc.replace(/\D/g, '');
+        if (digits && /^\d+$/.test(digits)) {
+          legacyToId.set(digits, c.id);
+          legacyToId.set(padLegacyCode(digits), c.id);
+        }
+      }
+      const bn = normalizeNameForCustomerMatch(c.business_name);
+      if (bn) normToId.set(bn, c.id);
+      const nm = normalizeNameForCustomerMatch(c.name);
+      if (nm) normToId.set(nm, c.id);
+    }
+
+    let rowsProcessed = 0;
+    let customersUpdated = 0;
+    let skippedNoSeller = 0;
+    let skippedNoCustomer = 0;
+    let skippedNoVendedorCell = 0;
+
+    for (let i = headerRow + 1; i < matrix.length; i++) {
+      const row = matrix[i];
+      const codigoRaw = cellStrResumenCell(row[codigoCol]);
+      const vendRaw = cellStrResumenCell(row[vendCol]);
+      const clienteRaw = clienteCol >= 0 ? cellStrResumenCell(row[clienteCol]) : '';
+      if (!codigoRaw && !clienteRaw) continue;
+      rowsProcessed++;
+
+      if (!vendRaw) {
+        skippedNoVendedorCell++;
+        continue;
+      }
+
+      const vm = vendRaw.match(/^(\d+)\s*[-–—]\s*(.+)$/u);
+      const vendCode = vm ? vm[1].trim().replace(/^0+/, '') || vm[1].trim() || '0' : null;
+      if (!vendCode) {
+        skippedNoSeller++;
+        continue;
+      }
+
+      const sellerEmail = `vendedor.${vendCode}@importado.lupohub.local`;
+      const sellerRow = await get(`SELECT id FROM users WHERE email = ? AND role = 'SELLER'`, [sellerEmail]);
+      if (!sellerRow?.id) {
+        skippedNoSeller++;
+        continue;
+      }
+
+      let customerId: string | undefined;
+      if (codigoRaw) {
+        const t = codigoRaw.trim();
+        const tryKeys = new Set<string>([t]);
+        const digits = t.replace(/\D/g, '');
+        if (digits) {
+          tryKeys.add(digits);
+          tryKeys.add(padLegacyCode(digits));
+          tryKeys.add(digits.replace(/^0+/, '') || '0');
+        }
+        for (const k of tryKeys) {
+          const hit = legacyToId.get(k);
+          if (hit) {
+            customerId = hit;
+            break;
+          }
+        }
+      }
+      if (!customerId && clienteRaw) {
+        customerId = normToId.get(normalizeNameForCustomerMatch(clienteRaw));
+      }
+      if (!customerId) {
+        skippedNoCustomer++;
+        continue;
+      }
+
+      await execute(`UPDATE customers SET seller_id = ? WHERE id = ?`, [sellerRow.id, customerId]);
+      customersUpdated++;
+    }
+
+    res.json({
+      message: 'Asignación de vendedores desde Resumen finalizada',
+      rowsProcessed,
+      customersUpdated,
+      skippedNoSeller,
+      skippedNoCustomer,
+      skippedNoVendedorCell,
+    });
+  } catch (e: any) {
+    console.error('assignCustomerSellersFromResumen:', e);
+    res.status(500).json({ message: 'Error asignando vendedores', detail: e?.message });
+  }
+};
+
 /** Quita pendientes de pedidos ya despachados para un cliente:
  *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
  *  - Elimina renglones con quantity <= 0

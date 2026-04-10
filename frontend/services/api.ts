@@ -714,6 +714,22 @@ export const api = {
     return requestFormData('/customers/multimedia-historial/import', formData, 180000);
   },
 
+  /** Resumen Multimedias: asigna seller_id según columna "Vendedor habitual" (usuarios vendedor.{n}@importado.lupohub.local). Solo ADMIN. */
+  assignCustomerSellersFromResumen: async (
+    file: File
+  ): Promise<{
+    message: string;
+    rowsProcessed: number;
+    customersUpdated: number;
+    skippedNoSeller: number;
+    skippedNoCustomer: number;
+    skippedNoVendedorCell: number;
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return requestFormData('/customers/assign-sellers-resumen', formData, 120000);
+  },
+
   /** Quita pendientes de pedidos ya despachados para un cliente (ajusta quantity a picked). */
   clearCustomerDispatchedPendings: async (customerId: string): Promise<{ message: string; ordersUpdated: number; itemsAdjusted: number; itemsRemoved: number }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');

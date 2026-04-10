@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -157,6 +157,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newAccountSellerLabel, setNewAccountSellerLabel] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
   const multimediaHistorialInputRef = useRef<HTMLInputElement>(null);
+  const assignSellersResumenInputRef = useRef<HTMLInputElement>(null);
+  const [groupBySeller, setGroupBySeller] = useState(false);
+  const [assigningSellersResumen, setAssigningSellersResumen] = useState(false);
   const [multimediaExporting, setMultimediaExporting] = useState(false);
   const [multimediaImporting, setMultimediaImporting] = useState(false);
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
@@ -167,6 +170,33 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     c.businessName.toLowerCase().includes(searchTerm.toLowerCase()) || 
     c.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const groupedForList = useMemo(() => {
+    if (!groupBySeller || searchTerm.trim()) {
+      return [{ key: 'all', label: '', customers: filteredCustomers }];
+    }
+    const map = new Map<string, { label: string; customers: Customer[] }>();
+    for (const c of filteredCustomers) {
+      const sid = c.sellerId || '__none__';
+      const label =
+        sid !== '__none__'
+          ? users.find((u) => u.id === c.sellerId)?.name || 'Vendedor'
+          : 'Sin vendedor asignado';
+      if (!map.has(sid)) map.set(sid, { label, customers: [] });
+      map.get(sid)!.customers.push(c);
+    }
+    const arr = [...map.entries()].map(([key, v]) => ({
+      key,
+      label: v.label,
+      customers: v.customers
+    }));
+    arr.sort((a, b) => {
+      if (a.key === '__none__') return 1;
+      if (b.key === '__none__') return -1;
+      return a.label.localeCompare(b.label, 'es');
+    });
+    return arr;
+  }, [groupBySeller, searchTerm, filteredCustomers, users]);
 
   const currentCustomerUserEmail = (c: Customer | null) => {
     // De momento usamos el email del propio cliente como referencia visual.
@@ -1290,6 +1320,33 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setMultimediaImporting(false);
   };
 
+  const handleAssignSellersFromResumen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAssigningSellersResumen(true);
+    try {
+      const res = await api.assignCustomerSellersFromResumen(file);
+      showToast(
+        'success',
+        `${res.customersUpdated} cliente(s) con vendedor asignado (${res.rowsProcessed} filas del Resumen).`
+      );
+      if (res.skippedNoCustomer > 0) {
+        showToast('warning', `${res.skippedNoCustomer} fila(s) sin cliente coincidente (código o nombre).`);
+      }
+      if (res.skippedNoSeller > 0) {
+        showToast('info', `${res.skippedNoSeller} fila(s) sin vendedor en el sistema (importá vendedores desde Configuración primero).`);
+      }
+      if (res.skippedNoVendedorCell > 0) {
+        showToast('info', `${res.skippedNoVendedorCell} fila(s) sin texto en "Vendedor habitual".`);
+      }
+      onRefreshData?.();
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error al asignar vendedores desde el Resumen.');
+    }
+    setAssigningSellersResumen(false);
+  };
+
   // 3. List View (Default)
   return (
     <div className="space-y-6">
@@ -1317,6 +1374,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               accept=".xlsx,.xls"
               className="hidden"
               onChange={handleMultimediaHistorialImport}
+            />
+          )}
+          {role === Role.ADMIN && (
+            <input
+              ref={assignSellersResumenInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleAssignSellersFromResumen}
             />
           )}
           {canViewSaldos && (
@@ -1373,6 +1439,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               <span>{multimediaImporting ? 'Importando…' : 'Importar historial Multimedias'}</span>
             </button>
           )}
+          {role === Role.ADMIN && (
+            <button
+              type="button"
+              onClick={() => assignSellersResumenInputRef.current?.click()}
+              disabled={assigningSellersResumen}
+              className="bg-indigo-900/50 text-indigo-100 px-4 py-2 rounded-lg hover:bg-indigo-900/70 border border-indigo-700/40 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              title="Misma hoja Resumen del Excel Multimedias: asigna cada cliente al vendedor de la columna Vendedor habitual (usuarios importados vendedor.N@importado.lupohub.local)"
+            >
+              {assigningSellersResumen ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
+              <span>{assigningSellersResumen ? 'Asignando…' : 'Asignar vendedores (Resumen)'}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => cuitUpdateInputRef.current?.click()}
@@ -1404,8 +1482,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
       <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
         {/* Toolbar */}
-        <div className="p-4 border-b border-slate-700 bg-slate-900/50">
-          <div className="relative max-w-md">
+        <div className="p-4 border-b border-slate-700 bg-slate-900/50 flex flex-wrap items-center gap-3 justify-between">
+          <div className="relative max-w-md flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
@@ -1415,11 +1493,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white placeholder-slate-500 text-sm"
             />
           </div>
+          {users.some((u) => u.role === Role.SELLER) && (
+            <button
+              type="button"
+              onClick={() => setGroupBySeller((v) => !v)}
+              className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition ${
+                groupBySeller
+                  ? 'bg-blue-600/25 border-blue-500/50 text-blue-100'
+                  : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
+              }`}
+              title={searchTerm.trim() ? 'Desactivá la búsqueda para ver grupos por vendedor' : 'Agrupa las tarjetas por vendedor asignado'}
+            >
+              <LayoutList size={16} />
+              Agrupar por vendedor
+            </button>
+          )}
         </div>
 
         {/* List Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-          {filteredCustomers.map(customer => {
+          {groupedForList.map((group) => (
+            <React.Fragment key={group.key}>
+              {group.label ? (
+                <div className="col-span-full flex items-center gap-2 pt-2 pb-1 border-b border-slate-700/80 -mt-1 first:pt-0 first:mt-0">
+                  <Users size={16} className="text-slate-500 shrink-0" />
+                  <span className="text-sm font-semibold text-slate-300">{group.label}</span>
+                  <span className="text-xs text-slate-500">({group.customers.length})</span>
+                </div>
+              ) : null}
+              {group.customers.map((customer) => {
             const saldo = saldosRows.find((r) => r.customerId === customer.id);
             const ledgerCard = ledgerSaldosById[customer.id];
             const deudaPedidos = Number(saldo?.saldoPendiente ?? 0);
@@ -1541,7 +1643,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             </div>
             );
-          })}
+              })}
+            </React.Fragment>
+          ))}
           {filteredCustomers.length === 0 && (
             <div className="col-span-full py-16 text-center text-slate-500">
                <Users size={48} className="mx-auto text-slate-800 mb-4"/>

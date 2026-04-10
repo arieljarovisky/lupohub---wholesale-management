@@ -924,11 +924,12 @@ const Settings: React.FC<SettingsProps> = ({
                 Importar vendedores desde Excel
               </h3>
               <p className="text-sm text-slate-400 mb-4">
-                Primera hoja del archivo: columnas reconocidas por nombre (ej. <strong className="text-slate-300">Nombre</strong>,{' '}
-                <strong className="text-slate-300">Vendedor</strong>, <strong className="text-slate-300">Email</strong>, opcional{' '}
-                <strong className="text-slate-300">Contraseña</strong> y <strong className="text-slate-300">Comisión %</strong>). Si no hay
-                email pero hay <strong className="text-slate-300">Código</strong> de vendedor, se genera un email{' '}
-                <code className="text-xs text-slate-500">vendedor.&lt;número&gt;@importado.lupohub.local</code>.
+                Podés subir el Excel <strong className="text-slate-300">historial_clientes_multimedias.xlsx</strong>: en la primera hoja
+                (<strong className="text-slate-300">Resumen</strong>) se leen los <strong className="text-slate-300">Vendedor habitual</strong>{' '}
+                únicos (ej. <code className="text-xs text-slate-500">9 - CHARLY</code>) y se crea un usuario por código, con email{' '}
+                <code className="text-xs text-slate-500">vendedor.9@importado.lupohub.local</code>. También acepta una hoja propia con{' '}
+                <strong className="text-slate-300">Nombre</strong>, <strong className="text-slate-300">Email</strong>, opcional contraseña y
+                comisión %.
               </p>
               <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 items-stretch sm:items-end">
                 <div className="space-y-1 flex-1 min-w-[200px]">
