@@ -1,10 +1,26 @@
-import React from 'react';
-import { User as UserIcon, TrendingUp, Percent, DollarSign } from 'lucide-react';
-import { Order, Role, User } from '../types';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  User as UserIcon,
+  TrendingUp,
+  DollarSign,
+  ArrowLeft,
+  ShoppingBag,
+  Users,
+  Wallet,
+  Mail,
+  MapPin,
+  Building2,
+  Calendar,
+  Loader2,
+  ChevronRight
+} from 'lucide-react';
+import { Customer, Order, Role, User } from '../types';
+import { api } from '../services/api';
 
 interface SellersCommissionsProps {
   orders: Order[];
   users: User[];
+  customers: Customer[];
   role: Role;
   currentUser: User;
   onUpdateUser?: (user: User) => void | Promise<void>;
@@ -13,16 +29,53 @@ interface SellersCommissionsProps {
 const fmtMoney = (n: number) =>
   `$${Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const salesTotalForSeller = (orders: Order[], sellerId: string) =>
-  orders.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+const salesTotalForSeller = (olist: Order[], sellerId: string) =>
+  olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
 const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   orders,
   users,
+  customers,
   role,
   currentUser,
   onUpdateUser
 }) => {
+  const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+  const [saldosRows, setSaldosRows] = useState<
+    Array<{ customerId: string; saldoPendiente: number; businessName?: string }>
+  >([]);
+  const [ledgerByCustomer, setLedgerByCustomer] = useState<Record<string, { lastSaldo: number; movementCount: number }>>({});
+  const [saldosLoading, setSaldosLoading] = useState(false);
+
+  const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
+
+  const loadSaldosCartera = useCallback(() => {
+    setSaldosLoading(true);
+    Promise.all([api.getSaldosPendientes().catch(() => [] as any[]), api.getMultimediaSaldosSummary().catch(() => [])])
+      .then(([srows, lrows]) => {
+        setSaldosRows(
+          (srows as any[]).map((r) => ({
+            customerId: r.customerId,
+            saldoPendiente: Number(r.saldoPendiente) || 0,
+            businessName: r.businessName
+          }))
+        );
+        const m: Record<string, { lastSaldo: number; movementCount: number }> = {};
+        for (const r of lrows as Array<{ customerId: string; lastSaldo: number; movementCount: number }>) {
+          m[r.customerId] = {
+            lastSaldo: Number(r.lastSaldo) || 0,
+            movementCount: Number(r.movementCount) || 0
+          };
+        }
+        setLedgerByCustomer(m);
+      })
+      .finally(() => setSaldosLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadSaldosCartera();
+  }, [loadSaldosCartera]);
+
   const updateCommission = async (userId: string, value: string) => {
     const user = users.find((u) => u.id === userId);
     if (user && onUpdateUser) {
@@ -35,134 +88,375 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     }
   };
 
+  const customersForSeller = (sellerId: string) => customers.filter((c) => c.sellerId === sellerId);
+  const ordersForSeller = (sellerId: string) => orders.filter((o) => o.sellerId === sellerId);
+
+  const unifiedSaldoForCustomer = (customerId: string) => {
+    const l = saldosRows.find((r) => r.customerId === customerId);
+    const le = ledgerByCustomer[customerId];
+    return (Number(l?.saldoPendiente) || 0) + (Number(le?.lastSaldo) || 0);
+  };
+
+  const totalSaldoCarteraForSeller = (sellerId: string) => {
+    const ids = customersForSeller(sellerId).map((c) => c.id);
+    return ids.reduce((sum, id) => sum + unifiedSaldoForCustomer(id), 0);
+  };
+
+  const selectedSeller = selectedSellerId ? users.find((u) => u.id === selectedSellerId) : null;
+
+  const sellerDetail = useMemo(() => {
+    if (!selectedSellerId) return null;
+    const sid = selectedSellerId;
+    const custs = customersForSeller(sid);
+    const ords = ordersForSeller(sid).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const sales = salesTotalForSeller(orders, sid);
+    const u = users.find((x) => x.id === sid);
+    const rate = Number(
+      u?.commissionPercentage != null
+        ? u.commissionPercentage
+        : sid === currentUser.id
+          ? currentUser.commissionPercentage ?? 0
+          : 0
+    );
+    const commission = sales * (rate / 100);
+    const saldoTotal = totalSaldoCarteraForSeller(sid);
+    return { custs, ords, sales, rate, commission, saldoTotal };
+  }, [selectedSellerId, orders, users, customers, saldosRows, ledgerByCustomer, currentUser]);
+
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);
     const rate = currentUser.commissionPercentage ?? 0;
     const commissionAmount = sellerSales * (rate / 100);
+    const sid = currentUser.id;
+
+    if (selectedSellerId === sid && sellerDetail) {
+      return (
+        <SellerDetailView
+          seller={currentUser}
+          detail={sellerDetail}
+          saldosLoading={saldosLoading}
+          unifiedSaldoForCustomer={unifiedSaldoForCustomer}
+          onBack={() => setSelectedSellerId(null)}
+          onRefreshSaldos={loadSaldosCartera}
+          commissionEditable={false}
+          onUpdateCommission={updateCommission}
+        />
+      );
+    }
 
     return (
       <div className="space-y-6 animate-fade-in pb-10">
         <p className="text-sm text-slate-400">
-          Resumen de tus pedidos en LupoHub y la comisión configurada por administración.
+          Tocá la tarjeta para ver clientes, pedidos, saldos de cartera y métricas.
         </p>
-        <div className="bg-slate-800 rounded-3xl border border-slate-700 p-5 md:p-6 shadow-lg flex flex-col gap-6 max-w-2xl">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white shadow-xl rotate-3">
-              <UserIcon size={28} />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <button
+            type="button"
+            onClick={() => setSelectedSellerId(sid)}
+            className="text-left bg-slate-800/90 hover:bg-slate-800 rounded-2xl border border-slate-700 hover:border-blue-500/40 p-5 transition-all shadow-lg group"
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg shrink-0">
+                <UserIcon size={24} />
+              </div>
+              <ChevronRight className="text-slate-600 group-hover:text-blue-400 shrink-0" size={20} />
             </div>
-            <div>
-              <h4 className="font-black text-white text-xl tracking-tight">{currentUser.name}</h4>
-              <p className="text-xs text-slate-500 font-medium">{currentUser.email}</p>
+            <h4 className="font-black text-white text-lg truncate">{currentUser.name}</h4>
+            <p className="text-xs text-slate-500 truncate mb-4">{currentUser.email}</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-slate-900/60 rounded-xl py-2 border border-slate-700/50">
+                <p className="text-[9px] font-black text-slate-500 uppercase">Ventas</p>
+                <p className="text-sm font-bold text-white tabular-nums">{fmtMoney(sellerSales)}</p>
+              </div>
+              <div className="bg-slate-900/60 rounded-xl py-2 border border-slate-700/50">
+                <p className="text-[9px] font-black text-slate-500 uppercase">%</p>
+                <p className="text-sm font-bold text-amber-200">{rate}%</p>
+              </div>
+              <div className="bg-indigo-950/40 rounded-xl py-2 border border-indigo-800/40">
+                <p className="text-[9px] font-black text-indigo-400 uppercase">Est.</p>
+                <p className="text-sm font-bold text-indigo-200 tabular-nums">{fmtMoney(commissionAmount)}</p>
+              </div>
             </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-              <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
-                <DollarSign size={10} /> Total pedidos
-              </p>
-              <p className="text-lg font-black text-white">{fmtMoney(sellerSales)}</p>
-            </div>
-            <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-              <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
-                <Percent size={10} /> Tu comisión
-              </p>
-              <p className="text-lg font-black text-white">{rate}%</p>
-            </div>
-            <div className="bg-indigo-900/20 p-4 rounded-2xl border border-indigo-800/50">
-              <p className="text-[10px] font-black text-indigo-400 uppercase mb-1 flex items-center gap-1">
-                <TrendingUp size={10} /> Estimado
-              </p>
-              <p className="text-lg font-black text-indigo-300">{fmtMoney(commissionAmount)}</p>
-            </div>
-          </div>
+          </button>
         </div>
       </div>
     );
   }
 
-  const sellers = users.filter((u) => u.role === Role.SELLER);
+  if (sellers.length === 0) {
+    return (
+      <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-8 text-center text-slate-400 text-sm">
+        No hay usuarios con rol vendedor. Creá uno en Configuración.
+      </div>
+    );
+  }
+
+  if (selectedSellerId && selectedSeller && sellerDetail) {
+    return (
+      <SellerDetailView
+        seller={selectedSeller}
+        detail={sellerDetail}
+        saldosLoading={saldosLoading}
+        unifiedSaldoForCustomer={unifiedSaldoForCustomer}
+        onBack={() => setSelectedSellerId(null)}
+        onRefreshSaldos={loadSaldosCartera}
+        commissionEditable
+        onUpdateCommission={updateCommission}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       <p className="text-sm text-slate-400">
-        Ventas totales por vendedor según pedidos en LupoHub y comisión configurable. Los vendedores se administran en{' '}
+        Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Los vendedores se administran en{' '}
         <strong className="text-slate-300">Configuración → Usuarios</strong> o importación Excel.
       </p>
-      {sellers.length === 0 ? (
-        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-8 text-center text-slate-400 text-sm">
-          No hay usuarios con rol vendedor. Creá uno en Configuración.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {sellers.map((seller) => {
-            const sellerSales = salesTotalForSeller(orders, seller.id);
-            const commissionRate = seller.commissionPercentage || 0;
-            const commissionAmount = sellerSales * (commissionRate / 100);
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {sellers.map((seller) => {
+          const sellerSales = salesTotalForSeller(orders, seller.id);
+          const commissionRate = seller.commissionPercentage || 0;
+          const commissionAmount = sellerSales * (commissionRate / 100);
+          const nCli = customersForSeller(seller.id).length;
+          const nOrd = ordersForSeller(seller.id).length;
 
-            return (
-              <div
-                key={seller.id}
-                className="bg-slate-800 rounded-3xl border border-slate-700 p-5 md:p-6 shadow-lg flex flex-col gap-6"
-              >
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white shadow-xl rotate-3 shrink-0">
-                      <UserIcon size={28} />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="font-black text-white text-xl tracking-tight truncate">{seller.name}</h4>
-                      <p className="text-xs text-slate-500 font-medium truncate">{seller.email}</p>
-                    </div>
+          return (
+            <button
+              key={seller.id}
+              type="button"
+              onClick={() => setSelectedSellerId(seller.id)}
+              className="text-left bg-slate-800/90 hover:bg-slate-800 rounded-2xl border border-slate-700 hover:border-blue-500/40 p-5 transition-all shadow-lg group"
+            >
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg shrink-0">
+                    <UserIcon size={24} />
                   </div>
-                  <div className="bg-slate-900/50 px-3 py-1.5 rounded-xl border border-slate-700 flex flex-col items-end">
-                    <span className="text-[8px] font-black text-slate-500 uppercase">Estado</span>
-                    <span className="text-[10px] font-bold text-green-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      ACTIVO
-                    </span>
+                  <div className="min-w-0">
+                    <h4 className="font-black text-white text-lg truncate">{seller.name}</h4>
+                    <p className="text-xs text-slate-500 truncate">{seller.email}</p>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                  <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
-                      <DollarSign size={10} /> Ventas totales
-                    </p>
-                    <p className="text-lg font-black text-white">{fmtMoney(sellerSales)}</p>
-                  </div>
-
-                  <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-                    <p className="text-[10px] font-black text-slate-500 uppercase mb-1 flex items-center gap-1">
-                      <Percent size={10} /> Tasa comisión
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        step="0.1"
-                        min={0}
-                        max={100}
-                        value={commissionRate}
-                        onChange={(e) => updateCommission(seller.id, e.target.value)}
-                        className="w-16 bg-slate-800 border border-slate-600 rounded-lg p-1 text-center text-white font-black text-md focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <span className="text-slate-400 font-bold">%</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-indigo-900/20 p-4 rounded-2xl border border-indigo-800/50">
-                    <p className="text-[10px] font-black text-indigo-400 uppercase mb-1 flex items-center gap-1">
-                      <TrendingUp size={10} /> Comisión estimada
-                    </p>
-                    <p className="text-lg font-black text-indigo-300">{fmtMoney(commissionAmount)}</p>
-                  </div>
+                <ChevronRight className="text-slate-600 group-hover:text-blue-400 shrink-0" size={22} />
+              </div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-[9px] font-black text-slate-500 uppercase px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700">
+                  Activo
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  {nCli} cliente(s) · {nOrd} pedido(s)
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-slate-900/60 rounded-xl py-2.5 border border-slate-700/50">
+                  <p className="text-[9px] font-black text-slate-500 uppercase mb-0.5">Ventas</p>
+                  <p className="text-sm font-bold text-white tabular-nums">{fmtMoney(sellerSales)}</p>
+                </div>
+                <div className="bg-slate-900/60 rounded-xl py-2.5 border border-slate-700/50">
+                  <p className="text-[9px] font-black text-slate-500 uppercase mb-0.5">Comisión</p>
+                  <p className="text-sm font-bold text-amber-200">{commissionRate}%</p>
+                </div>
+                <div className="bg-indigo-950/40 rounded-xl py-2.5 border border-indigo-800/40">
+                  <p className="text-[9px] font-black text-indigo-400 uppercase mb-0.5">Estimado</p>
+                  <p className="text-sm font-bold text-indigo-200 tabular-nums">{fmtMoney(commissionAmount)}</p>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };
+
+type DetailShape = {
+  custs: Customer[];
+  ords: Order[];
+  sales: number;
+  rate: number;
+  commission: number;
+  saldoTotal: number;
+};
+
+function SellerDetailView({
+  seller,
+  detail,
+  saldosLoading,
+  unifiedSaldoForCustomer,
+  onBack,
+  onRefreshSaldos,
+  commissionEditable,
+  onUpdateCommission
+}: {
+  seller: User;
+  detail: DetailShape;
+  saldosLoading: boolean;
+  unifiedSaldoForCustomer: (customerId: string) => number;
+  onBack: () => void;
+  onRefreshSaldos: () => void;
+  commissionEditable: boolean;
+  onUpdateCommission: (userId: string, value: string) => void | Promise<void>;
+}) {
+  const { custs, ords, sales, rate, commission, saldoTotal } = detail;
+
+  return (
+    <div className="space-y-6 animate-fade-in pb-10">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-200 hover:bg-slate-700 text-sm font-semibold transition"
+        >
+          <ArrowLeft size={18} />
+          Volver
+        </button>
+        <button
+          type="button"
+          onClick={onRefreshSaldos}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-700 text-slate-400 hover:text-white text-sm"
+        >
+          {saldosLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+          Actualizar saldos
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-start gap-4 justify-between">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white shadow-xl shrink-0">
+            <UserIcon size={32} />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black text-white truncate">{seller.name}</h2>
+            <p className="text-sm text-slate-500 truncate">{seller.email}</p>
+          </div>
+        </div>
+        {commissionEditable && (
+          <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2">
+            <span className="text-xs text-slate-500">Comisión %</span>
+            <input
+              type="number"
+              step="0.1"
+              min={0}
+              max={100}
+              value={rate}
+              onChange={(e) => onUpdateCommission(seller.id, e.target.value)}
+              className="w-16 bg-slate-900 border border-slate-600 rounded-lg p-1.5 text-center text-white font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-4">
+          <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase mb-1">
+            <Users size={12} /> Clientes
+          </div>
+          <p className="text-2xl font-black text-white">{custs.length}</p>
+        </div>
+        <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-4">
+          <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase mb-1">
+            <ShoppingBag size={12} /> Pedidos
+          </div>
+          <p className="text-2xl font-black text-white">{ords.length}</p>
+        </div>
+        <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-4">
+          <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase mb-1">
+            <DollarSign size={12} /> Ventas
+          </div>
+          <p className="text-xl font-black text-white tabular-nums">{fmtMoney(sales)}</p>
+        </div>
+        <div className="bg-slate-800/90 rounded-2xl border border-amber-900/40 p-4">
+          <div className="flex items-center gap-2 text-amber-400/90 text-[10px] font-black uppercase mb-1">
+            <Wallet size={12} /> Saldo pendiente
+          </div>
+          <p className="text-xl font-black text-amber-100 tabular-nums">
+            {saldosLoading ? '…' : fmtMoney(saldoTotal)}
+          </p>
+          <p className="text-[10px] text-slate-500 mt-1">Cuenta importada + LupoHub (cartera)</p>
+        </div>
+        <div className="bg-indigo-950/50 rounded-2xl border border-indigo-800/50 p-4">
+          <div className="flex items-center gap-2 text-indigo-400 text-[10px] font-black uppercase mb-1">
+            <TrendingUp size={12} /> Comisión est.
+          </div>
+          <p className="text-xl font-black text-indigo-200 tabular-nums">{fmtMoney(commission)}</p>
+          <p className="text-[10px] text-slate-500 mt-1">{rate}% sobre ventas</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="bg-slate-800/60 rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+            <Building2 size={18} className="text-blue-400" />
+            <h3 className="font-bold text-white text-sm">Clientes ({custs.length})</h3>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800">
+            {custs.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">Sin clientes asignados a este vendedor.</p>
+            ) : (
+              custs.map((c) => {
+                const sal = unifiedSaldoForCustomer(c.id);
+                return (
+                  <div key={c.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-800/40">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-white truncate">{c.businessName}</p>
+                      <p className="text-xs text-slate-500 flex items-center gap-2 truncate">
+                        <Mail size={11} className="shrink-0" /> {c.email}
+                      </p>
+                      {c.city ? (
+                        <p className="text-[11px] text-slate-600 flex items-center gap-1 mt-0.5">
+                          <MapPin size={11} /> {c.city}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[10px] text-slate-500 uppercase">Saldo</p>
+                      <p className="text-sm font-bold text-amber-200/95 tabular-nums">
+                        {saldosLoading ? '…' : fmtMoney(sal)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-800/60 rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+            <ShoppingBag size={18} className="text-emerald-400" />
+            <h3 className="font-bold text-white text-sm">Pedidos ({ords.length})</h3>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800">
+            {ords.length === 0 ? (
+              <p className="p-6 text-sm text-slate-500">Sin pedidos asignados a este vendedor.</p>
+            ) : (
+              ords.map((o) => (
+                <div key={o.id} className="px-4 py-3 hover:bg-slate-800/40">
+                  <div className="flex justify-between gap-2 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-500">#{o.id.slice(0, 8)}</p>
+                      <p className="font-medium text-white truncate">{o.customerBusinessName || 'Cliente'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-white tabular-nums">{fmtMoney(Number(o.total) || 0)}</p>
+                      <p className="text-[10px] text-slate-500">{o.status}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500">
+                    <Calendar size={12} />
+                    {o.date ? new Date(o.date).toLocaleDateString('es-AR') : '—'}
+                    {o.paymentStatus ? (
+                      <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700">{o.paymentStatus}</span>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default SellersCommissions;

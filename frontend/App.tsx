@@ -881,6 +881,7 @@ const App: React.FC = () => {
               <SellersCommissions
                 orders={orders}
                 users={users}
+                customers={getVisibleCustomers}
                 role={currentUser.role}
                 currentUser={currentUser}
                 onUpdateUser={currentUser.role === Role.ADMIN ? handleUpdateUser : undefined}
