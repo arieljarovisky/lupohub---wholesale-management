@@ -1,12 +1,8 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import ExcelJS from 'exceljs';
-import { query } from '../database/db';
-import {
-  getValidMLToken,
-  normalizeMercadoLibreItemId,
-  mercadoLibreItemIdCandidates
-} from './integrations.controller';
+import { query, get } from '../database/db';
+import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
@@ -15,29 +11,39 @@ const ADS_LOOKBACK_DAYS = 30;
 const ML_PADS_METRICS_DEFAULT =
   'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 
-/** Intenta GET /items/{id} probando el id normalizado y candidatos (MLAU vs MLU, etc.). */
-async function fetchMercadoLibreItemDetail(accessToken: string, rawItemId: string): Promise<any | null> {
-  const candidates = mercadoLibreItemIdCandidates(rawItemId);
-  const seen = new Set<string>();
-  for (const id of candidates) {
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    try {
-      const r = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(id)}?include_attributes=all`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        validateStatus: () => true
-      });
-      if (r.status === 200 && r.data?.id && !r.data.error) return r.data;
-    } catch {
-      /* siguiente candidato */
-    }
+function normalizeSkuForMatch(raw: unknown): string {
+  return (raw ?? '')
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/[\s\-\/]/g, '');
+}
+
+function mlSkuFromVariation(v: any): string {
+  const skuAttr = Array.isArray(v?.attributes)
+    ? v.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU')
+    : null;
+  const fromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+  const fromFields = (v?.seller_sku ?? v?.seller_custom_field ?? '').toString().trim();
+  return fromAttr || fromFields;
+}
+
+function mlSkuFromItem(item: any): string {
+  let s = (item?.seller_sku ?? item?.seller_custom_field ?? '').toString().trim();
+  if (!s && Array.isArray(item?.attributes)) {
+    const skuAttr = item.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+    s = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '').toString().trim();
   }
-  return null;
+  if (!s && item?.variations?.length === 1) {
+    return mlSkuFromVariation(item.variations[0]);
+  }
+  return s;
 }
 
 type HubVariant = {
   variant_id: string;
   sku_raw: string;
+  sku_norm: string;
   mercado_libre_item_id: string | null;
   mercado_libre_variant_id: string | null;
   product_id: string;
@@ -49,31 +55,9 @@ type HubVariant = {
   pub_pack?: number | null;
 };
 
-function pickLatestFob(
-  rows: Array<{ variant_id: string; costo_unitario: number; fecha_despacho: string | Date | null; moneda: string | null }>
-): Map<string, { cost: number; fecha: string; moneda: string }> {
-  const map = new Map<string, { cost: number; fecha: string; moneda: string }>();
-  for (const r of rows) {
-    if (!r.variant_id) continue;
-    const fechaStr =
-      r.fecha_despacho instanceof Date
-        ? r.fecha_despacho.toISOString().slice(0, 10)
-        : String(r.fecha_despacho || '').slice(0, 10);
-    const prev = map.get(r.variant_id);
-    if (!prev || fechaStr > prev.fecha) {
-      map.set(r.variant_id, {
-        cost: Number(r.costo_unitario) || 0,
-        fecha: fechaStr || '',
-        moneda: (r.moneda || 'USD').toString().trim() || 'USD'
-      });
-    }
-  }
-  return map;
-}
-
 /**
  * Solo vínculos guardados en LupoHub (variant_publications, mercado_libre_item_id, mercado_libre_id + variación).
- * No usa SKU. `itemIdNorm` = normalizeMercadoLibreItemId(id publicación ML).
+ * `itemIdNorm` = normalizeMercadoLibreItemId(id publicación ML).
  */
 function resolveHubVariantFromSync(
   itemIdNorm: string,
@@ -110,6 +94,25 @@ function resolveHubVariantFromSync(
     if (byVar) return byVar;
   }
 
+  return null;
+}
+
+/** Sync primero; si no hay match, intenta por SKU de ML = variante LupoHub. */
+function resolveHubVariantFull(
+  itemIdNorm: string,
+  variationId: string | null,
+  skuMlNorm: string,
+  hubBySku: Map<string, HubVariant>,
+  hubByMlItem: Map<string, HubVariant[]>,
+  hubByMlProduct: Map<string, HubVariant[]>,
+  pubMap: Map<string, HubVariant>
+): HubVariant | null {
+  const fromSync = resolveHubVariantFromSync(itemIdNorm, variationId, hubByMlItem, hubByMlProduct, pubMap);
+  if (fromSync) return fromSync;
+  if (skuMlNorm) {
+    const bySku = hubBySku.get(skuMlNorm);
+    if (bySku) return bySku;
+  }
   return null;
 }
 
@@ -256,13 +259,7 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       ml_pack_default: string | number | null;
     }>;
 
-    const variantsByProduct = new Map<string, string[]>();
-    for (const r of hubRows) {
-      if (!variantsByProduct.has(r.product_id)) variantsByProduct.set(r.product_id, []);
-      const arr = variantsByProduct.get(r.product_id)!;
-      if (!arr.includes(r.variant_id)) arr.push(r.variant_id);
-    }
-
+    const hubBySku = new Map<string, HubVariant>();
     const hubByMlItem = new Map<string, HubVariant[]>();
     const hubByMlProduct = new Map<string, HubVariant[]>();
     const variantById = new Map<string, HubVariant>();
@@ -272,6 +269,7 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       const hv: HubVariant = {
         variant_id: r.variant_id,
         sku_raw: skuRaw,
+        sku_norm: normalizeSkuForMatch(skuRaw),
         mercado_libre_item_id: r.mercado_libre_item_id,
         mercado_libre_variant_id: r.mercado_libre_variant_id,
         product_id: r.product_id,
@@ -282,6 +280,7 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
         ml_pack_default: Math.max(1, Number(r.ml_pack_default) || 1)
       };
       variantById.set(r.variant_id, hv);
+      if (hv.sku_norm) hubBySku.set(hv.sku_norm, hv);
       if (r.mercado_libre_item_id) {
         const k = normalizeMercadoLibreItemId(r.mercado_libre_item_id);
         if (k) {
@@ -325,25 +324,36 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       });
     }
 
-    const fobRows = (await query(
-      `SELECT di.variant_id, di.costo_unitario, d.fecha_despacho, d.moneda
-       FROM despacho_items di
-       JOIN despachos d ON d.id = di.despacho_id
-       WHERE di.variant_id IS NOT NULL AND di.costo_unitario IS NOT NULL`
-    )) as Array<{
-      variant_id: string;
-      costo_unitario: string | number | null;
-      fecha_despacho: string | Date | null;
-      moneda: string | null;
-    }>;
-    const fobByVariant = pickLatestFob(
-      fobRows.map((x) => ({
-        variant_id: x.variant_id,
-        costo_unitario: Number(x.costo_unitario) || 0,
-        fecha_despacho: x.fecha_despacho,
-        moneda: x.moneda
-      }))
-    );
+    /** Precio FOB por producto: lista de precios cuyo nombre contiene "fob" (ej. "precios FOB") o env LUPOHUB_FOB_PRICE_LIST_ID. */
+    let fobListName = '';
+    const fobListIdEnv = (process.env.LUPOHUB_FOB_PRICE_LIST_ID || '').trim();
+    let fobListId: string | null = null;
+    if (fobListIdEnv) {
+      const exists = await get('SELECT id, name FROM price_lists WHERE id = ?', [fobListIdEnv]);
+      if (exists?.id) {
+        fobListId = String(exists.id);
+        fobListName = (exists as any).name || '';
+      }
+    }
+    if (!fobListId) {
+      const pl = await get(
+        `SELECT id, name FROM price_lists WHERE LOWER(TRIM(name)) LIKE '%fob%' ORDER BY CASE WHEN LOWER(TRIM(name)) = 'precios fob' THEN 0 ELSE 1 END, name LIMIT 1`
+      );
+      if (pl?.id) {
+        fobListId = String(pl.id);
+        fobListName = String((pl as any).name || '');
+      }
+    }
+    const fobPriceRows = fobListId
+      ? ((await query(`SELECT product_id, price FROM price_list_items WHERE price_list_id = ?`, [fobListId])) as Array<{
+          product_id: string;
+          price: string | number | null;
+        }>)
+      : [];
+    const fobByProductId = new Map<string, number>();
+    for (const fr of fobPriceRows) {
+      fobByProductId.set(String(fr.product_id), Number(fr.price) || 0);
+    }
 
     const productMeta = new Map<string, { codigo: string; nombre: string; base_price: number; mayorista_pack: number }>();
     for (const r of hubRows) {
@@ -363,28 +373,29 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       dateToStr
     );
 
-    /** IDs de publicación ML guardados en inventario (misma fuente que el sync). */
-    const linkedRows = (await query(`
-      SELECT DISTINCT TRIM(external_product_id) AS ml_id FROM variant_publications
-      WHERE platform = 'mercadolibre' AND external_product_id IS NOT NULL AND TRIM(external_product_id) <> ''
-      UNION
-      SELECT DISTINCT TRIM(mercado_libre_item_id) AS ml_id FROM product_variants
-      WHERE mercado_libre_item_id IS NOT NULL AND TRIM(mercado_libre_item_id) <> ''
-      UNION
-      SELECT DISTINCT TRIM(mercado_libre_id) AS ml_id FROM products
-      WHERE mercado_libre_id IS NOT NULL AND TRIM(mercado_libre_id) <> ''
-    `)) as Array<{ ml_id: string }>;
-
+    /** Todas las publicaciones del vendedor (activas, pausadas y cerradas), hasta ML_SYNC_MAX_ITEMS. */
+    const seen = new Set<string>();
     const allItemIds: string[] = [];
-    const seenNorm = new Set<string>();
-    for (const row of linkedRows) {
-      const raw = String(row.ml_id || '').trim();
-      if (!raw) continue;
-      const n = normalizeMercadoLibreItemId(raw);
-      if (!n || seenNorm.has(n)) continue;
-      seenNorm.add(n);
-      allItemIds.push(raw);
-      if (allItemIds.length >= ML_SYNC_MAX_ITEMS) break;
+    for (const st of ['active', 'paused', 'closed'] as const) {
+      let offset = 0;
+      const limit = 100;
+      while (allItemIds.length < ML_SYNC_MAX_ITEMS) {
+        const itemsRes = await axios.get(
+          `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search?status=${st}&offset=${offset}&limit=${limit}`,
+          { headers: { Authorization: `Bearer ${mlToken.access_token}` } }
+        );
+        const ids: string[] = itemsRes.data?.results || [];
+        if (ids.length === 0) break;
+        for (const id of ids) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          allItemIds.push(id);
+          if (allItemIds.length >= ML_SYNC_MAX_ITEMS) break;
+        }
+        if (allItemIds.length >= ML_SYNC_MAX_ITEMS) break;
+        if (ids.length < limit) break;
+        offset += limit;
+      }
     }
 
     const buckets = new Map<string, AggBucket>();
@@ -409,60 +420,73 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     const batchSize = 10;
     for (let i = 0; i < allItemIds.length; i += batchSize) {
       const batch = allItemIds.slice(i, i + batchSize);
-      const items = await Promise.all(
-        batch.map((rawId) => fetchMercadoLibreItemDetail(mlToken.access_token, rawId))
+      const itemPromises = batch.map((itemId: string) =>
+        axios
+          .get(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}?include_attributes=all`, {
+            headers: { Authorization: `Bearer ${mlToken.access_token}` }
+          })
+          .then((r) => r.data)
+          .catch(() => null)
       );
+      const items = await Promise.all(itemPromises);
 
       for (const item of items) {
         if (!item?.id) continue;
         const itemIdNorm = normalizeMercadoLibreItemId(String(item.id));
+        const title = (item.title || '').toString();
 
-        const bump = (variationId: string | null, price: number) => {
-          const hub = resolveHubVariantFromSync(itemIdNorm, variationId, hubByMlItem, hubByMlProduct, pubMap);
-          if (!hub) return;
-          const meta = productMeta.get(hub.product_id);
-          const codigo = meta?.codigo ?? hub.product_id;
-          const nombre = meta?.nombre ?? hub.product_name;
-          const bp = meta?.base_price ?? hub.base_price;
-          const pk = meta?.mayorista_pack ?? hub.mayorista_pack_size;
-          const key = `p:${hub.product_id}`;
-          const b = ensureBucket(key, {
-            codigo,
-            nombre,
-            base_price: bp,
-            mayorista_pack: pk
-          });
-          b.ml_prices.push(price);
-          b.variant_ids.add(hub.variant_id);
-          b.ml_item_ids.add(itemIdNorm);
+        const bump = (variationId: string | null, skuMl: string, price: number) => {
+          const skuNorm = normalizeSkuForMatch(skuMl);
+          const hub = resolveHubVariantFull(
+            itemIdNorm,
+            variationId,
+            skuNorm,
+            hubBySku,
+            hubByMlItem,
+            hubByMlProduct,
+            pubMap
+          );
+          if (hub) {
+            const meta = productMeta.get(hub.product_id);
+            const codigo = meta?.codigo ?? hub.product_id;
+            const nombre = meta?.nombre ?? hub.product_name;
+            const bp = meta?.base_price ?? hub.base_price;
+            const pk = meta?.mayorista_pack ?? hub.mayorista_pack_size;
+            const key = `p:${hub.product_id}`;
+            const b = ensureBucket(key, {
+              codigo,
+              nombre,
+              base_price: bp,
+              mayorista_pack: pk
+            });
+            b.ml_prices.push(price);
+            b.variant_ids.add(hub.variant_id);
+            b.ml_item_ids.add(itemIdNorm);
+          } else {
+            const key = `u:${itemIdNorm}`;
+            const b = ensureBucket(key, {
+              codigo: itemIdNorm,
+              nombre: title,
+              base_price: 0,
+              mayorista_pack: 1
+            });
+            b.ml_prices.push(price);
+            b.ml_item_ids.add(itemIdNorm);
+          }
         };
 
         if (item.variations && item.variations.length > 0) {
           for (const v of item.variations) {
+            const skuMl = mlSkuFromVariation(v);
             const price = Number(v.price ?? item.price ?? 0) || 0;
-            bump(String(v.id), price);
+            bump(String(v.id), skuMl, price);
           }
         } else {
+          const skuMl = mlSkuFromItem(item);
           const price = Number(item.price ?? 0) || 0;
-          bump(null, price);
+          bump(null, skuMl, price);
         }
       }
-    }
-
-    function avgFobForProduct(productId: string): { cost: number | null; moneda: string } {
-      const vids = variantsByProduct.get(productId) || [];
-      const costs: number[] = [];
-      let moneda = 'USD';
-      for (const vid of vids) {
-        const f = fobByVariant.get(vid);
-        if (f && Number(f.cost) > 0) {
-          costs.push(Number(f.cost));
-          moneda = f.moneda || moneda;
-        }
-      }
-      if (costs.length === 0) return { cost: null, moneda: '' };
-      const avg = costs.reduce((a, c) => a + c, 0) / costs.length;
-      return { cost: avg, moneda };
     }
 
     const rowsOut: Array<{
@@ -475,11 +499,18 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     }> = [];
 
     for (const [key, agg] of buckets) {
-      if (!key.startsWith('p:') || agg.ml_prices.length === 0) continue;
+      if (agg.ml_prices.length === 0) continue;
       const precioMlProm = agg.ml_prices.reduce((a, p) => a + p, 0) / agg.ml_prices.length;
-      const pid = key.slice(2);
-      const fobCost = avgFobForProduct(pid).cost;
-      const precioUnidadMayor = agg.base_price / Math.max(1, agg.mayorista_pack);
+      let fobCost: number | null = null;
+      let precioUnidadMayor = 0;
+      if (key.startsWith('p:')) {
+        const pid = key.slice(2);
+        fobCost = fobByProductId.has(pid) ? fobByProductId.get(pid)! : null;
+        precioUnidadMayor = agg.base_price / Math.max(1, agg.mayorista_pack);
+      } else {
+        fobCost = null;
+        precioUnidadMayor = 0;
+      }
       let inversion = 0;
       for (const iid of agg.ml_item_ids) {
         inversion += costByItemId.get(normalizeMercadoLibreItemId(iid)) || 0;
@@ -506,22 +537,21 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       properties: { defaultRowHeight: 18 }
     });
 
+    const fobHeader = fobListName ? `Precio FOB (lista: ${fobListName})` : 'Precio FOB (lista de precios FOB)';
     ws.addRow([
       'Código artículo',
-      'Precio FOB (prom. último despacho, USD)',
+      fobHeader,
       'Precio mayorista (ARS, lista)',
       'Precio Mercado Libre (ARS, prom.)',
       `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
       'Ganancia (ARS)'
     ]);
-    ws.addRow([
-      'Solo artículos con vínculo ML en inventario (publicaciones vinculadas o columnas mercado_libre_*). FOB: promedio último despacho. Ganancia: precio ML − precio unidad mayorista − inversión Product Ads.',
-      '',
-      '',
-      '',
-      '',
-      ''
-    ]);
+    const noteText =
+      `Todas las publicaciones ML del vendedor (hasta ${ML_SYNC_MAX_ITEMS}). Match inventario: vínculos ML + SKU. FOB: precio de la lista ` +
+      (fobListName ? `"${fobListName}"` : 'cuyo nombre contiene "fob"') +
+      (fobListIdEnv ? ' (forzada por LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
+      ' Ganancia: precio ML − precio unidad mayorista − inversión.';
+    ws.addRow([noteText, '', '', '', '', '']);
     ws.mergeCells(2, 1, 2, 6);
     const note = ws.getRow(2).getCell(1);
     note.font = { italic: true, size: 10, name: 'Calibri', color: { argb: 'FF64748B' } };
