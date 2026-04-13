@@ -11,6 +11,14 @@ const ADS_LOOKBACK_DAYS = 30;
 const ML_PADS_METRICS_DEFAULT =
   'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 
+/** Para Excel: si el código es un id de publicación ML (MLA…, MLU…), muestra solo la parte numérica; si no, deja el SKU/código tal cual. */
+function excelCodigoSinPrefijoMl(raw: string): string {
+  const s = String(raw || '').trim();
+  const m = s.match(/^ML[A-Z]{1,5}(\d+)$/i);
+  if (m) return m[1];
+  return s;
+}
+
 function normalizeSkuForMatch(raw: unknown): string {
   return (raw ?? '')
     .toString()
@@ -124,6 +132,7 @@ type AggBucket = {
   ml_prices: number[];
   variant_ids: Set<string>;
   ml_item_ids: Set<string>;
+  permalinks: Set<string>;
 };
 
 /** Suma costo Product Ads por ítem ML, solo campañas con estado active en el período. */
@@ -410,7 +419,8 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
           mayorista_pack: init.mayorista_pack,
           ml_prices: [],
           variant_ids: new Set(),
-          ml_item_ids: new Set()
+          ml_item_ids: new Set(),
+          permalinks: new Set()
         };
         buckets.set(key, b);
       }
@@ -462,6 +472,8 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
             b.ml_prices.push(price);
             b.variant_ids.add(hub.variant_id);
             b.ml_item_ids.add(itemIdNorm);
+            const pl = (item.permalink || '').toString().trim();
+            if (pl) b.permalinks.add(pl);
           } else {
             const key = `u:${itemIdNorm}`;
             const b = ensureBucket(key, {
@@ -472,6 +484,8 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
             });
             b.ml_prices.push(price);
             b.ml_item_ids.add(itemIdNorm);
+            const pl = (item.permalink || '').toString().trim();
+            if (pl) b.permalinks.add(pl);
           }
         };
 
@@ -491,8 +505,8 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
 
     const rowsOut: Array<{
       codigo: string;
+      links_ml: string;
       fob: number | null;
-      mayorista_lista: number;
       precio_ml_prom: number;
       inversion: number;
       ganancia: number | null;
@@ -502,32 +516,37 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       if (agg.ml_prices.length === 0) continue;
       const precioMlProm = agg.ml_prices.reduce((a, p) => a + p, 0) / agg.ml_prices.length;
       let fobCost: number | null = null;
-      let precioUnidadMayor = 0;
       if (key.startsWith('p:')) {
         const pid = key.slice(2);
         fobCost = fobByProductId.has(pid) ? fobByProductId.get(pid)! : null;
-        precioUnidadMayor = agg.base_price / Math.max(1, agg.mayorista_pack);
       } else {
         fobCost = null;
-        precioUnidadMayor = 0;
       }
       let inversion = 0;
       for (const iid of agg.ml_item_ids) {
         inversion += costByItemId.get(normalizeMercadoLibreItemId(iid)) || 0;
       }
-      const ganancia = precioMlProm - precioUnidadMayor - inversion;
+      /** Margen: precio venta ML − costo FOB (lista) − inversión Product Ads. Requiere FOB cargado en la lista para el producto. */
+      let ganancia: number | null = null;
+      if (fobCost != null && Number.isFinite(fobCost)) {
+        const g = precioMlProm - Number(fobCost) - inversion;
+        ganancia = Number.isFinite(g) ? Math.round(g * 100) / 100 : null;
+      }
+      const linksText = Array.from(agg.permalinks)
+        .filter(Boolean)
+        .join('; ');
 
       rowsOut.push({
-        codigo: agg.codigo,
+        codigo: excelCodigoSinPrefijoMl(agg.codigo),
+        links_ml: linksText,
         fob: fobCost,
-        mayorista_lista: agg.base_price,
         precio_ml_prom: precioMlProm,
         inversion,
-        ganancia: Number.isFinite(ganancia) ? Math.round(ganancia * 100) / 100 : null
+        ganancia
       });
     }
 
-    rowsOut.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), 'es'));
+    rowsOut.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), 'es', { numeric: true }));
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'LupoHub';
@@ -540,17 +559,17 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     const fobHeader = fobListName ? `Precio FOB (lista: ${fobListName})` : 'Precio FOB (lista de precios FOB)';
     ws.addRow([
       'Código artículo',
+      'Link Mercado Libre',
       fobHeader,
-      'Precio mayorista (ARS, lista)',
       'Precio Mercado Libre (ARS, prom.)',
       `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
-      'Ganancia (ARS)'
+      'Margen (ARS)'
     ]);
     const noteText =
-      `Todas las publicaciones ML del vendedor (hasta ${ML_SYNC_MAX_ITEMS}). Match inventario: vínculos ML + SKU. FOB: precio de la lista ` +
-      (fobListName ? `"${fobListName}"` : 'cuyo nombre contiene "fob"') +
-      (fobListIdEnv ? ' (forzada por LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
-      ' Ganancia: precio ML − precio unidad mayorista − inversión.';
+      `Todas las publicaciones ML del vendedor (hasta ${ML_SYNC_MAX_ITEMS}). Código: referencia interna/SKU; ids ML sin prefijo MLA/MLU. FOB: lista ` +
+      (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
+      (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
+      ' Margen = precio ML − precio FOB − inversión publicitaria (Product Ads). Cargá el FOB en la lista para el producto; si falta FOB, el margen queda vacío.';
     ws.addRow([noteText, '', '', '', '', '']);
     ws.mergeCells(2, 1, 2, 6);
     const note = ws.getRow(2).getCell(1);
@@ -573,15 +592,15 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     for (const row of rowsOut) {
       const dataRow = ws.addRow([
         row.codigo,
+        row.links_ml,
         row.fob ?? '',
-        row.mayorista_lista,
         row.precio_ml_prom,
         row.inversion,
         row.ganancia ?? ''
       ]);
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { name: 'Calibri', size: 11 };
-        if ([2, 3, 4, 5, 6].includes(colNumber)) cell.numFmt = '#,##0.00';
+        if ([3, 4, 5, 6].includes(colNumber)) cell.numFmt = '#,##0.00';
       });
       if (rowIdx % 2 === 0) {
         dataRow.eachCell((cell) => {
@@ -592,11 +611,11 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     }
 
     ws.columns = [
-      { width: 22 },
+      { width: 18 },
+      { width: 52 },
       { width: 28 },
       { width: 26 },
-      { width: 28 },
-      { width: 38 },
+      { width: 36 },
       { width: 18 }
     ];
 
