@@ -19,6 +19,8 @@ const db_1 = require("../database/db");
 const integrations_controller_1 = require("./integrations.controller");
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
+/** Ventas agregadas desde orders/search (órdenes pagadas). */
+const SALES_LOOKBACK_DAYS = 30;
 /** Misma lista que integrations (Product Ads). */
 const ML_PADS_METRICS_DEFAULT = 'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 /** Para Excel: si el código es un id de publicación ML (MLA…, MLU…), muestra solo la parte numérica; si no, deja el SKU/código tal cual. */
@@ -255,8 +257,57 @@ function fetchActiveCampaignProductAdsCostByItem(accessToken, dateFrom, dateTo) 
         return costByItem;
     });
 }
+/**
+ * Suma unidades vendidas por publicación/variación ML en órdenes con estado `paid`
+ * creadas en el rango [dateFromYmd, dateToYmd] (inclusive, horario -03:00 como en el resto del backend).
+ * Clave: `normalizeMercadoLibreItemId(itemId)|variationId` (variationId vacío si la publicación no tiene variaciones).
+ */
+function fetchMercadoLibreSoldUnitsInDateRange(accessToken, sellerUserId, dateFromYmd, dateToYmd) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        const map = new Map();
+        let offset = 0;
+        const limit = 50;
+        while (offset < 20000) {
+            const res = yield axios_1.default.get('https://api.mercadolibre.com/orders/search', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                params: {
+                    seller: sellerUserId,
+                    'order.status': 'paid',
+                    'order.date_created.from': `${dateFromYmd}T00:00:00.000-03:00`,
+                    'order.date_created.to': `${dateToYmd}T23:59:59.999-03:00`,
+                    offset,
+                    limit,
+                    sort: 'date_desc'
+                },
+                validateStatus: () => true
+            });
+            if (res.status !== 200) {
+                console.warn('[publications-export] orders/search ventas:', res.status, ((_a = res.data) === null || _a === void 0 ? void 0 : _a.message) || res.data);
+                break;
+            }
+            const results = Array.isArray((_b = res.data) === null || _b === void 0 ? void 0 : _b.results) ? res.data.results : [];
+            for (const order of results) {
+                for (const line of order.order_items || []) {
+                    const iid = (0, integrations_controller_1.normalizeMercadoLibreItemId)((_c = line === null || line === void 0 ? void 0 : line.item) === null || _c === void 0 ? void 0 : _c.id);
+                    if (!iid)
+                        continue;
+                    const rawVid = (_d = line === null || line === void 0 ? void 0 : line.item) === null || _d === void 0 ? void 0 : _d.variation_id;
+                    const vid = rawVid != null && String(rawVid).trim() !== '' ? String(rawVid).trim() : '';
+                    const qty = Math.max(0, Math.floor(Number(line.quantity) || 0));
+                    const k = `${iid}|${vid}`;
+                    map.set(k, (map.get(k) || 0) + qty);
+                }
+            }
+            if (results.length < limit)
+                break;
+            offset += limit;
+        }
+        return map;
+    });
+}
 const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!mlToken) {
@@ -268,6 +319,11 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
         dateFrom.setDate(dateFrom.getDate() - ADS_LOOKBACK_DAYS);
         const dateFromStr = toYmd(dateFrom);
         const dateToStr = toYmd(dateTo);
+        const salesDateTo = new Date();
+        const salesDateFrom = new Date(salesDateTo);
+        salesDateFrom.setDate(salesDateFrom.getDate() - SALES_LOOKBACK_DAYS);
+        const salesFromStr = toYmd(salesDateFrom);
+        const salesToStr = toYmd(salesDateTo);
         const hubRows = (yield (0, db_1.query)(`
       SELECT pv.id AS variant_id,
              TRIM(COALESCE(pv.external_sku, pv.sku)) AS sku_raw,
@@ -379,6 +435,7 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             });
         }
         const costByItemId = yield fetchActiveCampaignProductAdsCostByItem(mlToken.access_token, dateFromStr, dateToStr);
+        const soldUnitsByItemVariation = yield fetchMercadoLibreSoldUnitsInDateRange(mlToken.access_token, String(mlToken.user_id), salesFromStr, salesToStr);
         /** Todas las publicaciones del vendedor (activas, pausadas y cerradas), hasta ML_SYNC_MAX_ITEMS. */
         const seen = new Set();
         const allItemIds = [];
@@ -416,7 +473,7 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                     mayorista_pack: init.mayorista_pack,
                     ml_prices: [],
                     ml_sale_fees: [],
-                    ventas_ml_suma: 0,
+                    ventas_periodo_suma: 0,
                     variant_ids: new Set(),
                     ml_item_ids: new Set(),
                     permalinks: new Set()
@@ -440,8 +497,8 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                 if (!(item === null || item === void 0 ? void 0 : item.id))
                     continue;
                 const itemIdNorm = (0, integrations_controller_1.normalizeMercadoLibreItemId)(String(item.id));
-                const bump = (variationId, skuMl, price, soldQty) => __awaiter(void 0, void 0, void 0, function* () {
-                    var _a, _b, _c;
+                const bump = (variationId, skuMl, price) => __awaiter(void 0, void 0, void 0, function* () {
+                    var _a, _b, _c, _d;
                     const skuNorm = normalizeSkuForMatch(skuMl);
                     const hub = resolveHubVariantFull(itemIdNorm, variationId, skuNorm, hubBySku, hubByMlItem, hubByMlProduct, pubMap);
                     if (hub) {
@@ -462,8 +519,9 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                         const saleFee = yield fetchListingSaleFeeAmount(mlToken.access_token, item, price, listingSaleFeeCache);
                         b.ml_prices.push(price);
                         b.ml_sale_fees.push(saleFee);
-                        const soldN = Math.max(0, Math.floor(Number(soldQty) || 0));
-                        b.ventas_ml_suma += soldN;
+                        const vid = variationId != null && String(variationId).trim() !== '' ? String(variationId).trim() : '';
+                        const soldKey = `${itemIdNorm}|${vid}`;
+                        b.ventas_periodo_suma += (_d = soldUnitsByItemVariation.get(soldKey)) !== null && _d !== void 0 ? _d : 0;
                         b.variant_ids.add(hub.variant_id);
                         b.ml_item_ids.add(itemIdNorm);
                         const pl = (item.permalink || '').toString().trim();
@@ -475,15 +533,13 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                     for (const v of item.variations) {
                         const skuMl = mlSkuFromVariation(v);
                         const price = Number((_e = (_d = v.price) !== null && _d !== void 0 ? _d : item.price) !== null && _e !== void 0 ? _e : 0) || 0;
-                        const sold = Number((_f = v.sold_quantity) !== null && _f !== void 0 ? _f : 0) || 0;
-                        yield bump(String(v.id), skuMl, price, sold);
+                        yield bump(String(v.id), skuMl, price);
                     }
                 }
                 else {
                     const skuMl = mlSkuFromItem(item);
-                    const price = Number((_g = item.price) !== null && _g !== void 0 ? _g : 0) || 0;
-                    const sold = Number((_h = item.sold_quantity) !== null && _h !== void 0 ? _h : 0) || 0;
-                    yield bump(null, skuMl, price, sold);
+                    const price = Number((_f = item.price) !== null && _f !== void 0 ? _f : 0) || 0;
+                    yield bump(null, skuMl, price);
                 }
             }
         }
@@ -507,11 +563,15 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             for (const iid of agg.ml_item_ids) {
                 inversion += costByItemId.get((0, integrations_controller_1.normalizeMercadoLibreItemId)(iid)) || 0;
             }
-            /** Margen neto: precio público ML − comisión venta (listing_prices) − FOB − Product Ads. */
+            let margenUnidad = null;
             let ganancia = null;
             if (fobCost != null && Number.isFinite(fobCost)) {
-                const g = precioMlProm - comisionMlProm - Number(fobCost) - inversion;
-                ganancia = Number.isFinite(g) ? Math.round(g * 100) / 100 : null;
+                const fobN = Number(fobCost);
+                const margenRaw = precioMlProm - comisionMlProm - fobN;
+                margenUnidad = Number.isFinite(margenRaw) ? Math.round(margenRaw * 100) / 100 : null;
+                const ventasN = Math.max(0, Math.floor(Number(agg.ventas_periodo_suma) || 0));
+                const gananciaRaw = margenRaw * ventasN - inversion;
+                ganancia = Number.isFinite(gananciaRaw) ? Math.round(gananciaRaw * 100) / 100 : null;
             }
             const linksText = Array.from(agg.permalinks)
                 .filter(Boolean)
@@ -521,9 +581,10 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                 links_ml: linksText,
                 fob: fobCost,
                 precio_ml_prom: precioMlProm,
-                ventas_ml: agg.ventas_ml_suma,
+                ventas_periodo: agg.ventas_periodo_suma,
                 comision_ml_prom: comisionMlProm,
                 inversion,
+                margen_unidad: margenUnidad,
                 ganancia
             });
         }
@@ -541,17 +602,18 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             'Link Mercado Libre',
             fobHeader,
             'Precio Mercado Libre (ARS, prom.)',
-            'Ventas acumuladas (unid., ML)',
+            `Ventas ${SALES_LOOKBACK_DAYS} días (unid., órdenes pagadas ML)`,
             'Comisión venta ML estimada (ARS, prom.)',
             `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
-            'Margen neto (ARS)'
+            'Margen por unidad (ARS)',
+            `Ganancia (${SALES_LOOKBACK_DAYS} días, ARS)`
         ]);
         const noteText = `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
             (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
             (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
-            ' Ventas: suma de sold_quantity de Mercado Libre por cada publicación/variación vinculada al artículo (histórico acumulado en ML). Comisión venta: API listing_prices (sale_fee_amount). Margen neto = precio ML − comisión ML − FOB − inversión Product Ads. Cargá el FOB en la lista; si falta FOB, el margen queda vacío.';
-        ws.addRow([noteText, '', '', '', '', '', '', '']);
-        ws.mergeCells(2, 1, 2, 8);
+            ` Ventas: unidades en órdenes pagadas entre ${salesFromStr} y ${salesToStr}. Comisión venta: API listing_prices (sale_fee_amount). Margen por unidad = precio ML (prom.) − comisión ML (prom.) − FOB. Ganancia del período = (margen por unidad × ventas del período) − inversión Product Ads. Si falta FOB, margen y ganancia quedan vacíos.`;
+        ws.addRow([noteText, '', '', '', '', '', '', '', '']);
+        ws.mergeCells(2, 1, 2, 9);
         const note = ws.getRow(2).getCell(1);
         note.font = { italic: true, size: 10, name: 'Calibri', color: { argb: 'FF64748B' } };
         note.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
@@ -571,18 +633,19 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             const dataRow = ws.addRow([
                 row.codigo,
                 row.links_ml,
-                (_j = row.fob) !== null && _j !== void 0 ? _j : '',
+                (_g = row.fob) !== null && _g !== void 0 ? _g : '',
                 row.precio_ml_prom,
-                row.ventas_ml,
+                row.ventas_periodo,
                 row.comision_ml_prom,
                 row.inversion,
-                (_k = row.ganancia) !== null && _k !== void 0 ? _k : ''
+                (_h = row.margen_unidad) !== null && _h !== void 0 ? _h : '',
+                (_j = row.ganancia) !== null && _j !== void 0 ? _j : ''
             ]);
             dataRow.eachCell((cell, colNumber) => {
                 cell.font = { name: 'Calibri', size: 11 };
                 if (colNumber === 5)
                     cell.numFmt = '#,##0';
-                else if ([3, 4, 6, 7, 8].includes(colNumber))
+                else if ([3, 4, 6, 7, 8, 9].includes(colNumber))
                     cell.numFmt = '#,##0.00';
             });
             if (rowIdx % 2 === 0) {
@@ -600,7 +663,8 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             { width: 22 },
             { width: 34 },
             { width: 36 },
-            { width: 18 }
+            { width: 22 },
+            { width: 22 }
         ];
         const buf = yield workbook.xlsx.writeBuffer();
         const filename = `publicaciones_ml_por_articulo_${new Date().toISOString().slice(0, 10)}.xlsx`;

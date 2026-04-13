@@ -6,6 +6,8 @@ import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.con
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
+/** Ventas agregadas desde orders/search (órdenes pagadas). */
+const SALES_LOOKBACK_DAYS = 30;
 
 /** Misma lista que integrations (Product Ads). */
 const ML_PADS_METRICS_DEFAULT =
@@ -192,8 +194,8 @@ type AggBucket = {
   ml_prices: number[];
   /** Comisión de venta ML (`sale_fee_amount`) por el mismo índice que ml_prices. */
   ml_sale_fees: number[];
-  /** Unidades vendidas en ML (suma de `sold_quantity` por publicación/variación que aporta al producto). */
-  ventas_ml_suma: number;
+  /** Unidades vendidas en ML en el período (órdenes pagadas, por publicación/variación). */
+  ventas_periodo_suma: number;
   variant_ids: Set<string>;
   ml_item_ids: Set<string>;
   permalinks: Set<string>;
@@ -289,6 +291,56 @@ async function fetchActiveCampaignProductAdsCostByItem(
   return costByItem;
 }
 
+/**
+ * Suma unidades vendidas por publicación/variación ML en órdenes con estado `paid`
+ * creadas en el rango [dateFromYmd, dateToYmd] (inclusive, horario -03:00 como en el resto del backend).
+ * Clave: `normalizeMercadoLibreItemId(itemId)|variationId` (variationId vacío si la publicación no tiene variaciones).
+ */
+async function fetchMercadoLibreSoldUnitsInDateRange(
+  accessToken: string,
+  sellerUserId: string,
+  dateFromYmd: string,
+  dateToYmd: string
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  let offset = 0;
+  const limit = 50;
+  while (offset < 20000) {
+    const res = await axios.get('https://api.mercadolibre.com/orders/search', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        seller: sellerUserId,
+        'order.status': 'paid',
+        'order.date_created.from': `${dateFromYmd}T00:00:00.000-03:00`,
+        'order.date_created.to': `${dateToYmd}T23:59:59.999-03:00`,
+        offset,
+        limit,
+        sort: 'date_desc'
+      },
+      validateStatus: () => true
+    });
+    if (res.status !== 200) {
+      console.warn('[publications-export] orders/search ventas:', res.status, res.data?.message || res.data);
+      break;
+    }
+    const results = Array.isArray(res.data?.results) ? res.data.results : [];
+    for (const order of results) {
+      for (const line of order.order_items || []) {
+        const iid = normalizeMercadoLibreItemId(line?.item?.id);
+        if (!iid) continue;
+        const rawVid = line?.item?.variation_id;
+        const vid = rawVid != null && String(rawVid).trim() !== '' ? String(rawVid).trim() : '';
+        const qty = Math.max(0, Math.floor(Number(line.quantity) || 0));
+        const k = `${iid}|${vid}`;
+        map.set(k, (map.get(k) || 0) + qty);
+      }
+    }
+    if (results.length < limit) break;
+    offset += limit;
+  }
+  return map;
+}
+
 export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -302,6 +354,12 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     dateFrom.setDate(dateFrom.getDate() - ADS_LOOKBACK_DAYS);
     const dateFromStr = toYmd(dateFrom);
     const dateToStr = toYmd(dateTo);
+
+    const salesDateTo = new Date();
+    const salesDateFrom = new Date(salesDateTo);
+    salesDateFrom.setDate(salesDateFrom.getDate() - SALES_LOOKBACK_DAYS);
+    const salesFromStr = toYmd(salesDateFrom);
+    const salesToStr = toYmd(salesDateTo);
 
     const hubRows = (await query(`
       SELECT pv.id AS variant_id,
@@ -451,6 +509,13 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       dateToStr
     );
 
+    const soldUnitsByItemVariation = await fetchMercadoLibreSoldUnitsInDateRange(
+      mlToken.access_token,
+      String(mlToken.user_id),
+      salesFromStr,
+      salesToStr
+    );
+
     /** Todas las publicaciones del vendedor (activas, pausadas y cerradas), hasta ML_SYNC_MAX_ITEMS. */
     const seen = new Set<string>();
     const allItemIds: string[] = [];
@@ -488,7 +553,7 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
           mayorista_pack: init.mayorista_pack,
           ml_prices: [],
           ml_sale_fees: [],
-          ventas_ml_suma: 0,
+          ventas_periodo_suma: 0,
           variant_ids: new Set(),
           ml_item_ids: new Set(),
           permalinks: new Set()
@@ -517,7 +582,7 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
         if (!item?.id) continue;
         const itemIdNorm = normalizeMercadoLibreItemId(String(item.id));
 
-        const bump = async (variationId: string | null, skuMl: string, price: number, soldQty: number) => {
+        const bump = async (variationId: string | null, skuMl: string, price: number) => {
           const skuNorm = normalizeSkuForMatch(skuMl);
           const hub = resolveHubVariantFull(
             itemIdNorm,
@@ -545,8 +610,9 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
             const saleFee = await fetchListingSaleFeeAmount(mlToken.access_token, item, price, listingSaleFeeCache);
             b.ml_prices.push(price);
             b.ml_sale_fees.push(saleFee);
-            const soldN = Math.max(0, Math.floor(Number(soldQty) || 0));
-            b.ventas_ml_suma += soldN;
+            const vid = variationId != null && String(variationId).trim() !== '' ? String(variationId).trim() : '';
+            const soldKey = `${itemIdNorm}|${vid}`;
+            b.ventas_periodo_suma += soldUnitsByItemVariation.get(soldKey) ?? 0;
             b.variant_ids.add(hub.variant_id);
             b.ml_item_ids.add(itemIdNorm);
             const pl = (item.permalink || '').toString().trim();
@@ -558,14 +624,12 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
           for (const v of item.variations) {
             const skuMl = mlSkuFromVariation(v);
             const price = Number(v.price ?? item.price ?? 0) || 0;
-            const sold = Number(v.sold_quantity ?? 0) || 0;
-            await bump(String(v.id), skuMl, price, sold);
+            await bump(String(v.id), skuMl, price);
           }
         } else {
           const skuMl = mlSkuFromItem(item);
           const price = Number(item.price ?? 0) || 0;
-          const sold = Number(item.sold_quantity ?? 0) || 0;
-          await bump(null, skuMl, price, sold);
+          await bump(null, skuMl, price);
         }
       }
     }
@@ -575,9 +639,12 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       links_ml: string;
       fob: number | null;
       precio_ml_prom: number;
-      ventas_ml: number;
+      ventas_periodo: number;
       comision_ml_prom: number;
       inversion: number;
+      /** Por unidad: precio ML − comisión ML − FOB (lo que ganarías por unidad). */
+      margen_unidad: number | null;
+      /** En el período: margen_unidad × ventas − inversión Product Ads (estimado de lo ganado). */
       ganancia: number | null;
     }> = [];
 
@@ -599,11 +666,15 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       for (const iid of agg.ml_item_ids) {
         inversion += costByItemId.get(normalizeMercadoLibreItemId(iid)) || 0;
       }
-      /** Margen neto: precio público ML − comisión venta (listing_prices) − FOB − Product Ads. */
+      let margenUnidad: number | null = null;
       let ganancia: number | null = null;
       if (fobCost != null && Number.isFinite(fobCost)) {
-        const g = precioMlProm - comisionMlProm - Number(fobCost) - inversion;
-        ganancia = Number.isFinite(g) ? Math.round(g * 100) / 100 : null;
+        const fobN = Number(fobCost);
+        const margenRaw = precioMlProm - comisionMlProm - fobN;
+        margenUnidad = Number.isFinite(margenRaw) ? Math.round(margenRaw * 100) / 100 : null;
+        const ventasN = Math.max(0, Math.floor(Number(agg.ventas_periodo_suma) || 0));
+        const gananciaRaw = margenRaw * ventasN - inversion;
+        ganancia = Number.isFinite(gananciaRaw) ? Math.round(gananciaRaw * 100) / 100 : null;
       }
       const linksText = Array.from(agg.permalinks)
         .filter(Boolean)
@@ -614,9 +685,10 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
         links_ml: linksText,
         fob: fobCost,
         precio_ml_prom: precioMlProm,
-        ventas_ml: agg.ventas_ml_suma,
+        ventas_periodo: agg.ventas_periodo_suma,
         comision_ml_prom: comisionMlProm,
         inversion,
+        margen_unidad: margenUnidad,
         ganancia
       });
     }
@@ -637,18 +709,19 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       'Link Mercado Libre',
       fobHeader,
       'Precio Mercado Libre (ARS, prom.)',
-      'Ventas acumuladas (unid., ML)',
+      `Ventas ${SALES_LOOKBACK_DAYS} días (unid., órdenes pagadas ML)`,
       'Comisión venta ML estimada (ARS, prom.)',
       `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
-      'Margen neto (ARS)'
+      'Margen por unidad (ARS)',
+      `Ganancia (${SALES_LOOKBACK_DAYS} días, ARS)`
     ]);
     const noteText =
       `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
       (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
       (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
-      ' Ventas: suma de sold_quantity de Mercado Libre por cada publicación/variación vinculada al artículo (histórico acumulado en ML). Comisión venta: API listing_prices (sale_fee_amount). Margen neto = precio ML − comisión ML − FOB − inversión Product Ads. Cargá el FOB en la lista; si falta FOB, el margen queda vacío.';
-    ws.addRow([noteText, '', '', '', '', '', '', '']);
-    ws.mergeCells(2, 1, 2, 8);
+      ` Ventas: unidades en órdenes pagadas entre ${salesFromStr} y ${salesToStr}. Comisión venta: API listing_prices (sale_fee_amount). Margen por unidad = precio ML (prom.) − comisión ML (prom.) − FOB. Ganancia del período = (margen por unidad × ventas del período) − inversión Product Ads. Si falta FOB, margen y ganancia quedan vacíos.`;
+    ws.addRow([noteText, '', '', '', '', '', '', '', '']);
+    ws.mergeCells(2, 1, 2, 9);
     const note = ws.getRow(2).getCell(1);
     note.font = { italic: true, size: 10, name: 'Calibri', color: { argb: 'FF64748B' } };
     note.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
@@ -672,15 +745,16 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
         row.links_ml,
         row.fob ?? '',
         row.precio_ml_prom,
-        row.ventas_ml,
+        row.ventas_periodo,
         row.comision_ml_prom,
         row.inversion,
+        row.margen_unidad ?? '',
         row.ganancia ?? ''
       ]);
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { name: 'Calibri', size: 11 };
         if (colNumber === 5) cell.numFmt = '#,##0';
-        else if ([3, 4, 6, 7, 8].includes(colNumber)) cell.numFmt = '#,##0.00';
+        else if ([3, 4, 6, 7, 8, 9].includes(colNumber)) cell.numFmt = '#,##0.00';
       });
       if (rowIdx % 2 === 0) {
         dataRow.eachCell((cell) => {
@@ -698,7 +772,8 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       { width: 22 },
       { width: 34 },
       { width: 36 },
-      { width: 18 }
+      { width: 22 },
+      { width: 22 }
     ];
 
     const buf = await workbook.xlsx.writeBuffer();
