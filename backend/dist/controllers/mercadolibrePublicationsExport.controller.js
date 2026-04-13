@@ -312,12 +312,14 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
         for (const r of hubRows) {
             if (productMeta.has(r.product_id))
                 continue;
-            const codigo = (r.product_sku || '').trim() || r.product_id;
+            const skuTrim = (r.product_sku || '').trim();
+            const codigo = skuTrim || r.product_id;
             productMeta.set(r.product_id, {
                 codigo,
                 nombre: (r.product_name || '').toString(),
                 base_price: Number((_b = r.base_price) !== null && _b !== void 0 ? _b : 0),
-                mayorista_pack: Math.max(1, Number(r.mayorista_pack_size) || 1)
+                mayorista_pack: Math.max(1, Number(r.mayorista_pack_size) || 1),
+                hasCodigo: skuTrim.length > 0
             });
         }
         const costByItemId = yield fetchActiveCampaignProductAdsCostByItem(mlToken.access_token, dateFromStr, dateToStr);
@@ -379,17 +381,18 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                 if (!(item === null || item === void 0 ? void 0 : item.id))
                     continue;
                 const itemIdNorm = (0, integrations_controller_1.normalizeMercadoLibreItemId)(String(item.id));
-                const title = (item.title || '').toString();
                 const bump = (variationId, skuMl, price) => {
-                    var _a, _b, _c, _d;
+                    var _a, _b, _c;
                     const skuNorm = normalizeSkuForMatch(skuMl);
                     const hub = resolveHubVariantFull(itemIdNorm, variationId, skuNorm, hubBySku, hubByMlItem, hubByMlProduct, pubMap);
                     if (hub) {
                         const meta = productMeta.get(hub.product_id);
-                        const codigo = (_a = meta === null || meta === void 0 ? void 0 : meta.codigo) !== null && _a !== void 0 ? _a : hub.product_id;
-                        const nombre = (_b = meta === null || meta === void 0 ? void 0 : meta.nombre) !== null && _b !== void 0 ? _b : hub.product_name;
-                        const bp = (_c = meta === null || meta === void 0 ? void 0 : meta.base_price) !== null && _c !== void 0 ? _c : hub.base_price;
-                        const pk = (_d = meta === null || meta === void 0 ? void 0 : meta.mayorista_pack) !== null && _d !== void 0 ? _d : hub.mayorista_pack_size;
+                        if (!(meta === null || meta === void 0 ? void 0 : meta.hasCodigo))
+                            return;
+                        const codigo = meta.codigo;
+                        const nombre = (_a = meta.nombre) !== null && _a !== void 0 ? _a : hub.product_name;
+                        const bp = (_b = meta.base_price) !== null && _b !== void 0 ? _b : hub.base_price;
+                        const pk = (_c = meta.mayorista_pack) !== null && _c !== void 0 ? _c : hub.mayorista_pack_size;
                         const key = `p:${hub.product_id}`;
                         const b = ensureBucket(key, {
                             codigo,
@@ -399,20 +402,6 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                         });
                         b.ml_prices.push(price);
                         b.variant_ids.add(hub.variant_id);
-                        b.ml_item_ids.add(itemIdNorm);
-                        const pl = (item.permalink || '').toString().trim();
-                        if (pl)
-                            b.permalinks.add(pl);
-                    }
-                    else {
-                        const key = `u:${itemIdNorm}`;
-                        const b = ensureBucket(key, {
-                            codigo: itemIdNorm,
-                            nombre: title,
-                            base_price: 0,
-                            mayorista_pack: 1
-                        });
-                        b.ml_prices.push(price);
                         b.ml_item_ids.add(itemIdNorm);
                         const pl = (item.permalink || '').toString().trim();
                         if (pl)
@@ -485,7 +474,7 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
             'Margen (ARS)'
         ]);
-        const noteText = `Todas las publicaciones ML del vendedor (hasta ${ML_SYNC_MAX_ITEMS}). Código: referencia interna/SKU; ids ML sin prefijo MLA/MLU. FOB: lista ` +
+        const noteText = `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
             (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
             (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
             ' Margen = precio ML − precio FOB − inversión publicitaria (Product Ads). Cargá el FOB en la lista para el producto; si falta FOB, el margen queda vacío.';
