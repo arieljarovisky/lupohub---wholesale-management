@@ -20,7 +20,7 @@ const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS |
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 /** Normaliza entradas de publicación ML (ID directo, URL o formato con guion, ej. MLAU-123). */
-function normalizeMercadoLibreItemId(raw: unknown): string {
+export function normalizeMercadoLibreItemId(raw: unknown): string {
   let s = (raw ?? '').toString().trim();
   if (!s) return '';
   try { s = decodeURIComponent(s); } catch {}
@@ -45,7 +45,7 @@ function normalizeMercadoLibreItemId(raw: unknown): string {
 }
 
 /** Genera candidatos de itemId para tolerar formatos no estándar (ej. MLAU... -> MLA...). */
-function mercadoLibreItemIdCandidates(raw: unknown): string[] {
+export function mercadoLibreItemIdCandidates(raw: unknown): string[] {
   const base = normalizeMercadoLibreItemId(raw);
   if (!base) return [];
   // Si llega solo el número, intentar los sitios más comunes.
