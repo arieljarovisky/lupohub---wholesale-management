@@ -221,6 +221,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlStockSyncIsImport, setMlStockSyncIsImport] = useState(false);
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
+  const [mlPublicationsExportLoading, setMlPublicationsExportLoading] = useState(false);
 
   // ML Auto Message Config
   const [mlAutoMessageEnabled, setMlAutoMessageEnabled] = useState(true);
@@ -440,6 +441,18 @@ const Settings: React.FC<SettingsProps> = ({
       setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
     } finally {
       setMlStockSyncLoading(false);
+    }
+  };
+
+  const handleExportMlPublications = async () => {
+    setMlPublicationsExportLoading(true);
+    try {
+      await api.exportMercadolibrePublications();
+      showToast('success', 'Se descargó el Excel con tus publicaciones de Mercado Libre.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al generar el Excel de publicaciones');
+    } finally {
+      setMlPublicationsExportLoading(false);
     }
   };
 
@@ -1683,6 +1696,16 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           <RefreshCw size={14} />
                           VINCULAR PRODUCTOS
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportMlPublications}
+                          disabled={mlPublicationsExportLoading}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Descarga Excel con precio ML, mayorista, FOB y margen aproximado"
+                        >
+                          {mlPublicationsExportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+                          EXCEL PUBLICACIONES
                         </button>
                       </div>
                     </div>

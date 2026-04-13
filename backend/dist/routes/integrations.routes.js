@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const integrations_controller_1 = require("../controllers/integrations.controller");
+const mercadolibrePublicationsExport_controller_1 = require("../controllers/mercadolibrePublicationsExport.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/status', integrations_controller_1.getIntegrationStatus);
@@ -22,6 +23,8 @@ router.get('/mercadolibre/brand-ads/advertisers', integrations_controller_1.getM
 router.get('/mercadolibre/brand-ads/campaigns', integrations_controller_1.getMercadoLibreBrandAdsCampaigns);
 router.get('/mercadolibre/display-ads/advertisers', integrations_controller_1.getMercadoLibreDisplayAdsAdvertisers);
 router.get('/mercadolibre/display-ads/campaigns', integrations_controller_1.getMercadoLibreDisplayAdsCampaigns);
+/** Excel: publicaciones ML + precio mayorista + último FOB por variante (requiere login). */
+router.get('/mercadolibre/publications-export', auth_1.authMiddleware, mercadolibrePublicationsExport_controller_1.exportMercadolibrePublicationsXlsx);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);

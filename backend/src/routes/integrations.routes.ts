@@ -53,6 +53,7 @@ import {
   getMercadoLibreDisplayAdsAdvertisers,
   getMercadoLibreDisplayAdsCampaigns
 } from '../controllers/integrations.controller';
+import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -76,6 +77,8 @@ router.get('/mercadolibre/brand-ads/advertisers', getMercadoLibreBrandAdsAdverti
 router.get('/mercadolibre/brand-ads/campaigns', getMercadoLibreBrandAdsCampaigns);
 router.get('/mercadolibre/display-ads/advertisers', getMercadoLibreDisplayAdsAdvertisers);
 router.get('/mercadolibre/display-ads/campaigns', getMercadoLibreDisplayAdsCampaigns);
+/** Excel: publicaciones ML + precio mayorista + último FOB por variante (requiere login). */
+router.get('/mercadolibre/publications-export', authMiddleware, exportMercadolibrePublicationsXlsx);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);

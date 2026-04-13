@@ -944,6 +944,19 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
   },
 
+  /** Excel: todas las publicaciones ML + precio mayorista + último FOB por variante (requiere sesión). */
+  exportMercadolibrePublications: async (): Promise<void> => {
+    const blob = await getBlob('/integrations/mercadolibre/publications-export', 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `publicaciones_ml_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Enviar stock solo de variantes seleccionadas a Tienda Nube */
   syncSelectedStockToTiendaNube: async (variantIds: string[]): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
     return handleRequest(async () => {
