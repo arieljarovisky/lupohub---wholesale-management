@@ -57,6 +57,62 @@ function mlSkuFromItem(item) {
     }
     return s;
 }
+/** Comisión de venta (`sale_fee_amount`) según API listing_prices de ML; respuesta puede ser array u objeto único. */
+function parseListingPricesSaleFee(data, listingTypeId) {
+    const lt = (listingTypeId || '').trim();
+    const rows = Array.isArray(data) ? data : data && typeof data === 'object' ? [data] : [];
+    const match = rows.find((r) => String((r === null || r === void 0 ? void 0 : r.listing_type_id) || '') === lt);
+    const row = match !== null && match !== void 0 ? match : rows[0];
+    const n = Number(row === null || row === void 0 ? void 0 : row.sale_fee_amount);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+/**
+ * Estima comisión por venta (ARS u otra moneda del ítem) vía GET /sites/{SITE}/listing_prices.
+ * Incluye cargo variable de ML por categoría/tipo de publicación; no incluye IVA propio ni retenciones fuera de este cálculo.
+ */
+function fetchListingSaleFeeAmount(accessToken, item, price, cache) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const siteId = String((item === null || item === void 0 ? void 0 : item.site_id) || '').trim();
+        const categoryId = String((item === null || item === void 0 ? void 0 : item.category_id) || '').trim();
+        const listingTypeId = String((item === null || item === void 0 ? void 0 : item.listing_type_id) || '').trim();
+        const currencyId = String((item === null || item === void 0 ? void 0 : item.currency_id) || '').trim() || 'ARS';
+        const logisticType = ((_a = item === null || item === void 0 ? void 0 : item.shipping) === null || _a === void 0 ? void 0 : _a.logistic_type) != null ? String(item.shipping.logistic_type).trim() : '';
+        if (!siteId || !listingTypeId || !Number.isFinite(price) || price <= 0)
+            return 0;
+        const priceRounded = Math.round(price * 100) / 100;
+        const cacheKey = `${siteId}|${categoryId}|${listingTypeId}|${priceRounded}|${currencyId}|${logisticType}`;
+        if (cache.has(cacheKey))
+            return cache.get(cacheKey);
+        const params = {
+            price: priceRounded,
+            listing_type_id: listingTypeId,
+            currency_id: currencyId
+        };
+        if (categoryId)
+            params.category_id = categoryId;
+        if (logisticType)
+            params.logistic_type = logisticType;
+        try {
+            const res = yield axios_1.default.get(`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/listing_prices`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                params,
+                validateStatus: () => true
+            });
+            if (res.status !== 200) {
+                cache.set(cacheKey, 0);
+                return 0;
+            }
+            const fee = parseListingPricesSaleFee(res.data, listingTypeId);
+            cache.set(cacheKey, fee);
+            return fee;
+        }
+        catch (_b) {
+            cache.set(cacheKey, 0);
+            return 0;
+        }
+    });
+}
 /**
  * Solo vínculos guardados en LupoHub (variant_publications, mercado_libre_item_id, mercado_libre_id + variación).
  * `itemIdNorm` = normalizeMercadoLibreItemId(id publicación ML).
@@ -200,7 +256,7 @@ function fetchActiveCampaignProductAdsCostByItem(accessToken, dateFrom, dateTo) 
     });
 }
 const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!mlToken) {
@@ -359,6 +415,8 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                     base_price: init.base_price,
                     mayorista_pack: init.mayorista_pack,
                     ml_prices: [],
+                    ml_sale_fees: [],
+                    ventas_ml_suma: 0,
                     variant_ids: new Set(),
                     ml_item_ids: new Set(),
                     permalinks: new Set()
@@ -367,6 +425,7 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             }
             return b;
         }
+        const listingSaleFeeCache = new Map();
         const batchSize = 10;
         for (let i = 0; i < allItemIds.length; i += batchSize) {
             const batch = allItemIds.slice(i, i + batchSize);
@@ -381,7 +440,7 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                 if (!(item === null || item === void 0 ? void 0 : item.id))
                     continue;
                 const itemIdNorm = (0, integrations_controller_1.normalizeMercadoLibreItemId)(String(item.id));
-                const bump = (variationId, skuMl, price) => {
+                const bump = (variationId, skuMl, price, soldQty) => __awaiter(void 0, void 0, void 0, function* () {
                     var _a, _b, _c;
                     const skuNorm = normalizeSkuForMatch(skuMl);
                     const hub = resolveHubVariantFull(itemIdNorm, variationId, skuNorm, hubBySku, hubByMlItem, hubByMlProduct, pubMap);
@@ -400,25 +459,31 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                             base_price: bp,
                             mayorista_pack: pk
                         });
+                        const saleFee = yield fetchListingSaleFeeAmount(mlToken.access_token, item, price, listingSaleFeeCache);
                         b.ml_prices.push(price);
+                        b.ml_sale_fees.push(saleFee);
+                        const soldN = Math.max(0, Math.floor(Number(soldQty) || 0));
+                        b.ventas_ml_suma += soldN;
                         b.variant_ids.add(hub.variant_id);
                         b.ml_item_ids.add(itemIdNorm);
                         const pl = (item.permalink || '').toString().trim();
                         if (pl)
                             b.permalinks.add(pl);
                     }
-                };
+                });
                 if (item.variations && item.variations.length > 0) {
                     for (const v of item.variations) {
                         const skuMl = mlSkuFromVariation(v);
                         const price = Number((_e = (_d = v.price) !== null && _d !== void 0 ? _d : item.price) !== null && _e !== void 0 ? _e : 0) || 0;
-                        bump(String(v.id), skuMl, price);
+                        const sold = Number((_f = v.sold_quantity) !== null && _f !== void 0 ? _f : 0) || 0;
+                        yield bump(String(v.id), skuMl, price, sold);
                     }
                 }
                 else {
                     const skuMl = mlSkuFromItem(item);
-                    const price = Number((_f = item.price) !== null && _f !== void 0 ? _f : 0) || 0;
-                    bump(null, skuMl, price);
+                    const price = Number((_g = item.price) !== null && _g !== void 0 ? _g : 0) || 0;
+                    const sold = Number((_h = item.sold_quantity) !== null && _h !== void 0 ? _h : 0) || 0;
+                    yield bump(null, skuMl, price, sold);
                 }
             }
         }
@@ -427,6 +492,9 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             if (agg.ml_prices.length === 0)
                 continue;
             const precioMlProm = agg.ml_prices.reduce((a, p) => a + p, 0) / agg.ml_prices.length;
+            const comisionMlProm = agg.ml_sale_fees.length > 0 && agg.ml_sale_fees.length === agg.ml_prices.length
+                ? agg.ml_sale_fees.reduce((a, f) => a + f, 0) / agg.ml_sale_fees.length
+                : 0;
             let fobCost = null;
             if (key.startsWith('p:')) {
                 const pid = key.slice(2);
@@ -439,10 +507,10 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             for (const iid of agg.ml_item_ids) {
                 inversion += costByItemId.get((0, integrations_controller_1.normalizeMercadoLibreItemId)(iid)) || 0;
             }
-            /** Margen: precio venta ML − costo FOB (lista) − inversión Product Ads. Requiere FOB cargado en la lista para el producto. */
+            /** Margen neto: precio público ML − comisión venta (listing_prices) − FOB − Product Ads. */
             let ganancia = null;
             if (fobCost != null && Number.isFinite(fobCost)) {
-                const g = precioMlProm - Number(fobCost) - inversion;
+                const g = precioMlProm - comisionMlProm - Number(fobCost) - inversion;
                 ganancia = Number.isFinite(g) ? Math.round(g * 100) / 100 : null;
             }
             const linksText = Array.from(agg.permalinks)
@@ -453,6 +521,8 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
                 links_ml: linksText,
                 fob: fobCost,
                 precio_ml_prom: precioMlProm,
+                ventas_ml: agg.ventas_ml_suma,
+                comision_ml_prom: comisionMlProm,
                 inversion,
                 ganancia
             });
@@ -471,15 +541,17 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             'Link Mercado Libre',
             fobHeader,
             'Precio Mercado Libre (ARS, prom.)',
+            'Ventas acumuladas (unid., ML)',
+            'Comisión venta ML estimada (ARS, prom.)',
             `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
-            'Margen (ARS)'
+            'Margen neto (ARS)'
         ]);
         const noteText = `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
             (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
             (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
-            ' Margen = precio ML − precio FOB − inversión publicitaria (Product Ads). Cargá el FOB en la lista para el producto; si falta FOB, el margen queda vacío.';
-        ws.addRow([noteText, '', '', '', '', '']);
-        ws.mergeCells(2, 1, 2, 6);
+            ' Ventas: suma de sold_quantity de Mercado Libre por cada publicación/variación vinculada al artículo (histórico acumulado en ML). Comisión venta: API listing_prices (sale_fee_amount). Margen neto = precio ML − comisión ML − FOB − inversión Product Ads. Cargá el FOB en la lista; si falta FOB, el margen queda vacío.';
+        ws.addRow([noteText, '', '', '', '', '', '', '']);
+        ws.mergeCells(2, 1, 2, 8);
         const note = ws.getRow(2).getCell(1);
         note.font = { italic: true, size: 10, name: 'Calibri', color: { argb: 'FF64748B' } };
         note.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
@@ -499,14 +571,18 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             const dataRow = ws.addRow([
                 row.codigo,
                 row.links_ml,
-                (_g = row.fob) !== null && _g !== void 0 ? _g : '',
+                (_j = row.fob) !== null && _j !== void 0 ? _j : '',
                 row.precio_ml_prom,
+                row.ventas_ml,
+                row.comision_ml_prom,
                 row.inversion,
-                (_h = row.ganancia) !== null && _h !== void 0 ? _h : ''
+                (_k = row.ganancia) !== null && _k !== void 0 ? _k : ''
             ]);
             dataRow.eachCell((cell, colNumber) => {
                 cell.font = { name: 'Calibri', size: 11 };
-                if ([3, 4, 5, 6].includes(colNumber))
+                if (colNumber === 5)
+                    cell.numFmt = '#,##0';
+                else if ([3, 4, 6, 7, 8].includes(colNumber))
                     cell.numFmt = '#,##0.00';
             });
             if (rowIdx % 2 === 0) {
@@ -521,6 +597,8 @@ const exportMercadolibrePublicationsXlsx = (_req, res) => __awaiter(void 0, void
             { width: 52 },
             { width: 28 },
             { width: 26 },
+            { width: 22 },
+            { width: 34 },
             { width: 36 },
             { width: 18 }
         ];
