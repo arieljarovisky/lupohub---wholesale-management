@@ -5,6 +5,11 @@ import { query } from '../database/db';
 import { getValidMLToken } from './integrations.controller';
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
+const ADS_LOOKBACK_DAYS = 30;
+
+/** Misma lista que integrations (Product Ads). */
+const ML_PADS_METRICS_DEFAULT =
+  'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 
 function normalizeSkuForMatch(raw: unknown): string {
   return (raw ?? '')
@@ -47,7 +52,6 @@ type HubVariant = {
   mayorista_pack_size: number;
   mercado_libre_id: string | null;
   ml_pack_default: number;
-  /** Solo si el match viene de variant_publications */
   pub_pack?: number | null;
 };
 
@@ -118,6 +122,106 @@ function resolveHubVariant(
   return null;
 }
 
+type AggBucket = {
+  codigo: string;
+  nombre: string;
+  base_price: number;
+  mayorista_pack: number;
+  ml_prices: number[];
+  variant_ids: Set<string>;
+  ml_item_ids: Set<string>;
+};
+
+/** Suma costo Product Ads por ítem ML, solo campañas con estado active en el período. */
+async function fetchActiveCampaignProductAdsCostByItem(
+  accessToken: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<Map<string, number>> {
+  const costByItem = new Map<string, number>();
+  try {
+    const advRes = await axios.get('https://api.mercadolibre.com/advertising/advertisers', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'Api-Version': '1'
+      },
+      params: { product_id: 'PADS' },
+      validateStatus: () => true
+    });
+    if (advRes.status !== 200 || !Array.isArray(advRes.data?.advertisers)) {
+      return costByItem;
+    }
+
+    for (const adv of advRes.data.advertisers) {
+      const siteId = String(adv.site_id || '').trim();
+      const advertiserId = adv.advertiser_id;
+      if (!siteId || advertiserId == null) continue;
+
+      const campaigns: any[] = [];
+      let cOff = 0;
+      const cLim = 50;
+      while (true) {
+        const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(String(advertiserId))}/product_ads/campaigns/search`;
+        const cr = await axios.get(url, {
+          headers: { Authorization: `Bearer ${accessToken}`, 'api-version': '2' },
+          params: {
+            date_from: dateFrom,
+            date_to: dateTo,
+            limit: cLim,
+            offset: cOff,
+            metrics: ML_PADS_METRICS_DEFAULT
+          },
+          validateStatus: () => true
+        });
+        if (cr.status !== 200) break;
+        const batch = cr.data?.results || [];
+        campaigns.push(...batch);
+        if (batch.length < cLim) break;
+        cOff += cLim;
+        if (cOff > 5000) break;
+      }
+
+      const active = campaigns.filter((c) => String(c.status || '').toLowerCase() === 'active');
+      for (const camp of active) {
+        const cid = camp.id;
+        let aOff = 0;
+        const aLim = 50;
+        while (true) {
+          const adsUrl = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(String(advertiserId))}/product_ads/ads/search`;
+          const ar = await axios.get(adsUrl, {
+            headers: { Authorization: `Bearer ${accessToken}`, 'api-version': '2' },
+            params: {
+              date_from: dateFrom,
+              date_to: dateTo,
+              limit: aLim,
+              offset: aOff,
+              channel: 'marketplace',
+              metrics: ML_PADS_METRICS_DEFAULT,
+              'filters[campaign_id]': String(cid)
+            },
+            validateStatus: () => true
+          });
+          if (ar.status !== 200) break;
+          const results = ar.data?.results || [];
+          for (const row of results) {
+            const iid = String(row.item_id || '').trim();
+            const cost = Number(row.metrics?.cost) || 0;
+            if (!iid) continue;
+            costByItem.set(iid, (costByItem.get(iid) || 0) + cost);
+          }
+          if (results.length < aLim) break;
+          aOff += aLim;
+          if (aOff > 10000) break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[publications-export] Product Ads costos:', e);
+  }
+  return costByItem;
+}
+
 export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
@@ -125,12 +229,20 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
     }
 
+    const toYmd = (d: Date) => d.toISOString().slice(0, 10);
+    const dateTo = new Date();
+    const dateFrom = new Date(dateTo);
+    dateFrom.setDate(dateFrom.getDate() - ADS_LOOKBACK_DAYS);
+    const dateFromStr = toYmd(dateFrom);
+    const dateToStr = toYmd(dateTo);
+
     const hubRows = (await query(`
       SELECT pv.id AS variant_id,
              TRIM(COALESCE(pv.external_sku, pv.sku)) AS sku_raw,
              pv.mercado_libre_item_id,
              pv.mercado_libre_variant_id,
              p.id AS product_id,
+             p.sku AS product_sku,
              p.name AS product_name,
              p.base_price,
              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
@@ -145,12 +257,20 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       mercado_libre_item_id: string | null;
       mercado_libre_variant_id: string | null;
       product_id: string;
+      product_sku: string | null;
       product_name: string;
       base_price: string | number | null;
       mayorista_pack_size: string | number | null;
       mercado_libre_id: string | null;
       ml_pack_default: string | number | null;
     }>;
+
+    const variantsByProduct = new Map<string, string[]>();
+    for (const r of hubRows) {
+      if (!variantsByProduct.has(r.product_id)) variantsByProduct.set(r.product_id, []);
+      const arr = variantsByProduct.get(r.product_id)!;
+      if (!arr.includes(r.variant_id)) arr.push(r.variant_id);
+    }
 
     const hubBySku = new Map<string, HubVariant>();
     const hubByMlItem = new Map<string, HubVariant[]>();
@@ -231,6 +351,24 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       }))
     );
 
+    const productMeta = new Map<string, { codigo: string; nombre: string; base_price: number; mayorista_pack: number }>();
+    for (const r of hubRows) {
+      if (productMeta.has(r.product_id)) continue;
+      const codigo = ((r.product_sku || '') as string).trim() || r.product_id;
+      productMeta.set(r.product_id, {
+        codigo,
+        nombre: (r.product_name || '').toString(),
+        base_price: Number(r.base_price ?? 0),
+        mayorista_pack: Math.max(1, Number(r.mayorista_pack_size) || 1)
+      });
+    }
+
+    const costByItemId = await fetchActiveCampaignProductAdsCostByItem(
+      mlToken.access_token,
+      dateFromStr,
+      dateToStr
+    );
+
     const seen = new Set<string>();
     const allItemIds: string[] = [];
     for (const st of ['active', 'paused', 'closed'] as const) {
@@ -255,8 +393,24 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       }
     }
 
-    type OutRow = Record<string, string | number | null | undefined>;
-    const dataRows: OutRow[] = [];
+    const buckets = new Map<string, AggBucket>();
+
+    function ensureBucket(key: string, init: Partial<AggBucket> & Pick<AggBucket, 'codigo' | 'nombre' | 'base_price' | 'mayorista_pack'>): AggBucket {
+      let b = buckets.get(key);
+      if (!b) {
+        b = {
+          codigo: init.codigo,
+          nombre: init.nombre,
+          base_price: init.base_price,
+          mayorista_pack: init.mayorista_pack,
+          ml_prices: [],
+          variant_ids: new Set(),
+          ml_item_ids: new Set()
+        };
+        buckets.set(key, b);
+      }
+      return b;
+    }
 
     const batchSize = 10;
     for (let i = 0; i < allItemIds.length; i += batchSize) {
@@ -273,137 +427,159 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
 
       for (const item of items) {
         if (!item?.id) continue;
-        const currency = (item.currency_id || '').toString();
-        const permalink = (item.permalink || '').toString();
         const title = (item.title || '').toString();
-        const status = (item.status || '').toString();
 
-        const pushRow = (opts: {
-          variationId: string | null;
-          skuMl: string;
-          price: number;
-          stock: number;
-          sold: number;
-          attrText: string;
-        }) => {
-          const skuNorm = normalizeSkuForMatch(opts.skuMl);
+        const bump = (variationId: string | null, skuMl: string, price: number) => {
+          const skuNorm = normalizeSkuForMatch(skuMl);
           const hub = resolveHubVariant(
             String(item.id),
-            opts.variationId,
+            variationId,
             skuNorm,
             hubBySku,
             hubByMlItem,
             hubByMlProduct,
             pubMap
           );
-          const packMayor = hub?.mayorista_pack_size ?? 1;
-          const precioMayorista = hub?.base_price ?? null;
-          const precioUnitMayorista =
-            precioMayorista != null ? Number(precioMayorista) / Math.max(1, packMayor) : null;
-          const fob = hub ? fobByVariant.get(hub.variant_id) : undefined;
-          const margenPct =
-            precioUnitMayorista != null && opts.price > 0
-              ? ((opts.price - precioUnitMayorista) / opts.price) * 100
-              : null;
-
-          dataRows.push({
-            item_id: String(item.id),
-            variation_id: opts.variationId ?? '',
-            titulo: title,
-            estado: status,
-            moneda_ml: currency,
-            precio_ml: opts.price,
-            stock: opts.stock,
-            vendidos: opts.sold,
-            sku_ml: opts.skuMl,
-            color_talle: opts.attrText,
-            producto_lupo: hub?.product_name ?? '',
-            sku_lupo: hub?.sku_raw ?? '',
-            variant_id_lupo: hub?.variant_id ?? '',
-            precio_mayorista_ars: precioMayorista,
-            pack_mayorista: packMayor,
-            precio_unidad_mayorista_ars: precioUnitMayorista,
-            pack_ml: hub?.pub_pack ?? hub?.ml_pack_default ?? '',
-            costo_fob: fob?.cost ?? '',
-            moneda_fob: fob?.moneda ?? '',
-            fecha_ultimo_despacho: fob?.fecha ?? '',
-            margen_bruto_pct_ml_vs_mayorista: margenPct !== null ? Math.round(margenPct * 100) / 100 : '',
-            permalink
-          });
+          if (hub) {
+            const meta = productMeta.get(hub.product_id);
+            const codigo = meta?.codigo ?? hub.product_id;
+            const nombre = meta?.nombre ?? hub.product_name;
+            const bp = meta?.base_price ?? hub.base_price;
+            const pk = meta?.mayorista_pack ?? hub.mayorista_pack_size;
+            const key = `p:${hub.product_id}`;
+            const b = ensureBucket(key, {
+              codigo,
+              nombre,
+              base_price: bp,
+              mayorista_pack: pk
+            });
+            b.ml_prices.push(price);
+            b.variant_ids.add(hub.variant_id);
+            b.ml_item_ids.add(String(item.id));
+          } else {
+            const key = `u:${String(item.id)}`;
+            const b = ensureBucket(key, {
+              codigo: String(item.id),
+              nombre: title,
+              base_price: 0,
+              mayorista_pack: 1
+            });
+            b.ml_prices.push(price);
+            b.ml_item_ids.add(String(item.id));
+          }
         };
 
         if (item.variations && item.variations.length > 0) {
           for (const v of item.variations) {
             const skuMl = mlSkuFromVariation(v);
             const price = Number(v.price ?? item.price ?? 0) || 0;
-            const stock = Number(v.available_quantity ?? 0) || 0;
-            const sold = Number(v.sold_quantity ?? 0) || 0;
-            const parts: string[] = [];
-            (v.attribute_combinations || []).forEach((attr: any) => {
-              const name = (attr.value_name || attr.name || '').toString().trim();
-              const id = (attr.id || '').toString();
-              if (name) parts.push(`${id}:${name}`);
-            });
-            pushRow({
-              variationId: String(v.id),
-              skuMl,
-              price,
-              stock,
-              sold,
-              attrText: parts.join(' · ')
-            });
+            bump(String(v.id), skuMl, price);
           }
         } else {
           const skuMl = mlSkuFromItem(item);
           const price = Number(item.price ?? 0) || 0;
-          const stock = Number(item.available_quantity ?? 0) || 0;
-          const sold = Number(item.sold_quantity ?? 0) || 0;
-          pushRow({
-            variationId: null,
-            skuMl,
-            price,
-            stock,
-            sold,
-            attrText: ''
-          });
+          bump(null, skuMl, price);
         }
       }
     }
 
+    function avgFobForProduct(productId: string): { cost: number | null; moneda: string } {
+      const vids = variantsByProduct.get(productId) || [];
+      const costs: number[] = [];
+      let moneda = 'USD';
+      for (const vid of vids) {
+        const f = fobByVariant.get(vid);
+        if (f && Number(f.cost) > 0) {
+          costs.push(Number(f.cost));
+          moneda = f.moneda || moneda;
+        }
+      }
+      if (costs.length === 0) return { cost: null, moneda: '' };
+      const avg = costs.reduce((a, c) => a + c, 0) / costs.length;
+      return { cost: avg, moneda };
+    }
+
+    function avgFobForVariants(variantIds: Set<string>): { cost: number | null; moneda: string } {
+      const costs: number[] = [];
+      let moneda = 'USD';
+      for (const vid of variantIds) {
+        const f = fobByVariant.get(vid);
+        if (f && Number(f.cost) > 0) {
+          costs.push(Number(f.cost));
+          moneda = f.moneda || moneda;
+        }
+      }
+      if (costs.length === 0) return { cost: null, moneda: '' };
+      return { cost: costs.reduce((a, c) => a + c, 0) / costs.length, moneda };
+    }
+
+    const rowsOut: Array<{
+      codigo: string;
+      fob: number | null;
+      mayorista_lista: number;
+      precio_ml_prom: number;
+      inversion: number;
+      ganancia: number | null;
+    }> = [];
+
+    for (const [key, agg] of buckets) {
+      if (agg.ml_prices.length === 0) continue;
+      const precioMlProm = agg.ml_prices.reduce((a, p) => a + p, 0) / agg.ml_prices.length;
+      let fobCost: number | null;
+      if (key.startsWith('p:')) {
+        const pid = key.slice(2);
+        fobCost = avgFobForProduct(pid).cost;
+      } else {
+        fobCost = avgFobForVariants(agg.variant_ids).cost;
+      }
+      const precioUnidadMayor = agg.base_price / Math.max(1, agg.mayorista_pack);
+      let inversion = 0;
+      for (const iid of agg.ml_item_ids) {
+        inversion += costByItemId.get(iid) || 0;
+      }
+      const ganancia = precioMlProm - precioUnidadMayor - inversion;
+
+      rowsOut.push({
+        codigo: agg.codigo,
+        fob: fobCost,
+        mayorista_lista: agg.base_price,
+        precio_ml_prom: precioMlProm,
+        inversion,
+        ganancia: Number.isFinite(ganancia) ? Math.round(ganancia * 100) / 100 : null
+      });
+    }
+
+    rowsOut.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), 'es'));
+
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'LupoHub';
     workbook.created = new Date();
-    const ws = workbook.addWorksheet('Publicaciones ML', {
-      views: [{ state: 'frozen', ySplit: 1 }],
+    const ws = workbook.addWorksheet('Por artículo', {
+      views: [{ state: 'frozen', ySplit: 2 }],
       properties: { defaultRowHeight: 18 }
     });
 
-    const headers = [
-      'ID publicación',
-      'ID variación',
-      'Título',
-      'Estado',
-      'Moneda ML',
-      'Precio ML',
-      'Stock',
-      'Vendidos',
-      'SKU ML',
-      'Atributos variación',
-      'Producto LupoHub',
-      'SKU LupoHub',
-      'Variante LupoHub (id)',
-      'Precio mayorista ARS (lista)',
-      'Pack mayorista (uds)',
-      'Precio unidad mayorista ARS',
-      'Pack ML (vinculación)',
-      'Costo FOB último despacho',
-      'Moneda FOB',
-      'Fecha último despacho',
-      'Margen bruto % (ML vs unidad mayorista)',
-      'Permalink'
-    ];
+    ws.addRow([
+      'Código artículo',
+      'Precio FOB (prom. último despacho, USD)',
+      'Precio mayorista (ARS, lista)',
+      'Precio Mercado Libre (ARS, prom.)',
+      `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
+      'Ganancia (ARS)'
+    ]);
+    ws.addRow([
+      'Una fila por artículo (agrupado, sin variantes). FOB: promedio por variante. Ganancia: precio ML − precio unidad mayorista − inversión. FOB en USD no se convierte en esta columna.',
+      '',
+      '',
+      '',
+      '',
+      ''
+    ]);
+    ws.mergeCells(2, 1, 2, 6);
+    const note = ws.getRow(2).getCell(1);
+    note.font = { italic: true, size: 10, name: 'Calibri', color: { argb: 'FF64748B' } };
+    note.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 
-    ws.addRow(headers);
     const headerRow = ws.getRow(1);
     headerRow.font = { bold: true, name: 'Calibri', size: 11 };
     headerRow.fill = {
@@ -416,75 +592,39 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       cell.alignment = { vertical: 'middle', wrapText: true };
     });
 
-    const colKeys = [
-      'item_id',
-      'variation_id',
-      'titulo',
-      'estado',
-      'moneda_ml',
-      'precio_ml',
-      'stock',
-      'vendidos',
-      'sku_ml',
-      'color_talle',
-      'producto_lupo',
-      'sku_lupo',
-      'variant_id_lupo',
-      'precio_mayorista_ars',
-      'pack_mayorista',
-      'precio_unidad_mayorista_ars',
-      'pack_ml',
-      'costo_fob',
-      'moneda_fob',
-      'fecha_ultimo_despacho',
-      'margen_bruto_pct_ml_vs_mayorista',
-      'permalink'
-    ];
-
-    let r = 2;
-    for (const row of dataRows) {
-      const values = colKeys.map((k) => row[k] ?? '');
-      const dataRow = ws.addRow(values);
+    let rowIdx = 3;
+    for (const row of rowsOut) {
+      const dataRow = ws.addRow([
+        row.codigo,
+        row.fob ?? '',
+        row.mayorista_lista,
+        row.precio_ml_prom,
+        row.inversion,
+        row.ganancia ?? ''
+      ]);
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { name: 'Calibri', size: 11 };
-        if ([6, 14, 16, 18, 21].includes(colNumber)) cell.numFmt = '#,##0.00';
-        if ([7, 8].includes(colNumber)) cell.numFmt = '0';
+        if ([2, 3, 4, 5, 6].includes(colNumber)) cell.numFmt = '#,##0.00';
       });
-      if (r % 2 === 0) {
+      if (rowIdx % 2 === 0) {
         dataRow.eachCell((cell) => {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
         });
       }
-      r++;
+      rowIdx++;
     }
 
     ws.columns = [
-      { width: 14 },
-      { width: 12 },
-      { width: 42 },
-      { width: 10 },
-      { width: 10 },
-      { width: 12 },
-      { width: 8 },
-      { width: 8 },
-      { width: 16 },
+      { width: 22 },
       { width: 28 },
+      { width: 26 },
       { width: 28 },
-      { width: 14 },
-      { width: 36 },
-      { width: 14 },
-      { width: 12 },
-      { width: 18 },
-      { width: 14 },
-      { width: 14 },
-      { width: 10 },
-      { width: 16 },
-      { width: 18 },
-      { width: 48 }
+      { width: 38 },
+      { width: 18 }
     ];
 
     const buf = await workbook.xlsx.writeBuffer();
-    const filename = `publicaciones_ml_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `publicaciones_ml_por_articulo_${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(Buffer.from(buf));
