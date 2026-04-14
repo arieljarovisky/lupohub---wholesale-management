@@ -54,6 +54,7 @@ import {
   getMercadoLibreDisplayAdsCampaigns
 } from '../controllers/integrations.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
+import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -108,6 +109,7 @@ router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.get('/tiendanube/orders', getTiendaNubeOrders);
 router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
+router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', syncAllStockToTiendaNube);

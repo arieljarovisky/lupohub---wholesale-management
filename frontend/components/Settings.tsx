@@ -38,6 +38,14 @@ function downloadPriceListTemplate(products: { sku: string; name?: string }[]) {
   XLSX.writeFile(wb, 'plantilla-lista-precios-todos-articulos.xlsx');
 }
 
+function ymdToday(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -222,6 +230,17 @@ const Settings: React.FC<SettingsProps> = ({
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
   const [mlPublicationsExportLoading, setMlPublicationsExportLoading] = useState(false);
+  const [tnSalesReportLoading, setTnSalesReportLoading] = useState(false);
+  const [tnSalesFrom, setTnSalesFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  });
+  const [tnSalesTo, setTnSalesTo] = useState(() => ymdToday());
+  const [tnSalesProducts, setTnSalesProducts] = useState('');
 
   // ML Auto Message Config
   const [mlAutoMessageEnabled, setMlAutoMessageEnabled] = useState(true);
@@ -453,6 +472,30 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error al generar el Excel de publicaciones');
     } finally {
       setMlPublicationsExportLoading(false);
+    }
+  };
+
+  const handleExportTnSalesReport = async () => {
+    if (!tnSalesFrom || !tnSalesTo) {
+      showToast('error', 'Completá desde y hasta.');
+      return;
+    }
+    if (tnSalesFrom > tnSalesTo) {
+      showToast('error', 'El rango es inválido: "desde" no puede ser mayor que "hasta".');
+      return;
+    }
+    setTnSalesReportLoading(true);
+    try {
+      const products = tnSalesProducts
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      await api.exportTiendaNubeSalesReport({ from: tnSalesFrom, to: tnSalesTo, products });
+      showToast('success', 'Reporte de ventas de Tienda Nube descargado.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al generar el reporte de ventas de Tienda Nube');
+    } finally {
+      setTnSalesReportLoading(false);
     }
   };
 
@@ -1598,8 +1641,51 @@ const Settings: React.FC<SettingsProps> = ({
                         </button>
                       </div>
                     </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="text-[11px] text-slate-400">
+                        Desde
+                        <input
+                          type="date"
+                          value={tnSalesFrom}
+                          onChange={(e) => setTnSalesFrom(e.target.value)}
+                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                        />
+                      </label>
+                      <label className="text-[11px] text-slate-400">
+                        Hasta
+                        <input
+                          type="date"
+                          value={tnSalesTo}
+                          onChange={(e) => setTnSalesTo(e.target.value)}
+                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleExportTnSalesReport}
+                        disabled={tnSalesReportLoading}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        title="Descargar reporte de ventas de Tienda Nube por período"
+                      >
+                        {tnSalesReportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                        REPORTE VENTAS TN
+                      </button>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block">
+                        Productos a incluir (opcional: SKU, ID o parte del nombre; separados por coma)
+                      </label>
+                      <input
+                        type="text"
+                        value={tnSalesProducts}
+                        onChange={(e) => setTnSalesProducts(e.target.value)}
+                        placeholder="Ej: BOXER123, 987654321, media negra"
+                        className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-xs"
+                      />
+                    </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG.</p>
+                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG. Reporte ventas: muestra solo productos, cantidad vendida y precio promedio.
+                    </p>
                   </div>
                 )}
              </div>

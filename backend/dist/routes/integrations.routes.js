@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const integrations_controller_1 = require("../controllers/integrations.controller");
 const mercadolibrePublicationsExport_controller_1 = require("../controllers/mercadolibrePublicationsExport.controller");
+const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/status', integrations_controller_1.getIntegrationStatus);
@@ -53,6 +54,7 @@ router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCal
 router.get('/tiendanube/orders', integrations_controller_1.getTiendaNubeOrders);
 router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
+router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
 router.post('/tiendanube/sync', integrations_controller_1.syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', integrations_controller_1.syncAllStockToTiendaNube);
