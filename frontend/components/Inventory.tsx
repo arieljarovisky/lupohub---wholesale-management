@@ -1084,11 +1084,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     if (filterSync === 'MISMATCH') {
       return byColor.filter(p => {
         const ext = variantExternalStocks[p.id];
-        if (!ext) return false;
-        const ml = ext.stockML;
-        const tn = ext.stockTN;
-        if (ml == null || tn == null) return false;
-        return ml !== tn;
+        const ml = ext?.stockML;
+        const tn = ext?.stockTN;
+        // Solo excluir cuando ya tenemos ambos stocks y coinciden. Si falta ML o TN (carga,
+        // error de API o vínculo incompleto) no ocultamos la fila — antes la lista quedaba vacía.
+        if (ml !== undefined && tn !== undefined) return ml !== tn;
+        return true;
       });
     }
     return byColor;
@@ -1196,7 +1197,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
     const safePage = Math.min(currentPage, totalPages);
     return { displayGroups: groups, totalPages, safePage };
-  }, [groupedProducts, filterColor, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
+  }, [groupedProducts, filterColor, filterSync, variantExternalStocks, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
 
   // Si tras filtrar la página actual supera el total, volver a la última página válida
   React.useEffect(() => {
@@ -2903,9 +2904,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         <span>Cargando variantes…</span>
                       </div>
                     )}
-                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock) && (
+                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock || filterSync === 'MISMATCH') && (
                       <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
-                        {hideZeroStock ? 'No hay variantes con stock para mostrar.' : 'No hay variantes para el color seleccionado.'}
+                        {hideZeroStock
+                          ? 'No hay variantes con stock para mostrar.'
+                          : filterSync === 'MISMATCH'
+                            ? 'No hay variantes con diferencia ML/TN en este artículo (o aún se están cargando los stocks externos).'
+                            : 'No hay variantes para el color seleccionado.'}
                       </div>
                     )}
                     {[...variantsToShow]
