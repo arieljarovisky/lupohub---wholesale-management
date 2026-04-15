@@ -957,6 +957,25 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Reporte de ventas Tienda Nube por período (Excel), opcionalmente filtrado por productos. */
+  exportTiendaNubeSalesReport: async (params: { from: string; to: string; products?: string[] }): Promise<void> => {
+    const query = new URLSearchParams();
+    query.set('from', params.from);
+    query.set('to', params.to);
+    if (params.products && params.products.length > 0) {
+      query.set('products', params.products.join(','));
+    }
+    const blob = await getBlob(`/integrations/tiendanube/sales-report-export?${query.toString()}`, 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ventas_tiendanube_${params.from}_a_${params.to}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Enviar stock solo de variantes seleccionadas a Tienda Nube */
   syncSelectedStockToTiendaNube: async (variantIds: string[]): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
     return handleRequest(async () => {
