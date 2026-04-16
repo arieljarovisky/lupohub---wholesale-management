@@ -46,6 +46,15 @@ function ymdToday(): string {
   return `${y}-${m}-${day}`;
 }
 
+function ymdDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
   const data = new Uint8Array(await file.arrayBuffer());
@@ -230,6 +239,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
   const [mlPublicationsExportLoading, setMlPublicationsExportLoading] = useState(false);
+  const [mlReportFrom, setMlReportFrom] = useState(() => ymdDaysAgo(30));
+  const [mlReportTo, setMlReportTo] = useState(() => ymdToday());
   const [tnSalesReportLoading, setTnSalesReportLoading] = useState(false);
   const [tnSalesFrom, setTnSalesFrom] = useState(() => {
     const d = new Date();
@@ -464,9 +475,17 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   const handleExportMlPublications = async () => {
+    if (!mlReportFrom || !mlReportTo) {
+      showToast('error', 'Completá desde y hasta para el reporte de Mercado Libre.');
+      return;
+    }
+    if (mlReportFrom > mlReportTo) {
+      showToast('error', 'El rango es inválido: "desde" no puede ser mayor que "hasta".');
+      return;
+    }
     setMlPublicationsExportLoading(true);
     try {
-      await api.exportMercadolibrePublications();
+      await api.exportMercadolibrePublications({ from: mlReportFrom, to: mlReportTo });
       showToast('success', 'Se descargó el Excel con tus publicaciones de Mercado Libre.');
     } catch (e: any) {
       showToast('error', e?.message || 'Error al generar el Excel de publicaciones');
@@ -1794,6 +1813,26 @@ const Settings: React.FC<SettingsProps> = ({
                           EXCEL PUBLICACIONES
                         </button>
                       </div>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="text-[11px] text-slate-400">
+                        Desde
+                        <input
+                          type="date"
+                          value={mlReportFrom}
+                          onChange={(e) => setMlReportFrom(e.target.value)}
+                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                        />
+                      </label>
+                      <label className="text-[11px] text-slate-400">
+                        Hasta
+                        <input
+                          type="date"
+                          value={mlReportTo}
+                          onChange={(e) => setMlReportTo(e.target.value)}
+                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                        />
+                      </label>
                     </div>
                     <p className="text-slate-500 text-xs">
                       <strong>Fuente de verdad:</strong> Tu inventario en LupoHub es la fuente de verdad. Usá <strong>Enviar mi stock a ML</strong> para enviar tu stock a Mercado Libre (y en Inventario podés enviar también a Tienda Nube o a ambas). <strong>Importar desde ML</strong> es opcional, solo si en algún momento querés traer el stock desde ML a LupoHub.

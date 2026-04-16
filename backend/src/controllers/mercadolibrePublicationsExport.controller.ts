@@ -6,12 +6,15 @@ import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.con
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
-/** Ventas agregadas desde orders/search (órdenes pagadas). */
-const SALES_LOOKBACK_DAYS = 30;
 
 /** Misma lista que integrations (Product Ads). */
 const ML_PADS_METRICS_DEFAULT =
   'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
+
+function asYmd(raw: unknown): string {
+  const s = String(raw || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
 
 /** Para Excel: si el código es un id de publicación ML (MLA…, MLU…), muestra solo la parte numérica; si no, deja el SKU/código tal cual. */
 function excelCodigoSinPrefijoMl(raw: string): string {
@@ -291,6 +294,86 @@ async function fetchActiveCampaignProductAdsCostByItem(
   return costByItem;
 }
 
+type ProductAdsCampaignRow = {
+  site_id: string;
+  advertiser_id: string;
+  campaign_id: string;
+  campaign_name: string;
+  status: string;
+  cost: number;
+  total_amount: number;
+  roas: number;
+  acos: number;
+  clicks: number;
+  prints: number;
+};
+
+/** Campañas Product Ads del período (todas) con métricas agregadas por campaña. */
+async function fetchProductAdsCampaignRows(
+  accessToken: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<ProductAdsCampaignRow[]> {
+  const out: ProductAdsCampaignRow[] = [];
+  try {
+    const advRes = await axios.get('https://api.mercadolibre.com/advertising/advertisers', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'Api-Version': '1'
+      },
+      params: { product_id: 'PADS' },
+      validateStatus: () => true
+    });
+    if (advRes.status !== 200 || !Array.isArray(advRes.data?.advertisers)) return out;
+
+    for (const adv of advRes.data.advertisers) {
+      const siteId = String(adv.site_id || '').trim();
+      const advertiserId = String(adv.advertiser_id || '').trim();
+      if (!siteId || !advertiserId) continue;
+      let offset = 0;
+      const limit = 50;
+      while (offset < 5000) {
+        const url = `https://api.mercadolibre.com/marketplace/advertising/${encodeURIComponent(siteId)}/advertisers/${encodeURIComponent(advertiserId)}/product_ads/campaigns/search`;
+        const r = await axios.get(url, {
+          headers: { Authorization: `Bearer ${accessToken}`, 'api-version': '2' },
+          params: {
+            date_from: dateFrom,
+            date_to: dateTo,
+            limit,
+            offset,
+            metrics: ML_PADS_METRICS_DEFAULT
+          },
+          validateStatus: () => true
+        });
+        if (r.status !== 200) break;
+        const batch = Array.isArray(r.data?.results) ? r.data.results : [];
+        for (const c of batch) {
+          const m = c?.metrics || {};
+          out.push({
+            site_id: siteId,
+            advertiser_id: advertiserId,
+            campaign_id: String(c?.id || ''),
+            campaign_name: String(c?.name || ''),
+            status: String(c?.status || ''),
+            cost: Number(m.cost) || 0,
+            total_amount: Number(m.total_amount) || 0,
+            roas: Number(m.roas) || 0,
+            acos: Number(m.acos) || 0,
+            clicks: Number(m.clicks) || 0,
+            prints: Number(m.prints) || 0
+          });
+        }
+        if (batch.length < limit) break;
+        offset += limit;
+      }
+    }
+  } catch (e) {
+    console.warn('[publications-export] Product Ads campañas:', e);
+  }
+  return out;
+}
+
 /**
  * Suma unidades vendidas por publicación/variación ML en órdenes con estado `paid`
  * creadas en el rango [dateFromYmd, dateToYmd] (inclusive, horario -03:00 como en el resto del backend).
@@ -341,7 +424,7 @@ async function fetchMercadoLibreSoldUnitsInDateRange(
   return map;
 }
 
-export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Response) => {
+export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Response) => {
   try {
     const mlToken = await getValidMLToken();
     if (!mlToken) {
@@ -349,17 +432,23 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     }
 
     const toYmd = (d: Date) => d.toISOString().slice(0, 10);
-    const dateTo = new Date();
-    const dateFrom = new Date(dateTo);
-    dateFrom.setDate(dateFrom.getDate() - ADS_LOOKBACK_DAYS);
-    const dateFromStr = toYmd(dateFrom);
-    const dateToStr = toYmd(dateTo);
-
-    const salesDateTo = new Date();
-    const salesDateFrom = new Date(salesDateTo);
-    salesDateFrom.setDate(salesDateFrom.getDate() - SALES_LOOKBACK_DAYS);
-    const salesFromStr = toYmd(salesDateFrom);
-    const salesToStr = toYmd(salesDateTo);
+    const todayYmd = toYmd(new Date());
+    const qFrom = asYmd(req.query.from || req.query.desde);
+    const qTo = asYmd(req.query.to || req.query.hasta);
+    const dateToStr = qTo || todayYmd;
+    const dateFromStr =
+      qFrom ||
+      (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - ADS_LOOKBACK_DAYS);
+        return toYmd(d);
+      })();
+    if (dateFromStr > dateToStr) {
+      return res.status(400).json({ message: 'Rango inválido: from no puede ser mayor que to' });
+    }
+    // Ventas usa el mismo período elegido por usuario.
+    const salesFromStr = dateFromStr;
+    const salesToStr = dateToStr;
 
     const hubRows = (await query(`
       SELECT pv.id AS variant_id,
@@ -508,6 +597,11 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       dateFromStr,
       dateToStr
     );
+    const productAdsCampaignRows = await fetchProductAdsCampaignRows(
+      mlToken.access_token,
+      dateFromStr,
+      dateToStr
+    );
 
     const soldUnitsByItemVariation = await fetchMercadoLibreSoldUnitsInDateRange(
       mlToken.access_token,
@@ -564,6 +658,19 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
     }
 
     const listingSaleFeeCache = new Map<string, number>();
+    const publicationRows: Array<{
+      item_id: string;
+      titulo: string;
+      estado: string;
+      link: string;
+      precio_actual: number;
+      ventas_unid_periodo: number;
+      facturacion_periodo: number;
+      comision_unidad: number;
+      comision_total: number;
+      inversion_ads: number;
+      resultado_estimado: number;
+    }> = [];
 
     const batchSize = 10;
     for (let i = 0; i < allItemIds.length; i += batchSize) {
@@ -631,6 +738,44 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
           const price = Number(item.price ?? 0) || 0;
           await bump(null, skuMl, price);
         }
+
+        let ventasPeriodo = 0;
+        let precioActual = Number(item.price ?? 0) || 0;
+        if (Array.isArray(item.variations) && item.variations.length > 0) {
+          let sumPrice = 0;
+          for (const v of item.variations) {
+            const vid = String(v?.id ?? '').trim();
+            const soldKey = `${itemIdNorm}|${vid}`;
+            ventasPeriodo += soldUnitsByItemVariation.get(soldKey) ?? 0;
+            sumPrice += Number(v?.price ?? item.price ?? 0) || 0;
+          }
+          precioActual = sumPrice > 0 ? sumPrice / item.variations.length : precioActual;
+        } else {
+          ventasPeriodo = soldUnitsByItemVariation.get(`${itemIdNorm}|`) ?? 0;
+        }
+        const inversionItem = costByItemId.get(itemIdNorm) || 0;
+        const comisionUnidad = await fetchListingSaleFeeAmount(
+          mlToken.access_token,
+          item,
+          precioActual,
+          listingSaleFeeCache
+        );
+        const facturacionPeriodo = precioActual * ventasPeriodo;
+        const comisionTotal = comisionUnidad * ventasPeriodo;
+        const resultadoEstimado = facturacionPeriodo - comisionTotal - inversionItem;
+        publicationRows.push({
+          item_id: itemIdNorm,
+          titulo: String(item.title || ''),
+          estado: String(item.status || ''),
+          link: String(item.permalink || ''),
+          precio_actual: Math.round(precioActual * 100) / 100,
+          ventas_unid_periodo: ventasPeriodo,
+          facturacion_periodo: Math.round(facturacionPeriodo * 100) / 100,
+          comision_unidad: Math.round(comisionUnidad * 100) / 100,
+          comision_total: Math.round(comisionTotal * 100) / 100,
+          inversion_ads: Math.round(inversionItem * 100) / 100,
+          resultado_estimado: Math.round(resultadoEstimado * 100) / 100
+        });
       }
     }
 
@@ -709,11 +854,11 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       'Link Mercado Libre',
       fobHeader,
       'Precio Mercado Libre (ARS, prom.)',
-      `Ventas ${SALES_LOOKBACK_DAYS} días (unid., órdenes pagadas ML)`,
+      `Ventas ${salesFromStr} a ${salesToStr} (unid., órdenes pagadas ML)`,
       'Comisión venta ML estimada (ARS, prom.)',
       `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
       'Margen por unidad (ARS)',
-      `Ganancia (${SALES_LOOKBACK_DAYS} días, ARS)`
+      `Ganancia (${salesFromStr} a ${salesToStr}, ARS)`
     ]);
     const noteText =
       `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
@@ -776,8 +921,93 @@ export const exportMercadolibrePublicationsXlsx = async (_req: Request, res: Res
       { width: 22 }
     ];
 
+    // Hoja 2: todas las publicaciones de la cuenta (sin exigir vínculo SKU/inventario)
+    const wsPub = workbook.addWorksheet('Publicaciones');
+    wsPub.views = [{ state: 'frozen', ySplit: 1 }];
+    wsPub.columns = [
+      { header: 'Item ID', key: 'item_id', width: 16 },
+      { header: 'Título', key: 'titulo', width: 42 },
+      { header: 'Estado', key: 'estado', width: 14 },
+      { header: 'Link', key: 'link', width: 52 },
+      { header: 'Precio actual', key: 'precio_actual', width: 16 },
+      { header: 'Ventas unid. período', key: 'ventas_unid_periodo', width: 18 },
+      { header: 'Facturación período', key: 'facturacion_periodo', width: 18 },
+      { header: 'Comisión unid. estimada', key: 'comision_unidad', width: 20 },
+      { header: 'Comisión total estimada', key: 'comision_total', width: 20 },
+      { header: 'Inversión Ads', key: 'inversion_ads', width: 16 },
+      { header: 'Resultado estimado', key: 'resultado_estimado', width: 18 }
+    ];
+    wsPub.getRow(1).font = { bold: true };
+    publicationRows.forEach((r) => wsPub.addRow(r));
+    for (let i = 2; i <= wsPub.rowCount; i++) {
+      wsPub.getCell(`E${i}`).numFmt = '#,##0.00';
+      wsPub.getCell(`F${i}`).numFmt = '#,##0';
+      wsPub.getCell(`G${i}`).numFmt = '#,##0.00';
+      wsPub.getCell(`H${i}`).numFmt = '#,##0.00';
+      wsPub.getCell(`I${i}`).numFmt = '#,##0.00';
+      wsPub.getCell(`J${i}`).numFmt = '#,##0.00';
+      wsPub.getCell(`K${i}`).numFmt = '#,##0.00';
+    }
+
+    // Hoja 3: campañas Product Ads (cuando la API devuelve anunciantes/permisos)
+    const wsAds = workbook.addWorksheet('Ads campañas');
+    wsAds.views = [{ state: 'frozen', ySplit: 1 }];
+    wsAds.columns = [
+      { header: 'Site', key: 'site_id', width: 10 },
+      { header: 'Advertiser', key: 'advertiser_id', width: 14 },
+      { header: 'Campaign ID', key: 'campaign_id', width: 14 },
+      { header: 'Campaña', key: 'campaign_name', width: 34 },
+      { header: 'Estado', key: 'status', width: 14 },
+      { header: 'Inversión', key: 'cost', width: 14 },
+      { header: 'Ventas atribuidas', key: 'total_amount', width: 18 },
+      { header: 'ROAS', key: 'roas', width: 10 },
+      { header: 'ACOS', key: 'acos', width: 10 },
+      { header: 'Clicks', key: 'clicks', width: 10 },
+      { header: 'Impresiones', key: 'prints', width: 12 }
+    ];
+    wsAds.getRow(1).font = { bold: true };
+    productAdsCampaignRows.forEach((r) => wsAds.addRow(r));
+    for (let i = 2; i <= wsAds.rowCount; i++) {
+      wsAds.getCell(`F${i}`).numFmt = '#,##0.00';
+      wsAds.getCell(`G${i}`).numFmt = '#,##0.00';
+      wsAds.getCell(`H${i}`).numFmt = '#,##0.00';
+      wsAds.getCell(`I${i}`).numFmt = '#,##0.00';
+      wsAds.getCell(`J${i}`).numFmt = '#,##0';
+      wsAds.getCell(`K${i}`).numFmt = '#,##0';
+    }
+
+    // Hoja 4: resumen ejecutivo de cuenta ML
+    const totalFacturacionPub = publicationRows.reduce((acc, r) => acc + (r.facturacion_periodo || 0), 0);
+    const totalInversionPub = publicationRows.reduce((acc, r) => acc + (r.inversion_ads || 0), 0);
+    const totalResultadoPub = publicationRows.reduce((acc, r) => acc + (r.resultado_estimado || 0), 0);
+    const totalVentasUnidPub = publicationRows.reduce((acc, r) => acc + (r.ventas_unid_periodo || 0), 0);
+    const totalGananciaArticulos = rowsOut.reduce((acc, r) => acc + (r.ganancia || 0), 0);
+    const totalInversionCampanas = productAdsCampaignRows.reduce((acc, r) => acc + (r.cost || 0), 0);
+    const totalVentasAtribAds = productAdsCampaignRows.reduce((acc, r) => acc + (r.total_amount || 0), 0);
+
+    const wsResumen = workbook.addWorksheet('Resumen cuenta');
+    wsResumen.columns = [{ width: 44 }, { width: 24 }];
+    wsResumen.addRow(['Reporte completo Mercado Libre', '']);
+    wsResumen.mergeCells(1, 1, 1, 2);
+    wsResumen.getCell('A1').font = { bold: true, size: 13 };
+    wsResumen.addRow(['Período del reporte', `${dateFromStr} a ${dateToStr}`]);
+    wsResumen.addRow(['Publicaciones consideradas', publicationRows.length]);
+    wsResumen.addRow(['Ventas unidades (publicaciones)', totalVentasUnidPub]);
+    wsResumen.addRow(['Facturación estimada (publicaciones)', totalFacturacionPub]);
+    wsResumen.addRow(['Inversión Ads detectada (publicaciones)', totalInversionPub]);
+    wsResumen.addRow(['Resultado estimado (publicaciones)', totalResultadoPub]);
+    wsResumen.addRow(['Ganancia estimada por artículo (con FOB)', totalGananciaArticulos]);
+    wsResumen.addRow(['Campañas Product Ads', productAdsCampaignRows.length]);
+    wsResumen.addRow(['Inversión Product Ads (campañas)', totalInversionCampanas]);
+    wsResumen.addRow(['Ventas atribuidas Product Ads (campañas)', totalVentasAtribAds]);
+    for (let r = 2; r <= wsResumen.rowCount; r++) wsResumen.getCell(`A${r}`).font = { bold: true };
+    for (let r = 4; r <= wsResumen.rowCount; r++) {
+      if (r === 4) wsResumen.getCell(`B${r}`).numFmt = '#,##0';
+      else wsResumen.getCell(`B${r}`).numFmt = '#,##0.00';
+    }
+
     const buf = await workbook.xlsx.writeBuffer();
-    const filename = `publicaciones_ml_por_articulo_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `reporte_ml_completo_${dateFromStr}_a_${dateToStr}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(Buffer.from(buf));
