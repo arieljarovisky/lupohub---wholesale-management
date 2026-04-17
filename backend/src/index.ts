@@ -68,14 +68,25 @@ const allowedOrigins: string[] = [
 const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '');
 if (frontendUrl && !allowedOrigins.includes(frontendUrl)) allowedOrigins.push(frontendUrl);
 
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // Permitir previews de Vercel del proyecto (ej: lupohub-wholesale-management-git-...vercel.app)
+  if (/^https:\/\/lupohub-wholesale-management(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin)) return true;
+  return false;
+}
+
 const corsOpts: cors.CorsOptions = {
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
     cb(null, false);
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 app.use(cors(corsOpts) as RequestHandler);
+app.options('*', cors(corsOpts) as RequestHandler);
 app.use(express.json() as any);
 app.use((req, res, next) => {
   console.log('[backend]', req.method, req.path);
