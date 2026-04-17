@@ -107,21 +107,88 @@ function mlItemIdCandidates(raw) {
     }
     return Array.from(new Set(out.filter(Boolean)));
 }
-function resolveReachableMlItemId(rawItemId, headers) {
+function resolveMlUserProductItemCandidates(rawUserProductId, headers) {
     return __awaiter(this, void 0, void 0, function* () {
-        const candidates = mlItemIdCandidates(rawItemId);
-        for (const c of candidates) {
-            try {
-                const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
-                    headers,
-                    validateStatus: () => true
-                });
-                if (r.status === 200 && r.data && !r.data.error)
+        var _a, _b, _c, _d;
+        const up = mlNormalizeItemId(rawUserProductId);
+        if (!/^MLAU\d+$/i.test(up))
+            return [];
+        try {
+            const meRes = yield axios_1.default.get('https://api.mercadolibre.com/users/me', {
+                headers,
+                validateStatus: () => true
+            });
+            const sellerId = meRes.status === 200 ? ((_b = (_a = meRes.data) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : (_c = meRes.data) === null || _c === void 0 ? void 0 : _c.user_id) : null;
+            if (!sellerId)
+                return [];
+            const allIds = [];
+            const seen = new Set();
+            const statuses = ['active', 'paused', 'closed'];
+            const pageLimit = 100;
+            for (const st of statuses) {
+                let offset = 0;
+                while (offset < 5000) {
+                    const res = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
+                        headers,
+                        params: { user_product_id: up, status: st, limit: pageLimit, offset },
+                        validateStatus: () => true
+                    });
+                    if (res.status >= 400 || !res.data)
+                        break;
+                    const rows = Array.isArray((_d = res.data) === null || _d === void 0 ? void 0 : _d.results) ? res.data.results : [];
+                    for (const x of rows) {
+                        const id = String(x || '').trim();
+                        if (!id || seen.has(id))
+                            continue;
+                        seen.add(id);
+                        allIds.push(id);
+                    }
+                    if (rows.length < pageLimit)
+                        break;
+                    offset += pageLimit;
+                }
+            }
+            return Array.from(new Set(allIds.flatMap((id) => mlItemIdCandidates(id))));
+        }
+        catch (_e) {
+            return [];
+        }
+    });
+}
+function resolveReachableMlItemId(rawItemId, headers, expectedVariationId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const tryCandidates = (candidates) => __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            for (const c of candidates) {
+                try {
+                    const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
+                        headers,
+                        validateStatus: () => true
+                    });
+                    if (r.status !== 200 || !r.data || r.data.error)
+                        continue;
+                    if (expectedVariationId) {
+                        const variations = Array.isArray((_a = r.data) === null || _a === void 0 ? void 0 : _a.variations) ? r.data.variations : [];
+                        if (variations.length > 0 && !variations.some((v) => String(v === null || v === void 0 ? void 0 : v.id) === String(expectedVariationId))) {
+                            continue;
+                        }
+                    }
                     return c;
+                }
+                catch (_b) {
+                    // probar siguiente candidato
+                }
             }
-            catch (_a) {
-                // probar siguiente candidato
-            }
+            return null;
+        });
+        const direct = yield tryCandidates(mlItemIdCandidates(rawItemId));
+        if (direct)
+            return direct;
+        const upCandidates = yield resolveMlUserProductItemCandidates(rawItemId, headers);
+        if (upCandidates.length > 0) {
+            const fromUp = yield tryCandidates(upCandidates);
+            if (fromUp)
+                return fromUp;
         }
         return null;
     });
@@ -473,7 +540,7 @@ const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __await
         'Authorization': `Bearer ${integration.access_token}`,
         'Content-Type': 'application/json'
     };
-    const resolvedItemId = yield resolveReachableMlItemId(itemId, headers);
+    const resolvedItemId = yield resolveReachableMlItemId(itemId, headers, variationId);
     if (!resolvedItemId) {
         console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}" (variación ${variationId})`);
         return false;

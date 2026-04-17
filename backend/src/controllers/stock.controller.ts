@@ -55,19 +55,91 @@ function mlItemIdCandidates(raw: unknown): string[] {
   return Array.from(new Set(out.filter(Boolean)));
 }
 
-async function resolveReachableMlItemId(rawItemId: string, headers: Record<string, string>): Promise<string | null> {
-  const candidates = mlItemIdCandidates(rawItemId);
-  for (const c of candidates) {
-    try {
-      const r = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
-        headers,
-        validateStatus: () => true
-      });
-      if (r.status === 200 && r.data && !r.data.error) return c;
-    } catch {
-      // probar siguiente candidato
+async function resolveMlUserProductItemCandidates(
+  rawUserProductId: string,
+  headers: Record<string, string>
+): Promise<string[]> {
+  const up = mlNormalizeItemId(rawUserProductId);
+  if (!/^MLAU\d+$/i.test(up)) return [];
+  try {
+    const meRes = await axios.get('https://api.mercadolibre.com/users/me', {
+      headers,
+      validateStatus: () => true
+    });
+    const sellerId = meRes.status === 200 ? (meRes.data?.id ?? meRes.data?.user_id) : null;
+    if (!sellerId) return [];
+
+    const allIds: string[] = [];
+    const seen = new Set<string>();
+    const statuses = ['active', 'paused', 'closed'] as const;
+    const pageLimit = 100;
+
+    for (const st of statuses) {
+      let offset = 0;
+      while (offset < 5000) {
+        const res = await axios.get(
+          `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+          {
+            headers,
+            params: { user_product_id: up, status: st, limit: pageLimit, offset },
+            validateStatus: () => true
+          }
+        );
+        if (res.status >= 400 || !res.data) break;
+        const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+        for (const x of rows) {
+          const id = String(x || '').trim();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          allIds.push(id);
+        }
+        if (rows.length < pageLimit) break;
+        offset += pageLimit;
+      }
     }
+
+    return Array.from(new Set(allIds.flatMap((id) => mlItemIdCandidates(id))));
+  } catch {
+    return [];
   }
+}
+
+async function resolveReachableMlItemId(
+  rawItemId: string,
+  headers: Record<string, string>,
+  expectedVariationId?: string
+): Promise<string | null> {
+  const tryCandidates = async (candidates: string[]): Promise<string | null> => {
+    for (const c of candidates) {
+      try {
+        const r = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
+          headers,
+          validateStatus: () => true
+        });
+        if (r.status !== 200 || !r.data || r.data.error) continue;
+        if (expectedVariationId) {
+          const variations: any[] = Array.isArray(r.data?.variations) ? r.data.variations : [];
+          if (variations.length > 0 && !variations.some((v: any) => String(v?.id) === String(expectedVariationId))) {
+            continue;
+          }
+        }
+        return c;
+      } catch {
+        // probar siguiente candidato
+      }
+    }
+    return null;
+  };
+
+  const direct = await tryCandidates(mlItemIdCandidates(rawItemId));
+  if (direct) return direct;
+
+  const upCandidates = await resolveMlUserProductItemCandidates(rawItemId, headers);
+  if (upCandidates.length > 0) {
+    const fromUp = await tryCandidates(upCandidates);
+    if (fromUp) return fromUp;
+  }
+
   return null;
 }
 
@@ -525,7 +597,7 @@ export const updateMercadoLibreStockByVariant = async (
     'Authorization': `Bearer ${integration.access_token}`,
     'Content-Type': 'application/json'
   };
-  const resolvedItemId = await resolveReachableMlItemId(itemId, headers);
+  const resolvedItemId = await resolveReachableMlItemId(itemId, headers, variationId);
   if (!resolvedItemId) {
     console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}" (variación ${variationId})`);
     return false;
