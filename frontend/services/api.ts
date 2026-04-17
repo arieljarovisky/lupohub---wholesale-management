@@ -933,7 +933,7 @@ export const api = {
 
   testLupoWebhook: async (payload?: { webhookId?: string; updates?: any[] }): Promise<any> => {
     return handleRequest(async () => {
-      return await request<any>('/integrations/luposhop/webhook-test', 'POST', payload || {});
+      return await request<any>('/integrations/luposhop/webhook-test', 'POST', payload || {}, undefined, 30000);
     }, { ok: false }, 'testLupoWebhook');
   },
 

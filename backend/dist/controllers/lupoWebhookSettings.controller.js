@@ -65,7 +65,8 @@ const testLupoWebhookEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, 
             ? req.body.updates
             : [{ sku: 'BOXER-TEST-NEGRO-P', stock_quantity: 10 }];
         const providedWebhookId = ((_b = req.body) === null || _b === void 0 ? void 0 : _b.webhookId) ? String(req.body.webhookId) : undefined;
-        const result = yield (0, lupoStockWebhook_service_1.sendStockWebhookPayload)({ updates }, providedWebhookId);
+        // En la prueba UI priorizamos respuesta rápida (sin cola de retries largos).
+        const result = yield (0, lupoStockWebhook_service_1.sendStockWebhookPayload)({ updates }, providedWebhookId, { timeoutMs: 8000, maxRetries5xx: 0, backoffBaseMs: 500 });
         const code = result.ok ? 200 : (result.status && [400, 401, 409].includes(result.status) ? result.status : 502);
         res.status(code).json(result);
     }

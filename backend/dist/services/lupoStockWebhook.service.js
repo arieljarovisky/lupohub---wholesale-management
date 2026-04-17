@@ -74,9 +74,11 @@ function getClientForConfig(config) {
     }
     return cachedClient;
 }
-function sendStockWebhookPayload(payload, webhookId) {
+function sendStockWebhookPayload(payload, webhookId, options) {
     return __awaiter(this, void 0, void 0, function* () {
-        const config = yield resolveRuntimeWebhookConfig();
+        const baseConfig = yield resolveRuntimeWebhookConfig();
+        const config = options
+            ? Object.assign(Object.assign({}, baseConfig), { timeoutMs: options.timeoutMs != null ? Math.max(1000, Math.floor(options.timeoutMs)) : baseConfig.timeoutMs, maxRetries5xx: options.maxRetries5xx != null ? Math.max(0, Math.floor(options.maxRetries5xx)) : baseConfig.maxRetries5xx, backoffBaseMs: options.backoffBaseMs != null ? Math.max(200, Math.floor(options.backoffBaseMs)) : baseConfig.backoffBaseMs }) : baseConfig;
         const client = getClientForConfig(config);
         return client.enqueue(payload, webhookId);
     });

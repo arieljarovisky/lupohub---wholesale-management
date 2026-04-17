@@ -90,9 +90,18 @@ function getClientForConfig(config: LupoStockWebhookConfig): LupoStockWebhookCli
 
 export async function sendStockWebhookPayload(
   payload: LupoStockWebhookPayload,
-  webhookId?: string
+  webhookId?: string,
+  options?: { timeoutMs?: number; maxRetries5xx?: number; backoffBaseMs?: number }
 ): Promise<LupoStockWebhookResult> {
-  const config = await resolveRuntimeWebhookConfig();
+  const baseConfig = await resolveRuntimeWebhookConfig();
+  const config = options
+    ? {
+        ...baseConfig,
+        timeoutMs: options.timeoutMs != null ? Math.max(1000, Math.floor(options.timeoutMs)) : baseConfig.timeoutMs,
+        maxRetries5xx: options.maxRetries5xx != null ? Math.max(0, Math.floor(options.maxRetries5xx)) : baseConfig.maxRetries5xx,
+        backoffBaseMs: options.backoffBaseMs != null ? Math.max(200, Math.floor(options.backoffBaseMs)) : baseConfig.backoffBaseMs
+      }
+    : baseConfig;
   const client = getClientForConfig(config);
   return client.enqueue(payload, webhookId);
 }
