@@ -218,8 +218,23 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         const up = (userProductId || '').toString().trim();
-        if (!up)
-            return [];
+        const perStatus = {
+            active: { hits: 0, pages: 0, failedRequests: 0 },
+            paused: { hits: 0, pages: 0, failedRequests: 0 },
+            closed: { hits: 0, pages: 0, failedRequests: 0 },
+        };
+        if (!up) {
+            return {
+                itemCandidates: [],
+                debug: {
+                    requestedUserProductId: up,
+                    sellerId: String(sellerId),
+                    perStatus,
+                    rawItemIds: [],
+                    candidateItemIds: [],
+                },
+            };
+        }
         try {
             const allIds = [];
             const seen = new Set();
@@ -233,9 +248,13 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
                         params: { user_product_id: up, status: st, limit: pageLimit, offset },
                         validateStatus: () => true
                     });
-                    if (res.status >= 400 || !res.data)
+                    perStatus[st].pages += 1;
+                    if (res.status >= 400 || !res.data) {
+                        perStatus[st].failedRequests += 1;
                         break;
+                    }
                     const rows = Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.results) ? res.data.results : [];
+                    perStatus[st].hits += rows.length;
                     for (const x of rows) {
                         const id = String(x || '').trim();
                         if (!id || seen.has(id))
@@ -248,10 +267,29 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
                     offset += pageLimit;
                 }
             }
-            return Array.from(new Set(allIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
+            const itemCandidates = Array.from(new Set(allIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
+            return {
+                itemCandidates,
+                debug: {
+                    requestedUserProductId: up,
+                    sellerId: String(sellerId),
+                    perStatus,
+                    rawItemIds: allIds,
+                    candidateItemIds: itemCandidates,
+                },
+            };
         }
         catch (_b) {
-            return [];
+            return {
+                itemCandidates: [],
+                debug: {
+                    requestedUserProductId: up,
+                    sellerId: String(sellerId),
+                    perStatus,
+                    rawItemIds: [],
+                    candidateItemIds: [],
+                },
+            };
         }
     });
 }
@@ -3708,6 +3746,12 @@ function mlBaseTitle(title) {
         return words.slice(0, -1).join(' ');
     return t;
 }
+/** Quita sufijos de numeración de publicación (ej. "... Negro 1", "... #2", "... N° 3"). */
+function mlStripTrailingPublicationIndex(title) {
+    return (title || '')
+        .replace(/\s*(?:#|N°|Nº)?\s*\d{1,2}\s*$/i, '')
+        .trim();
+}
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title) {
     let t = mlNormalizeTitle(title);
@@ -3927,6 +3971,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         let resolvedItemId = '';
         let catalogItemCandidates = [];
         let userProductItemCandidates = [];
+        let userProductResolveDebug = null;
         const triedCandidates = [...candidates];
         for (const candidate of candidates) {
             try {
@@ -3968,9 +4013,10 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         // Se ejecuta también cuando /items/{id} responde, porque para MLAU puede devolver
         // una vista incompleta y necesitamos expandir a todos los items reales asociados.
         if (!item || item.error || shouldResolveAsUserProduct) {
-            const upCandidates = yield resolveMercadoLibreUserProductItems(String(req.params.itemId || ''), mlToken.user_id, mlToken.access_token);
-            userProductItemCandidates = upCandidates;
-            for (const candidate of upCandidates) {
+            const upResolved = yield resolveMercadoLibreUserProductItems(String(req.params.itemId || ''), mlToken.user_id, mlToken.access_token);
+            userProductItemCandidates = upResolved.itemCandidates;
+            userProductResolveDebug = upResolved.debug;
+            for (const candidate of userProductItemCandidates) {
                 if (!triedCandidates.includes(candidate))
                     triedCandidates.push(candidate);
                 try {
@@ -3989,10 +4035,14 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
             }
         }
         if (!item || item.error) {
-            return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
+            return res.status(404).json({
+                message: 'Publicación no encontrada en Mercado Libre',
+                tried: triedCandidates,
+                debug: shouldResolveAsUserProduct ? { userProduct: userProductResolveDebug } : undefined
+            });
         }
         // Caso UP (MLAU...): devolver TODAS las variantes de todos los items del user_product_id.
-        if (userProductItemCandidates.length > 1) {
+        if ((shouldResolveAsUserProduct && userProductItemCandidates.length > 0) || userProductItemCandidates.length > 1) {
             const byVariationId = {};
             for (const candidate of userProductItemCandidates.slice(0, 120)) {
                 try {
@@ -4054,7 +4104,12 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     itemId: item.id,
                     requestedItemId: String(req.params.itemId || ''),
                     resolvedItemId,
-                    resolvedFromUserProduct: true
+                    resolvedFromUserProduct: true,
+                    debug: {
+                        userProduct: userProductResolveDebug,
+                        upCandidatesCount: userProductItemCandidates.length,
+                        upVariationCount: upVariations.length
+                    }
                 });
             }
         }
@@ -4139,10 +4194,11 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         // buscar publicaciones hermanas del mismo vendedor por título base.
         if (!item.variations || item.variations.length === 0) {
             const baseTitle = mlBaseTitle((item.title || '').toString().trim());
+            const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
             if (baseTitle) {
                 const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`, {
                     headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
-                    params: { q: baseTitle, limit: 50, offset: 0 },
+                    params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
                     validateStatus: () => true
                 });
                 const siblingIds = searchRes.status === 200 && Array.isArray((_o = searchRes.data) === null || _o === void 0 ? void 0 : _o.results)
@@ -4163,7 +4219,11 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     })));
                     const siblingVariations = (siblings || [])
                         .filter((it) => it && !it.error && (!it.variations || it.variations.length === 0))
-                        .filter((it) => mlBaseTitle((it.title || '').toString().trim()) === baseTitle)
+                        .filter((it) => {
+                        const siblingBase = mlBaseTitle((it.title || '').toString().trim());
+                        const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
+                        return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
+                    })
                         .map((it) => {
                         var _a, _b, _c, _d, _e, _f, _g, _h;
                         const attrs = Array.isArray(it.attributes) ? it.attributes : [];

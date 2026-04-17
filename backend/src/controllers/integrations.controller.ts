@@ -165,9 +165,34 @@ async function resolveMercadoLibreUserProductItems(
   userProductId: string,
   sellerId: string | number,
   accessToken: string
-): Promise<string[]> {
+): Promise<{
+  itemCandidates: string[];
+  debug: {
+    requestedUserProductId: string;
+    sellerId: string;
+    perStatus: Record<string, { hits: number; pages: number; failedRequests: number }>;
+    rawItemIds: string[];
+    candidateItemIds: string[];
+  };
+}> {
   const up = (userProductId || '').toString().trim();
-  if (!up) return [];
+  const perStatus: Record<string, { hits: number; pages: number; failedRequests: number }> = {
+    active: { hits: 0, pages: 0, failedRequests: 0 },
+    paused: { hits: 0, pages: 0, failedRequests: 0 },
+    closed: { hits: 0, pages: 0, failedRequests: 0 },
+  };
+  if (!up) {
+    return {
+      itemCandidates: [],
+      debug: {
+        requestedUserProductId: up,
+        sellerId: String(sellerId),
+        perStatus,
+        rawItemIds: [],
+        candidateItemIds: [],
+      },
+    };
+  }
   try {
     const allIds: string[] = [];
     const seen = new Set<string>();
@@ -184,8 +209,13 @@ async function resolveMercadoLibreUserProductItems(
             validateStatus: () => true
           }
         );
-        if (res.status >= 400 || !res.data) break;
+        perStatus[st].pages += 1;
+        if (res.status >= 400 || !res.data) {
+          perStatus[st].failedRequests += 1;
+          break;
+        }
         const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+        perStatus[st].hits += rows.length;
         for (const x of rows) {
           const id = String(x || '').trim();
           if (!id || seen.has(id)) continue;
@@ -196,9 +226,28 @@ async function resolveMercadoLibreUserProductItems(
         offset += pageLimit;
       }
     }
-    return Array.from(new Set(allIds.flatMap((id: string) => mercadoLibreItemIdCandidates(id))));
+    const itemCandidates = Array.from(new Set(allIds.flatMap((id: string) => mercadoLibreItemIdCandidates(id))));
+    return {
+      itemCandidates,
+      debug: {
+        requestedUserProductId: up,
+        sellerId: String(sellerId),
+        perStatus,
+        rawItemIds: allIds,
+        candidateItemIds: itemCandidates,
+      },
+    };
   } catch {
-    return [];
+    return {
+      itemCandidates: [],
+      debug: {
+        requestedUserProductId: up,
+        sellerId: String(sellerId),
+        perStatus,
+        rawItemIds: [],
+        candidateItemIds: [],
+      },
+    };
   }
 }
 
@@ -3966,6 +4015,13 @@ function mlBaseTitle(title: string): string {
   return t;
 }
 
+/** Quita sufijos de numeración de publicación (ej. "... Negro 1", "... #2", "... N° 3"). */
+function mlStripTrailingPublicationIndex(title: string): string {
+  return (title || '')
+    .replace(/\s*(?:#|N°|Nº)?\s*\d{1,2}\s*$/i, '')
+    .trim();
+}
+
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title: string): { color: string; size: string } {
   let t = mlNormalizeTitle(title);
@@ -4188,6 +4244,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     let resolvedItemId = '';
     let catalogItemCandidates: string[] = [];
     let userProductItemCandidates: string[] = [];
+    let userProductResolveDebug: any = null;
     const triedCandidates = [...candidates];
     for (const candidate of candidates) {
       try {
@@ -4226,13 +4283,14 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     // Se ejecuta también cuando /items/{id} responde, porque para MLAU puede devolver
     // una vista incompleta y necesitamos expandir a todos los items reales asociados.
     if (!item || item.error || shouldResolveAsUserProduct) {
-      const upCandidates = await resolveMercadoLibreUserProductItems(
+      const upResolved = await resolveMercadoLibreUserProductItems(
         String(req.params.itemId || ''),
         mlToken.user_id,
         mlToken.access_token
       );
-      userProductItemCandidates = upCandidates;
-      for (const candidate of upCandidates) {
+      userProductItemCandidates = upResolved.itemCandidates;
+      userProductResolveDebug = upResolved.debug;
+      for (const candidate of userProductItemCandidates) {
         if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
         try {
           const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
@@ -4249,10 +4307,14 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       }
     }
     if (!item || item.error) {
-      return res.status(404).json({ message: 'Publicación no encontrada en Mercado Libre', tried: triedCandidates });
+      return res.status(404).json({
+        message: 'Publicación no encontrada en Mercado Libre',
+        tried: triedCandidates,
+        debug: shouldResolveAsUserProduct ? { userProduct: userProductResolveDebug } : undefined
+      });
     }
     // Caso UP (MLAU...): devolver TODAS las variantes de todos los items del user_product_id.
-    if (userProductItemCandidates.length > 1) {
+    if ((shouldResolveAsUserProduct && userProductItemCandidates.length > 0) || userProductItemCandidates.length > 1) {
       const byVariationId: Record<string, { variationId: string; sku: string; color: string; size: string; stock: number }> = {};
       for (const candidate of userProductItemCandidates.slice(0, 120)) {
         try {
@@ -4310,7 +4372,12 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
           itemId: item.id,
           requestedItemId: String(req.params.itemId || ''),
           resolvedItemId,
-          resolvedFromUserProduct: true
+          resolvedFromUserProduct: true,
+          debug: {
+            userProduct: userProductResolveDebug,
+            upCandidatesCount: userProductItemCandidates.length,
+            upVariationCount: upVariations.length
+          }
         });
       }
     }
@@ -4388,12 +4455,13 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     // buscar publicaciones hermanas del mismo vendedor por título base.
     if (!item.variations || item.variations.length === 0) {
       const baseTitle = mlBaseTitle((item.title || '').toString().trim());
+      const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
       if (baseTitle) {
         const searchRes = await axios.get(
           `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`,
           {
             headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
-            params: { q: baseTitle, limit: 50, offset: 0 },
+            params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
             validateStatus: () => true
           }
         );
@@ -4414,7 +4482,11 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
           }));
           const siblingVariations = (siblings || [])
             .filter((it: any) => it && !it.error && (!it.variations || it.variations.length === 0))
-            .filter((it: any) => mlBaseTitle((it.title || '').toString().trim()) === baseTitle)
+            .filter((it: any) => {
+              const siblingBase = mlBaseTitle((it.title || '').toString().trim());
+              const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
+              return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
+            })
             .map((it: any) => {
               const attrs = Array.isArray(it.attributes) ? it.attributes : [];
               const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
