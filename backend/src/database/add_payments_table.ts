@@ -3,11 +3,20 @@ import { execute, get } from './db';
 /** Evita doble inserción del mismo recibo (doble click o dos POST simultáneos). */
 async function ensurePaymentsNaturalUniqueIndex(): Promise<void> {
   try {
+    const row = await get(
+      `SELECT COUNT(*) AS cnt FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = 'payments'
+         AND index_name = 'uq_payments_client_recibo_fecha_importe'`
+    );
+    if (Number((row as any)?.cnt || 0) > 0) {
+      console.log('[DB] Índice uq_payments_client_recibo_fecha_importe ya existe');
+      return;
+    }
     await execute(
       `CREATE UNIQUE INDEX uq_payments_client_recibo_fecha_importe
        ON payments (customer_id, receipt_number(80), date, amount)`
     );
-    console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado/ok');
+    console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado');
   } catch (e: any) {
     const code = e?.code;
     const msg = String(e?.message || '');

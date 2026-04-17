@@ -15,9 +15,16 @@ const db_1 = require("./db");
 function ensurePaymentsNaturalUniqueIndex() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            const row = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = 'payments'
+         AND index_name = 'uq_payments_client_recibo_fecha_importe'`);
+            if (Number((row === null || row === void 0 ? void 0 : row.cnt) || 0) > 0) {
+                console.log('[DB] Índice uq_payments_client_recibo_fecha_importe ya existe');
+                return;
+            }
             yield (0, db_1.execute)(`CREATE UNIQUE INDEX uq_payments_client_recibo_fecha_importe
        ON payments (customer_id, receipt_number(80), date, amount)`);
-            console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado/ok');
+            console.log('[DB] Índice único uq_payments_client_recibo_fecha_importe creado');
         }
         catch (e) {
             const code = e === null || e === void 0 ? void 0 : e.code;
