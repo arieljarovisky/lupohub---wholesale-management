@@ -110,12 +110,23 @@ export const createPayment = async (req: any, res: Response) => {
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
 
+    const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
     const existing = await get(
       `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
        FROM payments
-       WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+       WHERE customer_id = ?
+         AND ABS(amount - ?) < 0.01
+         AND (
+           (receipt_number = ? AND date = ?)
+           OR (
+             UPPER(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+             ) = ?
+             AND ABS(DATEDIFF(date, ?)) <= 1
+           )
+         )
        LIMIT 1`,
-      [customerId, receiptNumber, date, amount]
+      [customerId, amount, receiptNumber, date, receiptStrict, date]
     );
     if (existing) {
       const row = existing;
@@ -147,9 +158,19 @@ export const createPayment = async (req: any, res: Response) => {
         const rowDup = await get(
           `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
            FROM payments
-           WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+           WHERE customer_id = ?
+             AND ABS(amount - ?) < 0.01
+             AND (
+               (receipt_number = ? AND date = ?)
+               OR (
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) = ?
+                 AND ABS(DATEDIFF(date, ?)) <= 1
+               )
+             )
            LIMIT 1`,
-          [customerId, receiptNumber, date, amount]
+          [customerId, amount, receiptNumber, date, receiptStrict, date]
         );
         if (rowDup) {
           return res.status(200).json({
@@ -202,6 +223,13 @@ function normalizeNameForMatch(v: unknown): string {
 
 function normalizeReceiptNumber(v: unknown): string {
   return String(v ?? '').trim().replace(/\s+/g, '');
+}
+
+function normalizeReceiptNumberStrict(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
 }
 
 function toSqlDate(value: any): string | null {
@@ -266,11 +294,22 @@ export const importPaymentsFromExcel = async (req: any, res: Response) => {
 
           if (!receiptNumber || !date || !Number.isFinite(amount) || amount <= 0) continue;
 
+          const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
           const exists = await get(
             `SELECT id FROM payments
-             WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+             WHERE customer_id = ?
+               AND ABS(amount - ?) < 0.01
+               AND (
+                 (receipt_number = ? AND date = ?)
+                 OR (
+                   UPPER(
+                     REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                   ) = ?
+                   AND ABS(DATEDIFF(date, ?)) <= 1
+                 )
+               )
              LIMIT 1`,
-            [customer.id, receiptNumber, date, amount]
+            [customer.id, amount, receiptNumber, date, receiptStrict, date]
           );
           if (exists) {
             duplicated++;

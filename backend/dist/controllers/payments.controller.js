@@ -154,10 +154,21 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const orderId = body.orderId ? String(body.orderId).trim() : null;
         const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
         const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
+        const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
         const existing = yield (0, db_1.get)(`SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
        FROM payments
-       WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
-       LIMIT 1`, [customerId, receiptNumber, date, amount]);
+       WHERE customer_id = ?
+         AND ABS(amount - ?) < 0.01
+         AND (
+           (receipt_number = ? AND date = ?)
+           OR (
+             UPPER(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+             ) = ?
+             AND ABS(DATEDIFF(date, ?)) <= 1
+           )
+         )
+       LIMIT 1`, [customerId, amount, receiptNumber, date, receiptStrict, date]);
         if (existing) {
             const row = existing;
             return res.status(200).json({
@@ -183,8 +194,18 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             if (dup) {
                 const rowDup = yield (0, db_1.get)(`SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
            FROM payments
-           WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
-           LIMIT 1`, [customerId, receiptNumber, date, amount]);
+           WHERE customer_id = ?
+             AND ABS(amount - ?) < 0.01
+             AND (
+               (receipt_number = ? AND date = ?)
+               OR (
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) = ?
+                 AND ABS(DATEDIFF(date, ?)) <= 1
+               )
+             )
+           LIMIT 1`, [customerId, amount, receiptNumber, date, receiptStrict, date]);
                 if (rowDup) {
                     return res.status(200).json({
                         id: rowDup.id,
@@ -232,6 +253,12 @@ function normalizeNameForMatch(v) {
 }
 function normalizeReceiptNumber(v) {
     return String(v !== null && v !== void 0 ? v : '').trim().replace(/\s+/g, '');
+}
+function normalizeReceiptNumberStrict(v) {
+    return String(v !== null && v !== void 0 ? v : '')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
 }
 function toSqlDate(value) {
     if (!value)
@@ -291,9 +318,20 @@ const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, 
                     const amount = Math.round(Math.abs(amountRaw) * 100) / 100;
                     if (!receiptNumber || !date || !Number.isFinite(amount) || amount <= 0)
                         continue;
+                    const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
                     const exists = yield (0, db_1.get)(`SELECT id FROM payments
-             WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
-             LIMIT 1`, [customer.id, receiptNumber, date, amount]);
+             WHERE customer_id = ?
+               AND ABS(amount - ?) < 0.01
+               AND (
+                 (receipt_number = ? AND date = ?)
+                 OR (
+                   UPPER(
+                     REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                   ) = ?
+                   AND ABS(DATEDIFF(date, ?)) <= 1
+                 )
+               )
+             LIMIT 1`, [customer.id, amount, receiptNumber, date, receiptStrict, date]);
                     if (exists) {
                         duplicated++;
                         continue;

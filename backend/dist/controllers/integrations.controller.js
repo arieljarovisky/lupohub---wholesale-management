@@ -221,16 +221,34 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
         if (!up)
             return [];
         try {
-            const res = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-                params: { user_product_id: up, limit: 50, offset: 0 },
-                validateStatus: () => true
-            });
-            if (res.status >= 400 || !res.data)
-                return [];
-            const rows = Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.results) ? res.data.results : [];
-            const itemIds = rows.map((x) => String(x || '').trim()).filter(Boolean);
-            return Array.from(new Set(itemIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
+            const allIds = [];
+            const seen = new Set();
+            const statuses = ['active', 'paused', 'closed'];
+            const pageLimit = 100;
+            for (const st of statuses) {
+                let offset = 0;
+                while (offset < 5000) {
+                    const res = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` },
+                        params: { user_product_id: up, status: st, limit: pageLimit, offset },
+                        validateStatus: () => true
+                    });
+                    if (res.status >= 400 || !res.data)
+                        break;
+                    const rows = Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.results) ? res.data.results : [];
+                    for (const x of rows) {
+                        const id = String(x || '').trim();
+                        if (!id || seen.has(id))
+                            continue;
+                        seen.add(id);
+                        allIds.push(id);
+                    }
+                    if (rows.length < pageLimit)
+                        break;
+                    offset += pageLimit;
+                }
+            }
+            return Array.from(new Set(allIds.flatMap((id) => mercadoLibreItemIdCandidates(id))));
         }
         catch (_b) {
             return [];

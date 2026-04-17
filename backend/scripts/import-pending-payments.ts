@@ -30,6 +30,13 @@ function normalizeReceipt(v: unknown): string {
   return String(v ?? '').trim().replace(/\s+/g, '');
 }
 
+function normalizeReceiptStrict(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
 function toSqlDate(value: any): string | null {
   if (!value) return null;
   if (value instanceof Date && !isNaN(value.getTime())) {
@@ -110,11 +117,22 @@ async function main() {
       continue;
     }
 
+    const receiptStrict = normalizeReceiptStrict(c.receiptNumber);
     const exists = await query(
       `SELECT id FROM payments
-       WHERE customer_id = ? AND receipt_number = ? AND date = ? AND ABS(amount - ?) < 0.01
+       WHERE customer_id = ?
+         AND ABS(amount - ?) < 0.01
+         AND (
+           (receipt_number = ? AND date = ?)
+           OR (
+             UPPER(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+             ) = ?
+             AND ABS(DATEDIFF(date, ?)) <= 1
+           )
+         )
        LIMIT 1`,
-      [customer.id, c.receiptNumber, c.date, c.amount]
+      [customer.id, c.amount, c.receiptNumber, c.date, receiptStrict, c.date]
     );
     if ((exists as any[]).length > 0) {
       duplicate++;
