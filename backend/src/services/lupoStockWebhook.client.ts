@@ -5,9 +5,9 @@ import { buildSignedWebhookPayload } from '../utils/webhookHmac';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface LupoStockWebhookUpdate {
-  /** SKU del artículo (`products.sku`). Si el artículo no tiene SKU, cae al SKU de variante. */
+  /** SKU de la variante (recomendado para stock por talle/color); si no hay, SKU del artículo. */
   sku?: string;
-  /** Mismo valor que `sku` (SKU producto en LupoHub). */
+  /** SKU del producto / artículo (`products.sku`). */
   codigo_articulo?: string;
   /**
    * ID de producto en Tienda Nube (mismo string que en TN), solo si hay vínculo TN.
