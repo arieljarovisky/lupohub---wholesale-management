@@ -3,6 +3,7 @@ import { query, execute, get } from '../database/db';
 import axios from 'axios';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
 
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
@@ -328,39 +329,41 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       }
       // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
       await Promise.all(tasks);
-      return;
-    }
+    } else {
+      // Fallback: enlaces legacy en product_variants + products
+      const variant = await get(
+        `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
+                p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
+                COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+                COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+         FROM product_variants pv
+         JOIN product_colors pc ON pc.id = pv.product_color_id
+         JOIN products p ON p.id = pc.product_id
+         WHERE pv.id = ?`,
+        [variantId]
+      );
+      if (!variant) return;
 
-    // Fallback: enlaces legacy en product_variants + products
-    const variant = await get(
-      `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
-              p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
-              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
-              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-       FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       WHERE pv.id = ?`,
-      [variantId]
-    );
-    if (!variant) return;
+      const stockTN = stockForPlatform(newStock, variant.tn_pack);
+      const stockML = stockForPlatform(newStock, variant.ml_pack);
+      const skuMLTN = variant.external_sku || variant.sku;
 
-    const stockTN = stockForPlatform(newStock, variant.tn_pack);
-    const stockML = stockForPlatform(newStock, variant.ml_pack);
-    const skuMLTN = variant.external_sku || variant.sku;
-
-    if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-      await updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
-    }
-    if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-      await updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
-    } else if (variant.mercado_libre_item_id) {
-      await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
-    } else if (skuMLTN) {
-      await updateMercadoLibreStock(skuMLTN, stockML);
+      if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
+        await updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
+      }
+      if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
+        await updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
+      } else if (variant.mercado_libre_item_id) {
+        await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
+      } else if (skuMLTN) {
+        await updateMercadoLibreStock(skuMLTN, stockML);
+      }
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);
+  } finally {
+    // Lupo shop: siempre encolar evento firmado por variante (si hay config).
+    await enqueueStockWebhookForVariant(variantId, newStock);
   }
 };
 

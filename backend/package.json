@@ -17,7 +17,9 @@
     "delete-billing-by-cae:prod": "cross-env NODE_ENV=production ts-node scripts/delete-billing-by-cae.ts",
     "import-multimedia-saldos": "ts-node scripts/import-multimedia-composicion-saldos.ts",
     "import-seller-commissions": "ts-node scripts/import-seller-commissions.ts",
-    "import-pending-payments": "ts-node scripts/import-pending-payments.ts"
+    "import-pending-payments": "ts-node scripts/import-pending-payments.ts",
+    "test:lupo-webhook": "ts-node src/tests/lupoStockWebhook.test.ts",
+    "test-webhook-stock": "ts-node scripts/send-lupo-stock-webhook-test.ts"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",
