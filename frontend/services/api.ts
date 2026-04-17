@@ -1046,9 +1046,9 @@ export const api = {
   },
 
   /** Stock en ML y TN por variante (para mostrar en inventario). */
-  getVariantExternalStocks: async (variantIds: string[]): Promise<{ stocks: Record<string, { stockML?: number; stockTN?: number }> }> => {
+  getVariantExternalStocks: async (variantIds: string[]): Promise<{ stocks: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> }> => {
     return handleRequest(async () => {
-      return await request<{ stocks: Record<string, { stockML?: number; stockTN?: number }> }>('/integrations/variant-external-stocks', 'POST', { variantIds }, undefined, 30000);
+      return await request<{ stocks: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> }>('/integrations/variant-external-stocks', 'POST', { variantIds }, undefined, 30000);
     }, { stocks: {} }, 'getVariantExternalStocks');
   },
 

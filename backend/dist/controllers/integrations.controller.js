@@ -2138,7 +2138,7 @@ const syncSelectedStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, 
 exports.syncSelectedStockToMercadoLibre = syncSelectedStockToMercadoLibre;
 /** Obtener stock en ML y TN por variantes (para mostrar en inventario). */
 const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     try {
         const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 100) : [];
         if (variantIds.length === 0) {
@@ -2155,6 +2155,17 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
         const stocks = {};
         for (const id of variantIds)
             stocks[id] = {};
+        try {
+            const snapRows = yield (0, db_1.query)(`SELECT variant_id, stock FROM variant_luposhop_stock WHERE variant_id IN (${placeholders})`, variantIds);
+            for (const r of snapRows || []) {
+                const vid = r.variant_id;
+                if (vid && stocks[vid])
+                    stocks[vid].stockLupoShop = Number((_b = r.stock) !== null && _b !== void 0 ? _b : 0);
+            }
+        }
+        catch (_f) {
+            // tabla aún no existe o error puntual: no rompe ML/TN
+        }
         const mlToken = yield getValidMLToken();
         const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) {
@@ -2177,18 +2188,18 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                     const variations = item.variations || [];
                     for (const { variantId, variationId } of variants) {
                         if (variations.length === 0) {
-                            stocks[variantId].stockML = (_b = item.available_quantity) !== null && _b !== void 0 ? _b : 0;
+                            stocks[variantId].stockML = (_c = item.available_quantity) !== null && _c !== void 0 ? _c : 0;
                         }
                         else if (variationId) {
                             const v = variations.find((x) => String(x.id) === String(variationId));
-                            stocks[variantId].stockML = v ? ((_c = v.available_quantity) !== null && _c !== void 0 ? _c : 0) : undefined;
+                            stocks[variantId].stockML = v ? ((_d = v.available_quantity) !== null && _d !== void 0 ? _d : 0) : undefined;
                         }
                         else if (variations.length === 1) {
-                            stocks[variantId].stockML = (_d = variations[0].available_quantity) !== null && _d !== void 0 ? _d : 0;
+                            stocks[variantId].stockML = (_e = variations[0].available_quantity) !== null && _e !== void 0 ? _e : 0;
                         }
                     }
                 }
-                catch (_e) {
+                catch (_g) {
                     // ignore per-item errors
                 }
             }
@@ -2242,7 +2253,7 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                             stocks[variantId].stockTN = tv.stock;
                     }
                 }
-                catch (_f) {
+                catch (_h) {
                     // ignore per-product errors
                 }
             }

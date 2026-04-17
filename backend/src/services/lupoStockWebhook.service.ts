@@ -227,7 +227,17 @@ export async function enqueueStockWebhookForVariant(variantId: string, newStock:
       return;
     }
     const result = await sendStockWebhookPayload({ updates: [update] });
-    if (!result.ok) {
+    if (result.ok) {
+      try {
+        await execute(
+          `INSERT INTO variant_luposhop_stock (variant_id, stock) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE stock = VALUES(stock), updated_at = CURRENT_TIMESTAMP`,
+          [variantId, update.stock_quantity]
+        );
+      } catch (e: any) {
+        console.warn(`[LupoWebhook] no se pudo guardar snapshot tienda online variantId=${variantId}:`, e?.message || e);
+      }
+    } else {
       console.warn(
         `[LupoWebhook] envio fallido webhookId=${result.webhookId} status=${result.status ?? 'n/a'} error=${result.error ?? 'n/a'}`
       );

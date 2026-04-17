@@ -2343,8 +2343,21 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       variantIds
     );
 
-    const stocks: Record<string, { stockML?: number; stockTN?: number }> = {};
+    const stocks: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> = {};
     for (const id of variantIds) stocks[id] = {};
+
+    try {
+      const snapRows = await query(
+        `SELECT variant_id, stock FROM variant_luposhop_stock WHERE variant_id IN (${placeholders})`,
+        variantIds
+      );
+      for (const r of snapRows || []) {
+        const vid = (r as any).variant_id;
+        if (vid && stocks[vid]) stocks[vid].stockLupoShop = Number((r as any).stock ?? 0);
+      }
+    } catch {
+      // tabla aún no existe o error puntual: no rompe ML/TN
+    }
 
     const mlToken = await getValidMLToken();
     const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);

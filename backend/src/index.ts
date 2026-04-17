@@ -47,6 +47,7 @@ import { addExternalInvoicesTable } from './database/add_external_invoices_table
 import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
 import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_ledger';
 import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhook_config_table';
+import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -161,6 +162,7 @@ async function initDatabase() {
       await addExternalCreditNotesTable();
       await addCustomerMultimediaLedger();
       await addLupoStockWebhookConfigTable();
+      await addVariantLuposhopStockTable();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

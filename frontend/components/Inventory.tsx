@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -179,7 +179,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverMode, setServerMode] = useState(true);
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
-  const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number }>>({});
+  const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }>>({});
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
@@ -546,7 +546,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     Promise.all(batches.map(batch => api.getVariantExternalStocks(batch)))
       .then(results => {
         if (cancelled) return;
-        const merged: Record<string, { stockML?: number; stockTN?: number }> = {};
+        const merged: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> = {};
         results.forEach(r => { if (r?.stocks) Object.assign(merged, r.stocks); });
         setVariantExternalStocks(prev => ({ ...prev, ...merged }));
       })
@@ -3048,6 +3048,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                                  ? String(variantExternalStocks[product.id].stockTN)
                                                  : '—')
                                                : 'Falta sincronizar'}
+                                           </span>
+                                         </div>
+                                         <div className="flex items-center gap-1.5" title="Último stock enviado con éxito al webhook de tu tienda online">
+                                           <Store size={10} className="text-violet-400 shrink-0" />
+                                           <span className="text-slate-400">Tienda:</span>
+                                           <span className={variantExternalStocks[product.id]?.stockLupoShop !== undefined ? 'text-white font-medium' : 'text-slate-500'}>
+                                             {variantExternalStocks[product.id]?.stockLupoShop !== undefined
+                                               ? String(variantExternalStocks[product.id].stockLupoShop)
+                                               : '—'}
                                            </span>
                                          </div>
                                        </div>

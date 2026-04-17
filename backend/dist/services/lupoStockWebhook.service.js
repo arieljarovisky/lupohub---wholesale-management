@@ -191,7 +191,16 @@ function enqueueStockWebhookForVariant(variantId, newStock) {
                 return;
             }
             const result = yield sendStockWebhookPayload({ updates: [update] });
-            if (!result.ok) {
+            if (result.ok) {
+                try {
+                    yield (0, db_1.execute)(`INSERT INTO variant_luposhop_stock (variant_id, stock) VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE stock = VALUES(stock), updated_at = CURRENT_TIMESTAMP`, [variantId, update.stock_quantity]);
+                }
+                catch (e) {
+                    console.warn(`[LupoWebhook] no se pudo guardar snapshot tienda online variantId=${variantId}:`, (e === null || e === void 0 ? void 0 : e.message) || e);
+                }
+            }
+            else {
                 console.warn(`[LupoWebhook] envio fallido webhookId=${result.webhookId} status=${(_a = result.status) !== null && _a !== void 0 ? _a : 'n/a'} error=${(_b = result.error) !== null && _b !== void 0 ? _b : 'n/a'}`);
             }
         }
