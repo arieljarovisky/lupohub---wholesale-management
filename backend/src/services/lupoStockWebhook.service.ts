@@ -155,9 +155,9 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
         ? String(row.tienda_nube_variant_id).trim()
         : '';
     return {
-      sku: variantSku || productSku || undefined,
+      sku: productSku || variantSku || undefined,
       codigo_articulo: productSku || undefined,
-      id: row.product_id || undefined,
+      id: tnProd || undefined,
       external_tn_id: tnProd || undefined,
       tienda_nube_product_id: tnProd || undefined,
       tienda_nube_variant_id: tnVar || undefined,
@@ -365,9 +365,9 @@ export async function buildStockWebhookUpdateByVariantId(
       ? String(row.tienda_nube_variant_id).trim()
       : '';
   return {
-    sku: variantSku || productSku || undefined,
+    sku: productSku || variantSku || undefined,
     codigo_articulo: productSku || undefined,
-    id: row.product_id || undefined,
+    id: tnProd || undefined,
     external_tn_id: tnProd || undefined,
     tienda_nube_product_id: tnProd || undefined,
     tienda_nube_variant_id: tnVar || undefined,

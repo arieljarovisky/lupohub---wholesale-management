@@ -5,12 +5,16 @@ import { buildSignedWebhookPayload } from '../utils/webhookHmac';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface LupoStockWebhookUpdate {
-  /** SKU de la variante (talle/color); si no hay, cae al código de artículo. */
+  /** SKU del artículo (`products.sku`). Si el artículo no tiene SKU, cae al SKU de variante. */
   sku?: string;
-  /** Código de artículo = SKU del producto en LupoHub (`products.sku`). */
+  /** Mismo valor que `sku` (SKU producto en LupoHub). */
   codigo_articulo?: string;
+  /**
+   * ID de producto en Tienda Nube (mismo string que en TN), solo si hay vínculo TN.
+   * No se envía el UUID interno de producto de LupoHub; usar `variant_id` para correlación interna.
+   */
   id?: string;
-  /** ID producto Tienda Nube (legacy, mismo valor que `tienda_nube_product_id`). */
+  /** ID producto Tienda Nube (recomendado; mismo string que `id` cuando ambos vienen de TN). */
   external_tn_id?: string;
   /** ID producto en Tienda Nube. */
   tienda_nube_product_id?: string;
