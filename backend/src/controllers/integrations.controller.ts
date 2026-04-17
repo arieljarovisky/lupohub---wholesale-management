@@ -2355,6 +2355,19 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
         const vid = (r as any).variant_id;
         if (vid && stocks[vid]) stocks[vid].stockLupoShop = Number((r as any).stock ?? 0);
       }
+
+      // Valor inicial para no mostrar "Tienda: -" hasta el primer webhook exitoso.
+      const localRows = await query(
+        `SELECT variant_id, stock FROM stocks WHERE variant_id IN (${placeholders})`,
+        variantIds
+      );
+      for (const r of localRows || []) {
+        const vid = (r as any).variant_id;
+        if (!vid || !stocks[vid]) continue;
+        if (stocks[vid].stockLupoShop === undefined) {
+          stocks[vid].stockLupoShop = Number((r as any).stock ?? 0);
+        }
+      }
     } catch {
       // tabla aún no existe o error puntual: no rompe ML/TN
     }

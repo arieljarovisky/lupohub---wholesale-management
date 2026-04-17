@@ -50,6 +50,21 @@ function normalizeSkuForWebhook(raw: string | null | undefined): string {
   return t.replace(/-/g, '');
 }
 
+/** SKU base para webhook: prioriza código de color de LupoHub (colors.code). */
+function buildWebhookSkuRaw(params: {
+  productSkuRaw: string;
+  variantSkuRaw: string;
+  sizeCodeRaw: string;
+  colorCodeRaw: string;
+}): string {
+  const productSku = params.productSkuRaw.trim();
+  const variantSku = params.variantSkuRaw.trim();
+  const sizeCode = params.sizeCodeRaw.trim();
+  const colorCode = params.colorCodeRaw.trim();
+  if (productSku && sizeCode && colorCode) return `${productSku}-${sizeCode}-${colorCode}`;
+  return variantSku || productSku;
+}
+
 function maskSecret(value: string): string {
   if (!value) return '';
   if (value.length <= 8) return '*'.repeat(value.length);
@@ -134,6 +149,8 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
     `SELECT pv.id AS variant_id,
             pv.sku AS variant_sku,
             pv.tienda_nube_variant_id AS tienda_nube_variant_id,
+            szi.size_code AS size_code,
+            c.code AS color_code,
             p.id AS product_id,
             p.sku AS product_sku,
             p.tienda_nube_id AS external_tn_id,
@@ -142,6 +159,8 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
      FROM product_variants pv
      JOIN product_colors pc ON pc.id = pv.product_color_id
      JOIN products p ON p.id = pc.product_id
+     LEFT JOIN sizes szi ON szi.id = pv.size_id
+     LEFT JOIN colors c ON c.id = pc.color_id
      LEFT JOIN stocks s ON s.variant_id = pv.id
      WHERE
        (p.mercado_libre_id IS NOT NULL AND TRIM(p.mercado_libre_id) != '')
@@ -159,6 +178,10 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
       row.variant_sku != null && String(row.variant_sku).trim() !== '' ? String(row.variant_sku).trim() : '';
     const productSkuRaw =
       row.product_sku != null && String(row.product_sku).trim() !== '' ? String(row.product_sku).trim() : '';
+    const sizeCodeRaw = row.size_code != null ? String(row.size_code).trim() : '';
+    const colorCodeRaw = row.color_code != null ? String(row.color_code).trim() : '';
+    const webhookSkuRaw = buildWebhookSkuRaw({ productSkuRaw, variantSkuRaw, sizeCodeRaw, colorCodeRaw });
+    const webhookSkuNorm = normalizeSkuForWebhook(webhookSkuRaw);
     const variantSkuNorm = normalizeSkuForWebhook(variantSkuRaw);
     const productSkuNorm = normalizeSkuForWebhook(productSkuRaw);
     const tnProd = row.external_tn_id != null && String(row.external_tn_id).trim() !== '' ? String(row.external_tn_id).trim() : '';
@@ -167,7 +190,7 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
         ? String(row.tienda_nube_variant_id).trim()
         : '';
     return {
-      sku: variantSkuNorm || productSkuNorm || undefined,
+      sku: webhookSkuNorm || variantSkuNorm || productSkuNorm || undefined,
       codigo_articulo: productSkuNorm || undefined,
       id: tnProd || undefined,
       external_tn_id: tnProd || undefined,
@@ -175,7 +198,7 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
       tienda_nube_variant_id: tnVar || undefined,
       external_ml_id: row.external_ml_id || undefined,
       variant_id: row.variant_id || undefined,
-      variant_sku: variantSkuNorm || undefined,
+      variant_sku: webhookSkuNorm || variantSkuNorm || undefined,
       stock_quantity: normalizeStockQuantity(row.stock)
     };
   });
@@ -354,6 +377,8 @@ export async function buildStockWebhookUpdateByVariantId(
     `SELECT pv.id AS variant_id,
             pv.sku AS variant_sku,
             pv.tienda_nube_variant_id AS tienda_nube_variant_id,
+            szi.size_code AS size_code,
+            c.code AS color_code,
             p.id AS product_id,
             p.sku AS product_sku,
             p.tienda_nube_id AS external_tn_id,
@@ -361,6 +386,8 @@ export async function buildStockWebhookUpdateByVariantId(
      FROM product_variants pv
      JOIN product_colors pc ON pc.id = pv.product_color_id
      JOIN products p ON p.id = pc.product_id
+     LEFT JOIN sizes szi ON szi.id = pv.size_id
+     LEFT JOIN colors c ON c.id = pc.color_id
      WHERE pv.id = ?
      LIMIT 1`,
     [variantId]
@@ -370,6 +397,10 @@ export async function buildStockWebhookUpdateByVariantId(
     row.variant_sku != null && String(row.variant_sku).trim() !== '' ? String(row.variant_sku).trim() : '';
   const productSkuRaw =
     row.product_sku != null && String(row.product_sku).trim() !== '' ? String(row.product_sku).trim() : '';
+  const sizeCodeRaw = row.size_code != null ? String(row.size_code).trim() : '';
+  const colorCodeRaw = row.color_code != null ? String(row.color_code).trim() : '';
+  const webhookSkuRaw = buildWebhookSkuRaw({ productSkuRaw, variantSkuRaw, sizeCodeRaw, colorCodeRaw });
+  const webhookSkuNorm = normalizeSkuForWebhook(webhookSkuRaw);
   const variantSkuNorm = normalizeSkuForWebhook(variantSkuRaw);
   const productSkuNorm = normalizeSkuForWebhook(productSkuRaw);
   const tnProd =
@@ -379,7 +410,7 @@ export async function buildStockWebhookUpdateByVariantId(
       ? String(row.tienda_nube_variant_id).trim()
       : '';
   return {
-    sku: variantSkuNorm || productSkuNorm || undefined,
+    sku: webhookSkuNorm || variantSkuNorm || productSkuNorm || undefined,
     codigo_articulo: productSkuNorm || undefined,
     id: tnProd || undefined,
     external_tn_id: tnProd || undefined,
@@ -387,7 +418,7 @@ export async function buildStockWebhookUpdateByVariantId(
     tienda_nube_variant_id: tnVar || undefined,
     external_ml_id: row.external_ml_id || undefined,
     variant_id: row.variant_id || undefined,
-    variant_sku: variantSkuNorm || undefined,
+    variant_sku: webhookSkuNorm || variantSkuNorm || undefined,
     stock_quantity: normalizeStockQuantity(newStock)
   };
 }
