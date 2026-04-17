@@ -42,6 +42,14 @@ function normalizeStockQuantity(stock: number): number {
   return Math.floor(n);
 }
 
+/** SKU en webhook: sin guiones (ej. 0051003-130-280 → 0051003130280), alineado con ML/TN. */
+function normalizeSkuForWebhook(raw: string | null | undefined): string {
+  if (raw == null) return '';
+  const t = String(raw).trim();
+  if (!t) return '';
+  return t.replace(/-/g, '');
+}
+
 function maskSecret(value: string): string {
   if (!value) return '';
   if (value.length <= 8) return '*'.repeat(value.length);
@@ -147,23 +155,27 @@ export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMl
   );
 
   const updates: LupoStockWebhookUpdate[] = (rows as any[]).map((row) => {
-    const variantSku = row.variant_sku != null && String(row.variant_sku).trim() !== '' ? String(row.variant_sku).trim() : '';
-    const productSku = row.product_sku != null && String(row.product_sku).trim() !== '' ? String(row.product_sku).trim() : '';
+    const variantSkuRaw =
+      row.variant_sku != null && String(row.variant_sku).trim() !== '' ? String(row.variant_sku).trim() : '';
+    const productSkuRaw =
+      row.product_sku != null && String(row.product_sku).trim() !== '' ? String(row.product_sku).trim() : '';
+    const variantSkuNorm = normalizeSkuForWebhook(variantSkuRaw);
+    const productSkuNorm = normalizeSkuForWebhook(productSkuRaw);
     const tnProd = row.external_tn_id != null && String(row.external_tn_id).trim() !== '' ? String(row.external_tn_id).trim() : '';
     const tnVar =
       row.tienda_nube_variant_id != null && String(row.tienda_nube_variant_id).trim() !== ''
         ? String(row.tienda_nube_variant_id).trim()
         : '';
     return {
-      sku: variantSku || productSku || undefined,
-      codigo_articulo: productSku || undefined,
+      sku: variantSkuNorm || productSkuNorm || undefined,
+      codigo_articulo: productSkuNorm || undefined,
       id: tnProd || undefined,
       external_tn_id: tnProd || undefined,
       tienda_nube_product_id: tnProd || undefined,
       tienda_nube_variant_id: tnVar || undefined,
       external_ml_id: row.external_ml_id || undefined,
       variant_id: row.variant_id || undefined,
-      variant_sku: row.variant_sku || undefined,
+      variant_sku: variantSkuNorm || undefined,
       stock_quantity: normalizeStockQuantity(row.stock)
     };
   });
@@ -354,10 +366,12 @@ export async function buildStockWebhookUpdateByVariantId(
     [variantId]
   );
   if (!row) return null;
-  const variantSku =
+  const variantSkuRaw =
     row.variant_sku != null && String(row.variant_sku).trim() !== '' ? String(row.variant_sku).trim() : '';
-  const productSku =
+  const productSkuRaw =
     row.product_sku != null && String(row.product_sku).trim() !== '' ? String(row.product_sku).trim() : '';
+  const variantSkuNorm = normalizeSkuForWebhook(variantSkuRaw);
+  const productSkuNorm = normalizeSkuForWebhook(productSkuRaw);
   const tnProd =
     row.external_tn_id != null && String(row.external_tn_id).trim() !== '' ? String(row.external_tn_id).trim() : '';
   const tnVar =
@@ -365,15 +379,15 @@ export async function buildStockWebhookUpdateByVariantId(
       ? String(row.tienda_nube_variant_id).trim()
       : '';
   return {
-    sku: variantSku || productSku || undefined,
-    codigo_articulo: productSku || undefined,
+    sku: variantSkuNorm || productSkuNorm || undefined,
+    codigo_articulo: productSkuNorm || undefined,
     id: tnProd || undefined,
     external_tn_id: tnProd || undefined,
     tienda_nube_product_id: tnProd || undefined,
     tienda_nube_variant_id: tnVar || undefined,
     external_ml_id: row.external_ml_id || undefined,
     variant_id: row.variant_id || undefined,
-    variant_sku: row.variant_sku || undefined,
+    variant_sku: variantSkuNorm || undefined,
     stock_quantity: normalizeStockQuantity(newStock)
   };
 }
