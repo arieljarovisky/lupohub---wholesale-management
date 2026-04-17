@@ -5,9 +5,17 @@ import { buildSignedWebhookPayload } from '../utils/webhookHmac';
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface LupoStockWebhookUpdate {
+  /** SKU de la variante (talle/color); si no hay, cae al código de artículo. */
   sku?: string;
+  /** Código de artículo = SKU del producto en LupoHub (`products.sku`). */
+  codigo_articulo?: string;
   id?: string;
+  /** ID producto Tienda Nube (legacy, mismo valor que `tienda_nube_product_id`). */
   external_tn_id?: string;
+  /** ID producto en Tienda Nube. */
+  tienda_nube_product_id?: string;
+  /** ID variante en Tienda Nube. */
+  tienda_nube_variant_id?: string;
   external_ml_id?: string;
   variant_id?: string;
   variant_sku?: string;
@@ -117,8 +125,11 @@ const defaultTransport: WebhookTransport = async ({ url, body, headers, timeoutM
 function sanitizeUpdate(update: LupoStockWebhookUpdate): Record<string, unknown> {
   return {
     sku: update.sku ?? null,
+    codigo_articulo: update.codigo_articulo ?? null,
     id: update.id ?? null,
     external_tn_id: update.external_tn_id ?? null,
+    tienda_nube_product_id: update.tienda_nube_product_id ?? null,
+    tienda_nube_variant_id: update.tienda_nube_variant_id ?? null,
     external_ml_id: update.external_ml_id ?? null,
     variant_id: update.variant_id ?? null,
     variant_sku: update.variant_sku ?? null,
@@ -133,8 +144,21 @@ function validatePayload(payload: LupoStockWebhookPayload): string[] {
     return errors;
   }
   payload.updates.forEach((u, index) => {
-    const hasIdentity = !!(u.sku || u.id || u.external_tn_id || u.external_ml_id);
-    if (!hasIdentity) errors.push(`updates[${index}] debe incluir sku, id, external_tn_id o external_ml_id`);
+    const hasIdentity = !!(
+      u.sku ||
+      u.id ||
+      u.external_tn_id ||
+      u.external_ml_id ||
+      u.tienda_nube_product_id ||
+      u.tienda_nube_variant_id ||
+      u.codigo_articulo ||
+      u.variant_id
+    );
+    if (!hasIdentity) {
+      errors.push(
+        `updates[${index}] debe incluir al menos: sku, codigo_articulo, id, variant_id, external_tn_id, external_ml_id o ids de Tienda Nube`
+      );
+    }
     if (typeof u.stock_quantity !== 'number' || !Number.isFinite(u.stock_quantity) || u.stock_quantity < 0) {
       errors.push(`updates[${index}].stock_quantity debe ser número >= 0`);
     }
