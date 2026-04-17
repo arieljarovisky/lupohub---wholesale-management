@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot, Upload } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
@@ -202,6 +202,16 @@ const Settings: React.FC<SettingsProps> = ({
   const [savingLupoWebhook, setSavingLupoWebhook] = useState(false);
   const [testingLupoWebhook, setTestingLupoWebhook] = useState(false);
   const [lupoWebhookLastResult, setLupoWebhookLastResult] = useState<any | null>(null);
+  const [syncingLupoShopMlStock, setSyncingLupoShopMlStock] = useState(false);
+  const [lupoShopMlSyncResult, setLupoShopMlSyncResult] = useState<{
+    ok: boolean;
+    message?: string;
+    variantCount: number;
+    batchesTotal: number;
+    batchesOk: number;
+    batchesFailed: number;
+    errors: { batchIndex: number; status?: number; error?: string }[];
+  } | null>(null);
 
   // Mercado Libre Test Connection
   const [mlTestLoading, setMlTestLoading] = useState(false);
@@ -466,6 +476,39 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error enviando prueba de webhook.');
     } finally {
       setTestingLupoWebhook(false);
+    }
+  };
+
+  /** Stock LupoHub de variantes con vínculo ML → webhook tienda (masivo). */
+  const handleSyncLupoShopMlStock = async () => {
+    setSyncingLupoShopMlStock(true);
+    setLupoShopMlSyncResult(null);
+    try {
+      const result = await api.syncLupoShopMlStockBulk();
+      setLupoShopMlSyncResult(result);
+      if (result.ok) {
+        showToast(
+          'success',
+          result.variantCount === 0
+            ? result.message || 'No hay variantes con Mercado Libre vinculado.'
+            : `Enviado a la tienda: ${result.variantCount} variantes (${result.batchesOk} lote(s)).`
+        );
+      } else {
+        showToast('error', result.message || `Fallaron ${result.batchesFailed} lote(s) de ${result.batchesTotal}.`);
+      }
+    } catch (e: any) {
+      setLupoShopMlSyncResult({
+        ok: false,
+        variantCount: 0,
+        batchesTotal: 0,
+        batchesOk: 0,
+        batchesFailed: 0,
+        errors: [],
+        message: e?.message
+      });
+      showToast('error', e?.message || 'Error enviando stock a la tienda.');
+    } finally {
+      setSyncingLupoShopMlStock(false);
     }
   };
 
@@ -1809,7 +1852,32 @@ const Settings: React.FC<SettingsProps> = ({
                   {testingLupoWebhook ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                   PROBAR WEBHOOK
                 </button>
+                <button
+                  type="button"
+                  onClick={handleSyncLupoShopMlStock}
+                  disabled={syncingLupoShopMlStock || !lupoWebhookConfig.enabled}
+                  title={!lupoWebhookConfig.enabled ? 'Activá y guardá el webhook primero' : 'Envía el stock del depósito (LupoHub) de todas las variantes vinculadas a Mercado Libre'}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {syncingLupoShopMlStock ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  ENVIAR STOCK ML → TIENDA
+                </button>
               </div>
+              <p className="text-[11px] text-slate-500">
+                <strong className="text-slate-400">Envío masivo:</strong> toma el stock actual de tu depósito en LupoHub (no el de la API de ML) para cada variante que tenga vínculo a Mercado Libre y lo envía a la tienda en lotes. La columna &quot;Tienda&quot; en inventario se actualiza cuando la tienda responde OK.
+              </p>
+              {lupoShopMlSyncResult && (
+                <div
+                  className={`text-xs rounded-xl border px-3 py-2 ${
+                    lupoShopMlSyncResult.ok ? 'border-emerald-600/40 bg-emerald-900/20 text-emerald-200' : 'border-amber-600/40 bg-amber-900/20 text-amber-200'
+                  }`}
+                >
+                  Masivo ML→tienda: {lupoShopMlSyncResult.ok ? 'OK' : 'con errores'} · variantes: {lupoShopMlSyncResult.variantCount} ·
+                  lotes OK: {lupoShopMlSyncResult.batchesOk}/{lupoShopMlSyncResult.batchesTotal}
+                  {lupoShopMlSyncResult.message ? ` · ${lupoShopMlSyncResult.message}` : ''}
+                  {lupoShopMlSyncResult.errors?.length ? ` · detalle: ${JSON.stringify(lupoShopMlSyncResult.errors.slice(0, 3))}` : ''}
+                </div>
+              )}
               {lupoWebhookLastResult && (
                 <div className={`text-xs rounded-xl border px-3 py-2 ${lupoWebhookLastResult.ok ? 'border-emerald-600/40 bg-emerald-900/20 text-emerald-200' : 'border-rose-600/40 bg-rose-900/20 text-rose-200'}`}>
                   Resultado: {lupoWebhookLastResult.ok ? 'OK' : 'ERROR'} · webhookId: {lupoWebhookLastResult.webhookId || 'n/a'} · status: {lupoWebhookLastResult.status || 'n/a'} · intento: {lupoWebhookLastResult.attempt ?? 'n/a'}{lupoWebhookLastResult.duplicate ? ' · duplicate=true' : ''}

@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import {
   getLupoWebhookConfigForUi,
   saveLupoWebhookConfig,
-  sendStockWebhookPayload
+  sendStockWebhookPayload,
+  syncAllMercadoLibreLinkedStockToLupoShop
 } from '../services/lupoStockWebhook.service';
 
 function isAdmin(req: Request): boolean {
@@ -65,5 +66,20 @@ export const testLupoWebhookEndpoint = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[LupoWebhook Test] Error enviando prueba:', error?.message || error);
     res.status(500).json({ message: 'Error enviando webhook de prueba.' });
+  }
+};
+
+/** Stock LupoHub de todas las variantes vinculadas a ML → webhook tienda online (lotes). */
+export const syncLupoShopMlStockBulkEndpoint = async (req: Request, res: Response) => {
+  if (!isAdmin(req)) return unauthorized(res);
+  try {
+    const result = await syncAllMercadoLibreLinkedStockToLupoShop();
+    if (!result.ok && result.message?.includes('deshabilitado')) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (error: any) {
+    console.error('[LupoWebhook] sync masivo ML→tienda:', error?.message || error);
+    res.status(500).json({ message: 'Error en sincronización masiva hacia la tienda.' });
   }
 };

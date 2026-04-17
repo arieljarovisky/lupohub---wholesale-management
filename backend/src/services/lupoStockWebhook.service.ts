@@ -1,4 +1,5 @@
-import { execute, get } from '../database/db';
+import { v4 as uuidv4 } from 'uuid';
+import { execute, get, query } from '../database/db';
 import {
   buildLupoStockWebhookConfig,
   getLupoStockWebhookConfigFromEnv,
@@ -86,6 +87,137 @@ function getClientForConfig(config: LupoStockWebhookConfig): LupoStockWebhookCli
     cachedClientConfigKey = key;
   }
   return cachedClient;
+}
+
+const ML_TO_SHOP_BATCH_SIZE = 80;
+const ML_TO_SHOP_BATCH_DELAY_MS = 250;
+
+export interface SyncMlLinkedStockToLupoShopResult {
+  ok: boolean;
+  message?: string;
+  variantCount: number;
+  batchesTotal: number;
+  batchesOk: number;
+  batchesFailed: number;
+  errors: { batchIndex: number; status?: number; error?: string }[];
+}
+
+/**
+ * Envía a la tienda online (webhook Lupo) el stock actual de LupoHub para todas las variantes
+ * vinculadas a Mercado Libre (mismo criterio que en inventario: producto ML, ítems/variación o publicación ML).
+ * La cantidad enviada es el stock del depósito en LupoHub, no la lectura en vivo desde la API de ML.
+ */
+export async function syncAllMercadoLibreLinkedStockToLupoShop(): Promise<SyncMlLinkedStockToLupoShopResult> {
+  const cfg = await resolveRuntimeWebhookConfig();
+  if (!cfg.enabled) {
+    return {
+      ok: false,
+      message:
+        'Webhook de tienda Lupo deshabilitado o faltan URL, API key o secret. Activá y guardá la configuración en Integraciones.',
+      variantCount: 0,
+      batchesTotal: 0,
+      batchesOk: 0,
+      batchesFailed: 0,
+      errors: []
+    };
+  }
+
+  const rows = await query(
+    `SELECT pv.id AS variant_id,
+            pv.sku AS variant_sku,
+            p.id AS product_id,
+            p.sku AS product_sku,
+            p.tienda_nube_id AS external_tn_id,
+            p.mercado_libre_id AS external_ml_id,
+            COALESCE(s.stock, 0) AS stock
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     LEFT JOIN stocks s ON s.variant_id = pv.id
+     WHERE
+       (p.mercado_libre_id IS NOT NULL AND TRIM(p.mercado_libre_id) != '')
+       OR (pv.mercado_libre_item_id IS NOT NULL AND TRIM(pv.mercado_libre_item_id) != '')
+       OR (pv.mercado_libre_variant_id IS NOT NULL AND TRIM(pv.mercado_libre_variant_id) != '')
+       OR EXISTS (
+         SELECT 1 FROM variant_publications vp
+         WHERE vp.variant_id = pv.id AND vp.platform = 'mercadolibre'
+       )`,
+    []
+  );
+
+  const updates: LupoStockWebhookUpdate[] = (rows as any[]).map((row) => ({
+    sku: row.product_sku || row.variant_sku || undefined,
+    id: row.product_id || undefined,
+    external_tn_id: row.external_tn_id || undefined,
+    external_ml_id: row.external_ml_id || undefined,
+    variant_id: row.variant_id || undefined,
+    variant_sku: row.variant_sku || undefined,
+    stock_quantity: normalizeStockQuantity(row.stock)
+  }));
+
+  if (updates.length === 0) {
+    return {
+      ok: true,
+      message: 'No hay variantes vinculadas a Mercado Libre.',
+      variantCount: 0,
+      batchesTotal: 0,
+      batchesOk: 0,
+      batchesFailed: 0,
+      errors: []
+    };
+  }
+
+  const errors: { batchIndex: number; status?: number; error?: string }[] = [];
+  let batchesOk = 0;
+  let batchesFailed = 0;
+  const batchesTotal = Math.ceil(updates.length / ML_TO_SHOP_BATCH_SIZE);
+
+  console.log(
+    `[LupoWebhook] sincronización masiva ML→tienda: ${updates.length} variantes, ${batchesTotal} lote(s)`
+  );
+
+  for (let i = 0; i < updates.length; i += ML_TO_SHOP_BATCH_SIZE) {
+    const batch = updates.slice(i, i + ML_TO_SHOP_BATCH_SIZE);
+    const batchIndex = Math.floor(i / ML_TO_SHOP_BATCH_SIZE);
+    const result = await sendStockWebhookPayload({ updates: batch }, uuidv4());
+    if (result.ok) {
+      batchesOk++;
+      for (const u of batch) {
+        const vid = u.variant_id as string | undefined;
+        if (!vid) continue;
+        try {
+          await execute(
+            `INSERT INTO variant_luposhop_stock (variant_id, stock) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE stock = VALUES(stock), updated_at = CURRENT_TIMESTAMP`,
+            [vid, u.stock_quantity]
+          );
+        } catch (e: any) {
+          console.warn(`[LupoWebhook bulk] snapshot tienda variantId=${vid}:`, e?.message || e);
+        }
+      }
+    } else {
+      batchesFailed++;
+      errors.push({
+        batchIndex,
+        status: result.status,
+        error: result.error ?? (result.status != null ? String(result.status) : 'unknown')
+      });
+    }
+    if (i + ML_TO_SHOP_BATCH_SIZE < updates.length && ML_TO_SHOP_BATCH_DELAY_MS > 0) {
+      await new Promise((r) => setTimeout(r, ML_TO_SHOP_BATCH_DELAY_MS));
+    }
+  }
+
+  const ok = batchesFailed === 0;
+  return {
+    ok,
+    message: ok ? undefined : 'Al menos un lote falló al enviar a la tienda. Revisá logs y la respuesta del servidor de la tienda.',
+    variantCount: updates.length,
+    batchesTotal,
+    batchesOk,
+    batchesFailed,
+    errors
+  };
 }
 
 export async function sendStockWebhookPayload(

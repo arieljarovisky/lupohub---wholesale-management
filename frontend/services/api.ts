@@ -937,6 +937,29 @@ export const api = {
     }, { ok: false }, 'testLupoWebhook');
   },
 
+  /** Stock LupoHub de variantes vinculadas a ML → tienda online (webhook), en lotes. */
+  syncLupoShopMlStockBulk: async (): Promise<{
+    ok: boolean;
+    message?: string;
+    variantCount: number;
+    batchesTotal: number;
+    batchesOk: number;
+    batchesFailed: number;
+    errors: { batchIndex: number; status?: number; error?: string }[];
+  }> => {
+    return handleRequest(async () => {
+      return await request<{
+        ok: boolean;
+        message?: string;
+        variantCount: number;
+        batchesTotal: number;
+        batchesOk: number;
+        batchesFailed: number;
+        errors: { batchIndex: number; status?: number; error?: string }[];
+      }>('/integrations/luposhop/sync-ml-stock-to-shop', 'POST', {}, undefined, 600000);
+    }, { ok: false, variantCount: 0, batchesTotal: 0, batchesOk: 0, batchesFailed: 0, errors: [] }, 'syncLupoShopMlStockBulk');
+  },
+
   getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }> => {
     return handleRequest(async () => {
       return await request<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>('/integrations/status', 'GET');
