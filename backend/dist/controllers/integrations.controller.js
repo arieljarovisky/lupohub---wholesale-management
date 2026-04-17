@@ -3914,6 +3914,8 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         if (!itemId) {
             return res.status(400).json({ message: 'Falta itemId' });
         }
+        const requestedNormalized = normalizeMercadoLibreItemId(String(itemId || ''));
+        const shouldResolveAsUserProduct = /^MLAU\d+$/i.test(requestedNormalized);
         const candidates = mercadoLibreItemIdCandidates(itemId);
         if (candidates.length === 0)
             return res.status(400).json({ message: 'ID de publicación ML inválido' });
@@ -3962,8 +3964,10 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 }
             }
         }
-        // Si tampoco apareció, intentar resolver como user_product_id (UP), ej. MLAU...
-        if (!item || item.error) {
+        // Intentar resolver como user_product_id (UP), ej. MLAU...
+        // Se ejecuta también cuando /items/{id} responde, porque para MLAU puede devolver
+        // una vista incompleta y necesitamos expandir a todos los items reales asociados.
+        if (!item || item.error || shouldResolveAsUserProduct) {
             const upCandidates = yield resolveMercadoLibreUserProductItems(String(req.params.itemId || ''), mlToken.user_id, mlToken.access_token);
             userProductItemCandidates = upCandidates;
             for (const candidate of upCandidates) {
