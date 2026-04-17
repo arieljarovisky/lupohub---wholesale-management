@@ -944,13 +944,18 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
   },
 
-  /** Excel: todas las publicaciones ML + precio mayorista + último FOB por variante (requiere sesión). */
-  exportMercadolibrePublications: async (): Promise<void> => {
-    const blob = await getBlob('/integrations/mercadolibre/publications-export', 180000);
+  /** Excel: reporte completo de Mercado Libre por período (requiere sesión). */
+  exportMercadolibrePublications: async (params?: { from?: string; to?: string }): Promise<void> => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const blob = await getBlob(`/integrations/mercadolibre/publications-export${query.toString() ? '?' + query.toString() : ''}`, 180000);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `publicaciones_ml_por_articulo_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fromTag = params?.from ? params.from.replace(/-/g, '') : 'auto';
+    const toTag = params?.to ? params.to.replace(/-/g, '') : 'auto';
+    a.download = `reporte_ml_completo_${fromTag}_${toTag}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
