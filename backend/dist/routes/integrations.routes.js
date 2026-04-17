@@ -11,6 +11,7 @@ router.get('/status', integrations_controller_1.getIntegrationStatus);
 router.get('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.getLupoWebhookConfigEndpoint);
 router.post('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.saveLupoWebhookConfigEndpoint);
 router.post('/luposhop/webhook-test', auth_1.authMiddleware, lupoWebhookSettings_controller_1.testLupoWebhookEndpoint);
+router.post('/luposhop/sync-ml-stock-to-shop', auth_1.authMiddleware, lupoWebhookSettings_controller_1.syncLupoShopMlStockBulkEndpoint);
 // Mercado Libre
 router.get('/mercadolibre/auth', integrations_controller_1.getMercadoLibreAuthUrl);
 router.get('/mercadolibre/callback', integrations_controller_1.handleMercadoLibreCallback);

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testLupoWebhookEndpoint = exports.saveLupoWebhookConfigEndpoint = exports.getLupoWebhookConfigEndpoint = void 0;
+exports.syncLupoShopMlStockBulkEndpoint = exports.testLupoWebhookEndpoint = exports.saveLupoWebhookConfigEndpoint = exports.getLupoWebhookConfigEndpoint = void 0;
 const lupoStockWebhook_service_1 = require("../services/lupoStockWebhook.service");
 function isAdmin(req) {
     var _a;
@@ -76,3 +76,21 @@ const testLupoWebhookEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.testLupoWebhookEndpoint = testLupoWebhookEndpoint;
+/** Stock LupoHub de todas las variantes vinculadas a ML → webhook tienda online (lotes). */
+const syncLupoShopMlStockBulkEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    if (!isAdmin(req))
+        return unauthorized(res);
+    try {
+        const result = yield (0, lupoStockWebhook_service_1.syncAllMercadoLibreLinkedStockToLupoShop)();
+        if (!result.ok && ((_a = result.message) === null || _a === void 0 ? void 0 : _a.includes('deshabilitado'))) {
+            return res.status(400).json(result);
+        }
+        res.json(result);
+    }
+    catch (error) {
+        console.error('[LupoWebhook] sync masivo ML→tienda:', (error === null || error === void 0 ? void 0 : error.message) || error);
+        res.status(500).json({ message: 'Error en sincronización masiva hacia la tienda.' });
+    }
+});
+exports.syncLupoShopMlStockBulkEndpoint = syncLupoShopMlStockBulkEndpoint;

@@ -62,14 +62,17 @@ const defaultTransport = (_a) => __awaiter(void 0, [_a], void 0, function* ({ ur
     return { status: res.status, data: res.data };
 });
 function sanitizeUpdate(update) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     return {
         sku: (_a = update.sku) !== null && _a !== void 0 ? _a : null,
-        id: (_b = update.id) !== null && _b !== void 0 ? _b : null,
-        external_tn_id: (_c = update.external_tn_id) !== null && _c !== void 0 ? _c : null,
-        external_ml_id: (_d = update.external_ml_id) !== null && _d !== void 0 ? _d : null,
-        variant_id: (_e = update.variant_id) !== null && _e !== void 0 ? _e : null,
-        variant_sku: (_f = update.variant_sku) !== null && _f !== void 0 ? _f : null,
+        codigo_articulo: (_b = update.codigo_articulo) !== null && _b !== void 0 ? _b : null,
+        id: (_c = update.id) !== null && _c !== void 0 ? _c : null,
+        external_tn_id: (_d = update.external_tn_id) !== null && _d !== void 0 ? _d : null,
+        tienda_nube_product_id: (_e = update.tienda_nube_product_id) !== null && _e !== void 0 ? _e : null,
+        tienda_nube_variant_id: (_f = update.tienda_nube_variant_id) !== null && _f !== void 0 ? _f : null,
+        external_ml_id: (_g = update.external_ml_id) !== null && _g !== void 0 ? _g : null,
+        variant_id: (_h = update.variant_id) !== null && _h !== void 0 ? _h : null,
+        variant_sku: (_j = update.variant_sku) !== null && _j !== void 0 ? _j : null,
         stock_quantity: update.stock_quantity
     };
 }
@@ -80,9 +83,17 @@ function validatePayload(payload) {
         return errors;
     }
     payload.updates.forEach((u, index) => {
-        const hasIdentity = !!(u.sku || u.id || u.external_tn_id || u.external_ml_id);
-        if (!hasIdentity)
-            errors.push(`updates[${index}] debe incluir sku, id, external_tn_id o external_ml_id`);
+        const hasIdentity = !!(u.sku ||
+            u.id ||
+            u.external_tn_id ||
+            u.external_ml_id ||
+            u.tienda_nube_product_id ||
+            u.tienda_nube_variant_id ||
+            u.codigo_articulo ||
+            u.variant_id);
+        if (!hasIdentity) {
+            errors.push(`updates[${index}] debe incluir al menos: sku, codigo_articulo, id, variant_id, external_tn_id, external_ml_id o ids de Tienda Nube`);
+        }
         if (typeof u.stock_quantity !== 'number' || !Number.isFinite(u.stock_quantity) || u.stock_quantity < 0) {
             errors.push(`updates[${index}].stock_quantity debe ser número >= 0`);
         }

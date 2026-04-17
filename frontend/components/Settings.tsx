@@ -520,8 +520,16 @@ const Settings: React.FC<SettingsProps> = ({
     try {
       const res = await api.syncStockToTiendaNube();
       setStockSyncResult({ platform: 'Tienda Nube', updated: res.updated, errors: res.errors, logs: res.logs });
+      if (res.errors > 0) {
+        showToast('error', `Tienda Nube: ${res.updated} actualizadas, ${res.errors} errores.`);
+      } else if (res.updated > 0) {
+        showToast('success', `Tienda Nube: ${res.updated} variantes sincronizadas.`);
+      } else {
+        showToast('info', 'Tienda Nube: no hubo variantes para sincronizar (revisá vínculos TN).');
+      }
     } catch (e: any) {
       setStockSyncResult({ platform: 'Tienda Nube', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+      showToast('error', e?.message || 'Error al sincronizar stock a Tienda Nube');
     } finally {
       setTnStockSyncLoading(false);
     }
@@ -536,8 +544,16 @@ const Settings: React.FC<SettingsProps> = ({
     try {
       const res = await api.syncStockToMercadoLibre();
       setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
+      if (res.errors > 0) {
+        showToast('error', `Mercado Libre: ${res.updated} actualizadas, ${res.errors} errores.`);
+      } else if (res.updated > 0) {
+        showToast('success', `Mercado Libre: ${res.updated} variantes sincronizadas.`);
+      } else {
+        showToast('info', 'Mercado Libre: no hubo variantes para sincronizar (revisá vínculos ML).');
+      }
     } catch (e: any) {
       setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
+      showToast('error', e?.message || 'Error al sincronizar stock a Mercado Libre');
     } finally {
       setMlStockSyncLoading(false);
     }
