@@ -19,6 +19,58 @@ function flushPendingExternalSync(variantId: string): void {
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+/** Normaliza IDs de publicación ML y genera candidatos tolerantes (ej: MLAU123 -> MLA123 / MLU123). */
+function mlNormalizeItemId(raw: unknown): string {
+  let s = (raw ?? '').toString().trim();
+  if (!s) return '';
+  try { s = decodeURIComponent(s); } catch {}
+  s = s.replace(/\s+/g, '').toUpperCase();
+  if (/^https?:\/\//i.test(s)) {
+    const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+    if (m?.[1]) s = m[1].toUpperCase();
+  }
+  const mDash = s.match(/^(ML[A-Z]{0,5})-(\d+)$/);
+  if (mDash) s = `${mDash[1]}${mDash[2]}`;
+  const legacy = s.match(/^ML-(\d+)$/);
+  if (legacy) s = `MLA${legacy[1]}`;
+  return s;
+}
+
+function mlItemIdCandidates(raw: unknown): string[] {
+  const base = mlNormalizeItemId(raw);
+  if (!base) return [];
+  if (/^\d+$/.test(base)) {
+    const sites = ['MLU', 'MLA', 'MLB', 'MLM', 'MCO', 'MLC', 'MPE', 'MEC', 'MLV'];
+    return sites.map((site) => `${site}${base}`);
+  }
+  const out: string[] = [base];
+  const m = base.match(/^(ML[A-Z]{2,6})(\d+)$/);
+  if (m) {
+    const prefix = m[1];
+    const num = m[2];
+    if (prefix.length > 3) out.push(`${prefix.slice(0, 3)}${num}`);
+    if (prefix.length > 3) out.push(`ML${prefix[prefix.length - 1]}${num}`);
+    if (prefix === 'MLAU') out.push(`MLA${num}`);
+  }
+  return Array.from(new Set(out.filter(Boolean)));
+}
+
+async function resolveReachableMlItemId(rawItemId: string, headers: Record<string, string>): Promise<string | null> {
+  const candidates = mlItemIdCandidates(rawItemId);
+  for (const c of candidates) {
+    try {
+      const r = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
+        headers,
+        validateStatus: () => true
+      });
+      if (r.status === 200 && r.data && !r.data.error) return c;
+    } catch {
+      // probar siguiente candidato
+    }
+  }
+  return null;
+}
+
 async function withRetry429409<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   try {
     return await fn();
@@ -419,28 +471,33 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
     'Content-Type': 'application/json'
   };
   try {
-    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
+    const resolvedItemId = await resolveReachableMlItemId(itemId, headers);
+    if (!resolvedItemId) {
+      console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}"`);
+      return false;
+    }
+    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${resolvedItemId}`, { headers }));
     const item = getRes.data;
     const variations: any[] = item.variations || [];
     if (variations.length === 0) {
       await withRetry429409(() =>
-        axios.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: stock }, { headers })
+        axios.put(`https://api.mercadolibre.com/items/${resolvedItemId}`, { available_quantity: stock }, { headers })
       );
-      console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
+      console.log(`[ML Stock] Actualizado publicación única ${resolvedItemId} a ${stock} unidades`);
       return true;
     }
     if (variations.length === 1) {
       await withRetry429409(() =>
         axios.put(
-          `https://api.mercadolibre.com/items/${itemId}`,
+          `https://api.mercadolibre.com/items/${resolvedItemId}`,
           { variations: [{ id: variations[0].id, available_quantity: stock }] },
           { headers }
         )
       );
-      console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
+      console.log(`[ML Stock] Actualizado publicación única (1 variación) ${resolvedItemId} a ${stock} unidades`);
       return true;
     }
-    console.log(`[ML Stock] Item ${itemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
+    console.log(`[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
     return false;
   } catch (e: any) {
     console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, e.response?.data || e.message);
@@ -468,17 +525,22 @@ export const updateMercadoLibreStockByVariant = async (
     'Authorization': `Bearer ${integration.access_token}`,
     'Content-Type': 'application/json'
   };
+  const resolvedItemId = await resolveReachableMlItemId(itemId, headers);
+  if (!resolvedItemId) {
+    console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}" (variación ${variationId})`);
+    return false;
+  }
 
   // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
   try {
     await withRetry429409(() =>
       axios.put(
-        `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`,
+        `https://api.mercadolibre.com/items/${resolvedItemId}/variations/${variationId}`,
         { available_quantity: stock },
         { headers }
       )
     );
-    console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
+    console.log(`[ML Stock] Actualizado item ${resolvedItemId} variación ${variationId} a ${stock} unidades`);
     return true;
   } catch (subError: any) {
     const status = subError.response?.status;
@@ -486,7 +548,7 @@ export const updateMercadoLibreStockByVariant = async (
     // Si es 400/404/405, probar método completo (GET + PUT con todas las variaciones)
     if (status === 400 || status === 404 || status === 405 || (status >= 400 && status < 500)) {
       try {
-        return await updateMercadoLibreStockByItemUpdate(itemId, variationId, stock, integration.access_token);
+        return await updateMercadoLibreStockByItemUpdate(resolvedItemId, variationId, stock, integration.access_token);
       } catch (fullError: any) {
         console.error('[ML Stock] Error método completo:', fullError.response?.data || fullError.message);
         return false;

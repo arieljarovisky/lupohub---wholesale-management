@@ -62,6 +62,70 @@ function flushPendingExternalSync(variantId) {
     }
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** Normaliza IDs de publicación ML y genera candidatos tolerantes (ej: MLAU123 -> MLA123 / MLU123). */
+function mlNormalizeItemId(raw) {
+    let s = (raw !== null && raw !== void 0 ? raw : '').toString().trim();
+    if (!s)
+        return '';
+    try {
+        s = decodeURIComponent(s);
+    }
+    catch (_a) { }
+    s = s.replace(/\s+/g, '').toUpperCase();
+    if (/^https?:\/\//i.test(s)) {
+        const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+        if (m === null || m === void 0 ? void 0 : m[1])
+            s = m[1].toUpperCase();
+    }
+    const mDash = s.match(/^(ML[A-Z]{0,5})-(\d+)$/);
+    if (mDash)
+        s = `${mDash[1]}${mDash[2]}`;
+    const legacy = s.match(/^ML-(\d+)$/);
+    if (legacy)
+        s = `MLA${legacy[1]}`;
+    return s;
+}
+function mlItemIdCandidates(raw) {
+    const base = mlNormalizeItemId(raw);
+    if (!base)
+        return [];
+    if (/^\d+$/.test(base)) {
+        const sites = ['MLU', 'MLA', 'MLB', 'MLM', 'MCO', 'MLC', 'MPE', 'MEC', 'MLV'];
+        return sites.map((site) => `${site}${base}`);
+    }
+    const out = [base];
+    const m = base.match(/^(ML[A-Z]{2,6})(\d+)$/);
+    if (m) {
+        const prefix = m[1];
+        const num = m[2];
+        if (prefix.length > 3)
+            out.push(`${prefix.slice(0, 3)}${num}`);
+        if (prefix.length > 3)
+            out.push(`ML${prefix[prefix.length - 1]}${num}`);
+        if (prefix === 'MLAU')
+            out.push(`MLA${num}`);
+    }
+    return Array.from(new Set(out.filter(Boolean)));
+}
+function resolveReachableMlItemId(rawItemId, headers) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const candidates = mlItemIdCandidates(rawItemId);
+        for (const c of candidates) {
+            try {
+                const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${encodeURIComponent(c)}`, {
+                    headers,
+                    validateStatus: () => true
+                });
+                if (r.status === 200 && r.data && !r.data.error)
+                    return c;
+            }
+            catch (_a) {
+                // probar siguiente candidato
+            }
+        }
+        return null;
+    });
+}
 function withRetry429409(fn_1) {
     return __awaiter(this, arguments, void 0, function* (fn, retries = 2) {
         var _a;
@@ -369,20 +433,25 @@ const updateMercadoLibreStockByItem = (itemId, stock) => __awaiter(void 0, void 
         'Content-Type': 'application/json'
     };
     try {
-        const getRes = yield withRetry429409(() => axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
+        const resolvedItemId = yield resolveReachableMlItemId(itemId, headers);
+        if (!resolvedItemId) {
+            console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}"`);
+            return false;
+        }
+        const getRes = yield withRetry429409(() => axios_1.default.get(`https://api.mercadolibre.com/items/${resolvedItemId}`, { headers }));
         const item = getRes.data;
         const variations = item.variations || [];
         if (variations.length === 0) {
-            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: stock }, { headers }));
-            console.log(`[ML Stock] Actualizado publicación única ${itemId} a ${stock} unidades`);
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${resolvedItemId}`, { available_quantity: stock }, { headers }));
+            console.log(`[ML Stock] Actualizado publicación única ${resolvedItemId} a ${stock} unidades`);
             return true;
         }
         if (variations.length === 1) {
-            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: [{ id: variations[0].id, available_quantity: stock }] }, { headers }));
-            console.log(`[ML Stock] Actualizado publicación única (1 variación) ${itemId} a ${stock} unidades`);
+            yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${resolvedItemId}`, { variations: [{ id: variations[0].id, available_quantity: stock }] }, { headers }));
+            console.log(`[ML Stock] Actualizado publicación única (1 variación) ${resolvedItemId} a ${stock} unidades`);
             return true;
         }
-        console.log(`[ML Stock] Item ${itemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
+        console.log(`[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
         return false;
     }
     catch (e) {
@@ -404,10 +473,15 @@ const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __await
         'Authorization': `Bearer ${integration.access_token}`,
         'Content-Type': 'application/json'
     };
+    const resolvedItemId = yield resolveReachableMlItemId(itemId, headers);
+    if (!resolvedItemId) {
+        console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}" (variación ${variationId})`);
+        return false;
+    }
     // 1) Intentar actualización por subrecurso (algunas cuentas lo aceptan)
     try {
-        yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`, { available_quantity: stock }, { headers }));
-        console.log(`[ML Stock] Actualizado item ${itemId} variación ${variationId} a ${stock} unidades`);
+        yield withRetry429409(() => axios_1.default.put(`https://api.mercadolibre.com/items/${resolvedItemId}/variations/${variationId}`, { available_quantity: stock }, { headers }));
+        console.log(`[ML Stock] Actualizado item ${resolvedItemId} variación ${variationId} a ${stock} unidades`);
         return true;
     }
     catch (subError) {
@@ -416,7 +490,7 @@ const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __await
         // Si es 400/404/405, probar método completo (GET + PUT con todas las variaciones)
         if (status === 400 || status === 404 || status === 405 || (status >= 400 && status < 500)) {
             try {
-                return yield updateMercadoLibreStockByItemUpdate(itemId, variationId, stock, integration.access_token);
+                return yield updateMercadoLibreStockByItemUpdate(resolvedItemId, variationId, stock, integration.access_token);
             }
             catch (fullError) {
                 console.error('[ML Stock] Error método completo:', ((_c = fullError.response) === null || _c === void 0 ? void 0 : _c.data) || fullError.message);
