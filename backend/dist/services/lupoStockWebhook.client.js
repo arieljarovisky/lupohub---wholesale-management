@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.lupoStockWebhookClient = exports.LupoStockWebhookClient = void 0;
+exports.buildLupoStockWebhookConfig = buildLupoStockWebhookConfig;
 exports.getLupoStockWebhookConfigFromEnv = getLupoStockWebhookConfigFromEnv;
 const axios_1 = __importDefault(require("axios"));
 const crypto_1 = require("crypto");
@@ -24,21 +25,33 @@ function envInt(name, fallback) {
         return fallback;
     return Math.floor(raw);
 }
-function getLupoStockWebhookConfigFromEnv() {
-    const endpointUrl = (process.env.HUB_STOCK_WEBHOOK_URL || '').trim();
-    const apiKey = (process.env.HUB_API_KEY || '').trim();
-    const secret = (process.env.HUB_WEBHOOK_SECRET || '').trim();
-    const enabledByFlag = !['0', 'false', 'off'].includes((process.env.HUB_STOCK_WEBHOOK_ENABLED || '1').toLowerCase());
-    const enabled = enabledByFlag && !!endpointUrl && !!apiKey && !!secret;
+function buildLupoStockWebhookConfig(input) {
+    var _a, _b, _c;
+    const endpointUrl = (input.endpointUrl || '').trim();
+    const apiKey = (input.apiKey || '').trim();
+    const secret = (input.secret || '').trim();
+    const enabled = !!input.enabled && !!endpointUrl && !!apiKey && !!secret;
     return {
         enabled,
         endpointUrl,
         apiKey,
         secret,
+        timeoutMs: Math.max(1000, Math.floor(Number((_a = input.timeoutMs) !== null && _a !== void 0 ? _a : 10000) || 10000)),
+        maxRetries5xx: Math.max(0, Math.floor(Number((_b = input.maxRetries5xx) !== null && _b !== void 0 ? _b : 4) || 4)),
+        backoffBaseMs: Math.max(200, Math.floor(Number((_c = input.backoffBaseMs) !== null && _c !== void 0 ? _c : 1000) || 1000))
+    };
+}
+function getLupoStockWebhookConfigFromEnv() {
+    const enabledByFlag = !['0', 'false', 'off'].includes((process.env.HUB_STOCK_WEBHOOK_ENABLED || '1').toLowerCase());
+    return buildLupoStockWebhookConfig({
+        enabled: enabledByFlag,
+        endpointUrl: process.env.HUB_STOCK_WEBHOOK_URL || '',
+        apiKey: process.env.HUB_API_KEY || '',
+        secret: process.env.HUB_WEBHOOK_SECRET || '',
         timeoutMs: Math.max(1000, envInt('HUB_STOCK_WEBHOOK_TIMEOUT_MS', 10000)),
         maxRetries5xx: Math.max(0, envInt('HUB_STOCK_WEBHOOK_MAX_RETRIES', 4)),
         backoffBaseMs: Math.max(200, envInt('HUB_STOCK_WEBHOOK_BACKOFF_BASE_MS', 1000))
-    };
+    });
 }
 const defaultTransport = (_a) => __awaiter(void 0, [_a], void 0, function* ({ url, body, headers, timeoutMs }) {
     const res = yield axios_1.default.post(url, body, {

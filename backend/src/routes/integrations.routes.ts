@@ -56,10 +56,18 @@ import {
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { authMiddleware } from '../middleware/auth';
+import {
+  getLupoWebhookConfigEndpoint,
+  saveLupoWebhookConfigEndpoint,
+  testLupoWebhookEndpoint
+} from '../controllers/lupoWebhookSettings.controller';
 
 const router = Router();
 
 router.get('/status', getIntegrationStatus);
+router.get('/luposhop/webhook-config', authMiddleware, getLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-config', authMiddleware, saveLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-test', authMiddleware, testLupoWebhookEndpoint);
 
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);

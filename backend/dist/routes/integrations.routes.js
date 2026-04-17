@@ -5,8 +5,12 @@ const integrations_controller_1 = require("../controllers/integrations.controlle
 const mercadolibrePublicationsExport_controller_1 = require("../controllers/mercadolibrePublicationsExport.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const auth_1 = require("../middleware/auth");
+const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
 const router = (0, express_1.Router)();
 router.get('/status', integrations_controller_1.getIntegrationStatus);
+router.get('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.getLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.saveLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-test', auth_1.authMiddleware, lupoWebhookSettings_controller_1.testLupoWebhookEndpoint);
 // Mercado Libre
 router.get('/mercadolibre/auth', integrations_controller_1.getMercadoLibreAuthUrl);
 router.get('/mercadolibre/callback', integrations_controller_1.handleMercadoLibreCallback);

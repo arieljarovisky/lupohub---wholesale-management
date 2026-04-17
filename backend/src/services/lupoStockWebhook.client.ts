@@ -28,6 +28,16 @@ export interface LupoStockWebhookConfig {
   backoffBaseMs: number;
 }
 
+export interface LupoStockWebhookConfigInput {
+  enabled?: boolean;
+  endpointUrl?: string;
+  apiKey?: string;
+  secret?: string;
+  timeoutMs?: number;
+  maxRetries5xx?: number;
+  backoffBaseMs?: number;
+}
+
 export interface LupoStockWebhookResult {
   ok: boolean;
   duplicate?: boolean;
@@ -64,21 +74,35 @@ function envInt(name: string, fallback: number): number {
   return Math.floor(raw);
 }
 
-export function getLupoStockWebhookConfigFromEnv(): LupoStockWebhookConfig {
-  const endpointUrl = (process.env.HUB_STOCK_WEBHOOK_URL || '').trim();
-  const apiKey = (process.env.HUB_API_KEY || '').trim();
-  const secret = (process.env.HUB_WEBHOOK_SECRET || '').trim();
-  const enabledByFlag = !['0', 'false', 'off'].includes((process.env.HUB_STOCK_WEBHOOK_ENABLED || '1').toLowerCase());
-  const enabled = enabledByFlag && !!endpointUrl && !!apiKey && !!secret;
+export function buildLupoStockWebhookConfig(input: LupoStockWebhookConfigInput): LupoStockWebhookConfig {
+  const endpointUrl = (input.endpointUrl || '').trim();
+  const apiKey = (input.apiKey || '').trim();
+  const secret = (input.secret || '').trim();
+  const enabled = !!input.enabled && !!endpointUrl && !!apiKey && !!secret;
   return {
     enabled,
     endpointUrl,
     apiKey,
     secret,
+    timeoutMs: Math.max(1000, Math.floor(Number(input.timeoutMs ?? 10000) || 10000)),
+    maxRetries5xx: Math.max(0, Math.floor(Number(input.maxRetries5xx ?? 4) || 4)),
+    backoffBaseMs: Math.max(200, Math.floor(Number(input.backoffBaseMs ?? 1000) || 1000))
+  };
+}
+
+export function getLupoStockWebhookConfigFromEnv(): LupoStockWebhookConfig {
+  const enabledByFlag = !['0', 'false', 'off'].includes(
+    (process.env.HUB_STOCK_WEBHOOK_ENABLED || '1').toLowerCase()
+  );
+  return buildLupoStockWebhookConfig({
+    enabled: enabledByFlag,
+    endpointUrl: process.env.HUB_STOCK_WEBHOOK_URL || '',
+    apiKey: process.env.HUB_API_KEY || '',
+    secret: process.env.HUB_WEBHOOK_SECRET || '',
     timeoutMs: Math.max(1000, envInt('HUB_STOCK_WEBHOOK_TIMEOUT_MS', 10000)),
     maxRetries5xx: Math.max(0, envInt('HUB_STOCK_WEBHOOK_MAX_RETRIES', 4)),
     backoffBaseMs: Math.max(200, envInt('HUB_STOCK_WEBHOOK_BACKOFF_BASE_MS', 1000))
-  };
+  });
 }
 
 const defaultTransport: WebhookTransport = async ({ url, body, headers, timeoutMs }) => {

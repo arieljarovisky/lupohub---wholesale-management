@@ -887,6 +887,56 @@ export const api = {
   },
 
   // --- INTEGRATIONS ---
+  getLupoWebhookConfig: async (): Promise<{
+    enabled: boolean;
+    webhookUrl: string;
+    hasApiKey: boolean;
+    hasWebhookSecret: boolean;
+    apiKeyMasked: string;
+    webhookSecretMasked: string;
+    timeoutMs: number;
+    maxRetries: number;
+    backoffBaseMs: number;
+    source: 'db' | 'env';
+  }> => {
+    return handleRequest(async () => {
+      return await request<any>('/integrations/luposhop/webhook-config', 'GET');
+    }, {
+      enabled: false,
+      webhookUrl: '',
+      hasApiKey: false,
+      hasWebhookSecret: false,
+      apiKeyMasked: '',
+      webhookSecretMasked: '',
+      timeoutMs: 10000,
+      maxRetries: 4,
+      backoffBaseMs: 1000,
+      source: 'env'
+    }, 'getLupoWebhookConfig');
+  },
+
+  saveLupoWebhookConfig: async (payload: {
+    enabled: boolean;
+    webhookUrl: string;
+    apiKey: string;
+    webhookSecret?: string;
+    keepExistingApiKey: boolean;
+    keepExistingSecret: boolean;
+    timeoutMs: number;
+    maxRetries: number;
+    backoffBaseMs: number;
+  }): Promise<{ ok: boolean; config: any }> => {
+    return handleRequest(async () => {
+      return await request<{ ok: boolean; config: any }>('/integrations/luposhop/webhook-config', 'POST', payload);
+    }, { ok: false, config: null }, 'saveLupoWebhookConfig');
+  },
+
+  testLupoWebhook: async (payload?: { webhookId?: string; updates?: any[] }): Promise<any> => {
+    return handleRequest(async () => {
+      return await request<any>('/integrations/luposhop/webhook-test', 'POST', payload || {});
+    }, { ok: false }, 'testLupoWebhook');
+  },
+
   getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }> => {
     return handleRequest(async () => {
       return await request<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>('/integrations/status', 'GET');

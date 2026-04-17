@@ -183,6 +183,25 @@ const Settings: React.FC<SettingsProps> = ({
   // Integration Logic
   const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>({ mercadolibre: false, tiendanube: false });
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
+  const [lupoWebhookConfig, setLupoWebhookConfig] = useState({
+    enabled: false,
+    webhookUrl: '',
+    apiKey: '',
+    webhookSecret: '',
+    keepExistingApiKey: true,
+    keepExistingSecret: true,
+    hasApiKey: false,
+    hasWebhookSecret: false,
+    apiKeyMasked: '',
+    webhookSecretMasked: '',
+    timeoutMs: 10000,
+    maxRetries: 4,
+    backoffBaseMs: 1000,
+    source: 'env' as 'db' | 'env'
+  });
+  const [savingLupoWebhook, setSavingLupoWebhook] = useState(false);
+  const [testingLupoWebhook, setTestingLupoWebhook] = useState(false);
+  const [lupoWebhookLastResult, setLupoWebhookLastResult] = useState<any | null>(null);
 
   // Mercado Libre Test Connection
   const [mlTestLoading, setMlTestLoading] = useState(false);
@@ -292,6 +311,31 @@ const Settings: React.FC<SettingsProps> = ({
     };
     fetchStatus();
 
+    const fetchLupoWebhookConfig = async () => {
+      try {
+        const cfg = await api.getLupoWebhookConfig();
+        setLupoWebhookConfig(prev => ({
+          ...prev,
+          enabled: !!cfg.enabled,
+          webhookUrl: cfg.webhookUrl || '',
+          hasApiKey: !!cfg.hasApiKey,
+          hasWebhookSecret: !!cfg.hasWebhookSecret,
+          apiKeyMasked: cfg.apiKeyMasked || '',
+          webhookSecretMasked: cfg.webhookSecretMasked || '',
+          timeoutMs: Number(cfg.timeoutMs) || 10000,
+          maxRetries: Number(cfg.maxRetries) || 4,
+          backoffBaseMs: Number(cfg.backoffBaseMs) || 1000,
+          source: cfg.source || 'env',
+          webhookSecret: '',
+          keepExistingApiKey: true,
+          keepExistingSecret: true
+        }));
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchLupoWebhookConfig();
+
     // Fetch ML auto message config
     const fetchMLAutoMessage = async () => {
       try {
@@ -365,6 +409,63 @@ const Settings: React.FC<SettingsProps> = ({
       setMlTestResult({ success: false, message: 'Error de conexión', details: e.message });
     } finally {
       setMlTestLoading(false);
+    }
+  };
+
+  const handleSaveLupoWebhookConfig = async () => {
+    setSavingLupoWebhook(true);
+    try {
+      const res = await api.saveLupoWebhookConfig({
+        enabled: lupoWebhookConfig.enabled,
+        webhookUrl: lupoWebhookConfig.webhookUrl,
+        apiKey: lupoWebhookConfig.apiKey,
+        webhookSecret: lupoWebhookConfig.webhookSecret,
+        keepExistingApiKey: lupoWebhookConfig.keepExistingApiKey,
+        keepExistingSecret: lupoWebhookConfig.keepExistingSecret,
+        timeoutMs: lupoWebhookConfig.timeoutMs,
+        maxRetries: lupoWebhookConfig.maxRetries,
+        backoffBaseMs: lupoWebhookConfig.backoffBaseMs
+      });
+      const cfg = res?.config;
+      if (cfg) {
+        setLupoWebhookConfig(prev => ({
+          ...prev,
+          enabled: !!cfg.enabled,
+          webhookUrl: cfg.webhookUrl || '',
+          hasApiKey: !!cfg.hasApiKey,
+          hasWebhookSecret: !!cfg.hasWebhookSecret,
+          apiKeyMasked: cfg.apiKeyMasked || '',
+          webhookSecretMasked: cfg.webhookSecretMasked || '',
+          timeoutMs: Number(cfg.timeoutMs) || 10000,
+          maxRetries: Number(cfg.maxRetries) || 4,
+          backoffBaseMs: Number(cfg.backoffBaseMs) || 1000,
+          source: cfg.source || 'db',
+          webhookSecret: '',
+          keepExistingApiKey: true,
+          keepExistingSecret: true
+        }));
+      }
+      showToast('success', 'Configuración de webhook guardada.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudo guardar la configuración del webhook.');
+    } finally {
+      setSavingLupoWebhook(false);
+    }
+  };
+
+  const handleTestLupoWebhook = async () => {
+    setTestingLupoWebhook(true);
+    setLupoWebhookLastResult(null);
+    try {
+      const result = await api.testLupoWebhook();
+      setLupoWebhookLastResult(result);
+      if (result?.ok) showToast('success', result?.duplicate ? 'Prueba OK (idempotente/duplicado).' : 'Prueba de webhook enviada OK.');
+      else showToast('error', `Prueba fallida (${result?.status || 'sin status'}).`);
+    } catch (e: any) {
+      setLupoWebhookLastResult({ ok: false, error: e?.message || 'Error' });
+      showToast('error', e?.message || 'Error enviando prueba de webhook.');
+    } finally {
+      setTestingLupoWebhook(false);
     }
   };
 
@@ -1583,6 +1684,141 @@ const Settings: React.FC<SettingsProps> = ({
             <p className="text-xs text-slate-500 mt-3">
               Los productos de TN y ML no se guardan en la base de datos; solo se usa el vínculo que vos cargás para enviar stock desde LupoHub hacia cada plataforma.
             </p>
+          </div>
+
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+            <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex flex-wrap justify-between items-center gap-3">
+              <div className="flex items-center gap-3">
+                <div className="bg-violet-600/20 p-2.5 rounded-2xl text-violet-400"><Link size={24} /></div>
+                <div>
+                  <h3 className="font-black text-white text-lg">Tienda Lupo (Webhook de stock)</h3>
+                  <p className="text-xs text-slate-500">Fuente de verdad: LupoHub envía stock firmado con HMAC.</p>
+                </div>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-2 ${lupoWebhookConfig.enabled ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-slate-700/40 text-slate-400 border-slate-600'}`}>
+                {lupoWebhookConfig.enabled ? <Check size={12} /> : <Power size={12} />}
+                {lupoWebhookConfig.enabled ? 'ACTIVO' : 'INACTIVO'}
+              </span>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="text-xs text-slate-400">
+                  Webhook URL
+                  <input
+                    type="url"
+                    value={lupoWebhookConfig.webhookUrl}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
+                    placeholder="https://tu-backend.com/api/hub/webhook/stock"
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  API Key
+                  <input
+                    type="text"
+                    value={lupoWebhookConfig.apiKey}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, apiKey: e.target.value, keepExistingApiKey: false }))}
+                    placeholder={lupoWebhookConfig.hasApiKey ? `Actual: ${lupoWebhookConfig.apiKeyMasked}` : 'Ingresá tu HUB_API_KEY'}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Webhook Secret (HMAC)
+                  <input
+                    type="password"
+                    value={lupoWebhookConfig.webhookSecret}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, webhookSecret: e.target.value, keepExistingSecret: false }))}
+                    placeholder={lupoWebhookConfig.hasWebhookSecret ? `Actual: ${lupoWebhookConfig.webhookSecretMasked}` : 'Ingresá tu HUB_WEBHOOK_SECRET'}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Habilitado
+                  <select
+                    value={lupoWebhookConfig.enabled ? '1' : '0'}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, enabled: e.target.value === '1' }))}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  >
+                    <option value="1">Sí</option>
+                    <option value="0">No</option>
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="text-xs text-slate-400">
+                  Timeout (ms)
+                  <input
+                    type="number"
+                    min={1000}
+                    value={lupoWebhookConfig.timeoutMs}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, timeoutMs: Math.max(1000, Number(e.target.value) || 10000) }))}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Retries 5xx
+                  <input
+                    type="number"
+                    min={0}
+                    value={lupoWebhookConfig.maxRetries}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, maxRetries: Math.max(0, Number(e.target.value) || 0) }))}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Backoff base (ms)
+                  <input
+                    type="number"
+                    min={200}
+                    value={lupoWebhookConfig.backoffBaseMs}
+                    onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, backoffBaseMs: Math.max(200, Number(e.target.value) || 1000) }))}
+                    className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 text-sm"
+                  />
+                </label>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={lupoWebhookConfig.keepExistingApiKey}
+                  onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, keepExistingApiKey: e.target.checked }))}
+                />
+                Mantener API key actual si el campo de API key está vacío
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={lupoWebhookConfig.keepExistingSecret}
+                  onChange={(e) => setLupoWebhookConfig(prev => ({ ...prev, keepExistingSecret: e.target.checked }))}
+                />
+                Mantener secreto actual si el campo de secret está vacío
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleSaveLupoWebhookConfig}
+                  disabled={savingLupoWebhook}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {savingLupoWebhook ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  GUARDAR WEBHOOK
+                </button>
+                <button
+                  onClick={handleTestLupoWebhook}
+                  disabled={testingLupoWebhook}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {testingLupoWebhook ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  PROBAR WEBHOOK
+                </button>
+              </div>
+              {lupoWebhookLastResult && (
+                <div className={`text-xs rounded-xl border px-3 py-2 ${lupoWebhookLastResult.ok ? 'border-emerald-600/40 bg-emerald-900/20 text-emerald-200' : 'border-rose-600/40 bg-rose-900/20 text-rose-200'}`}>
+                  Resultado: {lupoWebhookLastResult.ok ? 'OK' : 'ERROR'} · webhookId: {lupoWebhookLastResult.webhookId || 'n/a'} · status: {lupoWebhookLastResult.status || 'n/a'} · intento: {lupoWebhookLastResult.attempt ?? 'n/a'}{lupoWebhookLastResult.duplicate ? ' · duplicate=true' : ''}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500">
+                Config actual tomada de: <strong className="text-slate-300">{lupoWebhookConfig.source === 'db' ? 'base de datos' : 'variables de entorno'}</strong>.
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
