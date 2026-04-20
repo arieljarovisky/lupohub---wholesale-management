@@ -886,12 +886,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </button>
                               ) : null}
                             </td>
-                            <td className="py-2.5 px-3 text-sm">
-                              <div className="flex flex-col leading-tight">
-                                <span className="text-slate-200">{row.colorName}</span>
-                                <span className="text-[11px] text-slate-500 font-mono">{row.colorCode || '—'}</span>
-                              </div>
-                            </td>
+                            <td className="py-2.5 px-3 text-slate-200 text-sm font-mono">{row.colorCode || '—'}</td>
                             <td className="py-2 px-2">
                               <div className="flex items-center gap-1.5 justify-center">
                                 <input
