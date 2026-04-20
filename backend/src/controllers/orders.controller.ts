@@ -664,7 +664,15 @@ export const emitirFactura = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('emitirFactura:', error);
     const msg = error?.message || 'Error emitiendo factura AFIP';
-    const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
+    const upstreamStatus = Number(error?.response?.status || error?.cause?.response?.status || 0);
+    const msgLower = String(msg).toLowerCase();
+    const status = msgLower.includes('no configurado')
+      ? 503
+      : msgLower.includes('ya tiene')
+        ? 409
+        : (upstreamStatus === 503 || msgLower.includes('service unavailable') || msgLower.includes('(503)')
+            ? 503
+            : 500);
     res.status(status).json({ message: msg });
   }
 };
@@ -911,7 +919,13 @@ export const emitirNotaCredito = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('emitirNotaCredito:', error);
     const msg = error?.message || 'Error emitiendo nota de crédito AFIP';
-    const status = msg.includes('no configurado') ? 503 : 500;
+    const upstreamStatus = Number(error?.response?.status || error?.cause?.response?.status || 0);
+    const msgLower = String(msg).toLowerCase();
+    const status = msgLower.includes('no configurado')
+      ? 503
+      : (upstreamStatus === 503 || msgLower.includes('service unavailable') || msgLower.includes('(503)')
+          ? 503
+          : 500);
     res.status(status).json({ message: msg });
   }
 };

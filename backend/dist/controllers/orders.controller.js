@@ -622,7 +622,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -673,7 +673,15 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     catch (error) {
         console.error('emitirFactura:', error);
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo factura AFIP';
-        const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
+        const upstreamStatus = Number(((_f = error === null || error === void 0 ? void 0 : error.response) === null || _f === void 0 ? void 0 : _f.status) || ((_h = (_g = error === null || error === void 0 ? void 0 : error.cause) === null || _g === void 0 ? void 0 : _g.response) === null || _h === void 0 ? void 0 : _h.status) || 0);
+        const msgLower = String(msg).toLowerCase();
+        const status = msgLower.includes('no configurado')
+            ? 503
+            : msgLower.includes('ya tiene')
+                ? 409
+                : (upstreamStatus === 503 || msgLower.includes('service unavailable') || msgLower.includes('(503)')
+                    ? 503
+                    : 500);
         res.status(status).json({ message: msg });
     }
 });
@@ -736,7 +744,7 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getOrderCreditNotes = getOrderCreditNotes;
 /** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
 const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d, _e;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -892,7 +900,13 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
     catch (error) {
         console.error('emitirNotaCredito:', error);
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo nota de crédito AFIP';
-        const status = msg.includes('no configurado') ? 503 : 500;
+        const upstreamStatus = Number(((_c = error === null || error === void 0 ? void 0 : error.response) === null || _c === void 0 ? void 0 : _c.status) || ((_e = (_d = error === null || error === void 0 ? void 0 : error.cause) === null || _d === void 0 ? void 0 : _d.response) === null || _e === void 0 ? void 0 : _e.status) || 0);
+        const msgLower = String(msg).toLowerCase();
+        const status = msgLower.includes('no configurado')
+            ? 503
+            : (upstreamStatus === 503 || msgLower.includes('service unavailable') || msgLower.includes('(503)')
+                ? 503
+                : 500);
         res.status(status).json({ message: msg });
     }
 });

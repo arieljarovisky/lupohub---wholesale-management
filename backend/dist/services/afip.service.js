@@ -77,6 +77,63 @@ const IVA_RESPONSABLE_INSCRIPTO = 1;
 const CONSUMIDOR_FINAL = 5;
 /** Alícuota IVA 21% = Id 5 */
 const ID_IVA_21 = 5;
+const AFIP_RETRY_MS = 1200;
+const AFIP_MAX_RETRIES = 2;
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function getHttpStatusFromError(error) {
+    var _a, _b, _c;
+    const direct = Number((_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.status);
+    if (Number.isFinite(direct))
+        return direct;
+    const nested = Number((_c = (_b = error === null || error === void 0 ? void 0 : error.cause) === null || _b === void 0 ? void 0 : _b.response) === null || _c === void 0 ? void 0 : _c.status);
+    if (Number.isFinite(nested))
+        return nested;
+    const asString = String((error === null || error === void 0 ? void 0 : error.message) || '');
+    const m = asString.match(/\bstatus code (\d{3})\b/i);
+    if (m)
+        return Number(m[1]);
+    return undefined;
+}
+function isAfipServiceUnavailable(error) {
+    const status = getHttpStatusFromError(error);
+    if (status === 503)
+        return true;
+    const msg = String((error === null || error === void 0 ? void 0 : error.message) || '').toLowerCase();
+    return msg.includes('service unavailable') || msg.includes('código de error 503');
+}
+function buildAfipError(operation, error) {
+    const status = getHttpStatusFromError(error);
+    const baseMsg = String((error === null || error === void 0 ? void 0 : error.message) || '');
+    if (status === 503 || isAfipServiceUnavailable(error)) {
+        return new Error(`AFIP/ARCA no disponible temporalmente (503) al ${operation}. Reintentá en unos minutos.`);
+    }
+    if (status) {
+        return new Error(`Error AFIP (${status}) al ${operation}. ${baseMsg || 'Revisá el estado del servicio e intentá nuevamente.'}`);
+    }
+    return new Error(baseMsg || `Error AFIP al ${operation}.`);
+}
+function executeWithAfipRetry(operation, fn) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let lastError;
+        for (let attempt = 0; attempt <= AFIP_MAX_RETRIES; attempt += 1) {
+            try {
+                return yield fn();
+            }
+            catch (error) {
+                lastError = error;
+                const shouldRetry = isAfipServiceUnavailable(error) && attempt < AFIP_MAX_RETRIES;
+                if (!shouldRetry)
+                    break;
+                const waitMs = AFIP_RETRY_MS * (attempt + 1);
+                console.warn(`[AFIP] ${operation}: intento ${attempt + 1} falló por 503. Reintentando en ${waitMs}ms...`);
+                yield sleep(waitMs);
+            }
+        }
+        throw buildAfipError(operation, lastError);
+    });
+}
 function readCertOrKey(envVar, value, description) {
     let p = value.trim();
     if (!p)
@@ -258,7 +315,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+        const lastVoucher = Number(yield executeWithAfipRetry('obtener último comprobante', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte)));
         const numeroFactura = lastVoucher + 1;
         const data = {
             CantReg: 1,
@@ -286,7 +343,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
                 { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
             ]
         };
-        const res = yield afip.ElectronicBilling.createVoucher(data);
+        const res = yield executeWithAfipRetry('emitir factura', () => afip.ElectronicBilling.createVoucher(data));
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
@@ -394,7 +451,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+        const lastVoucher = Number(yield executeWithAfipRetry('obtener último comprobante de NC', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte)));
         const numeroNC = lastVoucher + 1;
         const data = {
             CantReg: 1,
@@ -430,7 +487,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
                 { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
             ]
         };
-        const res = yield afip.ElectronicBilling.createVoucher(data);
+        const res = yield executeWithAfipRetry('emitir nota de crédito', () => afip.ElectronicBilling.createVoucher(data));
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
