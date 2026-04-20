@@ -402,6 +402,11 @@ const App: React.FC = () => {
       openCreateOrderForEditRef.current = false;
       return;
     }
+    try {
+      localStorage.removeItem('lupo_order_template_draft');
+    } catch {
+      /* ignore */
+    }
     if (editingOrder) {
       // Si se abre "Nuevo pedido" desde navegación general, no debe arrastrar el modo edición previo.
       setEditingOrder(null);

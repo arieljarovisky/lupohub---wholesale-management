@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List, AlertTriangle } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
@@ -61,6 +61,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [addingProduct, setAddingProduct] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -73,7 +74,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
-  const draftRestoredRef = useRef(false);
 
   const isEditing = !!initialOrder;
 
@@ -86,25 +86,31 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     onStartNewOrder?.();
   }, [onStartNewOrder]);
 
-  /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
-  useEffect(() => {
-    if (isEditing) return;
-    if (customers.length === 0 || draftRestoredRef.current) return;
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { selectedCustomerId?: string; orderDate?: string; orderReference?: string; rows?: TemplateRow[] };
-      if (!draft || (!draft.rows?.length && !draft.selectedCustomerId)) return;
-      draftRestoredRef.current = true;
-      if (draft.orderDate) setOrderDate(draft.orderDate);
-      if (typeof draft.orderReference === 'string') setOrderReference(draft.orderReference);
-      if (Array.isArray(draft.rows) && draft.rows.length > 0) setRows(draft.rows);
-      const validCustomerId = draft.selectedCustomerId && customers.some(c => c.id === draft.selectedCustomerId);
-      if (validCustomerId) setSelectedCustomerId(draft.selectedCustomerId!);
-    } catch {
-      localStorage.removeItem(DRAFT_KEY);
+  const hasUnsavedChanges = useMemo(() => {
+    if (isEditing) return false;
+    if (selectedCustomerId) return true;
+    if (orderReference.trim()) return true;
+    if (rows.length > 0) return true;
+    return false;
+  }, [isEditing, selectedCustomerId, orderReference, rows]);
+
+  const handleCancelWithConfirm = useCallback(() => {
+    if (hasUnsavedChanges) {
+      setShowExitConfirmModal(true);
+      return;
     }
-  }, [customers, isEditing]);
+    onCancel();
+  }, [hasUnsavedChanges, onCancel]);
+
+  const handleConfirmExitWithoutSaving = useCallback(() => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
+    setShowExitConfirmModal(false);
+    onCancel();
+  }, [onCancel]);
 
   const filteredCustomers = useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
@@ -646,7 +652,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       <header className="shrink-0 mb-5">
         <div className="flex items-center gap-3">
           <button
-            onClick={onCancel}
+            onClick={handleCancelWithConfirm}
             className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
             aria-label="Volver"
           >
@@ -1089,6 +1095,40 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      {showExitConfirmModal && (
+        <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowExitConfirmModal(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} className="text-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-white font-bold text-lg">Salir sin guardar</h3>
+                <p className="text-sm text-slate-300 mt-1">
+                  Se perderán los cambios y se borrará el borrador local de este pedido.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowExitConfirmModal(false)}
+                className="flex-1 min-h-[46px] rounded-xl border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold transition"
+              >
+                Seguir editando
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExitWithoutSaving}
+                className="flex-1 min-h-[46px] rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition"
+              >
+                Salir sin guardar
+              </button>
+            </div>
           </div>
         </div>
       )}
