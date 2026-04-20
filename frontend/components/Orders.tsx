@@ -56,6 +56,7 @@ interface OrdersProps {
 
 const CONDICIONES_VENTA_FACTURA = ['30 días', '60 días'] as const;
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
+const ORDERS_FILTERS_KEY = 'lupo_orders_filters_v1';
 
 /** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
 function afipDesdeNeto(neto: number) {
@@ -84,8 +85,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   orderArchivedFilter = 'no', setOrderArchivedFilter, refreshOrders
 }) => {
   const { showConfirm, showToast } = useNotification();
-  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
-  const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
+  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>(() => {
+    try {
+      const raw = localStorage.getItem(ORDERS_FILTERS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.status && (parsed.status === 'ALL' || Object.values(OrderStatus).includes(parsed.status))) {
+        return parsed.status;
+      }
+    } catch {
+      // ignore localStorage failures
+    }
+    return 'ALL';
+  });
+  const [filterCustomerQuery, setFilterCustomerQuery] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(ORDERS_FILTERS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return typeof parsed?.customerQuery === 'string' ? parsed.customerQuery : '';
+    } catch {
+      return '';
+    }
+  });
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
   const [remitoBultos, setRemitoBultos] = useState<string>('');
@@ -169,6 +189,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   }, [manualFacturaDataByOrder]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        ORDERS_FILTERS_KEY,
+        JSON.stringify({
+          status: filterStatus,
+          customerQuery: filterCustomerQuery,
+        })
+      );
+    } catch {
+      // ignore localStorage failures
+    }
+  }, [filterStatus, filterCustomerQuery]);
+
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700/50 text-slate-300 border border-slate-600';
@@ -183,10 +217,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
-  const filteredOrders = orders.filter(o =>
-    (filterStatus === 'ALL' || o.status === filterStatus) &&
-    (filterCustomer === 'ALL' || o.customerId === filterCustomer)
-  );
+  const normalizedCustomerQuery = filterCustomerQuery.trim().toLowerCase();
+  const filteredOrders = orders.filter((o) => {
+    if (filterStatus !== 'ALL' && o.status !== filterStatus) return false;
+    if (!normalizedCustomerQuery) return true;
+    const customer = customers.find((c) => c.id === o.customerId);
+    const label = `${o.customerBusinessName || ''} ${customer?.businessName || ''} ${customer?.name || ''}`.toLowerCase();
+    return label.includes(normalizedCustomerQuery);
+  });
 
   const statusesCancelables = [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
   const canCancelOrder = (order: Order) =>
@@ -800,16 +838,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
 
         <div className="relative">
-          <select
-            value={filterCustomer}
-            onChange={(e) => setFilterCustomer(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-xl p-3 outline-none appearance-none cursor-pointer"
-          >
-            <option value="ALL">Todos los Clientes</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.businessName || c.name || 'Cliente'}</option>
-            ))}
-          </select>
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+          <input
+            type="text"
+            value={filterCustomerQuery}
+            onChange={(e) => setFilterCustomerQuery(e.target.value)}
+            placeholder="Buscar cliente por nombre o razón social..."
+            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-xl py-3 pl-10 pr-10 outline-none"
+          />
+          {filterCustomerQuery.trim() && (
+            <button
+              type="button"
+              onClick={() => setFilterCustomerQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition"
+              aria-label="Limpiar búsqueda de cliente"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
