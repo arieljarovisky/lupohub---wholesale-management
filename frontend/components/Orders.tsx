@@ -124,6 +124,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
   const [ncItemQuantities, setNcItemQuantities] = useState<Record<number, number>>({});
+  const [ncItemsFilter, setNcItemsFilter] = useState('');
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
@@ -157,14 +158,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   useEffect(() => {
     if (!ncOrder) {
       setNcItemQuantities({});
+      setNcItemsFilter('');
       return;
     }
     const initial: Record<number, number> = {};
-    ncOrder.items.forEach((item, idx) => {
-      const qty = Number(item.quantity) || 0;
-      initial[idx] = qty > 0 ? 1 : 0;
+    ncOrder.items.forEach((_item, idx) => {
+      initial[idx] = 0;
     });
     setNcItemQuantities(initial);
+    setNcItemsFilter('');
   }, [ncOrder?.id]);
 
   const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
@@ -1509,7 +1511,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         );
       })()}
 
-      {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
+      {/* Modal: emitir nota de crédito (total o parcial por múltiples artículos) */}
       {ncOrder && (() => {
         const hasNCTotal = orderCreditNotes.some((nc) => (nc.scope || 'total') === 'total');
         const creditedByItemIndex: Record<number, number> = {};
@@ -1518,6 +1520,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         });
         const canEmitTotal = !hasNCTotal;
         const itemRows = ncOrder.items.map((item, i) => {
+          const enriched = enrichItem(item);
+          const sku = String(enriched.sku ?? '').trim();
+          const label = [enriched.productName ?? enriched.sku ?? 'Ítem', enriched.sizeCode, enriched.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
           const price = Number(item.priceAtMoment ?? 0);
           const qty = Number(item.quantity ?? 0);
           const lineTotal = Math.round(qty * price * 100) / 100;
@@ -1526,19 +1531,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const maxQty = remaining <= 0 || price <= 0 ? 0 : Math.min(qty, Math.floor(remaining / price + 0.001));
           const selectedQtyRaw = Number(ncItemQuantities[i] ?? 0);
           const selectedQty = Math.max(0, Math.min(maxQty, Number.isFinite(selectedQtyRaw) ? selectedQtyRaw : 0));
-          return { i, item, price, qty, lineTotal, credited, remaining, maxQty, selectedQty };
+          const searchText = `${label} ${sku}`.toLowerCase();
+          return { i, item, price, qty, credited, remaining, maxQty, selectedQty, sku, label, searchText };
         });
         const selectedRows = itemRows.filter((r) => r.selectedQty > 0);
         const itemNetToCredit = selectedRows.reduce((sum, r) => sum + (r.selectedQty * r.price), 0);
         const canEmitItem = selectedRows.length > 0 && selectedRows.every((r) => r.selectedQty >= 1 && r.selectedQty <= r.maxQty);
+        const filterText = ncItemsFilter.trim().toLowerCase();
+        const visibleItemRows = filterText ? itemRows.filter((r) => r.searchText.includes(filterText)) : itemRows;
         return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl max-h-[92vh] p-6 flex flex-col" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir nota de crédito</h3>
             <p className="text-sm text-slate-400 mb-4">
               Pedido #{ncOrder.id} — {ncOrder.customerBusinessName || getCustomerName(ncOrder)}
             </p>
-            <div className="space-y-4 mb-6">
+            <div className="space-y-4 mb-6 overflow-y-auto pr-1">
               {hasNCTotal ? (
                 <p className="text-sm text-amber-400 bg-amber-900/20 rounded-lg p-3">Ya existe una nota de crédito por el total de este pedido. No se pueden emitir más notas de crédito.</p>
               ) : (
@@ -1562,15 +1570,52 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               {ncTipo === 'item' && ncOrder.items.length > 0 && (
                 <div className="space-y-3 pl-1">
                   <label className="block text-xs font-semibold text-slate-400 uppercase">Artículos y cantidades a creditar</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type="text"
+                        value={ncItemsFilter}
+                        onChange={(e) => setNcItemsFilter(e.target.value)}
+                        placeholder="Filtrar por nombre o SKU..."
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-600 rounded-xl text-sm text-white placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: Record<number, number> = { ...ncItemQuantities };
+                        itemRows.forEach((row) => { next[row.i] = row.maxQty; });
+                        setNcItemQuantities(next);
+                      }}
+                      className="px-3 py-2.5 rounded-xl border border-slate-600 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition"
+                    >
+                      Todo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: Record<number, number> = { ...ncItemQuantities };
+                        itemRows.forEach((row) => { next[row.i] = 0; });
+                        setNcItemQuantities(next);
+                      }}
+                      className="px-3 py-2.5 rounded-xl border border-slate-600 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>Mostrando {visibleItemRows.length} de {itemRows.length} artículos</span>
+                    <span>Seleccionados: {selectedRows.length}</span>
+                  </div>
                   <div className="space-y-2 max-h-72 overflow-auto pr-1">
-                    {itemRows.map((row) => {
-                      const en = enrichItem(row.item);
-                      const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${row.i + 1}`;
+                    {visibleItemRows.map((row) => {
                       return (
                         <div key={row.i} className="bg-slate-900/70 border border-slate-700 rounded-xl p-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="text-sm text-white truncate">{label}</p>
+                              <p className="text-sm text-white truncate">{row.label}</p>
+                              <p className="text-[11px] text-amber-300/90 font-mono">SKU: {row.sku || '—'}</p>
                               <p className="text-xs text-slate-400">
                                 {row.qty} u × ${formatMoneyAr(row.price)} {row.credited > 0 ? `· Ya creditado: $${formatMoneyAr(row.credited)}` : ''}
                               </p>
@@ -1594,6 +1639,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         </div>
                       );
                     })}
+                    {visibleItemRows.length === 0 && (
+                      <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-400">
+                        No hay artículos que coincidan con el filtro.
+                      </div>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500">
                     {(() => {
