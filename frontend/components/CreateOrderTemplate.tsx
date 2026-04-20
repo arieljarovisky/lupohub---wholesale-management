@@ -39,6 +39,23 @@ interface TemplateRow {
   price: number;
 }
 
+function extractColorCodeFromSku(skuRaw: string): string {
+  const sku = String(skuRaw || '').trim();
+  if (!sku) return '';
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 3) return String(parts[parts.length - 1] || '').trim();
+  return '';
+}
+
+function normalizeColorCode(rawCode: unknown, colorName: unknown, skuCandidate?: unknown): string {
+  const code = String(rawCode ?? '').trim();
+  const name = String(colorName ?? '').trim();
+  if (code && (!name || code.toLowerCase() !== name.toLowerCase())) return code;
+  const fromSku = extractColorCodeFromSku(String(skuCandidate ?? ''));
+  if (fromSku) return fromSku;
+  return code || '';
+}
+
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
   customers,
@@ -202,7 +219,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const variantId = String((item as any).variantId || '').trim();
       if (!sizeCode || !variantId) continue;
       const productCode = getBaseArticleCode(rawSku, productId) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
-      const colorCode = String((item as any).colorCode || '').trim() || colorName;
+      const colorCode = normalizeColorCode((item as any).colorCode, colorName, rawSku) || colorName;
 
       const key = `${productId || productCode}__${colorCode}`;
       if (!rowsByKey.has(key)) {
@@ -286,7 +303,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         showToast('error', 'Código no encontrado o sin variantes.');
         return;
       }
-      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
+      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number; variant_sku?: string; external_sku?: string }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
         const c = v.color_code ?? '';
@@ -300,6 +317,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       byColor.forEach((vars, colorCode) => {
         const first = vars[0];
         const colorName = first?.color_name ?? colorCode;
+        const colorCodeNormalized = normalizeColorCode(colorCode, colorName, first?.variant_sku || first?.external_sku) || colorCode;
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
@@ -311,7 +329,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           productCode: product.sku,
           productName: product.name ?? baseSku,
           productId: product.id,
-          colorCode,
+          colorCode: colorCodeNormalized,
           colorName,
           variantBySize,
           quantitiesBySize: { ...defaultQtys },
@@ -434,7 +452,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         showToast('error', 'No se pudo cargar el artículo o no tiene variantes.');
         return;
       }
-      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
+      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number; variant_sku?: string; external_sku?: string }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
         const c = v.color_code ?? '';
@@ -447,9 +465,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
       const newRows: TemplateRow[] = [];
       byColor.forEach((vars, colorCode) => {
-        if (existingColorCodes.has(colorCode)) return;
         const first = vars[0];
         const colorName = first?.color_name ?? colorCode;
+        const colorCodeNormalized = normalizeColorCode(colorCode, colorName, first?.variant_sku || first?.external_sku) || colorCode;
+        if (existingColorCodes.has(colorCodeNormalized)) return;
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
@@ -463,7 +482,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           productCode: product.sku,
           productName: product.name ?? code,
           productId: product.id,
-          colorCode,
+          colorCode: colorCodeNormalized,
           colorName,
           variantBySize,
           quantitiesBySize: { ...defaultQtys },
@@ -887,7 +906,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               ) : null}
                             </td>
                             <td className="py-2.5 px-3 text-slate-200 text-sm">
-                              {row.colorName || 'Color'} ({row.colorCode || '—'})
+                              {(() => {
+                                const colorName = String(row.colorName || 'Color').trim();
+                                const colorCode = normalizeColorCode(row.colorCode, row.colorName) || '—';
+                                if (colorCode.toLowerCase() === colorName.toLowerCase()) return colorName;
+                                return `${colorCode} - ${colorName}`;
+                              })()}
                             </td>
                             <td className="py-2 px-2">
                               <div className="flex items-center gap-1.5 justify-center">
