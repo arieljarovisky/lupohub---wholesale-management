@@ -13,6 +13,7 @@ interface CreateOrderTemplateProps {
   customers: Customer[];
   onSave: (order: Order) => void | Promise<void>;
   onCancel: () => void;
+  onStartNewOrder?: () => void;
   sellerId?: string | null;
   initialOrder?: Order | null;
   role?: Role;
@@ -43,6 +44,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   customers,
   onSave,
   onCancel,
+  onStartNewOrder,
   sellerId,
   initialOrder = null,
   role,
@@ -74,6 +76,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const draftRestoredRef = useRef(false);
 
   const isEditing = !!initialOrder;
+
+  const handleStartNewOrder = useCallback(() => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
+    onStartNewOrder?.();
+  }, [onStartNewOrder]);
 
   /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
   useEffect(() => {
@@ -647,6 +658,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
           </div>
+          {isEditing && (
+            <button
+              type="button"
+              onClick={handleStartNewOrder}
+              className="shrink-0 h-11 px-4 rounded-xl border border-blue-500/50 text-blue-300 hover:text-white hover:bg-blue-600/20 transition text-sm font-semibold"
+            >
+              Crear pedido nuevo
+            </button>
+          )}
         </div>
       </header>
 

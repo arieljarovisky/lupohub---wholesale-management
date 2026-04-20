@@ -977,10 +977,20 @@ const App: React.FC = () => {
           {baseView === 'create_order' || baseView === 'create_order_template' ? (
             <Suspense fallback={<ViewFallback />}>
               <CreateOrderTemplate
+                key={`create-order-template-${editingOrder?.id ?? 'new'}`}
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
                 onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+                onStartNewOrder={() => {
+                  setEditingOrder(null);
+                  setCurrentView('create_order');
+                  try {
+                    localStorage.removeItem('lupo_order_template_draft');
+                  } catch {
+                    /* ignore */
+                  }
+                }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 role={currentUser.role}
