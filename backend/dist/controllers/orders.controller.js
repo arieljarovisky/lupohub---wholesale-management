@@ -77,6 +77,12 @@ function resolveDespachoIdForItem(item, variantId) {
 function mapPaymentStatus(row) {
     return (row === null || row === void 0 ? void 0 : row.payment_status) === 'pendiente' ? 'pendiente' : 'pagado';
 }
+function normalizeOrderReference(raw) {
+    const v = String(raw !== null && raw !== void 0 ? raw : '').trim();
+    if (!v)
+        return null;
+    return v.slice(0, 255);
+}
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
 function getOrderNetFromLineItems(orderId) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -205,23 +211,24 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             // Tabla credit_notes puede no existir en DB antiguas
         }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d, _e, _f, _g;
+            var _a, _b, _c, _d, _e, _f, _g, _h;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
                 customerBusinessName: (_b = (_a = order.customer_business_name) !== null && _a !== void 0 ? _a : order.customer_name) !== null && _b !== void 0 ? _b : undefined,
                 sellerId: order.seller_id,
+                reference: (_c = order.reference) !== null && _c !== void 0 ? _c : undefined,
                 date: order.date,
                 status: order.status,
                 total: Number(order.total),
-                pickedBy: (_c = order.picked_by) !== null && _c !== void 0 ? _c : undefined,
+                pickedBy: (_d = order.picked_by) !== null && _d !== void 0 ? _d : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 archived: !!(order.archived),
                 items: itemsByOrderId[order.id] || [],
-                invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined,
-                creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0,
-                creditNotesTotalCount: (_f = creditNotesTotalByOrderId[order.id]) !== null && _f !== void 0 ? _f : 0,
-                creditNotesItemCount: (_g = creditNotesItemByOrderId[order.id]) !== null && _g !== void 0 ? _g : 0,
+                invoice: (_e = invoiceByOrderId[order.id]) !== null && _e !== void 0 ? _e : undefined,
+                creditNotesCount: (_f = creditNotesCountByOrderId[order.id]) !== null && _f !== void 0 ? _f : 0,
+                creditNotesTotalCount: (_g = creditNotesTotalByOrderId[order.id]) !== null && _g !== void 0 ? _g : 0,
+                creditNotesItemCount: (_h = creditNotesItemByOrderId[order.id]) !== null && _h !== void 0 ? _h : 0,
                 paymentStatus: mapPaymentStatus(order),
                 noStockImpact: !!order.no_stock_impact
             });
@@ -235,7 +242,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getOrders = getOrders;
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     const newOrder = req.body;
     if (!newOrder.customerId || !newOrder.items.length) {
         return res.status(400).json({ message: "Datos de pedido inválidos" });
@@ -266,7 +273,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sqlDate = toSqlDate(newOrder.date);
         const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]);
+        const reference = normalizeOrderReference((_c = (_b = newOrder.reference) !== null && _b !== void 0 ? _b : newOrder.identifier) !== null && _c !== void 0 ? _c : newOrder.note);
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, reference, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, reference, paymentStatus, noStockImpact]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -284,7 +292,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack, despachoId]);
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_d = item.priceAtMoment) !== null && _d !== void 0 ? _d : 0, sellAsPack, despachoId]);
         }
         if (newOrder.status === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -292,7 +300,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (!result.success)
                 console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [orderId]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [orderId]);
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
         const items = yield (0, db_1.query)(`
@@ -333,10 +341,11 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
+            reference: (_e = created.reference) !== null && _e !== void 0 ? _e : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
+            pickedBy: (_f = created.picked_by) !== null && _f !== void 0 ? _f : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
@@ -394,7 +403,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     const { id } = req.params;
     const updated = req.body;
     if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
@@ -416,7 +425,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
         const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = updated.noStockImpact === true || updated.no_stock_impact === 1 ? 1 : 0;
-        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]);
+        const reference = normalizeOrderReference((_d = (_c = updated.reference) !== null && _c !== void 0 ? _c : updated.identifier) !== null && _d !== void 0 ? _d : updated.note);
+        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, reference = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, reference, paymentStatus, noStockImpact, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         for (const item of updated.items) {
             let variantId = item.variantId;
@@ -437,7 +447,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
+        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
@@ -478,10 +488,11 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
+            reference: (_e = created.reference) !== null && _e !== void 0 ? _e : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
+            pickedBy: (_f = created.picked_by) !== null && _f !== void 0 ? _f : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),

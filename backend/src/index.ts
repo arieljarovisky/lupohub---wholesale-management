@@ -42,6 +42,7 @@ import { addRemitenteTable } from './database/add_remitente_table';
 import { addPaymentStatusToOrders } from './database/add_payment_status_orders';
 import { addPaymentsTable } from './database/add_payments_table';
 import { addNoStockImpactToOrders } from './database/add_no_stock_impact_orders';
+import { addOrderReferenceToOrders } from './database/add_order_reference_orders';
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
 import { addExternalInvoicesTable } from './database/add_external_invoices_table';
 import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
@@ -157,6 +158,7 @@ async function initDatabase() {
       await addPaymentStatusToOrders();
       await addPaymentsTable();
       await addNoStockImpactToOrders();
+      await addOrderReferenceToOrders();
       await addCustomerInvoiceFields();
       await addExternalInvoicesTable();
       await addExternalCreditNotesTable();

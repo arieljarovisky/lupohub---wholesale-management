@@ -55,6 +55,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderReference, setOrderReference] = useState('');
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -83,10 +84,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;
-      const draft = JSON.parse(raw) as { selectedCustomerId?: string; orderDate?: string; rows?: TemplateRow[] };
+      const draft = JSON.parse(raw) as { selectedCustomerId?: string; orderDate?: string; orderReference?: string; rows?: TemplateRow[] };
       if (!draft || (!draft.rows?.length && !draft.selectedCustomerId)) return;
       draftRestoredRef.current = true;
       if (draft.orderDate) setOrderDate(draft.orderDate);
+      if (typeof draft.orderReference === 'string') setOrderReference(draft.orderReference);
       if (Array.isArray(draft.rows) && draft.rows.length > 0) setRows(draft.rows);
       const validCustomerId = draft.selectedCustomerId && customers.some(c => c.id === draft.selectedCustomerId);
       if (validCustomerId) setSelectedCustomerId(draft.selectedCustomerId!);
@@ -114,12 +116,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, []);
 
   /** Guardar borrador (debounced) cuando hay cliente o filas. */
-  const saveDraft = useCallback((customerId: string, date: string, draftRows: TemplateRow[]) => {
+  const saveDraft = useCallback((customerId: string, date: string, reference: string, draftRows: TemplateRow[]) => {
     if (!draftRows.length && !customerId) return;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         selectedCustomerId: customerId || '',
         orderDate: date,
+        orderReference: reference || '',
         rows: draftRows
       }));
     } catch {
@@ -128,28 +131,29 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => saveDraft(selectedCustomerId, orderDate, rows), 600);
+    const t = setTimeout(() => saveDraft(selectedCustomerId, orderDate, orderReference, rows), 600);
     if (isEditing) return () => clearTimeout(t);
     return () => clearTimeout(t);
-  }, [selectedCustomerId, orderDate, rows, saveDraft, isEditing]);
+  }, [selectedCustomerId, orderDate, orderReference, rows, saveDraft, isEditing]);
 
   /** Al cerrar/actualizar la página guardar borrador. */
   useEffect(() => {
     if (isEditing) return;
     const onBeforeUnload = () => {
       if (rows.length > 0 || selectedCustomerId) {
-        saveDraft(selectedCustomerId, orderDate, rows);
+        saveDraft(selectedCustomerId, orderDate, orderReference, rows);
       }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
+  }, [rows, selectedCustomerId, orderDate, orderReference, saveDraft, isEditing]);
 
   /** Modo edición: convertir ítems existentes del pedido en filas de planilla. */
   useEffect(() => {
     if (!initialOrder) return;
     setSelectedCustomerId(initialOrder.customerId);
     setOrderDate(initialOrder.date);
+    setOrderReference(initialOrder.reference || '');
 
     const productById = new Map(products.map((p) => [p.id, p]));
     const getBaseArticleCode = (skuRaw: string, productIdRaw: string) => {
@@ -513,6 +517,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
       sellerId: initialOrder?.sellerId ?? sellerId ?? null,
+      reference: orderReference.trim() || undefined,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
       status: asDraft ? OrderStatus.DRAFT : (initialOrder?.status ?? OrderStatus.CONFIRMED),
@@ -672,7 +677,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       )}
 
       {/* Cliente */}
-      <section className="shrink-0 mb-5">
+      <section className="shrink-0 mb-4">
         <label className="block text-xs font-semibold text-slate-400 mb-2">Cliente</label>
         {isCustomerLocked ? (
           <div className="w-full bg-slate-800/80 rounded-xl py-3.5 px-4 text-sm text-white border border-slate-700/80 min-h-[48px] flex items-center">
@@ -709,6 +714,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             )}
           </div>
         )}
+      </section>
+
+      <section className="shrink-0 mb-5">
+        <label className="block text-xs font-semibold text-slate-400 mb-2">Nota / identificador (opcional)</label>
+        <input
+          type="text"
+          value={orderReference}
+          onChange={(e) => setOrderReference(e.target.value.slice(0, 255))}
+          maxLength={255}
+          placeholder="Ej: OC-4587, nombre del evento, nota interna..."
+          className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
+        />
       </section>
 
       {/* Detalle + botón agregar */}

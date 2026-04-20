@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS orders (
   date DATE NOT NULL,
   status VARCHAR(50) NOT NULL, -- 'Borrador', 'Confirmado', 'Preparación', 'Despachado'
   total DECIMAL(10, 2) NOT NULL,
+  reference VARCHAR(255) NULL, -- Nota/identificador opcional del pedido
   picked_by VARCHAR(36),
   FOREIGN KEY (customer_id) REFERENCES customers(id),
   FOREIGN KEY (seller_id) REFERENCES users(id)

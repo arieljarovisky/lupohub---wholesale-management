@@ -35,6 +35,12 @@ function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
 
+function normalizeOrderReference(raw: unknown): string | null {
+  const v = String(raw ?? '').trim();
+  if (!v) return null;
+  return v.slice(0, 255);
+}
+
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
 async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   const rows = await query(
@@ -178,6 +184,7 @@ export const getOrders = async (req: any, res: any) => {
       customerId: order.customer_id,
       customerBusinessName: order.customer_business_name ?? order.customer_name ?? undefined,
       sellerId: order.seller_id,
+      reference: order.reference ?? undefined,
       date: order.date,
       status: order.status,
       total: Number(order.total),
@@ -234,9 +241,12 @@ export const createOrder = async (req: any, res: any) => {
     const paymentStatus =
       (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
+    const reference = normalizeOrderReference(
+      (newOrder as any).reference ?? (newOrder as any).identifier ?? (newOrder as any).note
+    );
     await execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, reference, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, reference, paymentStatus, noStockImpact]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -272,7 +282,7 @@ export const createOrder = async (req: any, res: any) => {
     }
 
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
+      'SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
       [orderId]
     );
     if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
@@ -311,6 +321,7 @@ export const createOrder = async (req: any, res: any) => {
       id: created.id,
       customerId: created.customer_id,
       sellerId: created.seller_id,
+      reference: created.reference ?? undefined,
       date: created.date,
       status: created.status,
       total: Number(created.total),
@@ -398,9 +409,12 @@ export const updateOrder = async (req: any, res: any) => {
     const paymentStatus =
       (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
+    const reference = normalizeOrderReference(
+      (updated as any).reference ?? (updated as any).identifier ?? (updated as any).note
+    );
     await execute(
-      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?',
-      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]
+      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, reference = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?',
+      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, reference, paymentStatus, noStockImpact, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
     for (const item of updated.items as any[]) {
@@ -429,7 +443,7 @@ export const updateOrder = async (req: any, res: any) => {
       );
     }
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
+      'SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
       [id]
     );
     if (!created) return res.json({ ...updated, id });
@@ -468,6 +482,7 @@ export const updateOrder = async (req: any, res: any) => {
       id: created.id,
       customerId: created.customer_id,
       sellerId: created.seller_id,
+      reference: created.reference ?? undefined,
       date: created.date,
       status: created.status,
       total: Number(created.total),

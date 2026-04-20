@@ -55,6 +55,7 @@ const add_remitente_table_1 = require("./database/add_remitente_table");
 const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
 const add_payments_table_1 = require("./database/add_payments_table");
 const add_no_stock_impact_orders_1 = require("./database/add_no_stock_impact_orders");
+const add_order_reference_orders_1 = require("./database/add_order_reference_orders");
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
 const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
 const add_external_credit_notes_table_1 = require("./database/add_external_credit_notes_table");
@@ -168,6 +169,7 @@ function initDatabase() {
                 yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
                 yield (0, add_payments_table_1.addPaymentsTable)();
                 yield (0, add_no_stock_impact_orders_1.addNoStockImpactToOrders)();
+                yield (0, add_order_reference_orders_1.addOrderReferenceToOrders)();
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
                 yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
                 yield (0, add_external_credit_notes_table_1.addExternalCreditNotesTable)();

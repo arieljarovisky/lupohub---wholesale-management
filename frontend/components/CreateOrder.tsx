@@ -41,6 +41,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderReference, setOrderReference] = useState('');
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -70,6 +71,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
     if (initialOrder) {
       setSelectedCustomerId(initialOrder.customerId);
       setOrderDate(initialOrder.date);
+      setOrderReference(initialOrder.reference || '');
       const mappedRows = initialOrder.items.map((item, idx) => {
         const p = products.find(prod => prod.id === item.productId) || products.find(prod => (prod as any).product_id === item.productId) || products.find(prod => prod.sku === (item as any).sku);
         const name = (item as any).productName ?? p?.name ?? 'Variante';
@@ -304,6 +306,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       total,
       status: initialOrder?.status ?? OrderStatus.CONFIRMED,
       date: orderDate,
+      reference: orderReference.trim() || undefined,
       paymentStatus: initialOrder?.paymentStatus ?? 'pendiente'
     });
   };
@@ -400,6 +403,18 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
             )}
           </>
         )}
+      </div>
+
+      <div className="bg-slate-800 p-3 sm:p-4 rounded-2xl border border-slate-700 shrink-0">
+        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Nota / identificador (opcional)</label>
+        <input
+          type="text"
+          value={orderReference}
+          onChange={(e) => setOrderReference(e.target.value.slice(0, 255))}
+          maxLength={255}
+          placeholder="Ej: OC-4587, referencia de cliente, evento..."
+          className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3.5 sm:py-3 px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-white min-h-[48px]"
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0 touch-scroll overscroll-contain">

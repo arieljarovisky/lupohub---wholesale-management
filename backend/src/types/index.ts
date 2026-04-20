@@ -53,6 +53,8 @@ export interface Order {
   id: string;
   customerId: string;
   sellerId?: string | null;
+  /** Nota o identificador opcional del pedido (referencia interna/cliente). */
+  reference?: string;
   items: OrderItem[];
   total: number;
   status: OrderStatus;

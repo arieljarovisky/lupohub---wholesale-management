@@ -911,6 +911,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <h3 className="text-xl font-black text-white truncate">{order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}</h3>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
+                    {order.reference && (
+                      <span
+                        className="max-w-[320px] truncate bg-slate-700/60 text-slate-200 border border-slate-600/70 px-2 py-0.5 rounded-lg text-[10px] font-semibold"
+                        title={order.reference}
+                      >
+                        Ref: {order.reference}
+                      </span>
+                    )}
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>
                       {order.status}
                     </span>
