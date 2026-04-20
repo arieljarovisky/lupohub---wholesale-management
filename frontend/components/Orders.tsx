@@ -123,8 +123,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
-  const [ncItemIndex, setNcItemIndex] = useState(0);
-  const [ncQuantity, setNcQuantity] = useState<number>(1);
+  const [ncItemQuantities, setNcItemQuantities] = useState<Record<number, number>>({});
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
@@ -156,20 +155,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   }, [ncOrder?.id]);
 
   useEffect(() => {
-    if (!ncOrder || ncTipo !== 'item' || !ncOrder.items[ncItemIndex]) return;
-    const creditedByItem: Record<number, number> = {};
-    orderCreditNotes.filter((n) => n.scope === 'item' && typeof n.itemIndex === 'number').forEach((n) => {
-      creditedByItem[n.itemIndex!] = (creditedByItem[n.itemIndex!] || 0) + n.amountCredited;
+    if (!ncOrder) {
+      setNcItemQuantities({});
+      return;
+    }
+    const initial: Record<number, number> = {};
+    ncOrder.items.forEach((item, idx) => {
+      const qty = Number(item.quantity) || 0;
+      initial[idx] = qty > 0 ? 1 : 0;
     });
-    const item = ncOrder.items[ncItemIndex];
-    const price = Number(item?.priceAtMoment ?? 0);
-    const qty = item?.quantity ?? 0;
-    const lineTotal = qty * price;
-    const credited = creditedByItem[ncItemIndex] ?? 0;
-    const remaining = Math.round((lineTotal - credited) * 100) / 100;
-    const maxQ = remaining <= 0 ? 0 : Math.min(qty, Math.floor(remaining / price + 0.001));
-    if (ncQuantity > maxQ) setNcQuantity(maxQ);
-  }, [orderCreditNotes, ncOrder, ncItemIndex, ncTipo]);
+    setNcItemQuantities(initial);
+  }, [ncOrder?.id]);
 
   const canEmitirFactura = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   useEffect(() => {
@@ -1520,15 +1516,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         orderCreditNotes.filter((nc) => nc.scope === 'item' && typeof nc.itemIndex === 'number').forEach((nc) => {
           creditedByItemIndex[nc.itemIndex!] = (creditedByItemIndex[nc.itemIndex!] || 0) + nc.amountCredited;
         });
-        const currentItem = ncOrder.items[ncItemIndex];
-        const itemPrice = Number(currentItem?.priceAtMoment ?? 0);
-        const itemQty = currentItem?.quantity ?? 0;
-        const itemLineTotal = Math.round(itemQty * itemPrice * 100) / 100;
-        const creditedItem = creditedByItemIndex[ncItemIndex] ?? 0;
-        const remainingCredit = Math.round((itemLineTotal - creditedItem) * 100) / 100;
-        const maxQtyRemaining = remainingCredit <= 0 ? 0 : Math.min(itemQty, Math.floor(remainingCredit / itemPrice + 0.001));
         const canEmitTotal = !hasNCTotal;
-        const canEmitItem = maxQtyRemaining > 0;
+        const itemRows = ncOrder.items.map((item, i) => {
+          const price = Number(item.priceAtMoment ?? 0);
+          const qty = Number(item.quantity ?? 0);
+          const lineTotal = Math.round(qty * price * 100) / 100;
+          const credited = creditedByItemIndex[i] ?? 0;
+          const remaining = Math.round((lineTotal - credited) * 100) / 100;
+          const maxQty = remaining <= 0 || price <= 0 ? 0 : Math.min(qty, Math.floor(remaining / price + 0.001));
+          const selectedQtyRaw = Number(ncItemQuantities[i] ?? 0);
+          const selectedQty = Math.max(0, Math.min(maxQty, Number.isFinite(selectedQtyRaw) ? selectedQtyRaw : 0));
+          return { i, item, price, qty, lineTotal, credited, remaining, maxQty, selectedQty };
+        });
+        const selectedRows = itemRows.filter((r) => r.selectedQty > 0);
+        const itemNetToCredit = selectedRows.reduce((sum, r) => sum + (r.selectedQty * r.price), 0);
+        const canEmitItem = selectedRows.length > 0 && selectedRows.every((r) => r.selectedQty >= 1 && r.selectedQty <= r.maxQty);
         return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
@@ -1554,57 +1556,51 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="ncTipo" checked={ncTipo === 'item'} onChange={() => setNcTipo('item')} className="rounded border-slate-500 text-amber-500" />
-                  <span className="text-white">Un artículo</span>
+                  <span className="text-white">Uno o varios artículos</span>
                 </label>
               </div>
               {ncTipo === 'item' && ncOrder.items.length > 0 && (
                 <div className="space-y-3 pl-1">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase">Artículo</label>
-                  <select
-                    value={ncItemIndex}
-                    onChange={(e) => {
-                      const i = parseInt(e.target.value, 10);
-                      setNcItemIndex(i);
-                      const q = ncOrder.items[i]?.quantity ?? 1;
-                      const p = Number(ncOrder.items[i]?.priceAtMoment ?? 0);
-                      const cred = creditedByItemIndex[i] ?? 0;
-                      const rem = Math.round((q * p - cred) * 100) / 100;
-                      const maxQ = rem <= 0 ? 0 : Math.min(q, Math.floor(rem / p + 0.001));
-                      setNcQuantity(maxQ > 0 ? Math.min(maxQ, q) : 0);
-                    }}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
-                  >
-                    {ncOrder.items.map((item, i) => {
-                      const en = enrichItem(item);
-                      const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
-                      const cred = creditedByItemIndex[i] ?? 0;
-                      const lineTotal = (item.quantity * Number(item.priceAtMoment ?? 0));
-                      const yaCred = cred > 0 ? ` — Ya creditado $${formatMoneyAr(cred)}` : '';
-                      return <option key={i} value={i}>{label} — {item.quantity} u × ${formatMoneyAr(Number(item.priceAtMoment))}{yaCred}</option>;
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">Artículos y cantidades a creditar</label>
+                  <div className="space-y-2 max-h-72 overflow-auto pr-1">
+                    {itemRows.map((row) => {
+                      const en = enrichItem(row.item);
+                      const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${row.i + 1}`;
+                      return (
+                        <div key={row.i} className="bg-slate-900/70 border border-slate-700 rounded-xl p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm text-white truncate">{label}</p>
+                              <p className="text-xs text-slate-400">
+                                {row.qty} u × ${formatMoneyAr(row.price)} {row.credited > 0 ? `· Ya creditado: $${formatMoneyAr(row.credited)}` : ''}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Disponible: ${formatMoneyAr(Math.max(0, row.remaining))} ({row.maxQty} u)
+                              </p>
+                            </div>
+                            <input
+                              type="number"
+                              min={0}
+                              max={row.maxQty}
+                              value={row.selectedQty}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(row.maxQty, parseInt(e.target.value, 10) || 0));
+                                setNcItemQuantities((prev) => ({ ...prev, [row.i]: next }));
+                              }}
+                              className="w-20 bg-slate-950 border border-slate-600 rounded-lg p-2 text-white text-sm text-center focus:ring-2 focus:ring-amber-500 outline-none"
+                              disabled={row.maxQty === 0}
+                            />
+                          </div>
+                        </div>
+                      );
                     })}
-                  </select>
-                  {creditedItem > 0 && (
-                    <p className="text-xs text-amber-400">Ya creditado para este ítem: ${formatMoneyAr(creditedItem)}. Máximo a creditar: ${formatMoneyAr(remainingCredit)} ({maxQtyRemaining} u)</p>
-                  )}
-                  <label className="block text-xs font-semibold text-slate-400 uppercase">Cantidad a creditar</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={maxQtyRemaining}
-                    value={ncQuantity}
-                    onChange={(e) => setNcQuantity(Math.max(0, Math.min(maxQtyRemaining, parseInt(e.target.value, 10) || 0)))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
-                  />
-                  {maxQtyRemaining === 0 && (
-                    <p className="text-xs text-amber-400">No queda monto a creditar para este ítem.</p>
-                  )}
+                  </div>
                   <p className="text-xs text-slate-500">
                     {(() => {
-                      const lineNet = ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0);
-                      const { iva, impTotal } = afipDesdeNeto(lineNet);
+                      const { iva, impTotal } = afipDesdeNeto(itemNetToCredit);
                       return (
                         <>
-                          Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(lineNet)}</strong>
+                          Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(itemNetToCredit)}</strong>
                           <span className="block mt-1 text-slate-400">
                             AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
                           </span>
@@ -1637,15 +1633,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               {!hasNCTotal && (
               <button
                 type="button"
-                disabled={emitiendoNC || (ncTipo === 'total' ? !canEmitTotal : !canEmitItem || ncQuantity < 1 || (ncTipo === 'item' && ncQuantity > maxQtyRemaining))}
+                disabled={emitiendoNC || (ncTipo === 'total' ? !canEmitTotal : !canEmitItem)}
                 onClick={async () => {
                   if (!ncOrder) return;
                   setEmitiendoNC(true);
                   try {
-                    const payload: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number } = { tipo: ncTipo };
+                    const payload: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number; items?: Array<{ itemIndex: number; quantity: number }> } = { tipo: ncTipo };
                     if (ncTipo === 'item') {
-                      payload.itemIndex = ncItemIndex;
-                      payload.quantity = ncQuantity;
+                      payload.items = itemRows
+                        .filter((r) => r.selectedQty > 0)
+                        .map((r) => ({ itemIndex: r.i, quantity: r.selectedQty }));
                     }
                     const res = await api.emitirNotaCredito(ncOrder.id, payload);
                     showToast('success', `Nota de crédito emitida. CAE ${res.cae}`);
