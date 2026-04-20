@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone, Sparkles, LayoutGrid, Radio, Percent } from 'lucide-react';
-import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES } from './constants';
+import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES, DAMIAN_TASKS_BANNER_EMAIL, DAMIAN_TASKS_BANNER_UNTIL_MS } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
@@ -758,6 +758,11 @@ const App: React.FC = () => {
     ]},
   ];
 
+  const showDamianTasksBanner =
+    !!currentUser.email &&
+    currentUser.email.trim().toLowerCase() === DAMIAN_TASKS_BANNER_EMAIL &&
+    Date.now() < DAMIAN_TASKS_BANNER_UNTIL_MS;
+
   return (
     <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
       <div className="hidden md:block shrink-0">
@@ -778,6 +783,34 @@ const App: React.FC = () => {
         )}
 
         <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden px-1 sm:px-0">
+          {showDamianTasksBanner && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-6 rounded-2xl border-2 border-amber-400/90 bg-gradient-to-br from-amber-950 via-amber-900/95 to-orange-950 p-5 sm:p-8 shadow-xl shadow-amber-900/40 ring-1 ring-amber-500/30"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                <div className="flex shrink-0 justify-center sm:justify-start">
+                  <div className="rounded-2xl bg-amber-500/20 p-4 border border-amber-400/40">
+                    <Megaphone className="text-amber-300 w-12 h-12 sm:w-16 sm:h-16" strokeWidth={2} aria-hidden />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1 text-center sm:text-left">
+                  <p className="text-amber-200/90 text-xs sm:text-sm font-bold uppercase tracking-widest mb-2">
+                    Tareas prioritarias — próximas 24 horas
+                  </p>
+                  <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-white leading-tight mb-4">
+                    Medias: stock, sincronización y publicaciones
+                  </h2>
+                  <ol className="list-decimal list-inside space-y-3 text-base sm:text-lg md:text-xl text-amber-50 font-semibold leading-relaxed max-w-4xl mx-auto sm:mx-0">
+                    <li>Controlar el stock de medias en Mercado Libre y Tienda Nube.</li>
+                    <li>Sincronizarlos.</li>
+                    <li>Una vez que termine eso, fijarse las que no están publicadas y publicarlas.</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )}
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">

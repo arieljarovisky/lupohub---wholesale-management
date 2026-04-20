@@ -104,3 +104,7 @@ export const MOCK_VISITS: Visit[] = [
   { id: 'v1', sellerId: 'u2', customerId: 'c1', date: '2023-10-20', notes: 'Cliente interesado en nueva linea sport.', outcome: 'Sale' },
   { id: 'v2', sellerId: 'u2', customerId: 'c3', date: '2023-10-22', notes: 'Stock alto, pasará pedido el mes que viene.', outcome: 'No Sale' },
 ];
+
+/** Aviso prioritario solo para este usuario; deja de mostrarse cuando pasa esta fecha (ISO, offset Argentina). Ajustá la fecha para renovar la ventana. */
+export const DAMIAN_TASKS_BANNER_EMAIL = 'damian@lupo.ar';
+export const DAMIAN_TASKS_BANNER_UNTIL_MS = Date.parse('2026-04-21T23:59:59-03:00');
