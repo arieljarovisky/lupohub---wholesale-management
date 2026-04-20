@@ -106,6 +106,7 @@ const App: React.FC = () => {
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
+  const openCreateOrderForEditRef = useRef(false);
 
   // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
@@ -390,9 +391,22 @@ const App: React.FC = () => {
   };
 
   const handleEditOrder = (order: Order) => {
+    openCreateOrderForEditRef.current = true;
     setEditingOrder(order);
     setCurrentView('create_order');
   };
+
+  useEffect(() => {
+    if (baseView !== 'create_order') return;
+    if (openCreateOrderForEditRef.current) {
+      openCreateOrderForEditRef.current = false;
+      return;
+    }
+    if (editingOrder) {
+      // Si se abre "Nuevo pedido" desde navegación general, no debe arrastrar el modo edición previo.
+      setEditingOrder(null);
+    }
+  }, [baseView, editingOrder]);
   
   const handleDeleteOrder = async (orderId: string) => {
     const previous = [...orders];
