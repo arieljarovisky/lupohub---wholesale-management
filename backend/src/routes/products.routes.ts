@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, getProductOrderHistory, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -19,6 +19,7 @@ router.delete('/all', authMiddleware, adminOrDepositoMiddleware, deleteAllProduc
 router.post('/import-tango', authMiddleware, adminOrDepositoMiddleware, importTangoArticles);
 router.get('/export-inventory', authMiddleware, exportInventory);
 router.get('/', authMiddleware, getProducts);
+router.get('/by-id/:id/order-history', authMiddleware, getProductOrderHistory);
 router.get('/by-id/:id', authMiddleware, getProductById);
 router.get('/:sku', authMiddleware, getProductBySku);
 router.post('/', authMiddleware, adminOrDepositoMiddleware, createProduct);

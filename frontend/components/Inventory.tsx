@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -141,6 +141,30 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [loadingEditVariant, setLoadingEditVariant] = useState(false);
   const [savingEditVariant, setSavingEditVariant] = useState(false);
   const [fetchingExternalSku, setFetchingExternalSku] = useState<'ml' | 'tn' | null>(null);
+
+  const [showOrderHistoryModal, setShowOrderHistoryModal] = useState(false);
+  const [orderHistoryLoading, setOrderHistoryLoading] = useState(false);
+  const [orderHistoryContext, setOrderHistoryContext] = useState<{ productId: string; groupKey: string; displayName: string } | null>(null);
+  const [orderHistoryData, setOrderHistoryData] = useState<{
+    summary: { ordersCount: number; rowsCount: number; totalUnits: number };
+    entries: Array<{
+      orderId: string;
+      date: string;
+      status: string;
+      reference?: string;
+      customerName: string;
+      sellerName?: string;
+      quantity: number;
+      lineTotal: number;
+      variantSku: string;
+      sizeCode?: string;
+      colorName?: string;
+    }>;
+  } | null>(null);
+  const [orderHistoryCustomerFilter, setOrderHistoryCustomerFilter] = useState('');
+  const [orderHistoryFrom, setOrderHistoryFrom] = useState('');
+  const [orderHistoryTo, setOrderHistoryTo] = useState('');
+  const [exportingOrderHistory, setExportingOrderHistory] = useState(false);
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -1362,6 +1386,79 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         }
       },
     });
+  };
+
+  const handleOpenOrderHistory = async (productId: string, groupKey: string, displayName: string) => {
+    setOrderHistoryContext({ productId, groupKey, displayName });
+    setOrderHistoryData(null);
+    setOrderHistoryCustomerFilter('');
+    setOrderHistoryFrom('');
+    setOrderHistoryTo('');
+    setShowOrderHistoryModal(true);
+    setOrderHistoryLoading(true);
+    try {
+      const res = await api.getProductOrderHistory(productId, 300);
+      setOrderHistoryData({
+        summary: res.summary,
+        entries: res.entries || [],
+      });
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudo cargar el historial del artículo');
+    } finally {
+      setOrderHistoryLoading(false);
+    }
+  };
+
+  const filteredOrderHistoryEntries = React.useMemo(() => {
+    const entries = orderHistoryData?.entries || [];
+    const q = orderHistoryCustomerFilter.trim().toLowerCase();
+    const from = orderHistoryFrom ? `${orderHistoryFrom}` : '';
+    const to = orderHistoryTo ? `${orderHistoryTo}` : '';
+    return entries.filter((row) => {
+      if (q) {
+        const hay = `${row.customerName || ''} ${row.sellerName || ''} ${row.reference || ''} ${row.orderId || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      const rowDate = row.date ? String(row.date).slice(0, 10) : '';
+      if (from && rowDate && rowDate < from) return false;
+      if (to && rowDate && rowDate > to) return false;
+      return true;
+    });
+  }, [orderHistoryData?.entries, orderHistoryCustomerFilter, orderHistoryFrom, orderHistoryTo]);
+
+  const exportOrderHistoryToExcel = () => {
+    try {
+      if (!orderHistoryContext || filteredOrderHistoryEntries.length === 0) {
+        showToast('info', 'No hay datos para exportar con los filtros actuales.');
+        return;
+      }
+      setExportingOrderHistory(true);
+      const rows = filteredOrderHistoryEntries.map((row) => ({
+        Fecha: row.date ? new Date(row.date).toLocaleDateString('es-AR') : '',
+        Pedido: row.orderId,
+        Estado: row.status,
+        Referencia: row.reference || '',
+        Cliente: row.customerName || '',
+        Vendedor: row.sellerName || '',
+        SKU: row.variantSku || '',
+        Talle: row.sizeCode || '',
+        Color: row.colorName || '',
+        Cantidad: Number(row.quantity || 0),
+        'Total línea': Number(row.lineTotal || 0),
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Historial');
+      const safeCode = (orderHistoryContext.groupKey || 'articulo').replace(/[\\/*?:\[\]]/g, '_');
+      const filename = `historial_${safeCode}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      showToast('success', 'Historial exportado a Excel');
+    } catch (e) {
+      console.error(e);
+      showToast('error', 'No se pudo exportar el historial');
+    } finally {
+      setExportingOrderHistory(false);
+    }
   };
 
   const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
@@ -2807,6 +2904,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                            </button>
                            {(groupVariants[0] as any)?.product_id && (
                              <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCardDotsOpenKey(null);
+                                  handleOpenOrderHistory((groupVariants[0] as any).product_id, groupKey, displayName);
+                                }}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                              >
+                                <History size={18} className="text-cyan-300 shrink-0" />
+                                Historial de pedidos
+                              </button>
                                <button
                                  type="button"
                                  onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
@@ -2843,6 +2952,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                    )}
                    {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
                      <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenOrderHistory((groupVariants[0] as any).product_id, groupKey, displayName);
+                        }}
+                        className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-cyan-700 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
+                        title="Ver historial de pedidos del artículo"
+                      >
+                        <History size={20} />
+                      </button>
                        <button
                          onClick={(e) => { e.stopPropagation(); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
                          className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
@@ -4155,6 +4274,137 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               <button type="button" onClick={handleBulkLinkSave} disabled={bulkLinkSaving || !bulkLinkProductId || bulkLinkVariants.length === 0} className="px-5 py-3 sm:py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm flex items-center justify-center gap-2 touch-manipulation min-h-[44px]">
                 {bulkLinkSaving ? 'Guardando...' : 'Guardar vinculaciones'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Historial de pedidos por artículo */}
+      {showOrderHistoryModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
+          <div className="bg-slate-900 rounded-2xl w-full max-w-4xl border border-slate-700 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <History size={18} className="text-cyan-300" />
+                  Historial del artículo
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 truncate">{orderHistoryContext?.displayName || orderHistoryContext?.groupKey}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOrderHistoryModal(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800"
+                aria-label="Cerrar historial"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 overflow-y-auto">
+              {orderHistoryLoading && (
+                <div className="py-10 flex flex-col items-center gap-3">
+                  <Loader2 size={30} className="animate-spin text-cyan-300" />
+                  <p className="text-sm text-slate-300">Cargando historial...</p>
+                </div>
+              )}
+
+              {!orderHistoryLoading && (
+                <>
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input
+                      type="text"
+                      value={orderHistoryCustomerFilter}
+                      onChange={(e) => setOrderHistoryCustomerFilter(e.target.value)}
+                      placeholder="Filtrar por cliente/vendedor/ref..."
+                      className="md:col-span-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none"
+                    />
+                    <input
+                      type="date"
+                      value={orderHistoryFrom}
+                      onChange={(e) => setOrderHistoryFrom(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none"
+                    />
+                    <input
+                      type="date"
+                      value={orderHistoryTo}
+                      onChange={(e) => setOrderHistoryTo(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none"
+                    />
+                    <div className="md:col-span-4 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={exportOrderHistoryToExcel}
+                        disabled={exportingOrderHistory || filteredOrderHistoryEntries.length === 0}
+                        className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold disabled:opacity-50"
+                      >
+                        {exportingOrderHistory ? 'Exportando...' : 'Exportar Excel'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 grid grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Pedidos</p>
+                      <p className="text-xl font-bold text-cyan-300">{new Set(filteredOrderHistoryEntries.map((e) => e.orderId)).size}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Líneas</p>
+                      <p className="text-xl font-bold text-slate-200">{filteredOrderHistoryEntries.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">Unidades</p>
+                      <p className="text-xl font-bold text-emerald-300">{filteredOrderHistoryEntries.reduce((acc, e) => acc + (Number(e.quantity) || 0), 0)}</p>
+                    </div>
+                  </div>
+
+                  {!filteredOrderHistoryEntries.length ? (
+                    <div className="text-center py-10 text-slate-500">
+                      <Package size={32} className="mx-auto mb-2 opacity-50" />
+                      <p>No hay pedidos para este artículo con esos filtros.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-auto border border-slate-800 rounded-xl">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-800/80 text-slate-300">
+                          <tr>
+                            <th className="text-left p-2.5 font-semibold">Fecha</th>
+                            <th className="text-left p-2.5 font-semibold">Pedido</th>
+                            <th className="text-left p-2.5 font-semibold">Cliente</th>
+                            <th className="text-left p-2.5 font-semibold">Variante</th>
+                            <th className="text-right p-2.5 font-semibold">Cantidad</th>
+                            <th className="text-right p-2.5 font-semibold">Total línea</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredOrderHistoryEntries.map((row, idx) => (
+                            <tr key={`${row.orderId}-${idx}`} className="border-t border-slate-800 text-slate-200">
+                              <td className="p-2.5">
+                                {row.date ? new Date(row.date).toLocaleDateString('es-AR') : '-'}
+                              </td>
+                              <td className="p-2.5">
+                                <div className="font-mono">#{row.orderId}</div>
+                                <div className="text-[11px] text-slate-500">{row.status}</div>
+                                {row.reference && <div className="text-[11px] text-cyan-300 truncate">Ref: {row.reference}</div>}
+                              </td>
+                              <td className="p-2.5">
+                                <div>{row.customerName}</div>
+                                {row.sellerName && <div className="text-[11px] text-slate-500">Vendedor: {row.sellerName}</div>}
+                              </td>
+                              <td className="p-2.5">
+                                <div className="font-mono text-xs">{row.variantSku}</div>
+                                <div className="text-[11px] text-slate-500">{[row.sizeCode, row.colorName].filter(Boolean).join(' / ') || '-'}</div>
+                              </td>
+                              <td className="p-2.5 text-right font-semibold">{row.quantity}</td>
+                              <td className="p-2.5 text-right font-semibold">${Number(row.lineTotal || 0).toLocaleString('es-AR')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>

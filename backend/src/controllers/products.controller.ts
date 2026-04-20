@@ -881,6 +881,86 @@ export const getVariantById = async (req: Request, res: Response) => {
   }
 };
 
+/** Historial de pedidos donde aparece un artículo (producto padre) y quién lo pidió. */
+export const getProductOrderHistory = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limitRaw = Number(req.query?.limit ?? 200);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+  if (!id) return res.status(400).json({ message: 'ID de producto requerido' });
+  try {
+    const product = await get(`SELECT id, sku, name FROM products WHERE id = ?`, [id]);
+    if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
+
+    const rows = await query(
+      `SELECT
+         o.id AS order_id,
+         o.date,
+         o.status,
+         o.reference,
+         c.business_name AS customer_business_name,
+         c.name AS customer_name,
+         u.name AS seller_name,
+         oi.quantity,
+         oi.price_at_moment,
+         pv.id AS variant_id,
+         COALESCE(pv.sku, p.sku) AS variant_sku,
+         s.size_code,
+         col.name AS color_name
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors col ON col.id = pc.color_id
+       LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users u ON u.id = o.seller_id
+       WHERE p.id = ?
+       ORDER BY o.date DESC, o.id DESC, oi.id DESC
+       LIMIT ?`,
+      [id, limit]
+    ) as any[];
+
+    const entries = rows.map((r) => {
+      const quantity = Number(r.quantity) || 0;
+      const price = Number(r.price_at_moment) || 0;
+      return {
+        orderId: r.order_id,
+        date: r.date,
+        status: r.status,
+        reference: r.reference ?? undefined,
+        customerName: r.customer_business_name || r.customer_name || 'Cliente',
+        sellerName: r.seller_name ?? undefined,
+        quantity,
+        priceAtMoment: price,
+        lineTotal: Math.round(quantity * price * 100) / 100,
+        variantId: r.variant_id,
+        variantSku: r.variant_sku,
+        sizeCode: r.size_code ?? undefined,
+        colorName: r.color_name ?? undefined,
+      };
+    });
+
+    const uniqueOrders = new Set(entries.map((e) => e.orderId));
+    const totalUnits = entries.reduce((acc, e) => acc + (Number(e.quantity) || 0), 0);
+
+    res.json({
+      productId: product.id,
+      productSku: product.sku,
+      productName: product.name,
+      summary: {
+        ordersCount: uniqueOrders.size,
+        rowsCount: entries.length,
+        totalUnits,
+      },
+      entries,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error obteniendo historial de pedidos del artículo' });
+  }
+};
+
 /** Actualizar variante (SKU y/o external_sku). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;

@@ -18,6 +18,7 @@ router.delete('/all', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, p
 router.post('/import-tango', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.importTangoArticles);
 router.get('/export-inventory', auth_1.authMiddleware, products_controller_1.exportInventory);
 router.get('/', auth_1.authMiddleware, products_controller_1.getProducts);
+router.get('/by-id/:id/order-history', auth_1.authMiddleware, products_controller_1.getProductOrderHistory);
 router.get('/by-id/:id', auth_1.authMiddleware, products_controller_1.getProductById);
 router.get('/:sku', auth_1.authMiddleware, products_controller_1.getProductBySku);
 router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.createProduct);

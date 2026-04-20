@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getProductOrderHistory = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
@@ -824,6 +824,84 @@ const getVariantById = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.getVariantById = getVariantById;
+/** Historial de pedidos donde aparece un artículo (producto padre) y quién lo pidió. */
+const getProductOrderHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const { id } = req.params;
+    const limitRaw = Number((_b = (_a = req.query) === null || _a === void 0 ? void 0 : _a.limit) !== null && _b !== void 0 ? _b : 200);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+    if (!id)
+        return res.status(400).json({ message: 'ID de producto requerido' });
+    try {
+        const product = yield (0, db_1.get)(`SELECT id, sku, name FROM products WHERE id = ?`, [id]);
+        if (!product)
+            return res.status(404).json({ message: 'Producto no encontrado' });
+        const rows = yield (0, db_1.query)(`SELECT
+         o.id AS order_id,
+         o.date,
+         o.status,
+         o.reference,
+         c.business_name AS customer_business_name,
+         c.name AS customer_name,
+         u.name AS seller_name,
+         oi.quantity,
+         oi.price_at_moment,
+         pv.id AS variant_id,
+         COALESCE(pv.sku, p.sku) AS variant_sku,
+         s.size_code,
+         col.name AS color_name
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors col ON col.id = pc.color_id
+       LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users u ON u.id = o.seller_id
+       WHERE p.id = ?
+       ORDER BY o.date DESC, o.id DESC, oi.id DESC
+       LIMIT ?`, [id, limit]);
+        const entries = rows.map((r) => {
+            var _a, _b, _c, _d;
+            const quantity = Number(r.quantity) || 0;
+            const price = Number(r.price_at_moment) || 0;
+            return {
+                orderId: r.order_id,
+                date: r.date,
+                status: r.status,
+                reference: (_a = r.reference) !== null && _a !== void 0 ? _a : undefined,
+                customerName: r.customer_business_name || r.customer_name || 'Cliente',
+                sellerName: (_b = r.seller_name) !== null && _b !== void 0 ? _b : undefined,
+                quantity,
+                priceAtMoment: price,
+                lineTotal: Math.round(quantity * price * 100) / 100,
+                variantId: r.variant_id,
+                variantSku: r.variant_sku,
+                sizeCode: (_c = r.size_code) !== null && _c !== void 0 ? _c : undefined,
+                colorName: (_d = r.color_name) !== null && _d !== void 0 ? _d : undefined,
+            };
+        });
+        const uniqueOrders = new Set(entries.map((e) => e.orderId));
+        const totalUnits = entries.reduce((acc, e) => acc + (Number(e.quantity) || 0), 0);
+        res.json({
+            productId: product.id,
+            productSku: product.sku,
+            productName: product.name,
+            summary: {
+                ordersCount: uniqueOrders.size,
+                rowsCount: entries.length,
+                totalUnits,
+            },
+            entries,
+        });
+    }
+    catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Error obteniendo historial de pedidos del artículo' });
+    }
+});
+exports.getProductOrderHistory = getProductOrderHistory;
 /** Actualizar variante (SKU y/o external_sku). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 const updateVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { variantId } = req.params;

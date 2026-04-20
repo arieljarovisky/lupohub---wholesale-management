@@ -298,6 +298,34 @@ export const api = {
     }
   },
 
+  getProductOrderHistory: async (
+    productId: string,
+    limit = 200
+  ): Promise<{
+    productId: string;
+    productSku: string;
+    productName: string;
+    summary: { ordersCount: number; rowsCount: number; totalUnits: number };
+    entries: Array<{
+      orderId: string;
+      date: string;
+      status: string;
+      reference?: string;
+      customerName: string;
+      sellerName?: string;
+      quantity: number;
+      priceAtMoment: number;
+      lineTotal: number;
+      variantId: string;
+      variantSku: string;
+      sizeCode?: string;
+      colorName?: string;
+    }>;
+  }> => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    return await request<any>(`/products/by-id/${encodeURIComponent(productId)}/order-history?${qs.toString()}`, 'GET');
+  },
+
   updateVariant: async (variantId: string, data: { sku?: string; externalSku?: string }): Promise<{ id: string; sku: string | null; external_sku: string | null }> => {
     return handleRequest(async () => {
       return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
