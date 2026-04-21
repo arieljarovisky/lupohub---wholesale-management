@@ -50,6 +50,11 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
     }));
   };
 
+  const markAllAsPicked = () => {
+    if (isReadOnly) return;
+    setItems(prev => prev.map(item => ({ ...item, picked: item.quantity })));
+  };
+
   const progress = Math.round((items.reduce((acc, i) => acc + (i.picked || 0), 0) / items.reduce((acc, i) => acc + i.quantity, 0)) * 100) || 0;
   const isComplete = progress === 100;
 
@@ -100,17 +105,27 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
 
           {/* Action Button (Mobile Full Width) */}
           {!isReadOnly && (
-            <button 
-              onClick={() => onFinishPicking(order.id, items)}
-              className={`w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] ${
-                 isComplete 
-                 ? 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/30' 
-                 : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/30'
-              }`}
-            >
-              <Save size={18} />
-              <span>{isComplete ? 'Finalizar y Despachar' : 'Guardar Progreso'}</span>
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                onClick={markAllAsPicked}
+                disabled={isComplete || items.length === 0}
+                className="w-full sm:w-auto sm:min-w-[220px] py-3.5 px-4 rounded-xl font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 border border-emerald-700/60 bg-emerald-900/25 hover:bg-emerald-800/40 text-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+              >
+                <CheckCircle size={18} />
+                <span>Marcar todo sacado</span>
+              </button>
+              <button
+                onClick={() => onFinishPicking(order.id, items)}
+                className={`w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] ${
+                  isComplete
+                    ? 'bg-green-600 hover:bg-green-500 text-white shadow-green-900/30'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/30'
+                }`}
+              >
+                <Save size={18} />
+                <span>{isComplete ? 'Finalizar y Despachar' : 'Guardar Progreso'}</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
