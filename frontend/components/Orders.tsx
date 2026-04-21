@@ -85,14 +85,24 @@ function getPickedQtyForBilling(item: OrderItem): number {
   return Math.max(0, Math.min(picked, qty));
 }
 
+function canUseLegacyFullQtyForBilling(order: Order): boolean {
+  const status = String(order.status || '').trim().toLowerCase();
+  if (status !== 'controlado' && status !== 'despachado') return false;
+  return (order.items || []).some((i) => Number(i.quantity || 0) > 0);
+}
+
 function orderHasPickedUnits(order: Order): boolean {
-  return (order.items || []).some((i) => getPickedQtyForBilling(i) > 0);
+  if ((order.items || []).some((i) => getPickedQtyForBilling(i) > 0)) return true;
+  return canUseLegacyFullQtyForBilling(order);
 }
 
 /** Para factura: usar únicamente lo retirado (picked). Si no hay picked (facturas antiguas), mantiene cantidades originales. */
 function orderWithFacturableItems(order: Order): Order {
-  const hasPicked = orderHasPickedUnits(order);
-  if (!hasPicked) return order;
+  const hasPickedRows = (order.items || []).some((i) => getPickedQtyForBilling(i) > 0);
+  if (!hasPickedRows) {
+    if (canUseLegacyFullQtyForBilling(order)) return order;
+    return { ...order, items: [] };
+  }
   const items = (order.items || [])
     .map((i) => ({ ...i, quantity: getPickedQtyForBilling(i) }))
     .filter((i) => Number(i.quantity || 0) > 0);

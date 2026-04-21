@@ -636,7 +636,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, status, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
         const noStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
@@ -652,8 +652,12 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         // Facturar únicamente lo efectivamente retirado/pickeado del pedido.
+        // Compatibilidad: pedidos históricos ya Controlados/Despachados sin picked persistido.
         const netFromPickedItems = yield getOrderNetFromLineItems(id, true);
-        const totalForAfip = netFromPickedItems;
+        const statusNorm = String(orderRow.status || '').trim().toLowerCase();
+        const isLegacyReadyStatus = statusNorm === 'controlado' || statusNorm === 'despachado';
+        const fallbackNetFromAllItems = yield getOrderNetFromLineItems(id, false);
+        const totalForAfip = netFromPickedItems > 0 ? netFromPickedItems : (isLegacyReadyStatus ? fallbackNetFromAllItems : 0);
         if (totalForAfip <= 0) {
             return res.status(400).json({ message: 'No hay unidades retiradas para facturar en este pedido.' });
         }
