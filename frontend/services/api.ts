@@ -596,7 +596,10 @@ export const api = {
       cbteHasta: r.cbteHasta,
       amountCredited: Number(r.amountCredited),
       scope: r.scope === 'item' ? 'item' : 'total',
-      itemIndex: r.itemIndex,
+      itemIndex:
+        r.itemIndex != null && Number.isFinite(Number(r.itemIndex))
+          ? Number(r.itemIndex)
+          : undefined,
       createdAt: r.createdAt
     }));
   },

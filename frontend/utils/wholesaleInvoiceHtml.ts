@@ -433,15 +433,26 @@ export function buildWholesaleCreditNoteHtml(params: {
   };
 
   const scope = nc.scope || 'total';
+  const toItemIndex = (value: unknown): number | null => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const idx = Math.trunc(n);
+    return idx >= 0 ? idx : null;
+  };
   const partialLines = (ncItems.length > 0 ? ncItems : [nc])
-    .filter((n) => (n.scope || scope) === 'item' && typeof n.itemIndex === 'number' && itemsOriginal[n.itemIndex!] != null)
+    .map((n) => ({ n, idx: toItemIndex((n as any).itemIndex) }))
+    .filter(({ n, idx }) => (n.scope || scope) === 'item' && idx != null && itemsOriginal[idx] != null)
     .map((n) => {
-      const item = itemsOriginal[n.itemIndex!];
+      const idx = toItemIndex((n as any).n?.itemIndex);
+      const note = (n as any).n as CreditNote;
+      if (idx == null) return null;
+      const item = itemsOriginal[idx];
       const unit = Number(item.priceAtMoment ?? 0);
-      const lineNeto = Math.round(Number(n.amountCredited || 0) * 100) / 100;
+      const lineNeto = Math.round(Number(note.amountCredited || 0) * 100) / 100;
       const qtyNc = unit > 0 ? Math.round((lineNeto / unit) * 1000) / 1000 : 0;
       return { item, unit, lineNeto, qtyNc };
-    });
+    })
+    .filter(Boolean) as Array<{ item: OrderItem; unit: number; lineNeto: number; qtyNc: number }>;
   const lines = scope === 'item' ? partialLines : items.map((i) => {
     const qty = Number(i.quantity || 0);
     const unit = Number(i.priceAtMoment ?? 0);
