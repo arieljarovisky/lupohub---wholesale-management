@@ -585,6 +585,7 @@ export const api = {
     const rows = await request<any[]>(`/orders/${orderId}/credit-notes`, 'GET');
     return (Array.isArray(rows) ? rows : []).map((r: any) => ({
       id: r.id,
+      creditNoteId: r.creditNoteId ?? r.credit_note_id ?? r.id,
       orderId: r.orderId,
       invoiceId: r.invoiceId,
       cae: r.cae,

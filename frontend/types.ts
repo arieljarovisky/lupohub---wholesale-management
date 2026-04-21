@@ -192,6 +192,8 @@ export interface Order {
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */
 export interface CreditNote {
   id: string;
+  /** ID de la NC cabecera; en detalle puede diferir de `id`. */
+  creditNoteId?: string;
   orderId: string;
   invoiceId: string;
   cae: string;

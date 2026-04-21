@@ -78,6 +78,27 @@ function orderNetoFromItems(order: Order): number {
   return Math.round(s * 100) / 100;
 }
 
+function getPickedQtyForBilling(item: OrderItem): number {
+  const qty = Number(item.quantity) || 0;
+  const picked = Number((item as any).picked ?? 0);
+  if (!Number.isFinite(picked) || picked <= 0) return 0;
+  return Math.max(0, Math.min(picked, qty));
+}
+
+function orderHasPickedUnits(order: Order): boolean {
+  return (order.items || []).some((i) => getPickedQtyForBilling(i) > 0);
+}
+
+/** Para factura: usar únicamente lo retirado (picked). Si no hay picked (facturas antiguas), mantiene cantidades originales. */
+function orderWithFacturableItems(order: Order): Order {
+  const hasPicked = orderHasPickedUnits(order);
+  if (!hasPicked) return order;
+  const items = (order.items || [])
+    .map((i) => ({ ...i, quantity: getPickedQtyForBilling(i) }))
+    .filter((i) => Number(i.quantity || 0) > 0);
+  return { ...order, items };
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -534,9 +555,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   };
 
   const buildFacturaHtml = (order: Order, manual?: { remitoNumber?: string; transportNumber?: string; saleCondition?: string }) => {
+    const orderToPrint = orderWithFacturableItems(order);
     const customer = customers.find((c) => c.id === order.customerId);
     return buildWholesaleFacturaHtml({
-      order,
+      order: orderToPrint,
       customer,
       products,
       remitente: mergedRemitenteForFactura() as any,
@@ -544,11 +566,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     });
   };
 
-  const buildCreditNoteHtml = (order: Order, nc: CreditNote) => {
+  const buildCreditNoteHtml = (order: Order, nc: CreditNote, ncItems?: CreditNote[]) => {
     const customer = customers.find((c) => c.id === order.customerId);
     return buildWholesaleCreditNoteHtml({
       order,
       nc,
+      ncItems,
       customer,
       products,
       remitente: mergedRemitenteForFactura() as any,
@@ -612,8 +635,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         showToast('info', 'No hay notas de crédito para este pedido');
         return;
       }
-      const nc = notes[0];
-      const html = buildCreditNoteHtml(order, nc);
+      const groupId = notes[0].creditNoteId || notes[0].id;
+      const group = notes.filter((n) => (n.creditNoteId || n.id) === groupId);
+      const header = group.find((n) => n.id === groupId) || group[0];
+      const html = buildCreditNoteHtml(order, header, group);
       if (!html) {
         showToast('error', 'No se pudo generar la nota de crédito');
         return;
@@ -896,6 +921,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const canEditOrder = canEditOrderBase && !order.invoice;
           const customer = customers.find(c => c.id === order.customerId);
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
+          const pickedItemsCount = order.items.reduce((acc, i) => acc + getPickedQtyForBilling(i), 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
           
           return (
@@ -1016,6 +1042,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (!orderHasPickedUnits(order)) {
+                            showToast('error', 'Solo se puede facturar lo retirado. Este pedido no tiene unidades sacadas.');
+                            return;
+                          }
                           setOrderToEmitFactura(order);
                           setEmitirFacturaTipo('auto');
                           const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition?.toLowerCase() || '';
@@ -1039,6 +1069,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                             message: `Se emitirá Factura ${tipoFactura} y este pedido quedará marcado como "sin impacto de stock".\n\nUsar solo para facturación administrativa (sin movimiento real de inventario).\n\n¿Continuar?`,
                             confirmLabel: `Facturar sin stock`,
                             onConfirm: () => {
+                              if (!orderHasPickedUnits(order)) {
+                                showToast('error', 'Solo se puede facturar lo retirado. Este pedido no tiene unidades sacadas.');
+                                return;
+                              }
                               setEmitiendoFacturaId(order.id);
                               api.emitirFactura(order.id, { noStockImpact: true })
                                 .then((res) => {
@@ -1200,8 +1234,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               </div>
 
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700/50">
-                <div className="text-xs text-slate-500">
-                  {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs text-slate-500">
+                    {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
+                  </div>
+                  <div className={`text-[11px] font-semibold ${pickedItemsCount > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+                    Retirado para facturar: {pickedItemsCount} {pickedItemsCount === 1 ? 'unidad' : 'unidades'}
+                  </div>
                 </div>
                 <div className="flex items-center gap-4 flex-wrap">
                    {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
@@ -1320,6 +1359,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 type="button"
                 onClick={() => {
                   if (!orderToEmitFactura) return;
+                  if (!orderHasPickedUnits(orderToEmitFactura)) {
+                    showToast('error', 'Solo se puede facturar lo retirado. Este pedido no tiene unidades sacadas.');
+                    return;
+                  }
                   const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
                   setEmitiendoFacturaId(orderToEmitFactura.id);
                   const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);

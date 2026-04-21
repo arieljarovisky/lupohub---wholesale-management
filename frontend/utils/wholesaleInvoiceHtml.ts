@@ -385,14 +385,16 @@ export function buildWholesaleFacturaHtml(params: {
 export function buildWholesaleCreditNoteHtml(params: {
   order: Order;
   nc: CreditNote;
+  ncItems?: CreditNote[];
   customer?: Customer;
   products: Product[];
   remitente: FacturaRemitente;
 }): string {
-  const { order, nc, customer, products, remitente } = params;
+  const { order, nc, ncItems = [], customer, products, remitente } = params;
 
+  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
   const items = sortOrderItemsForPrint(
-    order.items.map((i) => enrichOrderItem(i, products)),
+    itemsOriginal,
     products
   );
 
@@ -419,34 +421,46 @@ export function buildWholesaleCreditNoteHtml(params: {
     return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
   };
   const descOf = (i: OrderItem) => {
+    const base = (i.productName ?? '').toString().trim();
+    const size = (i.sizeCode ?? '').toString().trim();
+    const color = (i.colorName ?? '').toString().trim();
+    return [base || '—', size, color].filter(Boolean).join(' — ');
+  };
+  const codeOf = (i: OrderItem) => {
     const variantId = i.variantId ?? i.productId;
     const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
-    const localSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
-    return [localSku, (i.productName ?? '').toString().trim(), i.sizeCode ?? '', i.colorName ?? ''].filter(Boolean).join(' — ') || '—';
+    return normalizeSkuForPrint(localProduct?.sku ?? i.sku ?? '');
   };
 
   const scope = nc.scope || 'total';
-  const itemIdx = nc.itemIndex;
-  let rows: string;
-  if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
-    // itemIndex se guarda contra el orden original de order.items en backend.
-    const i = itemsOriginal[itemIdx];
-    const price = Number(i.priceAtMoment ?? 0);
-    const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
-    const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
-    rows = `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoNc)}</td><td class="col-r">$${formatMoneyAr(ivaNc)}</td><td class="col-r">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`;
-  } else {
-    rows = items
-      .map((i) => {
-        const qty = Number(i.quantity || 0);
-        const unit = Number(i.priceAtMoment ?? 0);
-        const lineNeto = Math.round(qty * unit * 100) / 100;
-        const lineIva = Math.round(lineNeto * 0.21 * 100) / 100;
-        const lineTotal = Math.round((lineNeto + lineIva) * 100) / 100;
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${formatMoneyAr(lineNeto)}</td><td class="col-r">$${formatMoneyAr(lineIva)}</td><td class="col-r">$${formatMoneyAr(lineTotal)}</td></tr>`;
-      })
-      .join('');
-  }
+  const partialLines = (ncItems.length > 0 ? ncItems : [nc])
+    .filter((n) => (n.scope || scope) === 'item' && typeof n.itemIndex === 'number' && itemsOriginal[n.itemIndex!] != null)
+    .map((n) => {
+      const item = itemsOriginal[n.itemIndex!];
+      const unit = Number(item.priceAtMoment ?? 0);
+      const lineNeto = Math.round(Number(n.amountCredited || 0) * 100) / 100;
+      const qtyNc = unit > 0 ? Math.round((lineNeto / unit) * 1000) / 1000 : 0;
+      return { item, unit, lineNeto, qtyNc };
+    });
+  const lines = scope === 'item' ? partialLines : items.map((i) => {
+    const qty = Number(i.quantity || 0);
+    const unit = Number(i.priceAtMoment ?? 0);
+    const lineNeto = Math.round(qty * unit * 100) / 100;
+    return { item: i, unit, lineNeto, qtyNc: qty };
+  });
+  const rows = lines
+    .map(({ item, unit, lineNeto, qtyNc }) => {
+      const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
+      return `<tr>
+        <td class="col-c">${qtyStr}</td>
+        <td class="col-c col-code">${codeOf(item) || '—'}</td>
+        <td>${descOf(item)}</td>
+        <td class="col-c">${despachoOf(item)}</td>
+        <td class="col-r">$${formatMoneyAr(unit)}</td>
+        <td class="col-r">$${formatMoneyAr(lineNeto)}</td>
+      </tr>`;
+    })
+    .join('');
 
   const vtoCae = nc.caeFchVto ? formatDateShort(nc.caeFchVto) : '—';
   const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
@@ -571,12 +585,12 @@ export function buildWholesaleCreditNoteHtml(params: {
         <table>
           <thead>
             <tr>
-              <th>Producto / Descripción</th>
-              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
               <th class="col-c" style="width: 70px;">CANT.</th>
-              <th class="col-r" style="width: 100px;">BASE</th>
-              <th class="col-r" style="width: 90px;">IVA</th>
-              <th class="col-r" style="width: 92px;">TOTAL</th>
+              <th class="col-c" style="width: 130px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
+              <th class="col-c" style="width: 125px;">N° DESPACHO</th>
+              <th class="col-r" style="width: 105px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 100px;">IMPORTE</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>

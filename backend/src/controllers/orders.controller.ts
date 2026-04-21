@@ -41,15 +41,18 @@ function normalizeOrderReference(raw: unknown): string | null {
   return v.slice(0, 255);
 }
 
-/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
-async function getOrderNetFromLineItems(orderId: string): Promise<number> {
+/** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
+async function getOrderNetFromLineItems(orderId: string, pickedOnly = false): Promise<number> {
   const rows = await query(
-    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    `SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
     [orderId]
-  ) as { quantity: number; price_at_moment: string | number }[];
+  ) as { quantity: number; picked?: number | null; price_at_moment: string | number }[];
   let sum = 0;
   for (const r of rows) {
-    const qty = Number(r.quantity) || 0;
+    const rawQty = pickedOnly ? Number(r.picked ?? 0) : Number(r.quantity);
+    const baseQty = Number.isFinite(rawQty) ? rawQty : 0;
+    const qty = Math.max(0, Math.min(baseQty, Number(r.quantity) || 0));
+    if (qty <= 0) continue;
     const price = Number(r.price_at_moment) || 0;
     sum += Math.round(qty * price * 100) / 100;
   }
@@ -629,8 +632,12 @@ export const emitirFactura = async (req: any, res: any) => {
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
-    const netFromItems = await getOrderNetFromLineItems(id);
-    const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+    // Facturar únicamente lo efectivamente retirado/pickeado del pedido.
+    const netFromPickedItems = await getOrderNetFromLineItems(id, true);
+    const totalForAfip = netFromPickedItems;
+    if (totalForAfip <= 0) {
+      return res.status(400).json({ message: 'No hay unidades retiradas para facturar en este pedido.' });
+    }
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
@@ -686,13 +693,13 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
     try {
       rows = await query(
         `SELECT
-           cn.id, cn.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+           cn.id, NULL AS credit_note_id, cn.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
            cn.amount_credited, cn.scope, cn.item_index, cn.created_at
          FROM credit_notes cn
          WHERE cn.order_id = ?
          UNION ALL
          SELECT
-           cni.id, cni.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+           cni.id, cni.credit_note_id, cni.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
            cni.amount_credited, 'item' AS scope, cni.item_index, cni.created_at
          FROM credit_note_items cni
          JOIN credit_notes cn ON cn.id = cni.credit_note_id
@@ -713,6 +720,7 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
     }
     res.json((rows as any[]).map((r: any) => ({
       id: r.id,
+      creditNoteId: r.credit_note_id ?? r.id,
       orderId: r.order_id,
       invoiceId: r.invoice_id,
       cae: r.cae,

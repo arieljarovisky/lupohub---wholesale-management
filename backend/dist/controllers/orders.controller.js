@@ -83,13 +83,18 @@ function normalizeOrderReference(raw) {
         return null;
     return v.slice(0, 255);
 }
-/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
-function getOrderNetFromLineItems(orderId) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const rows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [orderId]);
+/** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
+function getOrderNetFromLineItems(orderId_1) {
+    return __awaiter(this, arguments, void 0, function* (orderId, pickedOnly = false) {
+        var _a;
+        const rows = yield (0, db_1.query)(`SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [orderId]);
         let sum = 0;
         for (const r of rows) {
-            const qty = Number(r.quantity) || 0;
+            const rawQty = pickedOnly ? Number((_a = r.picked) !== null && _a !== void 0 ? _a : 0) : Number(r.quantity);
+            const baseQty = Number.isFinite(rawQty) ? rawQty : 0;
+            const qty = Math.max(0, Math.min(baseQty, Number(r.quantity) || 0));
+            if (qty <= 0)
+                continue;
             const price = Number(r.price_at_moment) || 0;
             sum += Math.round(qty * price * 100) / 100;
         }
@@ -646,8 +651,12 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
-        const netFromItems = yield getOrderNetFromLineItems(id);
-        const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+        // Facturar únicamente lo efectivamente retirado/pickeado del pedido.
+        const netFromPickedItems = yield getOrderNetFromLineItems(id, true);
+        const totalForAfip = netFromPickedItems;
+        if (totalForAfip <= 0) {
+            return res.status(400).json({ message: 'No hay unidades retiradas para facturar en este pedido.' });
+        }
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id }, {
             id: customerRow.id,
@@ -695,13 +704,13 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
         let rows = [];
         try {
             rows = (yield (0, db_1.query)(`SELECT
-           cn.id, cn.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+           cn.id, NULL AS credit_note_id, cn.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
            cn.amount_credited, cn.scope, cn.item_index, cn.created_at
          FROM credit_notes cn
          WHERE cn.order_id = ?
          UNION ALL
          SELECT
-           cni.id, cni.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+           cni.id, cni.credit_note_id, cni.order_id, cn.invoice_id, cn.cae, cn.cae_fch_vto, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
            cni.amount_credited, 'item' AS scope, cni.item_index, cni.created_at
          FROM credit_note_items cni
          JOIN credit_notes cn ON cn.id = cni.credit_note_id
@@ -718,20 +727,21 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         }
         res.json(rows.map((r) => {
-            var _a, _b, _c;
+            var _a, _b, _c, _d;
             return ({
                 id: r.id,
+                creditNoteId: (_a = r.credit_note_id) !== null && _a !== void 0 ? _a : r.id,
                 orderId: r.order_id,
                 invoiceId: r.invoice_id,
                 cae: r.cae,
-                caeFchVto: (_a = r.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
+                caeFchVto: (_b = r.cae_fch_vto) !== null && _b !== void 0 ? _b : undefined,
                 puntoVta: r.punto_venta,
                 cbteTipo: r.cbte_tipo,
                 cbteDesde: r.cbte_desde,
                 cbteHasta: r.cbte_hasta,
                 amountCredited: Number(r.amount_credited),
-                scope: (_b = r.scope) !== null && _b !== void 0 ? _b : 'total',
-                itemIndex: (_c = r.item_index) !== null && _c !== void 0 ? _c : undefined,
+                scope: (_c = r.scope) !== null && _c !== void 0 ? _c : 'total',
+                itemIndex: (_d = r.item_index) !== null && _d !== void 0 ? _d : undefined,
                 createdAt: r.created_at
             });
         }));
