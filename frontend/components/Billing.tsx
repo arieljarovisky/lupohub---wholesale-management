@@ -182,16 +182,20 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
       if (item.tipo === 'NC' || item.cbteTipo === 3 || item.cbteTipo === 8) {
         const notes = await api.getOrderCreditNotes(order.id);
-        const nc = notes.find((n: any) => String(n.cbteDesde) === String(item.cbteDesde) && String(n.puntoVta) === String(item.puntoVta)) || notes[0];
-        if (!nc) {
+        const matched = notes.find((n: any) => String(n.cbteDesde) === String(item.cbteDesde) && String(n.puntoVta) === String(item.puntoVta)) || notes[0];
+        if (!matched) {
           showToast('error', 'No se encontró la nota de crédito correspondiente');
           return;
         }
+        const groupId = (matched as any).creditNoteId || matched.id;
+        const group = notes.filter((n: any) => ((n as any).creditNoteId || n.id) === groupId);
+        const nc = group.find((n: any) => n.id === groupId) || matched;
 
         const customerNc = customers.find((c) => c.id === order.customerId);
         const html = buildWholesaleCreditNoteHtml({
           order,
           nc,
+          ncItems: group,
           customer: customerNc,
           products,
           remitente: mergedRemitenteForFactura() as any,
@@ -408,8 +412,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 return (
                   <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60">
                     <td className="px-3 py-2">{formatDate(item.fecha)}</td>
-                    <td className="px-3 py-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                         {formatTipo(item)}
                       </span>
                     </td>

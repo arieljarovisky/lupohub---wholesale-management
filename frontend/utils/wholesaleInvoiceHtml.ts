@@ -421,10 +421,7 @@ export function buildWholesaleCreditNoteHtml(params: {
     return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
   };
   const descOf = (i: OrderItem) => {
-    const base = (i.productName ?? '').toString().trim();
-    const size = (i.sizeCode ?? '').toString().trim();
-    const color = (i.colorName ?? '').toString().trim();
-    return [base || '—', size, color].filter(Boolean).join(' — ');
+    return (i.productName ?? '').toString().trim() || '—';
   };
   const codeOf = (i: OrderItem) => {
     const variantId = i.variantId ?? i.productId;
