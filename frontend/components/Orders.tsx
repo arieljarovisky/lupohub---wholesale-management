@@ -832,14 +832,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <span>Exportar a Excel</span>
           </button>
           {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
-            <button
-              onClick={() => onNavigate('create_order')}
-              className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
-            >
-              <Plus size={20} />
-              <span>Nuevo Pedido</span>
-            </button>
-          )}
+          <button 
+            onClick={() => onNavigate('create_order')}
+            className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
+          >
+            <Plus size={20} />
+            <span>Nuevo Pedido</span>
+          </button>
+        )}
         </div>
       </div>
 
@@ -917,7 +917,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
-          {filteredOrders.map((order) => {
+        {filteredOrders.map((order) => {
           const canEditOrder = canEditOrderBase && !order.invoice;
           const customer = customers.find(c => c.id === order.customerId);
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
@@ -1019,7 +1019,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     {Number(order.creditNotesTotalCount || 0) === 0 && Number(order.creditNotesItemCount || 0) > 0 && (
                       <span className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
                         <FileMinus size={10} /> N.C. PARCIAL ({order.creditNotesItemCount})
-                      </span>
+                       </span>
                     )}
                   </div>
                   {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
@@ -1039,7 +1039,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     const condicionIva = customer?.condicionIva || 'No informada';
                     return (
                     <>
-                      <button
+                    <button
                         onClick={(e) => {
                           e.stopPropagation();
                           if (!orderHasPickedUnits(order)) {
@@ -1235,16 +1235,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700/50">
                 <div className="flex flex-col gap-1">
-                  <div className="text-xs text-slate-500">
+                <div className="text-xs text-slate-500">
                     {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
-                  </div>
+                </div>
                   <div className={`text-[11px] font-semibold ${pickedItemsCount > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
                     Retirado para facturar: {pickedItemsCount} {pickedItemsCount === 1 ? 'unidad' : 'unidades'}
                   </div>
                 </div>
                 <div className="flex items-center gap-4 flex-wrap">
                    {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
-                     <button
+                     <button 
                         onClick={(e) => { e.stopPropagation(); onStartPicking?.(order); }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-500 transition"
                         title="Abrir pantalla de picking (pone el pedido en Preparando si estaba Confirmado)"
@@ -1343,8 +1343,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   {optsE.length === 0 && (
                     <p className="text-xs text-amber-400/95 mt-2">No hay transportes cargados. En Configuración → Remitos cargá transportes y asignalos al cliente en Clientes.</p>
                   )}
-                </div>
-              );
+    </div>
+  );
             })()}
             <div className="flex gap-3 justify-end">
               <button

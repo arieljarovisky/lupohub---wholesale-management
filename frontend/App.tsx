@@ -640,7 +640,13 @@ const App: React.FC = () => {
   const handleFinishPicking = async (orderId: string, updatedItems: OrderItem[]) => {
     // Al finalizar picking el pedido pasa a "Falta controlar" (luego Depósito pasará a Controlado y Despachado)
     const newStatus = OrderStatus.PENDING_CONTROL;
+    const targetOrder = orders.find((o) => o.id === orderId) || activePickingOrder;
+    if (!targetOrder) {
+      showToast('error', 'No se encontró el pedido para guardar el picking');
+      return;
+    }
 
+    const previousOrders = [...orders];
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o,
       items: updatedItems,
@@ -648,10 +654,22 @@ const App: React.FC = () => {
       pickedBy: currentUser?.id
     } : o));
 
-    await handleUpdateOrderStatus(orderId, newStatus, currentUser?.id);
-
-    setActivePickingOrder(null);
-    setCurrentView('orders');
+    try {
+      // Persistir cantidades retiradas (picked) en order_items.
+      await api.updateOrder({
+        ...targetOrder,
+        items: updatedItems,
+        status: newStatus,
+        pickedBy: currentUser?.id
+      });
+      // Persistir picked_by y estado operacional del pedido.
+      await handleUpdateOrderStatus(orderId, newStatus, currentUser?.id);
+      setActivePickingOrder(null);
+      setCurrentView('orders');
+    } catch (error) {
+      setOrders(previousOrders);
+      showToast('error', 'No se pudo guardar el picking del pedido');
+    }
   };
 
   if (!authChecked) {
