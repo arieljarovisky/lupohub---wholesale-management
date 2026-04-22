@@ -305,7 +305,7 @@ export const exportFacturasIibbCapital = async (req: Request, res: Response) => 
       JOIN orders o ON o.id = i.order_id
       JOIN customers c ON c.id = o.customer_id
       ${whereSql}
-      ORDER BY o.date DESC, i.created_at DESC
+      ORDER BY o.date ASC, i.cbte_desde ASC
     `;
 
     const rows = await query(sql, params);
@@ -356,22 +356,38 @@ export const exportFacturasIibbCapital = async (req: Request, res: Response) => 
       const d = new Date(raw);
       return isNaN(d.getTime()) ? null : d;
     };
+    const dateAtMidnight = (raw: any): Date | null => {
+      const d = toDate(raw);
+      if (!d) return null;
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    };
+    const asNumber = (v: any): number => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
 
     let rowNumber = 1;
     for (const r of rows as any[]) {
-      const neto = Math.round((Number(r.neto_gravado) || 0) * 100) / 100;
+      const cbteTipo = Number(r.cbte_tipo) || 0;
+      const neto = Math.round(asNumber(r.neto_gravado) * 100) / 100;
       const iva21 = Math.round(neto * 0.21 * 100) / 100;
       const iibbRate = Math.max(0, Number(r.iibb_perception_rate) || 0);
       const iibbAmount = Math.round(neto * (iibbRate / 100) * 100) / 100;
       const totalConIibb = Math.round((neto + iva21 + iibbAmount) * 100) / 100;
-      const cbte = `${letraFromCbte(Number(r.cbte_tipo) || 0)}${String(r.punto_venta ?? '').padStart(4, '0')}${String(r.numero_desde ?? '').padStart(8, '0')}`;
-      const clienteCodigo = (r.customer_legacy_code || r.customer_id || '').toString();
+      // Para AGIP: solo percepciones efectivas.
+      if (iibbAmount <= 0) continue;
+      // Para layout "FAC A..." del ejemplo: incluir solo facturas A.
+      if (cbteTipo !== 1) continue;
+
+      const cbte = `${letraFromCbte(cbteTipo)}${String(r.punto_venta ?? '').padStart(4, '0')}${String(r.numero_desde ?? '').padStart(8, '0')}`;
+      const clienteCodigo = (r.customer_legacy_code || '').toString().trim();
       const razon = (r.customer_business_name || r.customer_name || '').toString();
       const tipoDoc = tipoDocFrom(r.customer_cuit);
       const nroDoc = formatDocNumber(r.customer_cuit);
-      const situacionIb = iibbRate > 0 ? 'No inscripto' : 'Inscripto';
-      const fechaEmision = toDate(r.invoice_created_at) || toDate(r.fecha);
-      const nroInterno = (r.order_reference || r.order_id || r.id || '').toString();
+      const situacionIb = 'No inscripto';
+      const fechaEmision = dateAtMidnight(r.fecha) || dateAtMidnight(r.invoice_created_at);
+      // Para AGIP conviene un número interno simple numérico/estable.
+      const nroInterno = Number(r.numero_desde) || rowNumber;
 
       ws.addRow([
         rowNumber,
