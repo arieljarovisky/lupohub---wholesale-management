@@ -101,7 +101,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
       SELECT COUNT(*) AS total
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
-      JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id AND (pv.archived = 0 OR pv.archived IS NULL)
       ${priceJoin}
       ${whereClause}
       `, [...priceParams, ...params]);
@@ -117,7 +117,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
              c.name AS color_name, s.size_code AS size_code, s.name AS size_name
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
-      JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id AND (pv.archived = 0 OR pv.archived IS NULL)
       LEFT JOIN colors c ON c.id = pc.color_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN stocks st ON st.variant_id = pv.id
@@ -397,7 +397,7 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.id=?
+       WHERE p.id=? AND (pv.archived = 0 OR pv.archived IS NULL)
        ORDER BY c.code, s.size_code`, [product.id]);
         const variants = variantsRows.map((v) => (Object.assign(Object.assign({}, v), { externalIds: {
                 tiendaNubeVariant: v.tienda_nube_variant_id,
@@ -779,7 +779,7 @@ const deleteAllProducts = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.deleteAllProducts = deleteAllProducts;
-/** Eliminar una variante (y su stock). No se puede si está en pedidos. */
+/** Eliminar una variante (y su stock). Si está en pedidos, se archiva para preservar historial. */
 const deleteVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { variantId } = req.params;
     if (!variantId)
@@ -787,8 +787,12 @@ const deleteVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         const inOrder = yield (0, db_1.get)(`SELECT 1 FROM order_items WHERE variant_id = ? LIMIT 1`, [variantId]);
         if (inOrder) {
-            return res.status(400).json({
-                message: 'No se puede eliminar la variante porque está en uno o más pedidos.',
+            const result = yield (0, db_1.execute)('UPDATE product_variants SET archived = 1 WHERE id = ?', [variantId]);
+            const affected = result && result.affectedRows;
+            if (affected === 0)
+                return res.status(404).json({ message: 'Variante no encontrada' });
+            return res.json({
+                message: 'La variante está en pedidos y fue archivada (oculta), no eliminada.'
             });
         }
         yield (0, db_1.execute)('DELETE FROM stocks WHERE variant_id = ?', [variantId]);

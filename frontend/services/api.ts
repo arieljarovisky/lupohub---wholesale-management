@@ -432,8 +432,8 @@ export const api = {
   },
 
   /** Elimina una variante (y su stock). Falla si la variante está en pedidos. */
-  deleteVariant: async (variantId: string): Promise<void> => {
-    await request<void>(`/products/variants/${encodeURIComponent(variantId)}`, 'DELETE');
+  deleteVariant: async (variantId: string): Promise<{ message?: string }> => {
+    return await request<{ message?: string }>(`/products/variants/${encodeURIComponent(variantId)}`, 'DELETE');
   },
 
   /** Elimina un artículo; si tiene pedidos asociados, se archiva (oculta). */

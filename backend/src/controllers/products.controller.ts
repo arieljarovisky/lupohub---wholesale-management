@@ -62,7 +62,7 @@ export const getProducts = async (req: Request, res: Response) => {
       SELECT COUNT(*) AS total
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
-      JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id AND (pv.archived = 0 OR pv.archived IS NULL)
       ${priceJoin}
       ${whereClause}
       `,
@@ -82,7 +82,7 @@ export const getProducts = async (req: Request, res: Response) => {
              c.name AS color_name, s.size_code AS size_code, s.name AS size_name
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
-      JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id AND (pv.archived = 0 OR pv.archived IS NULL)
       LEFT JOIN colors c ON c.id = pc.color_id
       LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN stocks st ON st.variant_id = pv.id
@@ -403,7 +403,7 @@ export const getProductBySku = async (req: any, res: any) => {
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.id=?
+       WHERE p.id=? AND (pv.archived = 0 OR pv.archived IS NULL)
        ORDER BY c.code, s.size_code`,
       [product.id]
     );
@@ -835,7 +835,7 @@ export const deleteAllProducts = async (req: any, res: any) => {
   }
 };
 
-/** Eliminar una variante (y su stock). No se puede si está en pedidos. */
+/** Eliminar una variante (y su stock). Si está en pedidos, se archiva para preservar historial. */
 export const deleteVariant = async (req: any, res: any) => {
   const { variantId } = req.params;
   if (!variantId) return res.status(400).json({ message: 'Falta variantId' });
@@ -845,8 +845,11 @@ export const deleteVariant = async (req: any, res: any) => {
       [variantId]
     );
     if (inOrder) {
-      return res.status(400).json({
-        message: 'No se puede eliminar la variante porque está en uno o más pedidos.',
+      const result = await execute('UPDATE product_variants SET archived = 1 WHERE id = ?', [variantId]);
+      const affected = result && (result as any).affectedRows;
+      if (affected === 0) return res.status(404).json({ message: 'Variante no encontrada' });
+      return res.json({
+        message: 'La variante está en pedidos y fue archivada (oculta), no eliminada.'
       });
     }
     await execute('DELETE FROM stocks WHERE variant_id = ?', [variantId]);

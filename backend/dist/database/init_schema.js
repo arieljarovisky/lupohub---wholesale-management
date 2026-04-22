@@ -93,6 +93,7 @@ function initSchema() {
       mercado_libre_variant_id VARCHAR(100) NULL,
       mercado_libre_item_id VARCHAR(100) NULL,
       sku VARCHAR(100) NULL,
+      archived TINYINT(1) NOT NULL DEFAULT 0,
       FOREIGN KEY (product_color_id) REFERENCES product_colors(id) ON DELETE CASCADE,
       FOREIGN KEY (size_id) REFERENCES sizes(id) ON DELETE CASCADE
     )

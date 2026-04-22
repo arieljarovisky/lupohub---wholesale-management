@@ -1346,8 +1346,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       confirmLabel: 'Eliminar',
       onConfirm: async () => {
         try {
-          await api.deleteVariant(variantId);
-          showToast('success', 'Variante eliminada');
+          const res = await api.deleteVariant(variantId);
+          showToast('success', res?.message || 'Variante eliminada');
           setServerListRefreshKey(k => k + 1);
           if (groupKey) {
             setLoadedVariants(prev => {
