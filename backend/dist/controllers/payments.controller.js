@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importPaymentsFromExcel = exports.createPayment = exports.listPayments = void 0;
+exports.importIibbRetPer = exports.importPaymentsFromExcel = exports.createPayment = exports.listPayments = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const XLSX = __importStar(require("xlsx"));
@@ -365,3 +365,218 @@ const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.importPaymentsFromExcel = importPaymentsFromExcel;
+function normalizeCuit(v) {
+    return String(v !== null && v !== void 0 ? v : '').replace(/\D/g, '').trim();
+}
+function parseRetPerNumber(raw) {
+    const s = String(raw !== null && raw !== void 0 ? raw : '').trim();
+    if (!s)
+        return NaN;
+    const n = Number(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : NaN;
+}
+function parseRetPerFixedWidthLine(line) {
+    const raw = String(line !== null && line !== void 0 ? line : '');
+    if (!raw.trim())
+        return null;
+    if (raw.length < 205)
+        return null;
+    const cuit = normalizeCuit(raw.slice(76, 87));
+    const rateRaw = raw.slice(179, 185);
+    const amountRaw = raw.slice(192, 202);
+    const rate = parseRetPerNumber(rateRaw);
+    const amount = parseRetPerNumber(amountRaw);
+    if (!/^\d{11}$/.test(cuit) || !Number.isFinite(rate))
+        return null;
+    return {
+        cuit,
+        rate: Math.max(0, Math.round(rate * 10000) / 10000),
+        amount: Number.isFinite(amount) ? Math.round(amount * 100) / 100 : undefined,
+    };
+}
+function detectCsvDelimiter(headerLine) {
+    var _a;
+    const line = String(headerLine !== null && headerLine !== void 0 ? headerLine : '');
+    const counts = [
+        { d: ';', c: (line.match(/;/g) || []).length },
+        { d: ',', c: (line.match(/,/g) || []).length },
+        { d: '\t', c: (line.match(/\t/g) || []).length },
+    ];
+    counts.sort((a, b) => b.c - a.c);
+    return ((_a = counts[0]) === null || _a === void 0 ? void 0 : _a.c) > 0 ? counts[0].d : ';';
+}
+function findColumnIndex(headers, aliases) {
+    const normalized = headers.map((h) => normalizeNameForMatch(h));
+    for (const alias of aliases) {
+        const idx = normalized.findIndex((h) => h === normalizeNameForMatch(alias));
+        if (idx >= 0)
+            return idx;
+    }
+    return -1;
+}
+function parseRetPerCsv(content) {
+    var _a, _b, _c;
+    const lines = content
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean);
+    if (lines.length < 2)
+        return [];
+    const delimiter = detectCsvDelimiter(lines[0]);
+    const headers = lines[0].split(delimiter).map((s) => s.trim());
+    const cuitIdx = findColumnIndex(headers, ['cuit', 'cuil', 'documento', 'nro_doc']);
+    const rateIdx = findColumnIndex(headers, ['alicuota', 'aliquota', 'percepcion', 'perc_iibb', 'iibb']);
+    if (cuitIdx < 0 || rateIdx < 0)
+        return [];
+    const amountIdx = findColumnIndex(headers, ['importe', 'importe_percepcion', 'monto', 'percepcion_importe']);
+    const rows = [];
+    for (const line of lines.slice(1)) {
+        const cols = line.split(delimiter).map((s) => s.trim().replace(/^"|"$/g, ''));
+        const cuit = normalizeCuit((_a = cols[cuitIdx]) !== null && _a !== void 0 ? _a : '');
+        const rate = parseRetPerNumber((_b = cols[rateIdx]) !== null && _b !== void 0 ? _b : '');
+        const amount = amountIdx >= 0 ? parseRetPerNumber((_c = cols[amountIdx]) !== null && _c !== void 0 ? _c : '') : NaN;
+        if (!/^\d{11}$/.test(cuit) || !Number.isFinite(rate))
+            continue;
+        rows.push({
+            cuit,
+            rate: Math.max(0, Math.round(rate * 10000) / 10000),
+            amount: Number.isFinite(amount) ? Math.round(amount * 100) / 100 : undefined,
+        });
+    }
+    return rows;
+}
+function parseArdjuNoHeader(content) {
+    var _a, _b, _c, _d;
+    const lines = content
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter(Boolean);
+    const out = [];
+    for (const line of lines) {
+        const cols = line.split(';');
+        if (cols.length < 9)
+            continue;
+        const cuit = normalizeCuit((_a = cols[3]) !== null && _a !== void 0 ? _a : '');
+        // Formato ARDJU: col[8] suele ser alícuota de percepción; col[7] retención/fallback.
+        const percepRate = parseRetPerNumber((_b = cols[8]) !== null && _b !== void 0 ? _b : '');
+        const fallbackRate = parseRetPerNumber((_c = cols[7]) !== null && _c !== void 0 ? _c : '');
+        const rate = Number.isFinite(percepRate) ? percepRate : fallbackRate;
+        if (!/^\d{11}$/.test(cuit) || !Number.isFinite(rate))
+            continue;
+        const desde = String((_d = cols[1]) !== null && _d !== void 0 ? _d : '').replace(/\D/g, '');
+        const period = /^\d{8}$/.test(desde) ? `${desde.slice(4, 8)}${desde.slice(2, 4)}` : undefined;
+        out.push({
+            cuit,
+            rate: Math.max(0, Math.round(rate * 10000) / 10000),
+            period,
+        });
+    }
+    return out;
+}
+function parseRetPerFile(file) {
+    const original = String(file.originalname || '').toLowerCase();
+    const content = file.buffer.toString('utf8');
+    if (original.includes('ardju')) {
+        const ardjuRows = parseArdjuNoHeader(content);
+        if (ardjuRows.length > 0)
+            return ardjuRows;
+    }
+    if (original.endsWith('.csv'))
+        return parseRetPerCsv(content);
+    const fixedRows = content
+        .split(/\r?\n/)
+        .map((line) => parseRetPerFixedWidthLine(line))
+        .filter((r) => !!r);
+    if (fixedRows.length > 0)
+        return fixedRows;
+    return parseRetPerCsv(content);
+}
+function periodFromFileName(fileName) {
+    const base = String(fileName || '');
+    // RetPer_202603.txt => 202603
+    const yyyymm = base.match(/(20\d{2})(0[1-9]|1[0-2])/);
+    if (yyyymm)
+        return `${yyyymm[1]}${yyyymm[2]}`;
+    // ARDJU008042026.TXT => 202604
+    const mmYYYY = base.match(/(0[1-9]|1[0-2])(20\d{2})/);
+    if (mmYYYY)
+        return `${mmYYYY[2]}${mmYYYY[1]}`;
+    return null;
+}
+/** Importa padrón RetPer (TXT/CSV) y actualiza alícuota IIBB por CUIT en clientes. */
+const importIibbRetPer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const user = req.user;
+        if (!user || !canManagePayments(user.role)) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const files = req.files || [];
+        if (!files.length) {
+            return res.status(400).json({ message: 'Subí al menos un archivo RetPer (.txt o .csv)' });
+        }
+        const customers = (yield (0, db_1.query)(`SELECT id, cuit FROM customers WHERE cuit IS NOT NULL AND cuit <> ''`));
+        const customerByCuit = new Map();
+        for (const c of customers) {
+            const cuit = normalizeCuit(c.cuit);
+            if (/^\d{11}$/.test(cuit) && !customerByCuit.has(cuit))
+                customerByCuit.set(cuit, { id: c.id });
+        }
+        let rowsRead = 0;
+        let rowsValid = 0;
+        let updatedCustomers = 0;
+        let rowsWithoutCustomer = 0;
+        let importedAmountTotal = 0;
+        const unmatchedCuits = new Map();
+        for (const file of files) {
+            const rows = parseRetPerFile(file);
+            rowsRead += rows.length;
+            if (!rows.length)
+                continue;
+            const periodFromName = periodFromFileName(file.originalname);
+            const bestByCuit = new Map();
+            for (const row of rows) {
+                if (!/^\d{11}$/.test(row.cuit) || !Number.isFinite(row.rate))
+                    continue;
+                rowsValid++;
+                importedAmountTotal += Number.isFinite(row.amount) ? Number(row.amount) : 0;
+                const prev = bestByCuit.get(row.cuit);
+                if (!prev || row.rate > prev.rate)
+                    bestByCuit.set(row.cuit, row);
+            }
+            for (const [cuit, row] of bestByCuit.entries()) {
+                const customer = customerByCuit.get(cuit);
+                if (!customer) {
+                    rowsWithoutCustomer++;
+                    unmatchedCuits.set(cuit, (unmatchedCuits.get(cuit) || 0) + 1);
+                    continue;
+                }
+                yield (0, db_1.execute)(`UPDATE customers
+           SET iibb_perception_rate = ?,
+               iibb_padron_period = ?,
+               iibb_padron_source = ?,
+               iibb_padron_updated_at = NOW()
+           WHERE id = ?`, [row.rate, (_a = row.period) !== null && _a !== void 0 ? _a : periodFromName, file.originalname, customer.id]);
+                updatedCustomers++;
+            }
+        }
+        return res.json({
+            message: 'Importación RetPer finalizada',
+            files: files.length,
+            rowsRead,
+            rowsValid,
+            updatedCustomers,
+            rowsWithoutCustomer,
+            importedAmountTotal: Math.round(importedAmountTotal * 100) / 100,
+            unmatchedCuits: Array.from(unmatchedCuits.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 30)
+                .map(([cuit, count]) => ({ cuit, count })),
+        });
+    }
+    catch (e) {
+        console.error('importIibbRetPer:', e);
+        res.status(500).json({ message: 'Error importando RetPer', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.importIibbRetPer = importIibbRetPer;

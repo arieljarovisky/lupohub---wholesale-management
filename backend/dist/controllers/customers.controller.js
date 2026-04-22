@@ -52,7 +52,7 @@ const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
 function toCustomer(row, transportes) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
     return {
         id: row.id,
         sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : '',
@@ -72,6 +72,12 @@ function toCustomer(row, transportes) {
         legacyCode: (_q = row.legacy_code) !== null && _q !== void 0 ? _q : undefined,
         accountZone: (_r = row.account_zone) !== null && _r !== void 0 ? _r : undefined,
         accountSellerLabel: (_s = row.account_seller_label) !== null && _s !== void 0 ? _s : undefined,
+        iibbPerceptionRate: row.iibb_perception_rate != null && Number.isFinite(Number(row.iibb_perception_rate))
+            ? Number(row.iibb_perception_rate)
+            : undefined,
+        iibbPadronPeriod: (_t = row.iibb_padron_period) !== null && _t !== void 0 ? _t : undefined,
+        iibbPadronSource: (_u = row.iibb_padron_source) !== null && _u !== void 0 ? _u : undefined,
+        iibbPadronUpdatedAt: (_v = row.iibb_padron_updated_at) !== null && _v !== void 0 ? _v : undefined,
         transportes: transportes !== null && transportes !== void 0 ? transportes : []
     };
 }
@@ -80,7 +86,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     var _a, _b;
     try {
         const rows = yield (0, db_1.query)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
-              legacy_code, account_zone, account_seller_label
+              legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at
        FROM customers ORDER BY business_name ASC, name ASC`);
         const customers = (rows || []).map((r) => toCustomer(r));
         const ids = customers.map((c) => c.id);
@@ -144,7 +150,7 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const sqlBusinessName = businessName || name || null;
         yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel]);
-        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
+        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at FROM customers WHERE id = ?`, [id]);
         const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x) => x && typeof x === 'string') : [];
         for (const tid of transporteIds) {
             yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
@@ -248,7 +254,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
             }
         }
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => { var _a, _b; return ({ id: l.transporteId, name: (_a = l.transporteName) !== null && _a !== void 0 ? _a : l.transporteId, address: (_b = l.transporteAddress) !== null && _b !== void 0 ? _b : undefined }); });
         res.json(toCustomer(updated, transportes));

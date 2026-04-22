@@ -29,6 +29,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+  const [importingRetPer, setImportingRetPer] = useState(false);
 
   const parseMoneyInput = (raw: string): number => {
     const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/\$/g, '');
@@ -50,6 +51,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return Number.isFinite(n) ? n : NaN;
   };
   const paymentsExcelInputRef = useRef<HTMLInputElement | null>(null);
+  const retPerInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
@@ -136,6 +138,27 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     } finally {
       setImportingPaymentsExcel(false);
       if (paymentsExcelInputRef.current) paymentsExcelInputRef.current.value = '';
+    }
+  };
+
+  const handleImportRetPer = async (filesList: FileList | null) => {
+    const files = filesList ? Array.from(filesList) : [];
+    if (files.length === 0) return;
+    setImportingRetPer(true);
+    try {
+      const res = await api.importIibbRetPer(files);
+      showToast(
+        'success',
+        `RetPer importado: ${res.updatedCustomers} clientes actualizados, ${res.rowsWithoutCustomer} CUIT sin cliente, ${res.rowsRead} filas procesadas.`
+      );
+      if (res.unmatchedCuits?.length) {
+        console.warn('[RetPer] CUIT sin match:', res.unmatchedCuits.slice(0, 20));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando RetPer');
+    } finally {
+      setImportingRetPer(false);
+      if (retPerInputRef.current) retPerInputRef.current.value = '';
     }
   };
 
@@ -319,6 +342,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="hidden"
             onChange={(e) => { void handleImportPaymentsExcel(e.target.files); }}
           />
+          <input
+            ref={retPerInputRef}
+            type="file"
+            accept=".txt,.csv"
+            multiple
+            className="hidden"
+            onChange={(e) => { void handleImportRetPer(e.target.files); }}
+          />
           <button
             type="button"
             disabled={importingPaymentsExcel}
@@ -327,6 +358,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             {importingPaymentsExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
             Importar pagos (Excel)
+          </button>
+          <button
+            type="button"
+            disabled={importingRetPer}
+            onClick={() => retPerInputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-700 text-white text-sm font-bold shadow-lg shadow-amber-900/40 hover:bg-amber-600 disabled:opacity-50"
+          >
+            {importingRetPer ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            Importar RetPer (TXT/CSV)
           </button>
         </div>
       </div>

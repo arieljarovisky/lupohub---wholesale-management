@@ -635,7 +635,14 @@ export const api = {
         priceListId: r.priceListId ?? r.price_list_id ?? undefined,
         legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
         accountZone: r.accountZone ?? r.account_zone ?? undefined,
-        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined
+        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
+        iibbPerceptionRate:
+          r.iibbPerceptionRate != null
+            ? Number(r.iibbPerceptionRate)
+            : (r.iibb_perception_rate != null ? Number(r.iibb_perception_rate) : undefined),
+        iibbPadronPeriod: r.iibbPadronPeriod ?? r.iibb_padron_period ?? undefined,
+        iibbPadronSource: r.iibbPadronSource ?? r.iibb_padron_source ?? undefined,
+        iibbPadronUpdatedAt: r.iibbPadronUpdatedAt ?? r.iibb_padron_updated_at ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');
   },
@@ -1670,6 +1677,20 @@ export const api = {
     const formData = new FormData();
     files.forEach((f) => formData.append('files', f));
     return requestFormData('/payments/import-excel', formData, 120000);
+  },
+  importIibbRetPer: async (files: File[]): Promise<{
+    message: string;
+    files: number;
+    rowsRead: number;
+    rowsValid: number;
+    updatedCustomers: number;
+    rowsWithoutCustomer: number;
+    importedAmountTotal: number;
+    unmatchedCuits: Array<{ cuit: string; count: number }>;
+  }> => {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+    return requestFormData('/payments/import-retper', formData, 120000);
   },
 
   createPayment: async (payload: {

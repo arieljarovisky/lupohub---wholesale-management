@@ -139,7 +139,12 @@ export function buildWholesaleFacturaHtml(params: {
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
   const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
   const totalComprobante = Math.round((netoGravado + iva21) * 100) / 100;
-  const iibbRate = Math.max(0, Number(String(remitente.iibbAlicuota ?? '0').replace(',', '.')) || 0);
+  const customerIibbRateRaw =
+    (customer as (Customer & { iibb_perception_rate?: number }) | undefined)?.iibbPerceptionRate ??
+    (customer as (Customer & { iibb_perception_rate?: number }) | undefined)?.iibb_perception_rate;
+  const customerIibbRate = Number(String(customerIibbRateRaw ?? '').replace(',', '.'));
+  const remitenteIibbRate = Number(String(remitente.iibbAlicuota ?? '0').replace(',', '.'));
+  const iibbRate = Math.max(0, Number.isFinite(customerIibbRate) ? customerIibbRate : (Number.isFinite(remitenteIibbRate) ? remitenteIibbRate : 0));
   const iibbAmount = Math.round(netoGravado * (iibbRate / 100) * 100) / 100;
   const total = Math.round((totalComprobante + iibbAmount) * 100) / 100;
   const subtotalBruto = netoGravado;

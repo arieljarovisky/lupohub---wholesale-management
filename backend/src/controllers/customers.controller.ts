@@ -25,6 +25,13 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     legacyCode: row.legacy_code ?? undefined,
     accountZone: row.account_zone ?? undefined,
     accountSellerLabel: row.account_seller_label ?? undefined,
+    iibbPerceptionRate:
+      row.iibb_perception_rate != null && Number.isFinite(Number(row.iibb_perception_rate))
+        ? Number(row.iibb_perception_rate)
+        : undefined,
+    iibbPadronPeriod: row.iibb_padron_period ?? undefined,
+    iibbPadronSource: row.iibb_padron_source ?? undefined,
+    iibbPadronUpdatedAt: row.iibb_padron_updated_at ?? undefined,
     transportes: transportes ?? []
   };
 }
@@ -34,7 +41,7 @@ export const getCustomers = async (req: Request, res: Response) => {
   try {
     const rows = await query(
       `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
-              legacy_code, account_zone, account_seller_label
+              legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at
        FROM customers ORDER BY business_name ASC, name ASC`
     );
     const customers = (rows || []).map((r: any) => toCustomer(r));
@@ -125,7 +132,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     );
 
     const created = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at FROM customers WHERE id = ?`,
       [id]
     );
     const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x: string) => x && typeof x === 'string') : [];
@@ -202,7 +209,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, iibb_perception_rate, iibb_padron_period, iibb_padron_source, iibb_padron_updated_at FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(

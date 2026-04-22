@@ -65,6 +65,7 @@ const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_products_archived_1 = require("./database/add_products_archived");
 const add_product_variants_archived_1 = require("./database/add_product_variants_archived");
+const add_customer_iibb_padron_fields_1 = require("./database/add_customer_iibb_padron_fields");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -162,6 +163,7 @@ function initDatabase() {
                 yield (0, add_customer_direct_1.addCustomerDirect)();
                 yield (0, add_customer_cuit_1.addCustomerCuit)();
                 yield (0, add_customer_phone_iva_1.addCustomerPhoneIva)();
+                yield (0, add_customer_iibb_padron_fields_1.addCustomerIibbPadronFields)();
                 yield (0, add_transportes_tables_1.addTransportesTables)();
                 yield (0, add_invoices_table_1.addInvoicesTable)();
                 yield (0, add_credit_notes_table_1.addCreditNotesTable)();

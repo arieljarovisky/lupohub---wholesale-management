@@ -125,6 +125,11 @@ export interface Customer {
   accountZone?: string;
   /** Vendedor habitual en historial (ej. "27 - Colombo") */
   accountSellerLabel?: string;
+  /** Alícuota de percepción IIBB vigente para este cliente (desde padrón RetPer). */
+  iibbPerceptionRate?: number;
+  iibbPadronPeriod?: string;
+  iibbPadronSource?: string;
+  iibbPadronUpdatedAt?: string;
 }
 
 export interface OrderItem {

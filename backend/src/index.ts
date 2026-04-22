@@ -52,6 +52,7 @@ import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhoo
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addProductsArchived } from './database/add_products_archived';
 import { addProductVariantsArchived } from './database/add_product_variants_archived';
+import { addCustomerIibbPadronFields } from './database/add_customer_iibb_padron_fields';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -151,6 +152,7 @@ async function initDatabase() {
       await addCustomerDirect();
       await addCustomerCuit();
       await addCustomerPhoneIva();
+      await addCustomerIibbPadronFields();
       await addTransportesTables();
       await addInvoicesTable();
       await addCreditNotesTable();
