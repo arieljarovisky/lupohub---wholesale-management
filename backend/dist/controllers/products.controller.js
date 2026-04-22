@@ -50,7 +50,7 @@ const talles_tango_1 = require("../talles-tango");
 const stock_controller_1 = require("./stock.controller");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query;
+        const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id, include_archived, archived_only } = req.query;
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page, 10) || 20));
         const offset = (pageNum - 1) * perPageNum;
@@ -61,8 +61,16 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
         const filterSyncNone = sync_none === '1' || sync_none === 'true';
         const skipTotal = skip_total === '1' || skip_total === 'true';
+        const includeArchived = include_archived === '1' || include_archived === 'true';
+        const archivedOnly = archived_only === '1' || archived_only === 'true';
         const priceListId = (price_list_id && String(price_list_id).trim()) || null;
         const conditions = ['1=1'];
+        if (archivedOnly) {
+            conditions.push('p.archived = 1');
+        }
+        else if (!includeArchived) {
+            conditions.push('(p.archived = 0 OR p.archived IS NULL)');
+        }
         const params = [];
         if (search) {
             conditions.push('(pv.sku LIKE ? OR p.sku LIKE ? OR p.name LIKE ?)');
@@ -948,15 +956,20 @@ const updateVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.updateVariant = updateVariant;
-/** Elimina un producto por ID (variantes, colores, stock en cascada). No elimina si alguna variante está en pedidos. */
+/** Elimina un producto por ID. Si está en pedidos, lo archiva para preservar historial. */
 function deleteProductById(productId) {
     return __awaiter(this, void 0, void 0, function* () {
         const inOrder = yield (0, db_1.get)(`SELECT 1 FROM order_items oi
      JOIN product_variants pv ON pv.id = oi.variant_id
      JOIN product_colors pc ON pc.id = pv.product_color_id
      WHERE pc.product_id = ? LIMIT 1`, [productId]);
-        if (inOrder)
-            return { deleted: false, error: 'in_orders' };
+        if (inOrder) {
+            const result = yield (0, db_1.execute)('UPDATE products SET archived = 1 WHERE id = ?', [productId]);
+            const affected = result && result.affectedRows;
+            if (affected === 0)
+                return { deleted: false, error: 'not_found' };
+            return { deleted: true, archived: true };
+        }
         const result = yield (0, db_1.execute)('DELETE FROM products WHERE id = ?', [productId]);
         const affected = result && result.affectedRows;
         if (affected === 0)
@@ -964,7 +977,7 @@ function deleteProductById(productId) {
         return { deleted: true };
     });
 }
-/** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
+/** Eliminar un producto (artículo) y todas sus variantes, colores y stock. Si está en pedidos, se archiva. */
 const deleteProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const productId = req.params.id;
     if (!productId)
@@ -972,12 +985,10 @@ const deleteProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         const r = yield deleteProductById(productId);
         if (!r.deleted) {
-            if (r.error === 'in_orders') {
-                return res.status(400).json({
-                    message: 'No se puede eliminar el artículo porque alguna variante está en pedidos.',
-                });
-            }
             return res.status(404).json({ message: 'Producto no encontrado' });
+        }
+        if (r.archived) {
+            return res.json({ message: 'El artículo tiene pedidos asociados y fue archivado (oculto), no eliminado.' });
         }
         res.json({ message: 'Producto y variantes eliminados' });
     }

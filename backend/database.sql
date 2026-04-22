@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS products (
   stock INT DEFAULT 0,
   price DECIMAL(10, 2) NOT NULL,
   description TEXT,
-  integrations_json TEXT -- JSON almacenado como texto para configuraciones de API
+  integrations_json TEXT, -- JSON almacenado como texto para configuraciones de API
+  archived TINYINT(1) NOT NULL DEFAULT 0
 );
 
 -- 4. Tabla de Atributos (Talles y Colores dinámicos)

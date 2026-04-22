@@ -8,7 +8,7 @@ import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSk
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query as any;
+    const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id, include_archived, archived_only } = req.query as any;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
@@ -19,9 +19,17 @@ export const getProducts = async (req: Request, res: Response) => {
     const filterSyncTn = sync_tn === '1' || sync_tn === 'true';
     const filterSyncNone = sync_none === '1' || sync_none === 'true';
     const skipTotal = skip_total === '1' || skip_total === 'true';
+    const includeArchived = include_archived === '1' || include_archived === 'true';
+    const archivedOnly = archived_only === '1' || archived_only === 'true';
     const priceListId = (price_list_id && String(price_list_id).trim()) || null;
 
     const conditions: string[] = ['1=1'];
+    if (archivedOnly) {
+      conditions.push('p.archived = 1');
+    } else if (!includeArchived) {
+      conditions.push('(p.archived = 0 OR p.archived IS NULL)');
+    }
+
     const params: any[] = [];
     if (search) {
       conditions.push('(pv.sku LIKE ? OR p.sku LIKE ? OR p.name LIKE ?)');
@@ -1016,8 +1024,8 @@ export const updateVariant = async (req: Request, res: Response) => {
   }
 };
 
-/** Elimina un producto por ID (variantes, colores, stock en cascada). No elimina si alguna variante está en pedidos. */
-export async function deleteProductById(productId: string): Promise<{ deleted: boolean; error?: 'in_orders' | 'not_found' }> {
+/** Elimina un producto por ID. Si está en pedidos, lo archiva para preservar historial. */
+export async function deleteProductById(productId: string): Promise<{ deleted: boolean; archived?: boolean; error?: 'in_orders' | 'not_found' }> {
   const inOrder = await get(
     `SELECT 1 FROM order_items oi
      JOIN product_variants pv ON pv.id = oi.variant_id
@@ -1025,26 +1033,29 @@ export async function deleteProductById(productId: string): Promise<{ deleted: b
      WHERE pc.product_id = ? LIMIT 1`,
     [productId]
   );
-  if (inOrder) return { deleted: false, error: 'in_orders' };
+  if (inOrder) {
+    const result = await execute('UPDATE products SET archived = 1 WHERE id = ?', [productId]);
+    const affected = result && (result as any).affectedRows;
+    if (affected === 0) return { deleted: false, error: 'not_found' };
+    return { deleted: true, archived: true };
+  }
   const result = await execute('DELETE FROM products WHERE id = ?', [productId]);
   const affected = result && (result as any).affectedRows;
   if (affected === 0) return { deleted: false, error: 'not_found' };
   return { deleted: true };
 }
 
-/** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
+/** Eliminar un producto (artículo) y todas sus variantes, colores y stock. Si está en pedidos, se archiva. */
 export const deleteProduct = async (req: any, res: any) => {
   const productId = req.params.id;
   if (!productId) return res.status(400).json({ message: 'Falta productId' });
   try {
     const r = await deleteProductById(productId);
     if (!r.deleted) {
-      if (r.error === 'in_orders') {
-        return res.status(400).json({
-          message: 'No se puede eliminar el artículo porque alguna variante está en pedidos.',
-        });
-      }
       return res.status(404).json({ message: 'Producto no encontrado' });
+    }
+    if (r.archived) {
+      return res.json({ message: 'El artículo tiene pedidos asociados y fue archivado (oculto), no eliminado.' });
     }
     res.json({ message: 'Producto y variantes eliminados' });
   } catch (error) {

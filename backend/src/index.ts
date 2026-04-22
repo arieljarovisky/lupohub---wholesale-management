@@ -50,6 +50,7 @@ import { addExternalCreditNotesTable } from './database/add_external_credit_note
 import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_ledger';
 import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhook_config_table';
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
+import { addProductsArchived } from './database/add_products_archived';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -160,6 +161,7 @@ async function initDatabase() {
       await addPaymentStatusToOrders();
       await addPaymentsTable();
       await addNoStockImpactToOrders();
+      await addProductsArchived();
       await addOrderReferenceToOrders();
       await addCustomerInvoiceFields();
       await addExternalInvoicesTable();

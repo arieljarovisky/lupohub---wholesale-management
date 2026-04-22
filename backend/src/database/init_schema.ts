@@ -62,7 +62,8 @@ export async function initSchema(): Promise<void> {
       base_price DECIMAL(10, 2) NOT NULL DEFAULT 0,
       description TEXT,
       tienda_nube_id VARCHAR(100) NULL,
-      mercado_libre_id VARCHAR(100) NULL
+      mercado_libre_id VARCHAR(100) NULL,
+      archived TINYINT(1) NOT NULL DEFAULT 0
     )
   `);
 
