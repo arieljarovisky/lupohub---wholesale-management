@@ -82,6 +82,8 @@ export interface RemitenteConfig {
   city?: string;
   cuit?: string;
   ingresosBrutos?: string;
+  /** Alícuota de percepción Ingresos Brutos para mostrar en factura (ej: 3.5). */
+  iibbAlicuota?: string;
   inicioActividad?: string;
   email?: string;
   phone?: string;

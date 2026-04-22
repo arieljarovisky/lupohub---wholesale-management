@@ -21,12 +21,14 @@ export const getRemitente = (): RemitenteConfig => {
   const s = localStorage.getItem(REMITENTE_KEY);
   const parsed = s ? JSON.parse(s) : {};
   const ingresosBrutos = (parsed.ingresosBrutos ?? '').toString().trim() || DEFAULT_INGRESOS_BRUTOS;
+  const iibbAlicuota = (parsed.iibbAlicuota ?? '').toString().trim();
   return {
     businessName: parsed.businessName ?? '',
     address: parsed.address ?? '',
     city: parsed.city ?? '',
     cuit: parsed.cuit ?? '',
     ingresosBrutos,
+    iibbAlicuota,
     inicioActividad: parsed.inicioActividad ?? '13/06/2005',
     email: parsed.email ?? '',
     phone: parsed.phone ?? '',

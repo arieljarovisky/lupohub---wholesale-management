@@ -11,6 +11,7 @@ export type FacturaRemitente = Record<string, unknown> & {
   city?: string;
   cuit?: string;
   ingresosBrutos?: string;
+  iibbAlicuota?: string;
   inicioActividad?: string;
   email?: string;
   phone?: string;
@@ -137,7 +138,10 @@ export function buildWholesaleFacturaHtml(params: {
   const netoGravado =
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
   const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
-  const total = Math.round((netoGravado + iva21) * 100) / 100;
+  const totalComprobante = Math.round((netoGravado + iva21) * 100) / 100;
+  const iibbRate = Math.max(0, Number(String(remitente.iibbAlicuota ?? '0').replace(',', '.')) || 0);
+  const iibbAmount = Math.round(netoGravado * (iibbRate / 100) * 100) / 100;
+  const total = Math.round((totalComprobante + iibbAmount) * 100) / 100;
   const subtotalBruto = netoGravado;
 
   const rows = items
@@ -224,7 +228,7 @@ export function buildWholesaleFacturaHtml(params: {
     ptoVta: Number(inv.puntoVta ?? 0),
     tipoCmp: Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo ?? 0),
     nroCmp: Number(inv.cbteDesde ?? 0),
-    importe: Number(total.toFixed(2)),
+    importe: Number(totalComprobante.toFixed(2)),
     moneda: 'PES',
     ctz: 1,
     tipoDocRec,
@@ -365,6 +369,7 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
               <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoGravado)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+              ${iibbRate > 0 ? `<div class="r"><span>Ingresos Brutos (${String(iibbRate).replace('.', ',')}%)</span><span>$${formatMoneyAr(iibbAmount)}</span></div>` : ''}
               <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
             </div>
           </div>
