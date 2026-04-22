@@ -7,4 +7,5 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authMiddleware, auth_1.billingAccessMiddleware);
 router.get('/', billing_controller_1.listBilling);
 router.get('/export', billing_controller_1.exportBilling);
+router.get('/export-facturas-iibb-capital', billing_controller_1.exportFacturasIibbCapital);
 exports.default = router;

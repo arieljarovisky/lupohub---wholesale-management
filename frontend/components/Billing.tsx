@@ -124,6 +124,19 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
+  const handleExportFacturasIibbCapital = async () => {
+    try {
+      await api.exportFacturasIibbCapital({
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        customerId: customerId !== 'ALL' ? customerId : undefined,
+      });
+      showToast('success', 'Descarga de facturas + IIBB CABA iniciada');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando facturas con IIBB CABA');
+    }
+  };
+
   const handleImportPaymentsExcel = async (filesList: FileList | null) => {
     const files = filesList ? Array.from(filesList) : [];
     if (files.length === 0) return;
@@ -333,6 +346,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
+          </button>
+          <button
+            type="button"
+            onClick={handleExportFacturasIibbCapital}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-700 text-white text-sm font-bold shadow-lg shadow-cyan-900/40 hover:bg-cyan-600"
+          >
+            <FileSpreadsheet size={16} /> Facturas + IIBB CABA (Excel)
           </button>
           <input
             ref={paymentsExcelInputRef}
