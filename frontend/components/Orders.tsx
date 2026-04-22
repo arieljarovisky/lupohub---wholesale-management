@@ -381,12 +381,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (pages.length === 0) pages.push([]);
 
     const netFromLines = orderNetoFromItems(order);
-    const neto =
-      netFromLines > 0
-        ? netFromLines
-        : Math.round(
-            (order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0)) * 100
-          ) / 100;
+    const neto = netFromLines > 0 ? netFromLines : 0;
     const iva21 = Math.round(neto * 0.21 * 100) / 100;
     const total = Math.round((neto + iva21) * 100) / 100;
     const subtotalBruto = neto;
@@ -539,13 +534,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const confirmRemito = () => {
     if (!remitoOrder) return;
+    const orderToPrint = orderWithFacturableItems(remitoOrder);
+    if (!orderToPrint.items?.length) {
+      showToast('error', 'Este pedido no tiene unidades retiradas para remito.');
+      return;
+    }
     const docNro = remitoDocumentNumber.trim();
     if (!docNro) {
       showToast('error', 'Ingresá el número de remito (aparece arriba a la derecha en el PDF).');
       return;
     }
     const bultosVal = remitoBultos.trim() ? remitoBultos : null;
-    const html = buildRemitoHtml(remitoOrder, remitoTransporteName, docNro, bultosVal, remitoDescripcion.trim() || null);
+    const html = buildRemitoHtml(orderToPrint, remitoTransporteName, docNro, bultosVal, remitoDescripcion.trim() || null);
     const w = window.open('', '_blank');
     if (w) {
       w.document.write(html);
