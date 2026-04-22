@@ -1844,7 +1844,7 @@ Equipo Lupo`;
 /** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. Incluye variantes con publicación padre (mercado_libre_id + variant_id) y variantes con publicación propia (mercado_libre_item_id). */
 function runAutoSyncMLtoTN() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
         const mlToken = yield getValidMLToken();
         const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!mlToken || !(tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) || !(tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.store_id)) {
@@ -1892,17 +1892,32 @@ function runAutoSyncMLtoTN() {
                     for (const vr of variantRows) {
                         const r = vr;
                         const v = variations.find((x) => String(x.id) === String(r.ml_variant_id));
-                        const mlQty = v ? ((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0) : (variations.length === 0 ? ((_b = item.available_quantity) !== null && _b !== void 0 ? _b : 0) : 0);
+                        let mlQty = null;
+                        if (v) {
+                            mlQty = Number((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0);
+                        }
+                        else if (variations.length === 0) {
+                            mlQty = Number((_b = item.available_quantity) !== null && _b !== void 0 ? _b : 0);
+                        }
+                        else if (variations.length === 1) {
+                            // Fallback seguro: publicación con una sola variación.
+                            mlQty = Number((_d = (_c = variations[0]) === null || _c === void 0 ? void 0 : _c.available_quantity) !== null && _d !== void 0 ? _d : 0);
+                        }
+                        if (mlQty == null || !Number.isFinite(mlQty)) {
+                            errors++;
+                            console.warn(`[AutoSync ML→TN] Variación ML no resuelta para tn=${r.tn_id}/${r.tn_variant_id} (ml_id=${mlId}, ml_variant_id=${r.ml_variant_id}). Se omite para evitar pisar stock con 0.`);
+                            continue;
+                        }
                         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
                         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
-                        const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+                        const tnStock = Math.floor((Math.max(0, mlQty) * mlPack) / tnPack);
                         try {
                             yield putTnVariantWithRetry(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`, { stock: tnStock }, { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT });
                             updated++;
                         }
                         catch (e) {
                             errors++;
-                            console.warn(`[AutoSync ML→TN] Error TN PUT variante ml_variant=${r.ml_variant_id} tn=${r.tn_id}/${r.tn_variant_id}:`, ((_d = (_c = e.response) === null || _c === void 0 ? void 0 : _c.data) === null || _d === void 0 ? void 0 : _d.message) || e.message);
+                            console.warn(`[AutoSync ML→TN] Error TN PUT variante ml_variant=${r.ml_variant_id} tn=${r.tn_id}/${r.tn_variant_id}:`, ((_f = (_e = e.response) === null || _e === void 0 ? void 0 : _e.data) === null || _f === void 0 ? void 0 : _f.message) || e.message);
                         }
                         if (TN_RATE_LIMIT_DELAY_MS > 0)
                             yield sleep(TN_RATE_LIMIT_DELAY_MS);
@@ -1940,19 +1955,28 @@ function runAutoSyncMLtoTN() {
                         continue;
                     }
                     const variations = item.variations || [];
-                    const mlQty = variations.length === 0
-                        ? ((_e = item.available_quantity) !== null && _e !== void 0 ? _e : 0)
-                        : (variations.length === 1 ? ((_f = variations[0].available_quantity) !== null && _f !== void 0 ? _f : 0) : 0);
+                    let mlQty = null;
+                    if (variations.length === 0) {
+                        mlQty = Number((_g = item.available_quantity) !== null && _g !== void 0 ? _g : 0);
+                    }
+                    else if (variations.length === 1) {
+                        mlQty = Number((_j = (_h = variations[0]) === null || _h === void 0 ? void 0 : _h.available_quantity) !== null && _j !== void 0 ? _j : 0);
+                    }
+                    if (mlQty == null || !Number.isFinite(mlQty)) {
+                        errors++;
+                        console.warn(`[AutoSync ML→TN] Ítem ML con variaciones ambiguas para tn=${r.tn_id}/${r.tn_variant_id} (ml_item=${r.ml_item_id}). Se omite para evitar stock erróneo.`);
+                        continue;
+                    }
                     const mlPack = Math.max(1, Number(r.ml_pack) || 1);
                     const tnPack = Math.max(1, Number(r.tn_pack) || 1);
-                    const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+                    const tnStock = Math.floor((Math.max(0, mlQty) * mlPack) / tnPack);
                     try {
                         yield putTnVariantWithRetry(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`, { stock: tnStock }, { 'Authentication': `bearer ${tnIntegration.access_token}`, 'Content-Type': 'application/json', 'User-Agent': TN_USER_AGENT });
                         updated++;
                     }
                     catch (e) {
                         errors++;
-                        console.warn(`[AutoSync ML→TN] Error TN PUT ítem propio ml_item=${r.ml_item_id} tn=${r.tn_id}/${r.tn_variant_id} (SKU ${r.sku}):`, ((_h = (_g = e.response) === null || _g === void 0 ? void 0 : _g.data) === null || _h === void 0 ? void 0 : _h.message) || e.message);
+                        console.warn(`[AutoSync ML→TN] Error TN PUT ítem propio ml_item=${r.ml_item_id} tn=${r.tn_id}/${r.tn_variant_id} (SKU ${r.sku}):`, ((_l = (_k = e.response) === null || _k === void 0 ? void 0 : _k.data) === null || _l === void 0 ? void 0 : _l.message) || e.message);
                     }
                     if (TN_RATE_LIMIT_DELAY_MS > 0)
                         yield sleep(TN_RATE_LIMIT_DELAY_MS);

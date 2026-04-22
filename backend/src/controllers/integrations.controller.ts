@@ -2057,10 +2057,25 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         for (const vr of variantRows) {
           const r = vr as any;
           const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
-          const mlQty = v ? (v.available_quantity ?? 0) : (variations.length === 0 ? (item.available_quantity ?? 0) : 0);
+          let mlQty: number | null = null;
+          if (v) {
+            mlQty = Number(v.available_quantity ?? 0);
+          } else if (variations.length === 0) {
+            mlQty = Number(item.available_quantity ?? 0);
+          } else if (variations.length === 1) {
+            // Fallback seguro: publicación con una sola variación.
+            mlQty = Number(variations[0]?.available_quantity ?? 0);
+          }
+          if (mlQty == null || !Number.isFinite(mlQty)) {
+            errors++;
+            console.warn(
+              `[AutoSync ML→TN] Variación ML no resuelta para tn=${r.tn_id}/${r.tn_variant_id} (ml_id=${mlId}, ml_variant_id=${r.ml_variant_id}). Se omite para evitar pisar stock con 0.`
+            );
+            continue;
+          }
           const mlPack = Math.max(1, Number(r.ml_pack) || 1);
           const tnPack = Math.max(1, Number(r.tn_pack) || 1);
-          const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+          const tnStock = Math.floor((Math.max(0, mlQty) * mlPack) / tnPack);
           try {
             await putTnVariantWithRetry(
               `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
@@ -2110,12 +2125,22 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           continue;
         }
         const variations = item.variations || [];
-        const mlQty = variations.length === 0
-          ? (item.available_quantity ?? 0)
-          : (variations.length === 1 ? (variations[0].available_quantity ?? 0) : 0);
+        let mlQty: number | null = null;
+        if (variations.length === 0) {
+          mlQty = Number(item.available_quantity ?? 0);
+        } else if (variations.length === 1) {
+          mlQty = Number(variations[0]?.available_quantity ?? 0);
+        }
+        if (mlQty == null || !Number.isFinite(mlQty)) {
+          errors++;
+          console.warn(
+            `[AutoSync ML→TN] Ítem ML con variaciones ambiguas para tn=${r.tn_id}/${r.tn_variant_id} (ml_item=${r.ml_item_id}). Se omite para evitar stock erróneo.`
+          );
+          continue;
+        }
         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
-        const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
+        const tnStock = Math.floor((Math.max(0, mlQty) * mlPack) / tnPack);
         try {
           await putTnVariantWithRetry(
             `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${r.tn_id}/variants/${r.tn_variant_id}`,
