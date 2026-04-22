@@ -331,15 +331,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
       : localRemitente;
     const items = sortItemsForFacturaPrint(order.items.map(enrichItem), products);
-    const formatDateShort = (d: string) => {
-      const x = new Date(d);
-      if (isNaN(x.getTime())) return d;
+    const formatDateShort = (d: string | Date) => {
+      const x = d instanceof Date ? d : new Date(d);
+      if (isNaN(x.getTime())) return String(d);
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const day = x.getDate();
       const month = meses[x.getMonth()];
       const year = x.getFullYear();
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
+    const remitoIssueDate = new Date();
     const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
     const transportNumber = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
@@ -430,7 +431,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <div class="codebox codebox-remito">
             <div class="code">REMITO<br>R</div>
             <div class="num num-remito">${remitoNumber || '—'}</div>
-            <div style="margin-top:6px;" class="muted">Fecha: ${formatDateShort(order.date)}</div>
+            <div style="margin-top:6px;" class="muted">Fecha: ${formatDateShort(remitoIssueDate)}</div>
           </div>
         </div>
         <div class="hr"></div>
