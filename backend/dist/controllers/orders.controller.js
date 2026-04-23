@@ -83,6 +83,19 @@ function normalizeOrderReference(raw) {
         return null;
     return v.slice(0, 255);
 }
+function buildOrderItemDedupKey(params) {
+    const qty = Number(params.quantity) || 0;
+    const picked = Number(params.picked) || 0;
+    const price = Number(params.priceAtMoment) || 0;
+    return [
+        params.variantId,
+        params.despachoId || '',
+        qty.toFixed(4),
+        picked.toFixed(4),
+        price.toFixed(4),
+        String(params.sellAsPack ? 1 : 0),
+    ].join('|');
+}
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
 function getOrderNetFromLineItems(orderId_1) {
     return __awaiter(this, arguments, void 0, function* (orderId, pickedOnly = false) {
@@ -280,6 +293,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
         const reference = normalizeOrderReference((_c = (_b = newOrder.reference) !== null && _b !== void 0 ? _b : newOrder.identifier) !== null && _c !== void 0 ? _c : newOrder.note);
         yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, reference, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, reference, paymentStatus, noStockImpact]);
+        const seenInsertKeys = new Set();
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -297,7 +311,21 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_d = item.priceAtMoment) !== null && _d !== void 0 ? _d : 0, sellAsPack, despachoId]);
+            const quantity = Number(item.quantity) || 0;
+            const picked = Number(item.picked || 0) || 0;
+            const priceAtMoment = Number((_d = item.priceAtMoment) !== null && _d !== void 0 ? _d : 0) || 0;
+            const dedupKey = buildOrderItemDedupKey({
+                variantId,
+                despachoId,
+                quantity,
+                picked,
+                priceAtMoment,
+                sellAsPack,
+            });
+            if (seenInsertKeys.has(dedupKey))
+                continue;
+            seenInsertKeys.add(dedupKey);
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]);
         }
         if (newOrder.status === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -408,7 +436,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { id } = req.params;
     const updated = req.body;
     if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
@@ -433,6 +461,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const reference = normalizeOrderReference((_d = (_c = updated.reference) !== null && _c !== void 0 ? _c : updated.identifier) !== null && _d !== void 0 ? _d : updated.note);
         yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, reference = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, reference, paymentStatus, noStockImpact, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
+        const seenInsertKeys = new Set();
         for (const item of updated.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -450,7 +479,21 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
+            const quantity = Number(item.quantity) || 0;
+            const picked = Number(item.picked || 0) || 0;
+            const priceAtMoment = Number((_e = item.priceAtMoment) !== null && _e !== void 0 ? _e : 0) || 0;
+            const dedupKey = buildOrderItemDedupKey({
+                variantId,
+                despachoId,
+                quantity,
+                picked,
+                priceAtMoment,
+                sellAsPack,
+            });
+            if (seenInsertKeys.has(dedupKey))
+                continue;
+            seenInsertKeys.add(dedupKey);
+            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]);
         }
         const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!created)
@@ -493,11 +536,11 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            reference: (_e = created.reference) !== null && _e !== void 0 ? _e : undefined,
+            reference: (_f = created.reference) !== null && _f !== void 0 ? _f : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_f = created.picked_by) !== null && _f !== void 0 ? _f : undefined,
+            pickedBy: (_g = created.picked_by) !== null && _g !== void 0 ? _g : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),

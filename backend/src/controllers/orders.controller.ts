@@ -41,6 +41,27 @@ function normalizeOrderReference(raw: unknown): string | null {
   return v.slice(0, 255);
 }
 
+function buildOrderItemDedupKey(params: {
+  variantId: string;
+  despachoId: string | null;
+  quantity: number;
+  picked: number;
+  priceAtMoment: number;
+  sellAsPack: number;
+}): string {
+  const qty = Number(params.quantity) || 0;
+  const picked = Number(params.picked) || 0;
+  const price = Number(params.priceAtMoment) || 0;
+  return [
+    params.variantId,
+    params.despachoId || '',
+    qty.toFixed(4),
+    picked.toFixed(4),
+    price.toFixed(4),
+    String(params.sellAsPack ? 1 : 0),
+  ].join('|');
+}
+
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
 async function getOrderNetFromLineItems(orderId: string, pickedOnly = false): Promise<number> {
   const rows = await query(
@@ -252,6 +273,7 @@ export const createOrder = async (req: any, res: any) => {
       [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, reference, paymentStatus, noStockImpact]
     );
 
+    const seenInsertKeys = new Set<string>();
     for (const item of newOrder.items as any[]) {
       let variantId = item.variantId;
       if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -272,9 +294,22 @@ export const createOrder = async (req: any, res: any) => {
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       const despachoId = await resolveDespachoIdForItem(item, variantId);
+      const quantity = Number(item.quantity) || 0;
+      const picked = Number(item.picked || 0) || 0;
+      const priceAtMoment = Number(item.priceAtMoment ?? 0) || 0;
+      const dedupKey = buildOrderItemDedupKey({
+        variantId,
+        despachoId,
+        quantity,
+        picked,
+        priceAtMoment,
+        sellAsPack,
+      });
+      if (seenInsertKeys.has(dedupKey)) continue;
+      seenInsertKeys.add(dedupKey);
       await execute(
         `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, despachoId]
+        [uuidv4(), orderId, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]
       );
     }
 
@@ -420,6 +455,7 @@ export const updateOrder = async (req: any, res: any) => {
       [updated.customerId, sellerId, sqlDate, updated.status, updated.total, reference, paymentStatus, noStockImpact, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
+    const seenInsertKeys = new Set<string>();
     for (const item of updated.items as any[]) {
       let variantId = item.variantId;
       if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -440,9 +476,22 @@ export const updateOrder = async (req: any, res: any) => {
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       const despachoId = await resolveDespachoIdForItem(item, variantId);
+      const quantity = Number(item.quantity) || 0;
+      const picked = Number(item.picked || 0) || 0;
+      const priceAtMoment = Number(item.priceAtMoment ?? 0) || 0;
+      const dedupKey = buildOrderItemDedupKey({
+        variantId,
+        despachoId,
+        quantity,
+        picked,
+        priceAtMoment,
+        sellAsPack,
+      });
+      if (seenInsertKeys.has(dedupKey)) continue;
+      seenInsertKeys.add(dedupKey);
       await execute(
         "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]
+        [uuidv4(), id, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]
       );
     }
     const created = await get(
