@@ -3,6 +3,7 @@ import { ArrowLeft, Save, Trash2, Plus, Minus, Search, User as UserIcon, Calenda
 import { Order, OrderStatus, Product, Customer, OrderItem, Role, PriceList } from '../types';
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
+import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 
 interface CreateOrderProps {
   products: Product[];
@@ -304,7 +305,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
       total,
       status: initialOrder?.status ?? OrderStatus.CONFIRMED,
       date: orderDate,
-      paymentStatus: initialOrder?.paymentStatus ?? 'pendiente'
+      paymentStatus: initialOrder?.paymentStatus ?? 'pendiente',
+      noStockImpact: initialOrder?.noStockImpact
     });
   };
 
@@ -330,6 +332,40 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           )}
         </div>
       </div>
+
+      {initialOrder && (() => {
+        const impact = getWholesaleStockImpactMeta(initialOrder);
+        if (impact.variant === 'hidden') return null;
+        return (
+          <div
+            className={`shrink-0 rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 text-sm flex items-start gap-2 ${
+              impact.variant === 'no_impact'
+                ? 'bg-amber-900/20 border-amber-800/50 text-amber-100/95'
+                : impact.variant === 'pending'
+                  ? 'bg-slate-800/80 border-amber-800/40 text-slate-200'
+                  : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-100/90'
+            }`}
+          >
+            {impact.variant === 'no_impact' && <Package className="shrink-0 mt-0.5" size={18} />}
+            {impact.variant === 'pending' && <AlertCircle className="shrink-0 mt-0.5 text-amber-400" size={18} />}
+            {impact.variant === 'deducted' && <CheckCircle2 className="shrink-0 mt-0.5 text-emerald-400" size={18} />}
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Inventario (mayorista)</p>
+              <p className="text-xs sm:text-sm leading-snug">{impact.title}</p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {!initialOrder && (
+        <div className="shrink-0 rounded-2xl border border-slate-700/60 bg-slate-800/40 px-3 py-2.5 text-xs text-slate-400 flex items-start gap-2">
+          <Package className="shrink-0 text-slate-500" size={16} />
+          <span>
+            Al guardar en <strong className="text-slate-300">confirmado</strong>, el inventario se desconta con las
+            unidades (o packs) del pedido. Los borradores no mueven stock hasta que confirmes.
+          </span>
+        </div>
+      )}
 
       {/* Lista de precios: solo ADMIN/WAREHOUSE */}
       {showPriceListSelector && (

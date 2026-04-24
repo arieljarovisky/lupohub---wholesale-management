@@ -14,6 +14,7 @@ import {
   normalizeSkuForPrint,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
+import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 
 /** Lista para factura/remito: transportes del cliente o, si no tiene, el catálogo global. */
 function transporteOptionsForCustomer(customer: Customer | undefined, allTransportes: Transporte[]): Transporte[] {
@@ -889,14 +890,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
-                    {order.noStockImpact && (
-                      <span
-                        className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help"
-                        title="Pedido marcado para facturación administrativa: no descuenta ni restaura stock."
-                      >
-                        <Package size={10} /> SIN IMPACTO STOCK
-                      </span>
-                    )}
+                    {(() => {
+                      const impact = getWholesaleStockImpactMeta(order);
+                      if (impact.variant === 'hidden' || !impact.label) return null;
+                      return (
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help border ${impact.badgeClassName}`}
+                          title={impact.title}
+                        >
+                          {impact.variant === 'no_impact' && <Package size={10} />}
+                          {impact.variant === 'pending' && <Clock size={10} />}
+                          {impact.variant === 'deducted' && <PackageCheck size={10} />}
+                          {impact.label}
+                        </span>
+                      );
+                    })()}
                     {role !== Role.CUSTOMER && (
                       <button
                         type="button"
