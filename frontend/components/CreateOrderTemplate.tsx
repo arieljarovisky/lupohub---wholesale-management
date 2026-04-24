@@ -515,7 +515,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
-      status: asDraft ? OrderStatus.DRAFT : (initialOrder?.status ?? OrderStatus.CONFIRMED),
+      // Al confirmar desde la plantilla, siempre debe pasar a Confirmado
+      // (si no, al editar un borrador quedaba otra vez como Borrador).
+      status: asDraft ? OrderStatus.DRAFT : OrderStatus.CONFIRMED,
       date: orderDate
     };
   };
