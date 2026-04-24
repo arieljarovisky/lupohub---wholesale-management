@@ -12,7 +12,45 @@ interface OrderPickingProps {
 }
 
 const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUserId, users, onFinishPicking, onCancel }) => {
-  const [items, setItems] = useState<OrderItem[]>(order.items);
+  const baseArticleCode = (rawSku: string): string => {
+    const sku = (rawSku || '').toString().trim();
+    if (!sku) return '';
+    const digits = sku.match(/\d{5,}/);
+    return digits ? digits[0].slice(0, 5) : sku.slice(0, 5);
+  };
+
+  const sortPickingItems = (rows: OrderItem[]): OrderItem[] => {
+    return [...rows].sort((a, b) => {
+      const aProduct = products.find((p) => p.id === (a.variantId ?? a.productId)) ?? products.find((p) => (p as any).product_id === a.productId);
+      const bProduct = products.find((p) => p.id === (b.variantId ?? b.productId)) ?? products.find((p) => (p as any).product_id === b.productId);
+
+      const aSku = ((a as any).sku ?? aProduct?.sku ?? '').toString().trim();
+      const bSku = ((b as any).sku ?? bProduct?.sku ?? '').toString().trim();
+      const aBase = baseArticleCode(aSku);
+      const bBase = baseArticleCode(bSku);
+      const byBase = aBase.localeCompare(bBase, 'es', { numeric: true, sensitivity: 'base' });
+      if (byBase !== 0) return byBase;
+
+      const bySku = aSku.localeCompare(bSku, 'es', { numeric: true, sensitivity: 'base' });
+      if (bySku !== 0) return bySku;
+
+      const aName = ((a as any).productName ?? aProduct?.name ?? '').toString().trim();
+      const bName = ((b as any).productName ?? bProduct?.name ?? '').toString().trim();
+      const byName = aName.localeCompare(bName, 'es', { numeric: true, sensitivity: 'base' });
+      if (byName !== 0) return byName;
+
+      const aSize = ((a as any).sizeCode ?? aProduct?.size ?? '').toString().trim();
+      const bSize = ((b as any).sizeCode ?? bProduct?.size ?? '').toString().trim();
+      const bySize = aSize.localeCompare(bSize, 'es', { numeric: true, sensitivity: 'base' });
+      if (bySize !== 0) return bySize;
+
+      const aColor = ((a as any).colorName ?? aProduct?.color ?? '').toString().trim();
+      const bColor = ((b as any).colorName ?? bProduct?.color ?? '').toString().trim();
+      return aColor.localeCompare(bColor, 'es', { numeric: true, sensitivity: 'base' });
+    });
+  };
+
+  const [items, setItems] = useState<OrderItem[]>(() => sortPickingItems(order.items));
   
   // Logic to determine if this view is read-only
   // It is read-only if pickedBy exists AND it's not the current user
@@ -23,36 +61,36 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
 
   // Initialize picked count if undefined
   useEffect(() => {
-    setItems(order.items.map(i => ({ ...i, picked: i.picked || 0 })));
-  }, [order]);
+    setItems(sortPickingItems(order.items.map(i => ({ ...i, picked: i.picked || 0 }))));
+  }, [order, products]);
 
   /** Una línea = una variante; productId se repite entre talles/colores. */
   const itemKey = (item: OrderItem) => item.variantId || item.productId || '';
 
   const toggleItemComplete = (key: string) => {
     if (isReadOnly) return;
-    setItems(prev => prev.map(item => {
+    setItems(prev => sortPickingItems(prev.map(item => {
       if (itemKey(item) === key) {
         const newPicked = item.picked === item.quantity ? 0 : item.quantity;
         return { ...item, picked: newPicked };
       }
       return item;
-    }));
+    })));
   };
 
   const updatePickedQuantity = (key: string, qty: number) => {
     if (isReadOnly) return;
-    setItems(prev => prev.map(item => {
+    setItems(prev => sortPickingItems(prev.map(item => {
       if (itemKey(item) === key) {
         return { ...item, picked: Math.min(Math.max(0, qty), item.quantity) };
       }
       return item;
-    }));
+    })));
   };
 
   const markAllAsPicked = () => {
     if (isReadOnly) return;
-    setItems(prev => prev.map(item => ({ ...item, picked: item.quantity })));
+    setItems(prev => sortPickingItems(prev.map(item => ({ ...item, picked: item.quantity }))));
   };
 
   const progress = Math.round((items.reduce((acc, i) => acc + (i.picked || 0), 0) / items.reduce((acc, i) => acc + i.quantity, 0)) * 100) || 0;

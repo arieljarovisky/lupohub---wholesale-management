@@ -794,11 +794,35 @@ export const getStockMovements = async (req: Request, res: Response) => {
     params.push(limitNum);
 
     const movements = await query(
-      `SELECT sm.*, pv.sku, p.name as product_name
+      `SELECT
+         sm.*,
+         pv.sku,
+         p.name as product_name,
+         CASE
+           WHEN sm.movement_type = 'PEDIDO_MAYORISTA' AND o.id IS NOT NULL
+             THEN CONCAT(
+               COALESCE(NULLIF(c.business_name, ''), NULLIF(c.name, ''), 'Cliente'),
+               ' • ',
+               o.id
+             )
+           WHEN sm.movement_type = 'AJUSTE_MANUAL'
+             THEN CONCAT(
+               'Ajuste por ',
+               COALESCE(NULLIF(u.name, ''), REPLACE(COALESCE(sm.reference, ''), 'Ajuste por usuario ', ''), 'usuario')
+             )
+           ELSE sm.reference
+         END AS display_reference
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN orders o
+         ON sm.movement_type = 'PEDIDO_MAYORISTA'
+        AND o.id = REPLACE(COALESCE(sm.reference, ''), 'Pedido: ', '')
+       LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users u
+         ON sm.movement_type = 'AJUSTE_MANUAL'
+        AND u.id = REPLACE(COALESCE(sm.reference, ''), 'Ajuste por usuario ', '')
        WHERE ${whereClause}
        ORDER BY sm.created_at DESC
        LIMIT ?`,

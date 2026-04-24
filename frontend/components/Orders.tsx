@@ -109,6 +109,11 @@ function orderWithFacturableItems(order: Order): Order {
   return { ...order, items };
 }
 
+function orderNetoFacturable(order: Order): number {
+  const facturable = orderWithFacturableItems(order);
+  return Math.round(orderNetoFromItems(facturable) * 100) / 100;
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -1277,8 +1282,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                      </button>
                    )}
                    <div className="text-right">
-                     <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
-                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
+                     <div className="text-lg font-black text-emerald-300">${formatMoneyAr(orderNetoFacturable(order))}</div>
+                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto a facturar (sin IVA)</div>
+                     <div className="text-[10px] text-slate-500">Pedido: ${formatMoneyAr(orderNetoFromItems(order))}</div>
                    </div>
                 </div>
               </div>
@@ -1304,6 +1310,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               Condición IVA del cliente: {customers.find(c => c.id === orderToEmitFactura.customerId)?.condicionIva || 'No informada'}.
               Solo corresponde Factura A si el cliente es Responsable Inscripto.
             </p>
+            <div className="mb-4 rounded-lg border border-emerald-900/60 bg-emerald-950/20 px-3 py-2">
+              <div className="text-[10px] uppercase font-bold tracking-wide text-emerald-300">Monto neto a facturar</div>
+              <div className="text-lg font-black text-emerald-200">${formatMoneyAr(orderNetoFacturable(orderToEmitFactura))}</div>
+            </div>
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tipo de comprobante</label>
             <div className="space-y-2 mb-6">
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">

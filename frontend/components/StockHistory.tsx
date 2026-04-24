@@ -11,6 +11,7 @@ interface StockMovement {
   quantity_change: number;
   movement_type: string;
   reference: string | null;
+  display_reference?: string | null;
   created_at: string;
   sku: string;
   product_name: string;
@@ -542,8 +543,8 @@ const StockHistory: React.FC = () => {
                         <span className="text-white font-bold font-mono">{movement.new_stock}</span>
                       </td>
                       <td className="p-4">
-                        <span className="text-slate-500 text-xs truncate max-w-[150px] block" title={movement.reference || ''}>
-                          {movement.reference || '-'}
+                        <span className="text-slate-500 text-xs truncate max-w-[220px] block" title={movement.display_reference || movement.reference || ''}>
+                          {movement.display_reference || movement.reference || '-'}
                         </span>
                       </td>
                     </tr>
