@@ -96,6 +96,21 @@ function buildOrderItemDedupKey(params) {
         String(params.sellAsPack ? 1 : 0),
     ].join('|');
 }
+function buildOrderItemIdentityKey(params) {
+    const qty = Number(params.quantity) || 0;
+    const price = Number(params.priceAtMoment) || 0;
+    return [
+        params.variantId,
+        params.despachoId || '',
+        qty.toFixed(4),
+        price.toFixed(4),
+        String(params.sellAsPack ? 1 : 0),
+    ].join('|');
+}
+function statusShouldDeductStock(status) {
+    const s = String(status !== null && status !== void 0 ? status : '').trim().toLowerCase();
+    return s === 'confirmado' || s === 'preparando' || s === 'preparación' || s === 'falta controlar' || s === 'controlado';
+}
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
 function getOrderNetFromLineItems(orderId_1) {
     return __awaiter(this, arguments, void 0, function* (orderId, pickedOnly = false) {
@@ -400,6 +415,12 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const currentOrder = yield (0, db_1.get)("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
         const previousStatus = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
         const noStockImpact = !!(currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.no_stock_impact);
+        // Seguridad de flujo: una vez despachado no permitir volver a estados anteriores.
+        if (previousStatus === 'Despachado' && status !== 'Despachado') {
+            return res.status(400).json({
+                message: 'El pedido ya está Despachado. No se puede volver a un estado anterior.'
+            });
+        }
         // Si pasa de Borrador a Confirmado, descontar stock
         if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
@@ -436,13 +457,39 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const { id } = req.params;
     const updated = req.body;
     if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
         return res.status(400).json({ message: "Datos de pedido inválidos" });
     }
     try {
+        const currentOrder = yield (0, db_1.get)('SELECT status, no_stock_impact FROM orders WHERE id = ?', [id]);
+        if (!currentOrder) {
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        }
+        if (currentOrder.status === 'Despachado' && updated.status !== 'Despachado') {
+            return res.status(400).json({
+                message: 'El pedido ya está Despachado. No se puede volver a un estado anterior.'
+            });
+        }
+        const existingItemsRows = yield (0, db_1.query)(`SELECT variant_id, despacho_id, quantity, picked, price_at_moment, COALESCE(sell_as_pack, 0) AS sell_as_pack
+       FROM order_items
+       WHERE order_id = ?
+       ORDER BY id`, [id]);
+        const existingPickedByIdentity = new Map();
+        for (const row of existingItemsRows) {
+            const key = buildOrderItemIdentityKey({
+                variantId: row.variant_id,
+                despachoId: (_b = row.despacho_id) !== null && _b !== void 0 ? _b : null,
+                quantity: Number(row.quantity) || 0,
+                priceAtMoment: Number(row.price_at_moment) || 0,
+                sellAsPack: Number(row.sell_as_pack) ? 1 : 0,
+            });
+            const arr = existingPickedByIdentity.get(key) || [];
+            arr.push(Number(row.picked || 0) || 0);
+            existingPickedByIdentity.set(key, arr);
+        }
         const toSqlDate = (d) => {
             try {
                 const dt = new Date(d);
@@ -455,10 +502,10 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         };
         const sqlDate = toSqlDate(updated.date);
-        const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
+        const sellerId = (_c = updated.sellerId) !== null && _c !== void 0 ? _c : null;
         const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = updated.noStockImpact === true || updated.no_stock_impact === 1 ? 1 : 0;
-        const reference = normalizeOrderReference((_d = (_c = updated.reference) !== null && _c !== void 0 ? _c : updated.identifier) !== null && _d !== void 0 ? _d : updated.note);
+        const reference = normalizeOrderReference((_e = (_d = updated.reference) !== null && _d !== void 0 ? _d : updated.identifier) !== null && _e !== void 0 ? _e : updated.note);
         yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, reference = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, reference, paymentStatus, noStockImpact, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         const seenInsertKeys = new Set();
@@ -480,8 +527,22 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             const quantity = Number(item.quantity) || 0;
-            const picked = Number(item.picked || 0) || 0;
-            const priceAtMoment = Number((_e = item.priceAtMoment) !== null && _e !== void 0 ? _e : 0) || 0;
+            const priceAtMoment = Number((_f = item.priceAtMoment) !== null && _f !== void 0 ? _f : 0) || 0;
+            const identityKey = buildOrderItemIdentityKey({
+                variantId,
+                despachoId,
+                quantity,
+                priceAtMoment,
+                sellAsPack,
+            });
+            const incomingPicked = item.picked !== undefined && item.picked !== null
+                ? Number(item.picked || 0) || 0
+                : undefined;
+            let picked = incomingPicked;
+            if (picked === undefined) {
+                const pool = existingPickedByIdentity.get(identityKey);
+                picked = pool && pool.length > 0 ? (Number(pool.shift()) || 0) : 0;
+            }
             const dedupKey = buildOrderItemDedupKey({
                 variantId,
                 despachoId,
@@ -494,6 +555,24 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 continue;
             seenInsertKeys.add(dedupKey);
             yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]);
+        }
+        const noStockImpactBefore = !!currentOrder.no_stock_impact;
+        const noStockImpactAfter = !!noStockImpact;
+        const shouldHaveStockDeductedAfter = !noStockImpactAfter && statusShouldDeductStock(updated.status);
+        const hasPedidoMovement = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference = ? LIMIT 1`, [`Pedido: ${id}`]);
+        if (shouldHaveStockDeductedAfter && !hasPedidoMovement) {
+            const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+            const result = yield deductStockForOrder(id);
+            if (!result.success) {
+                console.error('Errores descontando stock al actualizar pedido:', result.errors);
+            }
+        }
+        else if (!noStockImpactBefore && noStockImpactAfter && hasPedidoMovement) {
+            const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+            const result = yield restoreStockForOrder(id);
+            if (!result.success) {
+                console.error('Errores restaurando stock al pasar a no_stock_impact:', result.errors);
+            }
         }
         const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
         if (!created)
@@ -536,11 +615,11 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            reference: (_f = created.reference) !== null && _f !== void 0 ? _f : undefined,
+            reference: (_g = created.reference) !== null && _g !== void 0 ? _g : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_g = created.picked_by) !== null && _g !== void 0 ? _g : undefined,
+            pickedBy: (_h = created.picked_by) !== null && _h !== void 0 ? _h : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),

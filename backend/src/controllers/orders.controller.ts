@@ -62,6 +62,29 @@ function buildOrderItemDedupKey(params: {
   ].join('|');
 }
 
+function buildOrderItemIdentityKey(params: {
+  variantId: string;
+  despachoId: string | null;
+  quantity: number;
+  priceAtMoment: number;
+  sellAsPack: number;
+}): string {
+  const qty = Number(params.quantity) || 0;
+  const price = Number(params.priceAtMoment) || 0;
+  return [
+    params.variantId,
+    params.despachoId || '',
+    qty.toFixed(4),
+    price.toFixed(4),
+    String(params.sellAsPack ? 1 : 0),
+  ].join('|');
+}
+
+function statusShouldDeductStock(status: unknown): boolean {
+  const s = String(status ?? '').trim().toLowerCase();
+  return s === 'confirmado' || s === 'preparando' || s === 'preparación' || s === 'falta controlar' || s === 'controlado';
+}
+
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items. */
 async function getOrderNetFromLineItems(orderId: string, pickedOnly = false): Promise<number> {
   const rows = await query(
@@ -386,6 +409,13 @@ export const updateOrderStatus = async (req: any, res: any) => {
     const previousStatus = currentOrder?.status;
     const noStockImpact = !!currentOrder?.no_stock_impact;
 
+    // Seguridad de flujo: una vez despachado no permitir volver a estados anteriores.
+    if (previousStatus === 'Despachado' && status !== 'Despachado') {
+      return res.status(400).json({
+        message: 'El pedido ya está Despachado. No se puede volver a un estado anterior.'
+      });
+    }
+
     // Si pasa de Borrador a Confirmado, descontar stock
     if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
       const { deductStockForOrder } = await import('./stock.controller');
@@ -433,6 +463,47 @@ export const updateOrder = async (req: any, res: any) => {
     return res.status(400).json({ message: "Datos de pedido inválidos" });
   }
   try {
+    const currentOrder = await get(
+      'SELECT status, no_stock_impact FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!currentOrder) {
+      return res.status(404).json({ message: 'Pedido no encontrado' });
+    }
+    if (currentOrder.status === 'Despachado' && updated.status !== 'Despachado') {
+      return res.status(400).json({
+        message: 'El pedido ya está Despachado. No se puede volver a un estado anterior.'
+      });
+    }
+
+    const existingItemsRows = await query(
+      `SELECT variant_id, despacho_id, quantity, picked, price_at_moment, COALESCE(sell_as_pack, 0) AS sell_as_pack
+       FROM order_items
+       WHERE order_id = ?
+       ORDER BY id`,
+      [id]
+    ) as Array<{
+      variant_id: string;
+      despacho_id: string | null;
+      quantity: number;
+      picked: number | null;
+      price_at_moment: number | string;
+      sell_as_pack: number;
+    }>;
+    const existingPickedByIdentity = new Map<string, number[]>();
+    for (const row of existingItemsRows) {
+      const key = buildOrderItemIdentityKey({
+        variantId: row.variant_id,
+        despachoId: row.despacho_id ?? null,
+        quantity: Number(row.quantity) || 0,
+        priceAtMoment: Number(row.price_at_moment) || 0,
+        sellAsPack: Number(row.sell_as_pack) ? 1 : 0,
+      });
+      const arr = existingPickedByIdentity.get(key) || [];
+      arr.push(Number(row.picked || 0) || 0);
+      existingPickedByIdentity.set(key, arr);
+    }
+
     const toSqlDate = (d: string) => {
       try {
         const dt = new Date(d);
@@ -477,8 +548,23 @@ export const updateOrder = async (req: any, res: any) => {
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       const despachoId = await resolveDespachoIdForItem(item, variantId);
       const quantity = Number(item.quantity) || 0;
-      const picked = Number(item.picked || 0) || 0;
       const priceAtMoment = Number(item.priceAtMoment ?? 0) || 0;
+      const identityKey = buildOrderItemIdentityKey({
+        variantId,
+        despachoId,
+        quantity,
+        priceAtMoment,
+        sellAsPack,
+      });
+      const incomingPicked =
+        item.picked !== undefined && item.picked !== null
+          ? Number(item.picked || 0) || 0
+          : undefined;
+      let picked = incomingPicked;
+      if (picked === undefined) {
+        const pool = existingPickedByIdentity.get(identityKey);
+        picked = pool && pool.length > 0 ? (Number(pool.shift()) || 0) : 0;
+      }
       const dedupKey = buildOrderItemDedupKey({
         variantId,
         despachoId,
@@ -493,6 +579,27 @@ export const updateOrder = async (req: any, res: any) => {
         "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [uuidv4(), id, variantId, quantity, picked, priceAtMoment, sellAsPack, despachoId]
       );
+    }
+
+    const noStockImpactBefore = !!currentOrder.no_stock_impact;
+    const noStockImpactAfter = !!noStockImpact;
+    const shouldHaveStockDeductedAfter = !noStockImpactAfter && statusShouldDeductStock(updated.status);
+    const hasPedidoMovement = await get(
+      `SELECT id FROM stock_movements WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference = ? LIMIT 1`,
+      [`Pedido: ${id}`]
+    );
+    if (shouldHaveStockDeductedAfter && !hasPedidoMovement) {
+      const { deductStockForOrder } = await import('./stock.controller');
+      const result = await deductStockForOrder(id);
+      if (!result.success) {
+        console.error('Errores descontando stock al actualizar pedido:', result.errors);
+      }
+    } else if (!noStockImpactBefore && noStockImpactAfter && hasPedidoMovement) {
+      const { restoreStockForOrder } = await import('./stock.controller');
+      const result = await restoreStockForOrder(id);
+      if (!result.success) {
+        console.error('Errores restaurando stock al pasar a no_stock_impact:', result.errors);
+      }
     }
     const created = await get(
       'SELECT id, customer_id, seller_id, date, status, total, reference, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
