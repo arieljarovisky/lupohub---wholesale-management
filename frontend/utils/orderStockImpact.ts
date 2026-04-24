@@ -8,7 +8,7 @@ import { Order, OrderStatus } from '../types';
 export type WholesaleStockImpactVariant = 'no_impact' | 'pending' | 'deducted' | 'hidden';
 
 const TITLE_NO_IMPACT =
-  'Facturación administrativa: este pedido no desconta ni devuelve stock.';
+  'Facturación sin movimiento de inventario: no desconta ni devuelve stock (incluye factura emitida con “sin impacto de stock”).';
 
 const TITLE_PENDING =
   'Mientras el pedido esté en Borrador, el stock no se altera. Al confirmar, se descontarán del inventario las unidades (y packs) del pedido.';
@@ -30,7 +30,7 @@ export function getWholesaleStockImpactMeta(
   if (order.noStockImpact) {
     return {
       variant: 'no_impact',
-      label: 'SIN IMPACTO EN STOCK',
+      label: 'SIN IMPACTO STOCK',
       title: TITLE_NO_IMPACT,
       badgeClassName:
         'bg-amber-900/30 text-amber-200 border-amber-800/50',
