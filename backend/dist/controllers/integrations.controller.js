@@ -45,8 +45,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
-exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = void 0;
+exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.syncAllSalesChannelsStock = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = void 0;
 exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
 exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
 exports.getValidMLToken = getValidMLToken;
@@ -1989,6 +1989,74 @@ function runAutoSyncMLtoTN() {
         return { updated, errors };
     });
 }
+/** Sincronización integral de stock en todos los canales:
+ * 1) LupoHub (stock local) -> ML/TN por vínculos de cada variante
+ * 2) (Opcional) reconciliación ML -> TN para publicaciones ambiguas/no lineales
+ */
+const syncAllSalesChannelsStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const includeMlToTnReconcile = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.includeMlToTnReconcile) !== false &&
+            ((_b = req.query) === null || _b === void 0 ? void 0 : _b.includeMlToTnReconcile) !== '0' &&
+            ((_c = req.query) === null || _c === void 0 ? void 0 : _c.includeMlToTnReconcile) !== 'false';
+        const variants = yield (0, db_1.query)(`SELECT pv.id AS variant_id,
+              pv.sku,
+              COALESCE(s.stock, 0) AS stock,
+              p.mercado_libre_id,
+              pv.mercado_libre_variant_id,
+              pv.mercado_libre_item_id,
+              p.tienda_nube_id,
+              pv.tienda_nube_variant_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id`);
+        const { syncStockToExternalPlatforms } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+        let synced = 0;
+        let skippedNoLinks = 0;
+        let errors = 0;
+        const logs = [];
+        for (const v of variants) {
+            const hasML = !!((v.mercado_libre_item_id && String(v.mercado_libre_item_id).trim()) ||
+                (v.mercado_libre_id && v.mercado_libre_variant_id));
+            const hasTN = !!(v.tienda_nube_id && v.tienda_nube_variant_id);
+            if (!hasML && !hasTN) {
+                skippedNoLinks++;
+                continue;
+            }
+            try {
+                yield syncStockToExternalPlatforms(v.variant_id, Math.max(0, Number(v.stock) || 0));
+                synced++;
+            }
+            catch (e) {
+                errors++;
+                logs.push(`[ERROR] ${v.sku || v.variant_id}: ${(e === null || e === void 0 ? void 0 : e.message) || 'falló sync de canales'}`);
+            }
+        }
+        let mlToTnReconcile = null;
+        if (includeMlToTnReconcile) {
+            mlToTnReconcile = yield runAutoSyncMLtoTN();
+        }
+        return res.json({
+            message: 'Sincronización integral ejecutada',
+            variantsTotal: variants.length,
+            synced,
+            skippedNoLinks,
+            errors,
+            includeMlToTnReconcile,
+            mlToTnReconcile,
+            logs
+        });
+    }
+    catch (error) {
+        console.error('Error en sincronización integral de canales:', error);
+        return res.status(500).json({
+            message: 'Error ejecutando sincronización integral de canales',
+            error: (error === null || error === void 0 ? void 0 : error.message) || 'unknown'
+        });
+    }
+});
+exports.syncAllSalesChannelsStock = syncAllSalesChannelsStock;
 // Sincronizar todo el stock local a Tienda Nube
 const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;

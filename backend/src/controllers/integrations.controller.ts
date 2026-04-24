@@ -2163,6 +2163,91 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
   return { updated, errors };
 }
 
+/** Sincronización integral de stock en todos los canales:
+ * 1) LupoHub (stock local) -> ML/TN por vínculos de cada variante
+ * 2) (Opcional) reconciliación ML -> TN para publicaciones ambiguas/no lineales
+ */
+export const syncAllSalesChannelsStock = async (req: Request, res: Response) => {
+  try {
+    const includeMlToTnReconcile =
+      req.body?.includeMlToTnReconcile !== false &&
+      req.query?.includeMlToTnReconcile !== '0' &&
+      req.query?.includeMlToTnReconcile !== 'false';
+
+    const variants = await query(
+      `SELECT pv.id AS variant_id,
+              pv.sku,
+              COALESCE(s.stock, 0) AS stock,
+              p.mercado_libre_id,
+              pv.mercado_libre_variant_id,
+              pv.mercado_libre_item_id,
+              p.tienda_nube_id,
+              pv.tienda_nube_variant_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id`
+    ) as Array<{
+      variant_id: string;
+      sku?: string | null;
+      stock: number;
+      mercado_libre_id?: string | null;
+      mercado_libre_variant_id?: string | null;
+      mercado_libre_item_id?: string | null;
+      tienda_nube_id?: string | null;
+      tienda_nube_variant_id?: string | null;
+    }>;
+
+    const { syncStockToExternalPlatforms } = await import('./stock.controller');
+
+    let synced = 0;
+    let skippedNoLinks = 0;
+    let errors = 0;
+    const logs: string[] = [];
+
+    for (const v of variants) {
+      const hasML = !!(
+        (v.mercado_libre_item_id && String(v.mercado_libre_item_id).trim()) ||
+        (v.mercado_libre_id && v.mercado_libre_variant_id)
+      );
+      const hasTN = !!(v.tienda_nube_id && v.tienda_nube_variant_id);
+      if (!hasML && !hasTN) {
+        skippedNoLinks++;
+        continue;
+      }
+      try {
+        await syncStockToExternalPlatforms(v.variant_id, Math.max(0, Number(v.stock) || 0));
+        synced++;
+      } catch (e: any) {
+        errors++;
+        logs.push(`[ERROR] ${v.sku || v.variant_id}: ${e?.message || 'falló sync de canales'}`);
+      }
+    }
+
+    let mlToTnReconcile: { updated: number; errors: number } | null = null;
+    if (includeMlToTnReconcile) {
+      mlToTnReconcile = await runAutoSyncMLtoTN();
+    }
+
+    return res.json({
+      message: 'Sincronización integral ejecutada',
+      variantsTotal: variants.length,
+      synced,
+      skippedNoLinks,
+      errors,
+      includeMlToTnReconcile,
+      mlToTnReconcile,
+      logs
+    });
+  } catch (error: any) {
+    console.error('Error en sincronización integral de canales:', error);
+    return res.status(500).json({
+      message: 'Error ejecutando sincronización integral de canales',
+      error: error?.message || 'unknown'
+    });
+  }
+};
+
 // Sincronizar todo el stock local a Tienda Nube
 export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   try {

@@ -51,7 +51,8 @@ import {
   getMercadoLibreBrandAdsAdvertisers,
   getMercadoLibreBrandAdsCampaigns,
   getMercadoLibreDisplayAdsAdvertisers,
-  getMercadoLibreDisplayAdsCampaigns
+  getMercadoLibreDisplayAdsCampaigns,
+  syncAllSalesChannelsStock
 } from '../controllers/integrations.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
@@ -70,6 +71,7 @@ router.get('/luposhop/webhook-config', authMiddleware, getLupoWebhookConfigEndpo
 router.post('/luposhop/webhook-config', authMiddleware, saveLupoWebhookConfigEndpoint);
 router.post('/luposhop/webhook-test', authMiddleware, testLupoWebhookEndpoint);
 router.post('/luposhop/sync-ml-stock-to-shop', authMiddleware, syncLupoShopMlStockBulkEndpoint);
+router.post('/stock/sync-all-channels', authMiddleware, syncAllSalesChannelsStock);
 
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);

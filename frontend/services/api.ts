@@ -1142,6 +1142,33 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0 }, 'syncMLtoTN');
   },
 
+  /** Sincronización integral: stock local -> ML/TN y (opcional) reconciliación ML -> TN. */
+  syncAllSalesChannelsStock: async (options?: { includeMlToTnReconcile?: boolean }): Promise<{
+    message: string;
+    variantsTotal: number;
+    synced: number;
+    skippedNoLinks: number;
+    errors: number;
+    includeMlToTnReconcile: boolean;
+    mlToTnReconcile: { updated: number; errors: number } | null;
+    logs: string[];
+  }> => {
+    return handleRequest(async () => {
+      return await request('/integrations/stock/sync-all-channels', 'POST', {
+        includeMlToTnReconcile: options?.includeMlToTnReconcile !== false
+      }, undefined, 240000);
+    }, {
+      message: 'Offline',
+      variantsTotal: 0,
+      synced: 0,
+      skippedNoLinks: 0,
+      errors: 0,
+      includeMlToTnReconcile: options?.includeMlToTnReconcile !== false,
+      mlToTnReconcile: null,
+      logs: []
+    }, 'syncAllSalesChannelsStock');
+  },
+
   importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }> => {
     return handleRequest(async () => {
       return await request<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);
