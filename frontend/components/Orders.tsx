@@ -761,7 +761,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
+          <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
+            Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
+            = aún en borrador o factura sin movimiento de inventario; gris = cancelado. Pasá el mouse por el chip de stock para
+            leer el detalle.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <button
             type="button"
@@ -854,12 +861,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const customer = customers.find(c => c.id === order.customerId);
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
+          const stockImpact = getWholesaleStockImpactMeta(order);
           
           return (
             <div 
               key={order.id} 
               onClick={() => canEditOrder && onEditOrder?.(order)}
-              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation`}
+              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation ${stockImpact.cardAccentClass}`}
             >
               <div className="flex justify-between items-start">
                 <div className="space-y-1 min-w-0 flex-1">
@@ -890,21 +898,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Receipt size={10} /> FACTURADO
                       </span>
                     )}
-                    {(() => {
-                      const impact = getWholesaleStockImpactMeta(order);
-                      if (impact.variant === 'hidden' || !impact.label) return null;
-                      return (
-                        <span
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help border ${impact.badgeClassName}`}
-                          title={impact.title}
-                        >
-                          {impact.variant === 'no_impact' && <Package size={10} />}
-                          {impact.variant === 'pending' && <Clock size={10} />}
-                          {impact.variant === 'deducted' && <PackageCheck size={10} />}
-                          {impact.label}
-                        </span>
-                      );
-                    })()}
+                    {stockImpact.label && (
+                      <span
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help border ${stockImpact.badgeClassName}`}
+                        title={stockImpact.title}
+                      >
+                        {stockImpact.variant === 'no_impact' && <Package size={10} />}
+                        {stockImpact.variant === 'pending' && <Clock size={10} />}
+                        {stockImpact.variant === 'deducted' && <PackageCheck size={10} />}
+                        {stockImpact.label}
+                      </span>
+                    )}
                     {role !== Role.CUSTOMER && (
                       <button
                         type="button"

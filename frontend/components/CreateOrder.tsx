@@ -51,6 +51,11 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
   const isReadOnly = initialOrder?.status === OrderStatus.DISPATCHED;
 
+  const orderStockHeader = React.useMemo(
+    () => (initialOrder ? getWholesaleStockImpactMeta(initialOrder) : null),
+    [initialOrder]
+  );
+
   /** Cantidad en el pedido para una variante (por variantId; en la lista cada ítem tiene p.id = variant id). */
   const getQuantityInCart = (variantId: string | undefined) => {
     if (!variantId) return 0;
@@ -330,32 +335,36 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
               Edición
             </span>
           )}
+          {orderStockHeader?.label && (
+            <span
+              className={`shrink-0 max-w-[min(100%,12rem)] truncate px-2 py-0.5 rounded-lg text-[9px] sm:text-[10px] font-black flex items-center gap-1 border cursor-default ${orderStockHeader.badgeClassName}`}
+              title={orderStockHeader.title}
+            >
+              {orderStockHeader.label}
+            </span>
+          )}
         </div>
       </div>
 
-      {initialOrder && (() => {
-        const impact = getWholesaleStockImpactMeta(initialOrder);
-        if (impact.variant === 'hidden') return null;
-        return (
-          <div
-            className={`shrink-0 rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 text-sm flex items-start gap-2 ${
-              impact.variant === 'no_impact'
-                ? 'bg-amber-900/20 border-amber-800/50 text-amber-100/95'
-                : impact.variant === 'pending'
-                  ? 'bg-slate-800/80 border-amber-800/40 text-slate-200'
-                  : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-100/90'
-            }`}
-          >
-            {impact.variant === 'no_impact' && <Package className="shrink-0 mt-0.5" size={18} />}
-            {impact.variant === 'pending' && <AlertCircle className="shrink-0 mt-0.5 text-amber-400" size={18} />}
-            {impact.variant === 'deducted' && <CheckCircle2 className="shrink-0 mt-0.5 text-emerald-400" size={18} />}
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Inventario (mayorista)</p>
-              <p className="text-xs sm:text-sm leading-snug">{impact.title}</p>
-            </div>
+      {orderStockHeader && orderStockHeader.variant !== 'hidden' && (
+        <div
+          className={`shrink-0 rounded-2xl border px-3 py-2.5 sm:px-4 sm:py-3 text-sm flex items-start gap-2 ${
+            orderStockHeader.variant === 'no_impact'
+              ? 'bg-amber-900/20 border-amber-800/50 text-amber-100/95'
+              : orderStockHeader.variant === 'pending'
+                ? 'bg-slate-800/80 border-amber-800/40 text-slate-200'
+                : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-100/90'
+          }`}
+        >
+          {orderStockHeader.variant === 'no_impact' && <Package className="shrink-0 mt-0.5" size={18} />}
+          {orderStockHeader.variant === 'pending' && <AlertCircle className="shrink-0 mt-0.5 text-amber-400" size={18} />}
+          {orderStockHeader.variant === 'deducted' && <CheckCircle2 className="shrink-0 mt-0.5 text-emerald-400" size={18} />}
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Inventario (mayorista)</p>
+            <p className="text-xs sm:text-sm leading-snug">{orderStockHeader.title}</p>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {!initialOrder && (
         <div className="shrink-0 rounded-2xl border border-slate-700/60 bg-slate-800/40 px-3 py-2.5 text-xs text-slate-400 flex items-start gap-2">

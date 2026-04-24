@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 
 interface CustomersProps {
   customers: Customer[];
@@ -1302,22 +1303,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            
            {visibleOrders.length > 0 ? (
              <div className="divide-y divide-slate-800">
-               {visibleOrders.map(order => (
+               {visibleOrders.map(order => {
+                 const stockImpact = getWholesaleStockImpactMeta(order);
+                 return (
                  <div 
                    key={order.id} 
                    onClick={() => setSelectedOrder(order)}
-                   className="p-4 hover:bg-slate-800 transition-colors cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
+                   className={`p-4 hover:bg-slate-800 transition-colors cursor-pointer flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group pl-0 ${stockImpact.cardAccentClass}`}
                  >
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 pl-4">
                        <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 group-hover:bg-blue-900/20 group-hover:text-blue-400 transition-colors">
                           <Package size={24} />
                        </div>
                        <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                              <span className="font-bold text-white">Pedido #{order.id}</span>
                              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${getStatusColor(order.status)}`}>
                                 {order.status}
                              </span>
+                             {stockImpact.label && (
+                               <span
+                                 className={`px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center gap-1 border cursor-help ${stockImpact.badgeClassName}`}
+                                 title={stockImpact.title}
+                               >
+                                 {stockImpact.variant === 'no_impact' && <Package size={9} />}
+                                 {stockImpact.variant === 'pending' && <Clock size={9} />}
+                                 {stockImpact.variant === 'deducted' && <PackageCheck size={9} />}
+                                 {stockImpact.label}
+                               </span>
+                             )}
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
                              <span className="flex items-center gap-1"><Calendar size={12}/> {order.date}</span>
@@ -1340,7 +1354,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                        <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-transform group-hover:translate-x-1" />
                     </div>
                  </div>
-               ))}
+               );
+               })}
              </div>
            ) : (
               <div className="p-12 text-center text-slate-500">

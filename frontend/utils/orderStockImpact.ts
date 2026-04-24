@@ -24,6 +24,8 @@ export function getWholesaleStockImpactMeta(
   title: string;
   /** Clases sugeridas para badge pequeño en lista de pedidos */
   badgeClassName: string;
+  /** Borde izquierdo de la tarjeta de pedido (saber de un vistazo si el stock ya se descontó) */
+  cardAccentClass: string;
 } {
   if (order.noStockImpact) {
     return {
@@ -32,10 +34,17 @@ export function getWholesaleStockImpactMeta(
       title: TITLE_NO_IMPACT,
       badgeClassName:
         'bg-amber-900/30 text-amber-200 border-amber-800/50',
+      cardAccentClass: 'border-l-4 border-amber-500/80',
     };
   }
   if (order.status === OrderStatus.CANCELLED) {
-    return { variant: 'hidden', label: null, title: '', badgeClassName: '' };
+    return {
+      variant: 'hidden',
+      label: null,
+      title: '',
+      badgeClassName: '',
+      cardAccentClass: 'border-l-4 border-slate-600/50',
+    };
   }
   if (order.status === OrderStatus.DRAFT) {
     return {
@@ -44,6 +53,7 @@ export function getWholesaleStockImpactMeta(
       title: TITLE_PENDING,
       badgeClassName:
         'bg-slate-800 text-amber-200 border-amber-700/50 border-dashed',
+      cardAccentClass: 'border-l-4 border-amber-400/90',
     };
   }
   return {
@@ -51,5 +61,6 @@ export function getWholesaleStockImpactMeta(
     label: 'STOCK: YA DESCONTADO',
     title: TITLE_DEDUCTED,
     badgeClassName: 'bg-emerald-950/50 text-emerald-300 border-emerald-800/50',
+    cardAccentClass: 'border-l-4 border-emerald-500/80',
   };
 }

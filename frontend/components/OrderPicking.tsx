@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle, Package, AlertTriangle, Save, Lock, User, Check } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Package, AlertTriangle, Save, Lock, User, Check, PackageCheck, Clock } from 'lucide-react';
 import { Order, OrderItem, Product, OrderStatus, User as UserType } from '../types';
+import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 
 interface OrderPickingProps {
   order: Order;
@@ -52,6 +53,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
 
   const progress = Math.round((items.reduce((acc, i) => acc + (i.picked || 0), 0) / items.reduce((acc, i) => acc + i.quantity, 0)) * 100) || 0;
   const isComplete = progress === 100;
+  const stockImpact = getWholesaleStockImpactMeta(order);
 
   return (
     <div className="bg-slate-950 md:bg-slate-900 min-h-[calc(100vh-100px)] rounded-3xl md:border md:border-slate-700 flex flex-col shadow-2xl animate-fade-in relative">
@@ -97,6 +99,18 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
               style={{ width: `${progress}%` }}
             ></div>
           </div>
+
+          {stockImpact.label && (
+            <div
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-bold ${stockImpact.badgeClassName}`}
+              title={stockImpact.title}
+            >
+              {stockImpact.variant === 'no_impact' && <Package size={14} className="shrink-0" />}
+              {stockImpact.variant === 'pending' && <Clock size={14} className="shrink-0" />}
+              {stockImpact.variant === 'deducted' && <PackageCheck size={14} className="shrink-0" />}
+              <span className="leading-tight">{stockImpact.label}</span>
+            </div>
+          )}
 
           {/* Action Button (Mobile Full Width) */}
           {!isReadOnly && (
