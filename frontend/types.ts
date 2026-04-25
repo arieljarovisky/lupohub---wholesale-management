@@ -185,6 +185,8 @@ export interface Order {
   paymentStatus?: 'pendiente' | 'pagado';
   /** Si true, este pedido no debe impactar stock (facturación administrativa). */
   noStockImpact?: boolean;
+  /** Si el backend lo envía: hubo movimiento PEDIDO_MAYORISTA en historial (stock ya descontado de verdad). */
+  mayoristaStockApplied?: boolean;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

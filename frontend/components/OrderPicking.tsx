@@ -108,6 +108,7 @@ const OrderPicking: React.FC<OrderPickingProps> = ({ order, products, currentUse
               {stockImpact.variant === 'no_impact' && <Package size={14} className="shrink-0" />}
               {stockImpact.variant === 'pending' && <Clock size={14} className="shrink-0" />}
               {stockImpact.variant === 'deducted' && <PackageCheck size={14} className="shrink-0" />}
+              {stockImpact.variant === 'not_applied' && <AlertTriangle size={14} className="shrink-0" />}
               <span className="leading-tight">{stockImpact.label}</span>
             </div>
           )}

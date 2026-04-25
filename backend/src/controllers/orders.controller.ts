@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Order, OrderItem } from '../types';
-import { restoreStockForOrder, restoreStockForOrderItem } from './stock.controller';
+import {
+  restoreStockForOrder,
+  restoreStockForOrderItem,
+  deductStockForOrder,
+  isMayoristaStockDeductedForWholesale,
+} from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
 async function resolveDespachoIdForItem(item: any, variantId?: string): Promise<string | null> {
@@ -173,6 +178,27 @@ export const getOrders = async (req: any, res: any) => {
       // Tabla credit_notes puede no existir en DB antiguas
     }
 
+    let mayoristaStockLoaded = false;
+    let mayoristaStockAppliedByOrder: Record<string, boolean> = {};
+    try {
+      if (orderIds.length > 0) {
+        const refs = orderIds.map((oid: string) => `Pedido: ${oid}`);
+        const rph = refs.map(() => '?').join(',');
+        const mRows = await query(
+          `SELECT DISTINCT reference FROM stock_movements
+           WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference IN (${rph})`,
+          refs
+        );
+        const appliedRefs = new Set((mRows as { reference: string }[]).map((r) => r.reference));
+        for (const oid of orderIds) {
+          mayoristaStockAppliedByOrder[oid] = appliedRefs.has(`Pedido: ${oid}`);
+        }
+        mayoristaStockLoaded = true;
+      }
+    } catch (_) {
+      // stock_movements puede no existir en DB antiguas
+    }
+
     const ordersFull = ordersRow.map((order: any) => ({
       id: order.id,
       customerId: order.customer_id,
@@ -190,7 +216,10 @@ export const getOrders = async (req: any, res: any) => {
       creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
       creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0,
       paymentStatus: mapPaymentStatus(order),
-      noStockImpact: !!order.no_stock_impact
+      noStockImpact: !!order.no_stock_impact,
+      mayoristaStockApplied: mayoristaStockLoaded
+        ? mayoristaStockAppliedByOrder[order.id] === true
+        : undefined
     }));
 
     res.json(ordersFull);
@@ -510,6 +539,61 @@ export const patchOrderPaymentStatus = async (req: any, res: any) => {
   } catch (error) {
     console.error('patchOrderPaymentStatus:', error);
     res.status(500).json({ message: 'Error actualizando estado de cobro' });
+  }
+};
+
+/**
+ * Aplica el descuento de stock del pedido mayorista de una (idempotente).
+ * Si el pedido está en Borrador, pasa a Confirmado y luego desconta (mismo criterio que al confirmar).
+ */
+export const applyMayoristaStockDeduction = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  try {
+    const order = await get(
+      'SELECT id, status, no_stock_impact, customer_id FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!order) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (user.role === 'SELLER') {
+      const cust = order.customer_id
+        ? await get('SELECT seller_id FROM customers WHERE id = ?', [order.customer_id])
+        : null;
+      if (cust?.seller_id && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+      }
+    }
+    if (order.no_stock_impact) {
+      return res.status(400).json({ message: 'Este pedido está marcado sin impacto en stock.' });
+    }
+    if (order.status === 'Cancelado') {
+      return res.status(400).json({ message: 'No aplica a pedidos cancelados.' });
+    }
+    if (await isMayoristaStockDeductedForWholesale(id)) {
+      return res.json({
+        id,
+        alreadyApplied: true,
+        message: 'El stock de este pedido ya estaba descontado.',
+      });
+    }
+    if (order.status === 'Borrador') {
+      await execute("UPDATE orders SET status = 'Confirmado' WHERE id = ?", [id]);
+    }
+    const result = await deductStockForOrder(id);
+    if (!result.success) {
+      return res.status(500).json({
+        message: 'Error al descontar stock: ' + (result.errors?.join(', ') || 'desconocido'),
+        errors: result.errors
+      });
+    }
+    res.json({ id, success: true, message: 'Stock descontado correctamente.' });
+  } catch (error: any) {
+    console.error('applyMayoristaStockDeduction:', error);
+    res.status(500).json({ message: error?.message || 'Error al descontar stock' });
   }
 };
 

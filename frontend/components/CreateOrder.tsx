@@ -353,11 +353,14 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
               ? 'bg-amber-900/20 border-amber-800/50 text-amber-100/95'
               : orderStockHeader.variant === 'pending'
                 ? 'bg-slate-800/80 border-amber-800/40 text-slate-200'
-                : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-100/90'
+                : orderStockHeader.variant === 'not_applied'
+                  ? 'bg-orange-950/35 border-orange-800/50 text-orange-100/90'
+                  : 'bg-emerald-950/30 border-emerald-800/40 text-emerald-100/90'
           }`}
         >
           {orderStockHeader.variant === 'no_impact' && <Package className="shrink-0 mt-0.5" size={18} />}
           {orderStockHeader.variant === 'pending' && <AlertCircle className="shrink-0 mt-0.5 text-amber-400" size={18} />}
+          {orderStockHeader.variant === 'not_applied' && <AlertCircle className="shrink-0 mt-0.5 text-orange-400" size={18} />}
           {orderStockHeader.variant === 'deducted' && <CheckCircle2 className="shrink-0 mt-0.5 text-emerald-400" size={18} />}
           <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">Inventario (mayorista)</p>

@@ -502,6 +502,13 @@ export const api = {
     return await request<{ id: string; paymentStatus: string }>(`/orders/${orderId}/payment-status`, 'PATCH', { paymentStatus });
   },
 
+  /** Desconta stock del pedido mayorista ahora (idempotente; si es borrador pasa a confirmado). */
+  applyMayoristaStock: async (
+    orderId: string
+  ): Promise<{ id: string; success?: boolean; alreadyApplied?: boolean; message?: string; errors?: string[] }> => {
+    return await request(`/orders/${orderId}/apply-mayorista-stock`, 'POST', {});
+  },
+
   /** Indica si AFIP está configurado en el servidor (para mostrar botón Emitir factura). */
   getAfipStatus: async (): Promise<{ configured: boolean; production?: boolean }> => {
     const res = await request<{ configured: boolean; production?: boolean }>('/afip/status', 'GET');

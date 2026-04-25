@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -1329,6 +1329,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                                  {stockImpact.variant === 'no_impact' && <Package size={9} />}
                                  {stockImpact.variant === 'pending' && <Clock size={9} />}
                                  {stockImpact.variant === 'deducted' && <PackageCheck size={9} />}
+                                 {stockImpact.variant === 'not_applied' && <AlertTriangle size={9} />}
                                  {stockImpact.label}
                                </span>
                              )}

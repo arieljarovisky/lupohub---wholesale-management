@@ -247,6 +247,19 @@ function unitsToDeductForOrderItem(quantity: number, sellAsPack: boolean | numbe
   return sellAsPack ? quantity * packSize : quantity;
 }
 
+/** Texto de referencia en `stock_movements` para el descuento de un pedido mayorista. */
+export const wholesaleOrderStockReference = (orderId: string) => `Pedido: ${orderId}`;
+
+/** Indica si ya se registró al menos un movimiento PEDIDO_MAYORISTA para este pedido (idempotencia). */
+export const isMayoristaStockDeductedForWholesale = async (orderId: string): Promise<boolean> => {
+  const ref = wholesaleOrderStockReference(orderId);
+  const row = await get(
+    `SELECT 1 AS ok FROM stock_movements WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference = ? LIMIT 1`,
+    [ref]
+  );
+  return !!row;
+};
+
 // Descontar stock por pedido mayorista
 export const deductStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
   const errors: string[] = [];

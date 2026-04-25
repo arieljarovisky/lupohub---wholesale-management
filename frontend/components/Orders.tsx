@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -97,6 +97,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [afipProduction, setAfipProduction] = useState(true);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
+  const [applyingMayoristaStockId, setApplyingMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
   const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
@@ -765,8 +766,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
           <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
             Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
-            = aún en borrador o factura sin movimiento de inventario; gris = cancelado. Pasá el mouse por el chip de stock para
-            leer el detalle.
+            = borrador o sin impacto de stock; naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado.
+            Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
@@ -906,6 +907,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         {stockImpact.variant === 'no_impact' && <Package size={10} />}
                         {stockImpact.variant === 'pending' && <Clock size={10} />}
                         {stockImpact.variant === 'deducted' && <PackageCheck size={10} />}
+                        {stockImpact.variant === 'not_applied' && <AlertTriangle size={10} />}
                         {stockImpact.label}
                       </span>
                     )}
@@ -1026,6 +1028,43 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   >
                     <FileText size={16} />
                   </button>
+                  {role !== Role.CUSTOMER &&
+                    !order.noStockImpact &&
+                    order.status !== OrderStatus.CANCELLED &&
+                    order.mayoristaStockApplied !== true && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setApplyingMayoristaStockId(order.id);
+                          api
+                            .applyMayoristaStock(order.id)
+                            .then((r) => {
+                              showToast(
+                                'success',
+                                r.message ||
+                                  (r.alreadyApplied
+                                    ? 'El stock de este pedido ya estaba descontado.'
+                                    : 'Stock descontado correctamente.')
+                              );
+                              refreshOrders?.();
+                            })
+                            .catch((err: any) =>
+                              showToast('error', err?.response?.data?.message || err?.message || 'Error al descontar stock')
+                            )
+                            .finally(() => setApplyingMayoristaStockId(null));
+                        }}
+                        disabled={applyingMayoristaStockId === order.id}
+                        className="p-2 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-700/50 transition disabled:opacity-50"
+                        title="Descontar stock ahora: en borrador pasa a confirmado y aplica; si ya estaba confirmado, solo registra el movimiento de inventario si aún faltaba."
+                      >
+                        {applyingMayoristaStockId === order.id ? (
+                          <Loader2 size={16} className="animate-spin text-cyan-400" />
+                        ) : (
+                          <ArrowDownToLine size={16} />
+                        )}
+                      </button>
+                    )}
                   {order.invoice && (
                     <>
                       <button
