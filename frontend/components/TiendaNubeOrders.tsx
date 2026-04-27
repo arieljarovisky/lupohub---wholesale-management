@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText } from 'lucide-react';
 import { api } from '../services/api';
+import { getRemitente } from '../services/apiIntegration';
 
 interface TiendaNubeOrder {
   id: number;
