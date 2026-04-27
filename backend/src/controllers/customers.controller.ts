@@ -32,10 +32,14 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
 /** Listar todos los clientes (camelCase para el frontend) con transportes asignados. */
 export const getCustomers = async (req: Request, res: Response) => {
   try {
+    const authUser = (req as any).user;
+    const sellerFilter = authUser?.role === 'SELLER' ? ' WHERE seller_id = ?' : '';
+    const params = authUser?.role === 'SELLER' ? [authUser.id] : [];
     const rows = await query(
       `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
               legacy_code, account_zone, account_seller_label
-       FROM customers ORDER BY business_name ASC, name ASC`
+       FROM customers${sellerFilter} ORDER BY business_name ASC, name ASC`,
+      params
     );
     const customers = (rows || []).map((r: any) => toCustomer(r));
     const ids = customers.map((c: any) => c.id);

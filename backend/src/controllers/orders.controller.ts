@@ -57,20 +57,23 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
 
 export const getOrders = async (req: any, res: any) => {
   try {
+    const user = req.user;
     const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
     const archivedOnly = req.query.archivedOnly === 'true' || req.query.archivedOnly === '1';
     let whereArchived = ' AND (o.archived = 0 OR o.archived IS NULL)';
     if (archivedOnly) whereArchived = ' AND o.archived = 1';
     else if (includeArchived) whereArchived = '';
+    const whereUserScope = user?.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const ordersParams = user?.role === 'SELLER' ? [user.id] : [];
 
-    let ordersRow = await query(`
-      SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
-      FROM orders o
-      LEFT JOIN customers c ON c.id = o.customer_id
-      WHERE 1=1 ${whereArchived}
-      ORDER BY o.date DESC
-    `);
-    const user = req.user;
+    let ordersRow = await query(
+      `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
+       FROM orders o
+       LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE 1=1 ${whereArchived}${whereUserScope}
+       ORDER BY o.date DESC`,
+      ordersParams
+    );
     if (user?.role === 'CUSTOMER') {
       const { get } = await import('../database/db');
       const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
