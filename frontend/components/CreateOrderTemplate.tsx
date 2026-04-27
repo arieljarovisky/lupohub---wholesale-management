@@ -899,7 +899,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                     <input
                                       type="number"
                                       min={0}
-                                      value={row.quantitiesBySize[s.code] ?? ''}
+                                      value={qtyVal === 0 ? '' : qtyVal}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
                                       className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${
                                         noStock || exceeds
