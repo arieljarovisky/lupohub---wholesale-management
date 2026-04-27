@@ -23,10 +23,10 @@ export const listPayments = async (req: any, res: Response) => {
     if (desde) { where.push('p.date >= ?'); params.push(desde); }
     if (hasta) { where.push('p.date <= ?'); params.push(hasta); }
 
-    // Para SELLER: solo pagos de sus clientes (seller_id = user.id) o pagos donde él es el vendedor del recibo
+    // Para SELLER: solo pagos de clientes asignados a ese vendedor
     if (user.role === 'SELLER') {
-      where.push('(p.seller_id = ? OR c.seller_id = ?)');
-      params.push(user.id, user.id);
+      where.push('c.seller_id = ?');
+      params.push(user.id);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -102,10 +102,15 @@ export const createPayment = async (req: any, res: Response) => {
     if (!date) return res.status(400).json({ message: 'Falta fecha' });
     if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ message: 'Monto inválido' });
 
-    const cust = await get('SELECT id FROM customers WHERE id = ?', [customerId]);
+    const cust = await get('SELECT id, seller_id FROM customers WHERE id = ?', [customerId]);
     if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés cargar pagos para tus clientes' });
+    }
 
-    const sellerId = body.sellerId ? String(body.sellerId).trim() : null;
+    const sellerId = user.role === 'SELLER'
+      ? user.id
+      : (body.sellerId ? String(body.sellerId).trim() : null);
     const orderId = body.orderId ? String(body.orderId).trim() : null;
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
