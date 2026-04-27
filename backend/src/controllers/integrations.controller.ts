@@ -3061,6 +3061,24 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
         customerName = order.shipping_address.name;
       }
 
+      const shippingCandidates = [
+        order.shipping_option,
+        order.shipping_option_name,
+        order.shipping_method,
+        order.shipping_method_name,
+        order.shipping_name,
+        order.shipping_type,
+        order.shipping_mode,
+        order.shipping_service,
+        order.shipping_status,
+        order.gateway_name
+      ]
+        .map((v: any) => (v == null ? '' : String(v).trim()))
+        .filter(Boolean);
+      const shippingMethod = shippingCandidates[0] || '';
+      const expressBlob = shippingCandidates.join(' ').toLowerCase();
+      const hasExpressShipping = /\bexpress\b|\bexpr[eé]s\b/.test(expressBlob);
+
       return {
       id: order.id,
       number: order.number,
@@ -3069,6 +3087,8 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       paymentStatusRaw: rawPaymentStatus || null,
       isPaid: normalizedPaymentStatus === 'paid',
       shippingStatus: order.shipping_status,
+      shippingMethod,
+      hasExpressShipping,
       total: order.total,
       currency: order.currency,
       customer: {

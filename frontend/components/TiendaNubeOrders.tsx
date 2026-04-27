@@ -10,6 +10,8 @@ interface TiendaNubeOrder {
   paymentStatusRaw?: string | null;
   isPaid?: boolean;
   shippingStatus: string;
+  shippingMethod?: string;
+  hasExpressShipping?: boolean;
   total: string;
   currency: string;
   customer: {
@@ -175,6 +177,130 @@ const TiendaNubeOrders: React.FC = () => {
 
   const clearSelection = () => setSelectedOrderIds([]);
 
+  const buildTiendaNubeReceiptHtml = (order: TiendaNubeOrder): string => {
+    const remitente = getRemitente();
+    const empresa = (remitente.businessName || 'Multimedias SA').toString();
+    const empresaCuit = (remitente.cuit || '').toString();
+    const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ');
+    const customerName = (order.customer?.name || 'Cliente').toString().trim();
+    const customerEmail = (order.customer?.email || '').toString().trim();
+    const customerPhone = (order.customer?.phone || '').toString().trim();
+    const createdAt = new Date(order.createdAt);
+    const createdAtStr = isNaN(createdAt.getTime())
+      ? String(order.createdAt)
+      : createdAt.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const now = new Date();
+    const nowStr = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const address = order.shippingAddress
+      ? `${order.shippingAddress.address}, ${order.shippingAddress.city}, ${order.shippingAddress.province}, CP ${order.shippingAddress.zipcode}`
+      : 'Sin dirección de envío';
+    const totalUnits = (order.products || []).reduce((acc, p) => acc + (Number(p.quantity) || 0), 0);
+
+    const productRows = (order.products || []).map((p) => {
+      const qty = Number(p.quantity) || 0;
+      return `<tr>
+        <td>${(p.name || '').toString().trim() || '—'}</td>
+        <td>${(p.sku || '').toString().trim() || '—'}</td>
+        <td class="c">${qty}</td>
+      </tr>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Recibo TN #${order.number}</title>
+  <style>
+    @page { size: A4; margin: 16mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 12px; }
+    .sheet { max-width: 190mm; margin: 0 auto; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .muted { color: #555; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+    .card { border: 1px solid #222; border-radius: 6px; padding: 10px; min-height: 70px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { border-top: 1px solid #222; border-bottom: 1px solid #222; font-size: 11px; }
+    .c { text-align: center; }
+    .signatures { margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .sig { border-top: 1px solid #333; padding-top: 6px; text-align: center; min-height: 56px; }
+    .print-actions { margin-top: 18px; }
+    @media print { .print-actions { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <h1>Recibo de Entrega</h1>
+    <div class="muted">Comprobante interno para firma del cliente</div>
+    <div class="row">
+      <div class="card">
+        <div><strong>Empresa:</strong> ${empresa}</div>
+        ${empresaCuit ? `<div><strong>CUIT:</strong> ${empresaCuit}</div>` : ''}
+        ${empresaDir ? `<div><strong>Domicilio:</strong> ${empresaDir}</div>` : ''}
+        <div><strong>Fecha de emisión:</strong> ${nowStr}</div>
+      </div>
+      <div class="card">
+        <div><strong>Pedido Tienda Nube:</strong> #${order.number}</div>
+        <div><strong>ID:</strong> ${order.id}</div>
+        <div><strong>Fecha pedido:</strong> ${createdAtStr}</div>
+        <div><strong>Total unidades:</strong> ${totalUnits}</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="card">
+        <div><strong>Cliente:</strong> ${customerName}</div>
+        ${customerEmail ? `<div><strong>Email:</strong> ${customerEmail}</div>` : ''}
+        ${customerPhone ? `<div><strong>Tel:</strong> ${customerPhone}</div>` : ''}
+      </div>
+      <div class="card">
+        <div><strong>Dirección de entrega:</strong></div>
+        <div>${address}</div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>SKU</th>
+          <th class="c">Cantidad</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${productRows || `<tr><td colspan="3" class="c">Sin productos</td></tr>`}
+      </tbody>
+    </table>
+    <div class="signatures">
+      <div class="sig">
+        Firma cliente<br/>
+        Aclaración / DNI
+      </div>
+      <div class="sig">
+        Firma quien entrega<br/>
+        Aclaración
+      </div>
+    </div>
+    <div class="print-actions">
+      <button onclick="window.print()" style="padding:10px 14px;background:#1f2937;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Descargar PDF / Imprimir</button>
+      <button onclick="window.close()" style="padding:10px 14px;margin-left:8px;background:#94a3b8;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cerrar</button>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
+    if (order.hasExpressShipping === true) return true;
+    const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
+    return /\bexpress\b|\bexpr[eé]s\b/.test(blob);
+  };
+
+  const openReceiptForSignature = (order: TiendaNubeOrder) => {
+    const html = buildTiendaNubeReceiptHtml(order);
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+  };
   const selectAllFilteredPaid = async () => {
     setSelectingAllFiltered(true);
     try {
@@ -546,6 +672,20 @@ const TiendaNubeOrders: React.FC = () => {
 
                     {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
+                      {hasExpressShipping(order) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReceiptForSignature(order);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
+                          title="Generar recibo PDF para firma (solo envío express)"
+                        >
+                          <FileText size={14} />
+                          Recibo PDF
+                        </button>
+                      )}
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
                         <p className="text-xs text-slate-500">#{order.number}</p>
