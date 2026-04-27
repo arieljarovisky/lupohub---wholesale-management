@@ -3108,7 +3108,13 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
         address: order.shipping_address.address,
         city: order.shipping_address.city,
         province: order.shipping_address.province,
-        zipcode: order.shipping_address.zipcode
+        zipcode: order.shipping_address.zipcode,
+        number: order.shipping_address.number,
+        floor: order.shipping_address.floor,
+        apartment: order.shipping_address.apartment,
+        locality: order.shipping_address.locality,
+        country: order.shipping_address.country,
+        betweenStreets: order.shipping_address.between_streets
       } : null,
       createdAt: order.created_at,
       updatedAt: order.updated_at

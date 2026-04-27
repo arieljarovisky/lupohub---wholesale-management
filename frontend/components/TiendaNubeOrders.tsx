@@ -33,6 +33,12 @@ interface TiendaNubeOrder {
     city: string;
     province: string;
     zipcode: string;
+    number?: string;
+    floor?: string;
+    apartment?: string;
+    locality?: string;
+    country?: string;
+    betweenStreets?: string;
   } | null;
   createdAt: string;
   updatedAt: string;
@@ -192,9 +198,22 @@ const TiendaNubeOrders: React.FC = () => {
       : createdAt.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const now = new Date();
     const nowStr = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const address = order.shippingAddress
-      ? `${order.shippingAddress.address}, ${order.shippingAddress.city}, ${order.shippingAddress.province}, CP ${order.shippingAddress.zipcode}`
-      : 'Sin dirección de envío';
+    const shipping = order.shippingAddress;
+    const line1 = shipping
+      ? [shipping.address, shipping.number].filter(Boolean).join(' ').trim()
+      : '';
+    const line2Parts = shipping
+      ? [shipping.floor ? `Piso ${shipping.floor}` : '', shipping.apartment ? `Dto ${shipping.apartment}` : ''].filter(Boolean)
+      : [];
+    const line2 = line2Parts.join(' - ');
+    const line3 = shipping
+      ? [shipping.locality, shipping.city, shipping.province].filter(Boolean).join(', ').trim()
+      : '';
+    const line4 = shipping
+      ? [shipping.zipcode ? `CP ${shipping.zipcode}` : '', shipping.country || ''].filter(Boolean).join(', ')
+      : '';
+    const between = shipping?.betweenStreets ? `Entre calles: ${shipping.betweenStreets}` : '';
+    const address = [line1, line2, line3, line4, between].filter(Boolean).join('<br/>') || 'Sin dirección de envío';
     const totalUnits = (order.products || []).reduce((acc, p) => acc + (Number(p.quantity) || 0), 0);
 
     const productRows = (order.products || []).map((p) => {
