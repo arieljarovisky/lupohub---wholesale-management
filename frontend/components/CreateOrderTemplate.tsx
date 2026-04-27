@@ -62,8 +62,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [addingProduct, setAddingProduct] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<string>('');
-  const [addByCodeInput, setAddByCodeInput] = useState('');
-  const [addByCodeError, setAddByCodeError] = useState<string | null>(null);
   /** Código del artículo al que se están agregando colores (para mostrar carga en el botón). */
   const [addingColorsForCode, setAddingColorsForCode] = useState<string | null>(null);
   /** Códigos de artículo colapsados (solo se muestra resumen). */
@@ -261,11 +259,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const code = (baseSku || '').trim();
     if (!code) return;
     setAddingProduct(true);
-    setAddByCodeError(null);
     try {
       const product = await api.getProductBySku(code);
       if (!product || !product.variants?.length) {
-        setAddByCodeError('Código no encontrado o sin variantes.');
+        showToast('error', 'Código no encontrado o sin variantes.');
         return;
       }
       const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
@@ -304,7 +301,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const alreadyInOrder = rows.some(r => r.productCode === product.sku);
       if (alreadyInOrder) {
         showToast('error', 'Este artículo ya está en el pedido.');
-        setAddByCodeError('Este artículo ya está en el pedido. No se puede agregar dos veces.');
         setAddingProduct(false);
         return;
       }
@@ -314,13 +310,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       });
       setShowAddModal(false);
       setSearchTerm('');
-      setAddByCodeInput('');
-      setAddByCodeError(null);
     } catch (e: any) {
       const msg = e?.response?.status === 401
         ? 'Sesión vencida. Cerrá sesión y volvé a iniciar sesión.'
         : (e?.message || 'Error al cargar el artículo.');
-      setAddByCodeError(msg);
+      showToast('error', msg);
     } finally {
       setAddingProduct(false);
     }
@@ -997,7 +991,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[100] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="shrink-0 py-3 flex items-center gap-3">
             <button
-              onClick={() => { setShowAddModal(false); setSearchTerm(''); setAddByCodeError(null); setAddByCodeInput(''); }}
+              onClick={() => { setShowAddModal(false); setSearchTerm(''); }}
               className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition touch-manipulation"
               aria-label="Cerrar"
             >
@@ -1013,32 +1007,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           )}
 
-          <div className="shrink-0 mb-4 p-4 rounded-xl bg-slate-800/90 border border-slate-700/80">
-            <p className="text-xs font-semibold text-slate-400 mb-2">Por código (SKU)</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Ej: 28608"
-                className="flex-1 bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-white font-mono text-sm focus:ring-2 focus:ring-blue-500/50 outline-none"
-                value={addByCodeInput}
-                onChange={(e) => { setAddByCodeInput(e.target.value); setAddByCodeError(null); }}
-                onKeyDown={(e) => e.key === 'Enter' && addProductBySku(addByCodeInput)}
-              />
-              <button
-                type="button"
-                disabled={addingProduct || !addByCodeInput.trim()}
-                onClick={() => addProductBySku(addByCodeInput)}
-                className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm disabled:opacity-50 whitespace-nowrap min-h-[48px] touch-manipulation"
-              >
-                {addingProduct ? 'Cargando...' : 'Cargar'}
-              </button>
-            </div>
-            {addByCodeError && (
-              <p className="mt-2 text-sm text-red-400">{addByCodeError}</p>
-            )}
-          </div>
-
-          <p className="text-xs text-slate-500 mb-2">O elegí de la lista</p>
+          <p className="text-xs text-slate-500 mb-2">Elegí de la lista</p>
           <div className="relative mb-3">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
             <input
@@ -1081,7 +1050,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <div className="pt-4 border-t border-slate-700 shrink-0">
             <button
               type="button"
-              onClick={() => { setShowAddModal(false); setSearchTerm(''); setAddByCodeError(null); setAddByCodeInput(''); }}
+              onClick={() => { setShowAddModal(false); setSearchTerm(''); }}
               className="w-full min-h-[48px] py-3 rounded-xl bg-slate-700/90 hover:bg-slate-600 text-slate-200 font-semibold border border-slate-600 transition touch-manipulation"
             >
               Cerrar
