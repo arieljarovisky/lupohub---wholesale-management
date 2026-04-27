@@ -737,6 +737,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [newUserRole, setNewUserRole] = useState<Role>(Role.SELLER);
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [editingSellerAccessId, setEditingSellerAccessId] = useState<string | null>(null);
   const [defaultSellerImportPassword, setDefaultSellerImportPassword] = useState('');
   const [sellerExcelImporting, setSellerExcelImporting] = useState(false);
   const sellersImportInputRef = useRef<HTMLInputElement>(null);
@@ -962,6 +963,42 @@ const Settings: React.FC<SettingsProps> = ({
       setNewUserRole(Role.SELLER);
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const handleEditSellerAccess = async (u: User) => {
+    if (!onUpdateUser) return;
+    const currentEmail = (u.email || '').trim();
+    const nextEmailRaw = window.prompt('Nuevo email del vendedor:', currentEmail);
+    if (nextEmailRaw == null) return;
+    const nextEmail = nextEmailRaw.trim().toLowerCase();
+    if (!nextEmail || !nextEmail.includes('@')) {
+      showToast('error', 'Email inválido');
+      return;
+    }
+
+    const nextPassRaw = window.prompt('Nueva contraseña (dejar vacío para no cambiar):', '');
+    if (nextPassRaw == null) return;
+    const nextPassword = nextPassRaw.trim();
+    if (nextPassword && nextPassword.length < 4) {
+      showToast('error', 'La contraseña debe tener al menos 4 caracteres');
+      return;
+    }
+
+    setEditingSellerAccessId(u.id);
+    try {
+      await Promise.resolve(
+        onUpdateUser({
+          ...u,
+          email: nextEmail,
+          password: nextPassword || undefined
+        })
+      );
+      showToast('success', 'Acceso del vendedor actualizado');
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo actualizar el acceso del vendedor');
+    } finally {
+      setEditingSellerAccessId(null);
     }
   };
 
@@ -1234,22 +1271,34 @@ const Settings: React.FC<SettingsProps> = ({
                        </div>
                     </div>
                     {currentUser?.id !== u.id && (
-                       <button 
-                         onClick={async () => {
-                           if (!onDeleteUser) return;
-                           setDeletingUserId(u.id);
-                           try {
-                             await Promise.resolve(onDeleteUser(u.id));
-                           } finally {
-                             setDeletingUserId(null);
-                           }
-                         }}
-                         disabled={deletingUserId === u.id}
-                         className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-900/10 rounded-lg transition-all disabled:opacity-50"
-                         title="Eliminar usuario"
-                       >
-                         {deletingUserId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
-                       </button>
+                       <div className="flex items-center gap-2">
+                         {u.role === Role.SELLER && (
+                           <button
+                             onClick={() => handleEditSellerAccess(u)}
+                             disabled={editingSellerAccessId === u.id}
+                             className="p-2 text-slate-600 hover:text-cyan-400 hover:bg-cyan-900/10 rounded-lg transition-all disabled:opacity-50"
+                             title="Editar email y contraseña"
+                           >
+                             {editingSellerAccessId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Key size={18} />}
+                           </button>
+                         )}
+                         <button 
+                           onClick={async () => {
+                             if (!onDeleteUser) return;
+                             setDeletingUserId(u.id);
+                             try {
+                               await Promise.resolve(onDeleteUser(u.id));
+                             } finally {
+                               setDeletingUserId(null);
+                             }
+                           }}
+                           disabled={deletingUserId === u.id}
+                           className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-900/10 rounded-lg transition-all disabled:opacity-50"
+                           title="Eliminar usuario"
+                         >
+                           {deletingUserId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                         </button>
+                       </div>
                     )}
                  </div>
               ))}

@@ -57,7 +57,7 @@ export const api = {
       priceListId: created.priceListId ?? undefined
     } as User;
   },
-  updateUser: async (id: string, data: { priceListId?: string | null; commissionPercentage?: number }): Promise<User> => {
+  updateUser: async (id: string, data: { priceListId?: string | null; commissionPercentage?: number; email?: string; password?: string }): Promise<User> => {
     const updated = await request<any>(`/users/${id}`, 'PATCH', data);
     return {
       id: updated.id,

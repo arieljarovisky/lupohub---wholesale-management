@@ -192,7 +192,12 @@ export const updateUser = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Solo administradores pueden actualizar usuarios' });
     }
     const { id } = req.params;
-    const body = req.body as { priceListId?: string | null; commissionPercentage?: number | null };
+    const body = req.body as {
+      priceListId?: string | null;
+      commissionPercentage?: number | null;
+      email?: string;
+      password?: string;
+    };
     const existing = await get('SELECT id, role FROM users WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Usuario no encontrado' });
     const userRole = String((existing as { role?: string }).role ?? '');
@@ -213,6 +218,32 @@ export const updateUser = async (req: Request, res: Response) => {
         return res.status(400).json({ message: 'commissionPercentage debe estar entre 0 y 100' });
       }
       await execute('UPDATE users SET commission_percentage = ? WHERE id = ?', [commission, id]);
+      didUpdate = true;
+    }
+    if (body.email !== undefined) {
+      if (userRole !== 'SELLER') {
+        return res.status(400).json({ message: 'Solo se puede editar email de vendedores desde esta pantalla' });
+      }
+      const nextEmail = String(body.email || '').trim().toLowerCase();
+      if (!nextEmail || !nextEmail.includes('@')) {
+        return res.status(400).json({ message: 'Email inválido' });
+      }
+      const existingEmail = await get('SELECT id FROM users WHERE email = ? AND id <> ?', [nextEmail, id]);
+      if (existingEmail) {
+        return res.status(409).json({ message: 'Ya existe un usuario con ese email' });
+      }
+      await execute('UPDATE users SET email = ? WHERE id = ?', [nextEmail, id]);
+      didUpdate = true;
+    }
+    if (body.password !== undefined) {
+      if (userRole !== 'SELLER') {
+        return res.status(400).json({ message: 'Solo se puede editar contraseña de vendedores desde esta pantalla' });
+      }
+      const nextPassword = String(body.password || '');
+      if (nextPassword.length < 4) {
+        return res.status(400).json({ message: 'La contraseña debe tener al menos 4 caracteres' });
+      }
+      await execute('UPDATE users SET password = ? WHERE id = ?', [nextPassword, id]);
       didUpdate = true;
     }
     if (didUpdate && userRole === 'SELLER') {

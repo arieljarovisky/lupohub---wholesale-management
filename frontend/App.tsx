@@ -452,7 +452,9 @@ const App: React.FC = () => {
     try {
       const saved = await api.updateUser(updatedUser.id, {
         priceListId: updatedUser.priceListId ?? null,
-        commissionPercentage: updatedUser.commissionPercentage ?? 0
+        commissionPercentage: updatedUser.commissionPercentage ?? 0,
+        email: updatedUser.email,
+        password: updatedUser.password
       });
       setUsers(prev => prev.map(u => u.id === saved.id ? saved : u));
     } catch (err: any) {
