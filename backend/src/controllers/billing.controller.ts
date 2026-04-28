@@ -21,6 +21,16 @@ function parseMoney(value: any): number {
 }
 
 function normalizeDate(value: any): string {
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const dd = m[1].padStart(2, '0');
+      const mm = m[2].padStart(2, '0');
+      const yyyy = m[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value || '').slice(0, 10);
   return d.toISOString().slice(0, 10);
@@ -137,8 +147,6 @@ export const listBilling = async (req: Request, res: Response) => {
     if (tipo !== 'NC') {
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
-      if (desde) { importedWhere.push('e.line_date >= ?'); importedParams.push(desde); }
-      if (hasta) { importedWhere.push('e.line_date <= ?'); importedParams.push(hasta); }
       if (customerId) { importedWhere.push('e.customer_id = ?'); importedParams.push(customerId); }
       if (authUser?.role === 'SELLER') {
         importedWhere.push('c.seller_id = ?');
@@ -206,7 +214,9 @@ export const listBilling = async (req: Request, res: Response) => {
             }
           };
         })
-        .filter(({ dedupeKey }) => {
+        .filter(({ row, dedupeKey }) => {
+          if (desde && row.fecha < String(desde)) return false;
+          if (hasta && row.fecha > String(hasta)) return false;
           if (existingKeys.has(dedupeKey)) return false;
           existingKeys.add(dedupeKey);
           return true;
@@ -356,8 +366,6 @@ export const exportBilling = async (req: Request, res: Response) => {
       const authUser = (req as any).user;
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
-      if (desde) { importedWhere.push('e.line_date >= ?'); importedParams.push(desde); }
-      if (hasta) { importedWhere.push('e.line_date <= ?'); importedParams.push(hasta); }
       if (customerId) { importedWhere.push('e.customer_id = ?'); importedParams.push(customerId); }
       if (authUser?.role === 'SELLER') {
         importedWhere.push('c.seller_id = ?');
@@ -393,6 +401,8 @@ export const exportBilling = async (req: Request, res: Response) => {
 
       for (const r of importedRows) {
         const fecha = normalizeDate(r.line_date);
+        if (desde && fecha < String(desde)) continue;
+        if (hasta && fecha > String(hasta)) continue;
         const numero = String(r.numero || '').trim();
         const importe = parseMoney(r.importe);
         const key = [fecha, numero.toUpperCase(), importe.toFixed(2), r.customer_id].join('|');

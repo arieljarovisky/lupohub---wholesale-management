@@ -33,6 +33,16 @@ function parseMoney(value) {
     return Number.isFinite(n) ? n : 0;
 }
 function normalizeDate(value) {
+    if (typeof value === 'string') {
+        const raw = value.trim();
+        const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) {
+            const dd = m[1].padStart(2, '0');
+            const mm = m[2].padStart(2, '0');
+            const yyyy = m[3];
+            return `${yyyy}-${mm}-${dd}`;
+        }
+    }
     const d = new Date(value);
     if (Number.isNaN(d.getTime()))
         return String(value || '').slice(0, 10);
@@ -139,14 +149,6 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (tipo !== 'NC') {
             const importedWhere = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
             const importedParams = [];
-            if (desde) {
-                importedWhere.push('e.line_date >= ?');
-                importedParams.push(desde);
-            }
-            if (hasta) {
-                importedWhere.push('e.line_date <= ?');
-                importedParams.push(hasta);
-            }
             if (customerId) {
                 importedWhere.push('e.customer_id = ?');
                 importedParams.push(customerId);
@@ -213,7 +215,11 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     }
                 };
             })
-                .filter(({ dedupeKey }) => {
+                .filter(({ row, dedupeKey }) => {
+                if (desde && row.fecha < String(desde))
+                    return false;
+                if (hasta && row.fecha > String(hasta))
+                    return false;
                 if (existingKeys.has(dedupeKey))
                     return false;
                 existingKeys.add(dedupeKey);
@@ -350,14 +356,6 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             const authUser = req.user;
             const importedWhere = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
             const importedParams = [];
-            if (desde) {
-                importedWhere.push('e.line_date >= ?');
-                importedParams.push(desde);
-            }
-            if (hasta) {
-                importedWhere.push('e.line_date <= ?');
-                importedParams.push(hasta);
-            }
             if (customerId) {
                 importedWhere.push('e.customer_id = ?');
                 importedParams.push(customerId);
@@ -391,6 +389,10 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }));
             for (const r of importedRows) {
                 const fecha = normalizeDate(r.line_date);
+                if (desde && fecha < String(desde))
+                    continue;
+                if (hasta && fecha > String(hasta))
+                    continue;
                 const numero = String(r.numero || '').trim();
                 const importe = parseMoney(r.importe);
                 const key = [fecha, numero.toUpperCase(), importe.toFixed(2), r.customer_id].join('|');
