@@ -9,7 +9,7 @@ router.get('/', getOrders);
 router.post('/', createOrder);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
 router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDeduction);
-router.patch('/:id/status', updateOrderStatus);
+router.patch('/:id/status', authMiddleware, updateOrderStatus);
 router.put('/:id', updateOrder);
 router.patch('/:id/archive', authMiddleware, archiveOrder);
 router.delete('/:id', deleteOrder);

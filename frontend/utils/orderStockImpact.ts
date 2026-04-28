@@ -2,7 +2,7 @@ import { Order, OrderStatus } from '../types';
 
 /**
  * Cómo se refleja el pedido mayorista en el inventario.
- * Alineado con el backend: descuento al confirmar (Borrador → Confirmado o create confirmado);
+ * Alineado con el backend: descuento solo cuando ADMIN confirma (desde Borrador/Pendiente admin);
  * `noStockImpact` = facturación sin movimiento de stock.
  */
 export type WholesaleStockImpactVariant = 'no_impact' | 'pending' | 'deducted' | 'not_applied' | 'hidden';
@@ -11,7 +11,7 @@ const TITLE_NO_IMPACT =
   'Facturación sin movimiento de inventario: no desconta ni devuelve stock (incluye factura emitida con “sin impacto de stock”).';
 
 const TITLE_PENDING =
-  'Mientras el pedido esté en Borrador, el stock no se altera. Al confirmar, se descontarán del inventario las unidades (y packs) del pedido.';
+  'Mientras el pedido esté en Borrador o pendiente de confirmación admin, el stock no se altera. Solo al confirmar ADMIN se descontarán las unidades (o packs).';
 
 const TITLE_DEDUCTED =
   'El inventario ya se actualizó: al confirmar este pedido, las unidades se descontaron. Si se cancela antes de despachar, el stock se restaura.';
@@ -49,7 +49,7 @@ export function getWholesaleStockImpactMeta(
       cardAccentClass: 'border-l-4 border-slate-600/50',
     };
   }
-  if (order.status === OrderStatus.DRAFT) {
+  if (order.status === OrderStatus.DRAFT || order.status === OrderStatus.PENDING_ADMIN_CONFIRMATION) {
     if (order.mayoristaStockApplied === true) {
       return {
         variant: 'deducted',

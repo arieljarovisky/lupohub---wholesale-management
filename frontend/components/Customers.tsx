@@ -355,6 +355,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700 text-slate-300';
+      case OrderStatus.PENDING_ADMIN_CONFIRMATION: return 'bg-violet-900/40 text-violet-300 border border-violet-800';
       case OrderStatus.CONFIRMED: return 'bg-blue-900/40 text-blue-300 border border-blue-800';
       case OrderStatus.PREPARING: return 'bg-yellow-900/40 text-yellow-300 border border-yellow-800';
       case OrderStatus.PENDING_CONTROL: return 'bg-amber-900/40 text-amber-300 border border-amber-800';

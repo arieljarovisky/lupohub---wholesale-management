@@ -231,7 +231,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   // Por despachar (sacar y no despachado) — sin total facturado
   const tnToShipCount = tnOrders.filter((o: any) => o.paymentStatus === 'paid' && o.shippingStatus !== 'shipped' && o.shippingStatus !== 'delivered').length;
   const mlToShipCount = mlOrders.filter((o: any) => o.status === 'paid' && o.shipping?.status && ['ready_to_ship', 'pending', 'handling'].includes(o.shipping.status)).length;
-  const mayToShipCount = orders.filter(o => [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status)).length;
+  const mayToShipCount = orders.filter(o => [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status)).length;
   const totalToShip = tnToShipCount + mlToShipCount + mayToShipCount;
 
   const formatMoney = (n: number) => {
@@ -258,7 +258,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   // Dashboard para clientes directos: solo sus métricas, sin TN ni ML
   if (isCustomer) {
     const myOrders = orders || [];
-    const pendingOrders = myOrders.filter(o => [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status));
+    const pendingOrders = myOrders.filter(o => [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status));
     const dispatchedOrders = myOrders.filter(o => o.status === OrderStatus.DISPATCHED);
     const totalComprado = dispatchedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
     const recentOrders = [...myOrders].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 8);
@@ -266,6 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const getStatusColor = (status: string) => {
       switch (status) {
         case OrderStatus.DISPATCHED: return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+        case OrderStatus.PENDING_ADMIN_CONFIRMATION: return 'bg-violet-500/20 text-violet-300 border-violet-500/40';
         case OrderStatus.CONFIRMED:
         case OrderStatus.PREPARING:
         case OrderStatus.PENDING_CONTROL:
@@ -645,7 +646,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
   if (isSeller && currentUserId) {
     const myOrders = orders.filter(o => o.sellerId === currentUserId);
     const pendingOrders = myOrders.filter(o =>
-      [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status)
+      [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(o.status)
     );
     const dispatchedOrders = myOrders.filter(o => o.status === OrderStatus.DISPATCHED);
     const totalVendido = dispatchedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
@@ -665,6 +666,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const getStatusColor = (status: string) => {
       switch (status) {
         case OrderStatus.DISPATCHED: return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+        case OrderStatus.PENDING_ADMIN_CONFIRMATION: return 'bg-violet-500/20 text-violet-300 border-violet-500/40';
         case OrderStatus.CONFIRMED:
         case OrderStatus.PREPARING:
         case OrderStatus.PENDING_CONTROL:

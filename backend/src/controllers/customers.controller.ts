@@ -2188,9 +2188,30 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       sortNumero: string;
     }> = [];
 
+    const normalizeDateKey = (d: Date | null) => {
+      if (!d || Number.isNaN(d.getTime())) return '';
+      return d.toISOString().slice(0, 10);
+    };
+    const normalizeNumberKey = (v: any) => String(v || '').trim().toUpperCase();
+    const normalizeAmountKey = (v: any) => Number(v || 0).toFixed(2);
+    const isReceiptType = (tipo: any) => {
+      const t = String(tipo || '').trim().toUpperCase();
+      return t === 'REC' || t === 'RECIBO';
+    };
+
+    const existingReceiptKeys = new Set<string>();
+
     for (const e of entries) {
       const fecha = e.line_date ? new Date(e.line_date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      if (isReceiptType(e.tipo)) {
+        const receiptKey = [
+          normalizeDateKey(fecha),
+          normalizeNumberKey(e.numero),
+          normalizeAmountKey(e.importe)
+        ].join('|');
+        existingReceiptKeys.add(receiptKey);
+      }
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
@@ -2225,6 +2246,12 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const p of paymentsRows) {
       const fecha = p.date ? new Date(p.date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      const receiptKey = [
+        normalizeDateKey(fecha),
+        normalizeNumberKey(p.receipt_number),
+        normalizeAmountKey(p.amount)
+      ].join('|');
+      if (existingReceiptKeys.has(receiptKey)) continue;
       timelineRows.push({
         section: 'SISTEMA',
         fecha,

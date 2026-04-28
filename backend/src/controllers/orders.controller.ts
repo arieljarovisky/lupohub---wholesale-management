@@ -276,9 +276,13 @@ export const createOrder = async (req: any, res: any) => {
       (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
     const createdBy = user?.id ?? null;
+    const requestedStatus = String(newOrder.status || 'Borrador');
+    const shouldStayPendingAdmin =
+      requestedStatus === 'Confirmado' && (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
+    const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
     await execute(
       `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact, createdBy]
+      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -307,7 +311,7 @@ export const createOrder = async (req: any, res: any) => {
       );
     }
 
-    if (newOrder.status === 'Confirmado' && !noStockImpact) {
+    if (statusToSave === 'Confirmado' && !noStockImpact) {
       const { deductStockForOrder } = await import('./stock.controller');
       const result = await deductStockForOrder(orderId);
       if (!result.success) console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
@@ -381,15 +385,38 @@ export const createOrder = async (req: any, res: any) => {
 export const updateOrderStatus = async (req: any, res: any) => {
   const { id } = req.params;
   const { status, pickedBy } = req.body;
+  const user = req.user;
 
   try {
     // Obtener estado anterior
     const currentOrder = await get("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
     const previousStatus = currentOrder?.status;
     const noStockImpact = !!currentOrder?.no_stock_impact;
+    if (!previousStatus) return res.status(404).json({ message: 'Pedido no encontrado' });
 
-    // Si pasa de Borrador a Confirmado, descontar stock
-    if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
+    const isAdmin = user?.role === 'ADMIN';
+    const requestedStatus = String(status || previousStatus);
+    const nextStatus =
+      requestedStatus === 'Confirmado' && !isAdmin
+        ? 'Pendiente confirmación admin'
+        : requestedStatus;
+
+    // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse por ADMIN.
+    if (
+      previousStatus === 'Pendiente confirmación admin' &&
+      !['Pendiente confirmación admin', 'Confirmado', 'Cancelado'].includes(nextStatus)
+    ) {
+      return res.status(400).json({
+        message: 'El pedido está pendiente de confirmación de admin.'
+      });
+    }
+
+    // Solo al confirmar ADMIN se descuenta stock.
+    if (
+      ['Borrador', 'Pendiente confirmación admin'].includes(previousStatus) &&
+      nextStatus === 'Confirmado' &&
+      !noStockImpact
+    ) {
       const { deductStockForOrder } = await import('./stock.controller');
       const result = await deductStockForOrder(id);
       
@@ -401,7 +428,7 @@ export const updateOrderStatus = async (req: any, res: any) => {
     // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
     const hadStockDeducted =
       !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
-    if (status === 'Cancelado' && hadStockDeducted) {
+    if (nextStatus === 'Cancelado' && hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
       
@@ -411,17 +438,17 @@ export const updateOrderStatus = async (req: any, res: any) => {
     }
 
     // Documentar quién prepara/despacha y cuándo
-    if ((status === 'Preparando' || status === 'Preparación') && pickedBy) {
-      await execute("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
-    } else if (status === 'Despachado') {
+    if ((nextStatus === 'Preparando' || nextStatus === 'Preparación') && pickedBy) {
+      await execute("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [nextStatus, pickedBy, id]);
+    } else if (nextStatus === 'Despachado') {
       await execute(
         "UPDATE orders SET status = ?, picked_by = COALESCE(?, picked_by), dispatched_at = NOW() WHERE id = ?",
-        [status, pickedBy || null, id]
+        [nextStatus, pickedBy || null, id]
       );
     } else {
-      await execute("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+      await execute("UPDATE orders SET status = ? WHERE id = ?", [nextStatus, id]);
     }
-    res.json({ id, status, previousStatus });
+    res.json({ id, status: nextStatus, previousStatus });
   } catch (error) {
     console.error('Error updating order status:', error);
     res.status(500).json({ message: "Error updating order status" });

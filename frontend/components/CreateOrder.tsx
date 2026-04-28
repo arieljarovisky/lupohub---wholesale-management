@@ -308,7 +308,11 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         despachoId: r.despachoId || undefined
       })),
       total,
-      status: initialOrder?.status ?? OrderStatus.CONFIRMED,
+      status:
+        initialOrder?.status ??
+        ((role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
+          ? OrderStatus.CONFIRMED
+          : OrderStatus.PENDING_ADMIN_CONFIRMATION),
       date: orderDate,
       paymentStatus: initialOrder?.paymentStatus ?? 'pendiente',
       noStockImpact: initialOrder?.noStockImpact
@@ -373,8 +377,8 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         <div className="shrink-0 rounded-2xl border border-slate-700/60 bg-slate-800/40 px-3 py-2.5 text-xs text-slate-400 flex items-start gap-2">
           <Package className="shrink-0 text-slate-500" size={16} />
           <span>
-            Al guardar en <strong className="text-slate-300">confirmado</strong>, el inventario se desconta con las
-            unidades (o packs) del pedido. Los borradores no mueven stock hasta que confirmes.
+            El stock solo se descuenta cuando un <strong className="text-slate-300">admin confirma</strong> el pedido.
+            Vendedor/cliente generan pedidos pendientes de confirmación de admin.
           </span>
         </div>
       )}

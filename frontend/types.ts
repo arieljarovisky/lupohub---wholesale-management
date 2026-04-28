@@ -8,6 +8,7 @@ export enum Role {
 
 export enum OrderStatus {
   DRAFT = 'Borrador',
+  PENDING_ADMIN_CONFIRMATION = 'Pendiente confirmación admin',
   CONFIRMED = 'Confirmado',
   PREPARING = 'Preparando',
   PENDING_CONTROL = 'Falta controlar',

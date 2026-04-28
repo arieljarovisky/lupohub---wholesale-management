@@ -186,6 +186,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const getStatusColor = (status: OrderStatus) => {
     switch(status) {
       case OrderStatus.DRAFT: return 'bg-slate-700/50 text-slate-300 border border-slate-600';
+      case OrderStatus.PENDING_ADMIN_CONFIRMATION: return 'bg-violet-900/30 text-violet-300 border border-violet-800';
       case OrderStatus.CONFIRMED: return 'bg-blue-900/30 text-blue-300 border border-blue-800';
       case OrderStatus.PREPARING: return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800';
       case OrderStatus.PENDING_CONTROL: return 'bg-amber-900/30 text-amber-300 border border-amber-800';
@@ -202,7 +203,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     (filterCustomer === 'ALL' || o.customerId === filterCustomer)
   );
 
-  const statusesCancelables = [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
+  const statusesCancelables = [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
   const canCancelOrder = (order: Order) =>
     !order.invoice &&
     (statusesCancelables.includes(order.status) || order.status === 'Preparación') &&
@@ -211,6 +212,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Siguiente estado posible para el flujo Depósito (Preparando → Falta controlar → Controlado → Despachado). */
   const getNextStatusForOrder = (order: Order): OrderStatus | null => {
     const s = order.status;
+    if (s === OrderStatus.CONFIRMED) return OrderStatus.PREPARING;
     if (s === OrderStatus.PREPARING || s === 'Preparación') return OrderStatus.PENDING_CONTROL;
     if (s === OrderStatus.PENDING_CONTROL) return OrderStatus.CONTROLLED;
     if (s === OrderStatus.CONTROLLED) return OrderStatus.DISPATCHED;
@@ -786,7 +788,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
           <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
             Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
-            = borrador o sin impacto de stock; naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado.
+            = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado.
             Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
           </p>
         </div>
@@ -1247,11 +1249,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
                 </div>
                 <div className="flex items-center gap-4 flex-wrap">
-                   {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) && order.status !== OrderStatus.DISPATCHED && order.status !== OrderStatus.CANCELLED && (
+                   {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) &&
+                    [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(order.status) && (
                      <button
                         onClick={(e) => { e.stopPropagation(); onStartPicking?.(order); }}
                         className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-500 transition"
-                        title="Abrir pantalla de picking (pone el pedido en Preparando si estaba Confirmado)"
+                        title="Abrir pantalla de picking (requiere confirmación admin previa)"
                      >
                         Picking
                      </button>
