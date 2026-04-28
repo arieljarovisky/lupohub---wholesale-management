@@ -1824,10 +1824,57 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     rowNum++;
   }
 
+  // Fila final: total general al pie de la hoja.
+  const totalPedidos = mergedList.reduce((acc, r) => acc + (Number(r.totalCargosPendiente) || 0), 0);
+  const totalImportada = mergedList.reduce((acc, r) => acc + (Number(r.multimediaSaldo) || 0), 0);
+  const totalRecibosSistema = mergedList.reduce((acc, r) => acc + (Number(r.totalPagos) || 0), 0);
+  const totalSaldoFinal = mergedList.reduce((acc, r) => acc + (Number(r.saldoPendiente) || 0), 0);
+  const totalMovs = mergedList.reduce(
+    (acc, r) => acc + (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0),
+    0
+  );
+
+  const totalRow = ws.addRow([
+    '',
+    'TOTAL GENERAL',
+    '',
+    '',
+    totalPedidos,
+    totalImportada,
+    totalRecibosSistema,
+    totalSaldoFinal,
+    totalMovs
+  ]);
+  totalRow.height = 24;
+  totalRow.eachCell((cell, colNumber) => {
+    cell.font = { bold: true, size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE2E8F0' }
+    };
+    cell.border = {
+      top: { style: 'medium', color: { argb: 'FF64748B' } },
+      left: borderThin,
+      bottom: { style: 'medium', color: { argb: 'FF64748B' } },
+      right: borderThin
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: colNumber >= 5 ? 'right' : 'left'
+    };
+    if ([5, 6, 7, 8].includes(colNumber)) {
+      cell.numFmt = '#,##0.00';
+    }
+    if (colNumber === 9) {
+      cell.numFmt = '0';
+    }
+  });
+
   if (mergedList.length > 0) {
     ws.autoFilter = {
       from: { row: 1, column: 1 },
-      to: { row: mergedList.length + 1, column: 9 }
+      to: { row: mergedList.length + 2, column: 9 }
     };
   }
 
