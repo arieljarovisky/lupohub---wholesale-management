@@ -2663,7 +2663,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       tipo: 'SALDO UNIFICADO',
       numero: '',
       importe: saldoUnificado,
-      detalle: `Pedidos: ${orderCargosPendientes.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Cuenta importada: ${multimediaSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${totalPagos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | El detalle inferior muestra movimientos, no saldo histórico acumulado.`
+      detalle: ''
     });
     ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', detalle: '' });
 
@@ -2686,15 +2686,11 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     };
     const normalizeNumberKey = (v: any) => String(v || '').trim().toUpperCase();
     const normalizeAmountKey = (v: any) => Number(v || 0).toFixed(2);
-    const isReceiptType = (tipo: any) => {
-      const t = String(tipo || '').trim().toUpperCase();
-      return t === 'REC' || t === 'RECIBO';
-    };
-
     const normalizeUnifiedType = (tipo: any) => {
       const t = String(tipo || '').trim().toUpperCase();
-      if (t === 'FAC' || t === 'FACTURA') return 'CARGO';
-      if (t === 'REC' || t === 'RECIBO') return 'PAGO';
+      if (t === 'NC' || t === 'NOTA DE CREDITO' || t === 'NOTA DE CRÉDITO') return 'NC';
+      if (t === 'REC' || t === 'RECIBO' || t === 'PAGO' || t === 'COBRO' || t === 'INGRESO') return 'REC';
+      if (t === 'FAC' || t === 'FACTURA' || t === 'CARGO') return 'FAC';
       return t || '';
     };
 
@@ -2722,7 +2718,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
-        tipo: `CARGO${o.status ? ` (${o.status})` : ''}`,
+        tipo: 'FAC',
         numero: o.id ?? '',
         importe: Number(o.total || 0),
         saldo: null,
@@ -2739,7 +2735,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
-        tipo: 'PAGO',
+        tipo: 'REC',
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
@@ -2750,12 +2746,12 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       });
     }
 
-    // Evitar duplicados de PAGO (importado + sistema) por misma fecha/número/importe.
+    // Evitar duplicados de REC (importado + sistema) por misma fecha/número/importe.
     // Se prioriza el registro del sistema (sortSeq mayor, detalle más trazable).
     const paymentByKey = new Map<string, (typeof timelineRows)[number]>();
     const nonPaymentRows: Array<(typeof timelineRows)[number]> = [];
     for (const row of timelineRows) {
-      if (row.tipo !== 'PAGO') {
+      if (row.tipo !== 'REC') {
         nonPaymentRows.push(row);
         continue;
       }
