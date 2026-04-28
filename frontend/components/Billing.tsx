@@ -276,25 +276,58 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const filteredCount = items.length;
+  const normalizeDateKey = (v: any): string => {
+    if (!v) return '';
+    if (typeof v === 'string') {
+      const raw = v.trim();
+      const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+    }
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
+    return d.toISOString().slice(0, 10);
+  };
+  const filteredBillingItems = useMemo(() => {
+    return items.filter((it: any) => {
+      const dateKey = normalizeDateKey(it.fecha);
+      if (desde && dateKey && dateKey < desde) return false;
+      if (hasta && dateKey && dateKey > hasta) return false;
+      if (customerId !== 'ALL' && String(it.customerId || '') !== customerId) return false;
+      if (tipo !== 'ALL' && String(it.tipo || '') !== tipo) return false;
+      return true;
+    });
+  }, [items, desde, hasta, customerId, tipo]);
+  const filteredPayments = useMemo(() => {
+    return payments.filter((p: any) => {
+      const dateKey = normalizeDateKey(p.date);
+      if (desde && dateKey && dateKey < desde) return false;
+      if (hasta && dateKey && dateKey > hasta) return false;
+      if (customerId !== 'ALL' && String(p.customerId || '') !== customerId) return false;
+      return true;
+    });
+  }, [payments, desde, hasta, customerId]);
+
+  const filteredCountDisplay = filteredBillingItems.length;
   const pagedItems = useMemo(() => {
     const start = (billingPage - 1) * BILLING_PAGE_SIZE;
-    return items.slice(start, start + BILLING_PAGE_SIZE);
-  }, [items, billingPage]);
-  const billingTotalPages = Math.max(1, Math.ceil(items.length / BILLING_PAGE_SIZE));
+    return filteredBillingItems.slice(start, start + BILLING_PAGE_SIZE);
+  }, [filteredBillingItems, billingPage]);
+  const billingTotalPages = Math.max(1, Math.ceil(filteredBillingItems.length / BILLING_PAGE_SIZE));
 
   const pagedPayments = useMemo(() => {
     const start = (paymentsPage - 1) * PAYMENTS_PAGE_SIZE;
-    return payments.slice(start, start + PAYMENTS_PAGE_SIZE);
-  }, [payments, paymentsPage]);
-  const paymentsTotalPages = Math.max(1, Math.ceil(payments.length / PAYMENTS_PAGE_SIZE));
+    return filteredPayments.slice(start, start + PAYMENTS_PAGE_SIZE);
+  }, [filteredPayments, paymentsPage]);
+  const paymentsTotalPages = Math.max(1, Math.ceil(filteredPayments.length / PAYMENTS_PAGE_SIZE));
 
   useEffect(() => {
     setBillingPage(1);
-  }, [items.length, desde, hasta, customerId, tipo]);
+  }, [filteredBillingItems.length, desde, hasta, customerId, tipo]);
 
   useEffect(() => {
     setPaymentsPage(1);
-  }, [payments.length, desde, hasta, customerId]);
+  }, [filteredPayments.length, desde, hasta, customerId]);
 
   useEffect(() => {
     if (billingPage > billingTotalPages) setBillingPage(billingTotalPages);
@@ -443,7 +476,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
           <div className="flex items-center gap-2 text-sm text-slate-400">
             <Search size={14} />
-            <span>{filteredCount} comprobante(s) • Página {billingPage}/{billingTotalPages}</span>
+            <span>{filteredCountDisplay} comprobante(s) • Página {billingPage}/{billingTotalPages}</span>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -462,7 +495,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 && (
+              {filteredBillingItems.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
                     No hay comprobantes para los filtros seleccionados.
@@ -501,7 +534,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             </tbody>
           </table>
         </div>
-        {items.length > BILLING_PAGE_SIZE && (
+        {filteredBillingItems.length > BILLING_PAGE_SIZE && (
           <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-800">
             <button
               type="button"
@@ -539,11 +572,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         </div>
         {loadingPayments ? (
           <div className="py-6 text-center text-slate-400">Cargando pagos…</div>
-        ) : payments.length === 0 ? (
+        ) : filteredPayments.length === 0 ? (
           <div className="py-4 text-slate-500 text-sm">No hay pagos cargados para el filtro actual.</div>
         ) : (
           <div className="space-y-2">
-            <div className="text-xs text-slate-400 pb-1">Página {paymentsPage}/{paymentsTotalPages} • {payments.length} recibo(s)</div>
+            <div className="text-xs text-slate-400 pb-1">Página {paymentsPage}/{paymentsTotalPages} • {filteredPayments.length} recibo(s)</div>
             {pagedPayments.map((p) => (
               <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3">
                 <div className="min-w-0">
@@ -555,7 +588,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
               </div>
             ))}
-            {payments.length > PAYMENTS_PAGE_SIZE && (
+            {filteredPayments.length > PAYMENTS_PAGE_SIZE && (
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
