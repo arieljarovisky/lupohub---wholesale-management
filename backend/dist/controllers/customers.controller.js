@@ -1963,7 +1963,7 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
 exports.clearDispatchedPendingsForCustomer = clearDispatchedPendingsForCustomer;
 /** Exporta en Excel el detalle del cliente como un único sistema de movimientos, filtrable por fecha. */
 const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
@@ -2064,10 +2064,9 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
         ws.columns = [
             { header: 'Sección', key: 'section', width: 20 },
             { header: 'Fecha', key: 'fecha', width: 14 },
-            { header: 'Tipo/Estado', key: 'tipo', width: 18 },
-            { header: 'Número/ID', key: 'numero', width: 20 },
-            { header: 'Importe', key: 'importe', width: 16 },
-            { header: 'Saldo', key: 'saldo', width: 16 },
+            { header: 'Movimiento', key: 'tipo', width: 20 },
+            { header: 'Referencia', key: 'numero', width: 22 },
+            { header: 'Monto', key: 'importe', width: 16 },
             { header: 'Detalle', key: 'detalle', width: 42 }
         ];
         ws.getRow(1).font = { bold: true };
@@ -2078,20 +2077,18 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             tipo: '',
             numero: customer.id,
             importe: '',
-            saldo: '',
             detalle: `${customer.business_name || customer.name || 'Cliente'} | Vendedor: ${customer.seller_name || customer.seller_id || 'N/A'}`
         });
-        ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+        ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', detalle: '' });
         ws.addRow({
             section: 'RESUMEN',
             fecha: '',
             tipo: 'SALDO UNIFICADO',
             numero: '',
             importe: saldoUnificado,
-            saldo: null,
             detalle: `Pedidos: ${orderCargosPendientes.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Cuenta importada: ${multimediaSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${totalPagos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         });
-        ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+        ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', detalle: '' });
         const timelineRows = [];
         const normalizeDateKey = (d) => {
             if (!d || Number.isNaN(d.getTime()))
@@ -2105,6 +2102,14 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             return t === 'REC' || t === 'RECIBO';
         };
         const existingReceiptKeys = new Set();
+        const normalizeUnifiedType = (tipo) => {
+            const t = String(tipo || '').trim().toUpperCase();
+            if (t === 'FAC' || t === 'FACTURA')
+                return 'CARGO';
+            if (t === 'REC' || t === 'RECIBO')
+                return 'PAGO';
+            return t || '';
+        };
         for (const e of entries) {
             const fecha = e.line_date ? new Date(e.line_date) : null;
             const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
@@ -2119,11 +2124,12 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             timelineRows.push({
                 section: 'SISTEMA',
                 fecha,
-                tipo: (_f = e.tipo) !== null && _f !== void 0 ? _f : '',
-                numero: (_g = e.numero) !== null && _g !== void 0 ? _g : '',
+                tipo: normalizeUnifiedType(e.tipo),
+                numero: (_f = e.numero) !== null && _f !== void 0 ? _f : '',
                 importe: e.importe != null ? Number(e.importe) : null,
-                saldo: e.saldo != null ? Number(e.saldo) : null,
-                detalle: (_h = e.detalle) !== null && _h !== void 0 ? _h : '',
+                // En modo unificado no mostramos saldo histórico por línea importada.
+                saldo: null,
+                detalle: (_g = e.detalle) !== null && _g !== void 0 ? _g : '',
                 sortTs: ts,
                 sortSeq: Number(e.line_order || 0),
                 sortNumero: String(e.numero || '')
@@ -2135,8 +2141,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             timelineRows.push({
                 section: 'SISTEMA',
                 fecha,
-                tipo: `PEDIDO${o.status ? ` (${o.status})` : ''}`,
-                numero: (_j = o.id) !== null && _j !== void 0 ? _j : '',
+                tipo: `CARGO${o.status ? ` (${o.status})` : ''}`,
+                numero: (_h = o.id) !== null && _h !== void 0 ? _h : '',
                 importe: Number(o.total || 0),
                 saldo: null,
                 detalle: `Cobro: ${o.payment_status || 'pendiente'}`,
@@ -2158,8 +2164,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             timelineRows.push({
                 section: 'SISTEMA',
                 fecha,
-                tipo: 'RECIBO',
-                numero: (_k = p.receipt_number) !== null && _k !== void 0 ? _k : '',
+                tipo: 'PAGO',
+                numero: (_j = p.receipt_number) !== null && _j !== void 0 ? _j : '',
                 importe: Number(p.amount || 0),
                 saldo: null,
                 detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
@@ -2182,13 +2188,11 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 tipo: row.tipo,
                 numero: row.numero,
                 importe: row.importe,
-                saldo: row.saldo,
                 detalle: row.detalle
             });
         }
         ws.getColumn('B').numFmt = 'dd/mm/yyyy';
         ws.getColumn('E').numFmt = '#,##0.00';
-        ws.getColumn('F').numFmt = '#,##0.00';
         const out = yield wb.xlsx.writeBuffer();
         const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
         const filename = `cliente_detalle_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
