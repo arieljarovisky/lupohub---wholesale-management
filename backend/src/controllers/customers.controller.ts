@@ -2136,6 +2136,18 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       ordersParams
     ) as any[];
 
+    const paymentsWhere: string[] = ['p.customer_id = ?'];
+    const paymentsParams: any[] = [customerId];
+    if (from) { paymentsWhere.push('p.date >= ?'); paymentsParams.push(from); }
+    if (to) { paymentsWhere.push('p.date <= ?'); paymentsParams.push(to); }
+    const paymentsRows = await query(
+      `SELECT p.date, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
+       FROM payments p
+       WHERE ${paymentsWhere.join(' AND ')}
+       ORDER BY p.date DESC, p.created_at DESC`,
+      paymentsParams
+    ) as any[];
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
     wb.created = new Date();
@@ -2187,6 +2199,20 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
         importe: Number(o.total || 0),
         saldo: null,
         detalle: `Cobro: ${o.payment_status || 'pendiente'}`
+      });
+    }
+
+    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+    ws.addRow({ section: 'RECIBOS SISTEMA NUEVO', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+    for (const p of paymentsRows) {
+      ws.addRow({
+        section: 'RECIBOS SISTEMA NUEVO',
+        fecha: p.date ? new Date(p.date) : null,
+        tipo: 'RECIBO',
+        numero: p.receipt_number ?? '',
+        importe: Number(p.amount || 0),
+        saldo: null,
+        detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`
       });
     }
 
