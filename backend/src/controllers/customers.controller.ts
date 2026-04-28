@@ -2651,7 +2651,16 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       return t === 'REC' || t === 'RECIBO';
     };
 
-    const existingReceiptKeys = new Set<string>();
+    const systemReceiptKeys = new Set(
+      paymentsRows.map((p) => {
+        const fecha = p.date ? new Date(p.date) : null;
+        return [
+          normalizeDateKey(fecha),
+          normalizeNumberKey(p.receipt_number),
+          normalizeAmountKey(p.amount)
+        ].join('|');
+      })
+    );
     const normalizeUnifiedType = (tipo: any) => {
       const t = String(tipo || '').trim().toUpperCase();
       if (t === 'FAC' || t === 'FACTURA') return 'CARGO';
@@ -2668,7 +2677,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
           normalizeNumberKey(e.numero),
           normalizeAmountKey(e.importe)
         ].join('|');
-        existingReceiptKeys.add(receiptKey);
+        // Si existe recibo equivalente cargado en el sistema actual, priorizar el del sistema.
+        if (systemReceiptKeys.has(receiptKey)) continue;
       }
       timelineRows.push({
         section: 'SISTEMA',
@@ -2705,12 +2715,6 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const p of paymentsRows) {
       const fecha = p.date ? new Date(p.date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
-      const receiptKey = [
-        normalizeDateKey(fecha),
-        normalizeNumberKey(p.receipt_number),
-        normalizeAmountKey(p.amount)
-      ].join('|');
-      if (existingReceiptKeys.has(receiptKey)) continue;
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
