@@ -131,14 +131,6 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             mmWhere.push('e.customer_id = ?');
             mmParams.push(customerId);
         }
-        if (desde) {
-            mmWhere.push('e.line_date >= ?');
-            mmParams.push(desde);
-        }
-        if (hasta) {
-            mmWhere.push('e.line_date <= ?');
-            mmParams.push(hasta);
-        }
         if (user.role === 'SELLER') {
             mmWhere.push('c.seller_id = ?');
             mmParams.push(user.id);
@@ -183,6 +175,16 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return Number.isFinite(n) ? n : 0;
         };
         const normalizeDate = (v) => {
+            if (typeof v === 'string') {
+                const raw = v.trim();
+                const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                if (m) {
+                    const dd = m[1].padStart(2, '0');
+                    const mm = m[2].padStart(2, '0');
+                    const yyyy = m[3];
+                    return `${yyyy}-${mm}-${dd}`;
+                }
+            }
             const d = new Date(v);
             if (Number.isNaN(d.getTime()))
                 return String(v || '').slice(0, 10);
@@ -198,8 +200,13 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         ].join('|')));
         const importedAsPayments = importedRows
             .filter((r) => {
+            const d = normalizeDate(r.line_date);
+            if (desde && d < String(desde))
+                return false;
+            if (hasta && d > String(hasta))
+                return false;
             const key = [
-                normalizeDate(r.line_date),
+                d,
                 normalizeNumber(r.numero),
                 normalizeAmount(r.importe),
                 r.customer_id

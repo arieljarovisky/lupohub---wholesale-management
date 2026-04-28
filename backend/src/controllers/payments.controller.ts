@@ -77,8 +77,6 @@ export const listPayments = async (req: any, res: Response) => {
     const mmWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'`];
     const mmParams: any[] = [];
     if (customerId) { mmWhere.push('e.customer_id = ?'); mmParams.push(customerId); }
-    if (desde) { mmWhere.push('e.line_date >= ?'); mmParams.push(desde); }
-    if (hasta) { mmWhere.push('e.line_date <= ?'); mmParams.push(hasta); }
     if (user.role === 'SELLER') {
       mmWhere.push('c.seller_id = ?');
       mmParams.push(user.id);
@@ -125,6 +123,16 @@ export const listPayments = async (req: any, res: Response) => {
       return Number.isFinite(n) ? n : 0;
     };
     const normalizeDate = (v: any) => {
+      if (typeof v === 'string') {
+        const raw = v.trim();
+        const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) {
+          const dd = m[1].padStart(2, '0');
+          const mm = m[2].padStart(2, '0');
+          const yyyy = m[3];
+          return `${yyyy}-${mm}-${dd}`;
+        }
+      }
       const d = new Date(v);
       if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
       return d.toISOString().slice(0, 10);
@@ -143,8 +151,11 @@ export const listPayments = async (req: any, res: Response) => {
 
     const importedAsPayments = importedRows
       .filter((r) => {
+        const d = normalizeDate(r.line_date);
+        if (desde && d < String(desde)) return false;
+        if (hasta && d > String(hasta)) return false;
         const key = [
-          normalizeDate(r.line_date),
+          d,
           normalizeNumber(r.numero),
           normalizeAmount(r.importe),
           r.customer_id
