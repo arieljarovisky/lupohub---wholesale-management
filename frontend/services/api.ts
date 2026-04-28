@@ -819,10 +819,19 @@ export const api = {
     const q = new URLSearchParams();
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
-    const blob = await getBlob(
-      `/customers/${encodeURIComponent(customerId)}/export-detalle${q.toString() ? `?${q.toString()}` : ''}`,
-      120000
-    );
+    let blob: Blob;
+    try {
+      blob = await getBlob(
+        `/customers/${encodeURIComponent(customerId)}/export-detalle${q.toString() ? `?${q.toString()}` : ''}`,
+        120000
+      );
+    } catch {
+      // Fallback para entornos con ruta alternativa (cache/restart parcial del backend).
+      blob = await getBlob(
+        `/customers/export-detalle/${encodeURIComponent(customerId)}${q.toString() ? `?${q.toString()}` : ''}`,
+        120000
+      );
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
