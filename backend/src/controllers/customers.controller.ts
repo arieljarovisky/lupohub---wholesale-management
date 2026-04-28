@@ -2220,7 +2220,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       tipo: 'SALDO UNIFICADO',
       numero: '',
       importe: saldoUnificado,
-      detalle: `Pedidos: ${orderCargosPendientes.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Cuenta importada: ${multimediaSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${totalPagos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      detalle: `Pedidos: ${orderCargosPendientes.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Cuenta importada: ${multimediaSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${totalPagos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | El detalle inferior muestra movimientos, no saldo histórico acumulado.`
     });
     ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', detalle: '' });
 
