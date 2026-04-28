@@ -1988,7 +1988,7 @@ function buildCustomerFinancialSummary(customerId) {
           LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
         ) AS comprobante,
         o.id AS order_id,
-        ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+        ROUND(COALESCE(o.total, 0), 2) AS debe,
         0 AS haber,
         CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
       FROM invoices i
@@ -2012,7 +2012,7 @@ function buildCustomerFinancialSummary(customerId) {
         ) AS comprobante,
         cn.order_id AS order_id,
         0 AS debe,
-        ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
+        ROUND(COALESCE(cn.amount_credited, 0), 2) AS haber,
         CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
@@ -2043,10 +2043,6 @@ function buildCustomerFinancialSummary(customerId) {
       e.line_order
     FROM customer_multimedia_entries e
     WHERE e.customer_id = ?
-      AND (
-        UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
-        OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
-      )
     ORDER BY e.line_date ASC, e.line_order ASC
     `, [customerId]));
         const parseMoney = (v) => {
@@ -2087,6 +2083,16 @@ function buildCustomerFinancialSummary(customerId) {
             return d.toISOString().slice(0, 10);
         };
         const normalizeDoc = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const classifyImportedEntry = (tipoRaw, detalleRaw) => {
+            const tipo = String(tipoRaw || '').toUpperCase();
+            const detalle = String(detalleRaw || '').toUpperCase();
+            const raw = `${tipo} ${detalle}`;
+            if (/RECIBO|COBRO|PAGO|INGRESO|REC\b|^RC\b|NC\s*A/.test(raw))
+                return 'RECIBO';
+            if (/FACT|FCA|FCE|DEBITO|COMPROBANTE|NC\s*D|FAC\b/.test(raw))
+                return 'FACTURA';
+            return null;
+        };
         const existingKeys = new Set();
         const toKey = (tipo, fecha, comprobante, debe, haber) => [
             tipo,
@@ -2100,9 +2106,12 @@ function buildCustomerFinancialSummary(customerId) {
             existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
         }
         for (const e of importedEntries) {
-            const tipoRaw = String(e.tipo_raw || '');
-            const tipo = tipoRaw.startsWith('FAC') ? 'FACTURA' : 'RECIBO';
-            const importe = Math.round(parseMoney(e.importe) * 100) / 100;
+            const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
+            if (!tipo)
+                continue;
+            const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
+            if (importe <= 0)
+                continue;
             const debe = tipo === 'FACTURA' ? importe : 0;
             const haber = tipo === 'RECIBO' ? importe : 0;
             const key = toKey(tipo, e.fecha, e.comprobante, debe, haber);
