@@ -16,7 +16,8 @@ import {
   exportSaldosPendientesDetalleXlsx,
   exportSaldosPendientesMultimediasXlsx,
   clearDispatchedPendingsForCustomer,
-  assignCustomerSellersFromResumen
+  assignCustomerSellersFromResumen,
+  exportCustomerDetailXlsx
 } from '../controllers/customers.controller';
 import {
   exportMultimediaHistorial,
@@ -52,6 +53,7 @@ router.post('/import', authMiddleware as any, importCustomers as any);
 router.post('/bulk-update-cuit', authMiddleware as any, bulkUpdateCuit as any);
 router.post('/:id/attach-user', authMiddleware as any, attachUserToCustomer as any);
 router.post('/:id/clear-dispatched-pendings', authMiddleware as any, clearDispatchedPendingsForCustomer as any);
+router.get('/:id/export-detalle', authMiddleware as any, exportCustomerDetailXlsx as any);
 router.patch('/:id', authMiddleware as any, updateCustomer as any);
 router.delete('/:id', authMiddleware as any, deleteCustomer as any);
 

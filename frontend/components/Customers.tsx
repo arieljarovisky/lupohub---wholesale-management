@@ -164,6 +164,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [showExportSheetsModal, setShowExportSheetsModal] = useState(false);
   const [exportSheetSelectedIds, setExportSheetSelectedIds] = useState<string[]>([]);
   const [exportingSheets, setExportingSheets] = useState(false);
+  const [showCustomerDetailExportModal, setShowCustomerDetailExportModal] = useState(false);
+  const [customerDetailExportFrom, setCustomerDetailExportFrom] = useState('');
+  const [customerDetailExportTo, setCustomerDetailExportTo] = useState('');
+  const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
 
@@ -781,6 +785,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            <div className="flex items-center gap-2">
              <button
                onClick={() => {
+                 setCustomerDetailExportFrom('');
+                 setCustomerDetailExportTo('');
+                 setShowCustomerDetailExportModal(true);
+               }}
+               className="px-4 py-2 bg-emerald-900/40 border border-emerald-700/50 rounded-xl text-sm font-bold text-emerald-200 hover:bg-emerald-900/60 hover:text-white transition flex items-center gap-2"
+               title="Exportar detalle del cliente con filtro de fechas"
+             >
+               <FileSpreadsheet size={16} />
+               Exportar detalle
+             </button>
+             <button
+               onClick={() => {
                  setExportSheetSelectedIds([selectedCustomer.id]);
                  setShowExportSheetsModal(true);
                }}
@@ -829,6 +845,78 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
              )}
            </div>
         </div>
+
+        {showCustomerDetailExportModal && selectedCustomer && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="text-white font-bold">Exportar detalle del cliente</h3>
+                <button onClick={() => setShowCustomerDetailExportModal(false)} className="text-slate-400 hover:text-white">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <p className="text-sm text-slate-400">
+                  Elegí rango de fechas (opcional). Se exportan movimientos de archivo y pedidos en LupoHub.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">Desde</label>
+                    <input
+                      type="date"
+                      value={customerDetailExportFrom}
+                      onChange={(e) => setCustomerDetailExportFrom(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">Hasta</label>
+                    <input
+                      type="date"
+                      value={customerDetailExportTo}
+                      onChange={(e) => setCustomerDetailExportTo(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-800 flex gap-2">
+                <button
+                  onClick={() => setShowCustomerDetailExportModal(false)}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  disabled={exportingCustomerDetail}
+                  onClick={async () => {
+                    if (customerDetailExportFrom && customerDetailExportTo && customerDetailExportFrom > customerDetailExportTo) {
+                      showToast('error', 'La fecha desde no puede ser mayor que la fecha hasta.');
+                      return;
+                    }
+                    try {
+                      setExportingCustomerDetail(true);
+                      await api.exportCustomerDetail(selectedCustomer.id, {
+                        from: customerDetailExportFrom || undefined,
+                        to: customerDetailExportTo || undefined
+                      });
+                      showToast('success', 'Excel descargado');
+                      setShowCustomerDetailExportModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'Error al exportar detalle');
+                    } finally {
+                      setExportingCustomerDetail(false);
+                    }
+                  }}
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {exportingCustomerDetail ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Descargar Excel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showExportSheetsModal && (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">

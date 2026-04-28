@@ -815,6 +815,24 @@ export const api = {
     return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');
   },
 
+  exportCustomerDetail: async (customerId: string, params?: { from?: string; to?: string }): Promise<void> => {
+    const q = new URLSearchParams();
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    const blob = await getBlob(
+      `/customers/${encodeURIComponent(customerId)}/export-detalle${q.toString() ? `?${q.toString()}` : ''}`,
+      120000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cliente_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Perfil del cliente directo (solo cuando el usuario tiene rol CUSTOMER). */
   getMyCustomer: async (): Promise<Customer | null> => {
     try {

@@ -2086,3 +2086,121 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
     res.status(500).json({ message: 'Error quitando pendientes de pedidos despachados' });
   }
 };
+
+/** Exporta en Excel el detalle del cliente (movimientos importados + pedidos LupoHub), filtrable por fecha. */
+export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !roleCanViewSaldos(authUser.role)) {
+      return res.status(403).json({ message: 'Sin permiso para exportar detalle de cliente' });
+    }
+    const customerId = String(req.params?.id || '').trim();
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const customer = await get(
+      `SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       WHERE c.id = ?`,
+      [customerId]
+    );
+    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (authUser.role === 'SELLER' && customer.seller_id !== authUser.id) {
+      return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
+    }
+
+    const from = (req.query?.from as string | undefined)?.trim();
+    const to = (req.query?.to as string | undefined)?.trim();
+
+    const entriesWhere: string[] = ['e.customer_id = ?'];
+    const entriesParams: any[] = [customerId];
+    if (from) { entriesWhere.push('e.line_date >= ?'); entriesParams.push(from); }
+    if (to) { entriesWhere.push('e.line_date <= ?'); entriesParams.push(to); }
+    const entries = await query(
+      `SELECT e.line_order, e.line_date, e.tipo, e.numero, e.importe, e.saldo, e.detalle
+       FROM customer_multimedia_entries e
+       WHERE ${entriesWhere.join(' AND ')}
+       ORDER BY e.line_date ASC, e.line_order ASC`,
+      entriesParams
+    ) as any[];
+
+    const ordersWhere: string[] = ['o.customer_id = ?'];
+    const ordersParams: any[] = [customerId];
+    if (from) { ordersWhere.push('o.date >= ?'); ordersParams.push(from); }
+    if (to) { ordersWhere.push('o.date <= ?'); ordersParams.push(to); }
+    const ordersRows = await query(
+      `SELECT o.id, o.date, o.status, o.total, o.payment_status
+       FROM orders o
+       WHERE ${ordersWhere.join(' AND ')}
+       ORDER BY o.date DESC, o.id DESC`,
+      ordersParams
+    ) as any[];
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'LupoHub';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Detalle cliente');
+    ws.columns = [
+      { header: 'Sección', key: 'section', width: 20 },
+      { header: 'Fecha', key: 'fecha', width: 14 },
+      { header: 'Tipo/Estado', key: 'tipo', width: 18 },
+      { header: 'Número/ID', key: 'numero', width: 20 },
+      { header: 'Importe', key: 'importe', width: 16 },
+      { header: 'Saldo', key: 'saldo', width: 16 },
+      { header: 'Detalle', key: 'detalle', width: 42 }
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    ws.addRow({
+      section: 'CLIENTE',
+      fecha: '',
+      tipo: '',
+      numero: customer.id,
+      importe: '',
+      saldo: '',
+      detalle: `${customer.business_name || customer.name || 'Cliente'} | Vendedor: ${customer.seller_name || customer.seller_id || 'N/A'}`
+    });
+    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+
+    ws.addRow({ section: 'MOV. ARCHIVO', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: 'Multimedias / Tango' });
+    for (const e of entries) {
+      ws.addRow({
+        section: 'MOV. ARCHIVO',
+        fecha: e.line_date ? new Date(e.line_date) : null,
+        tipo: e.tipo ?? '',
+        numero: e.numero ?? '',
+        importe: e.importe != null ? Number(e.importe) : null,
+        saldo: e.saldo != null ? Number(e.saldo) : null,
+        detalle: e.detalle ?? ''
+      });
+    }
+
+    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+    ws.addRow({ section: 'PEDIDOS LUPOHUB', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+    for (const o of ordersRows) {
+      ws.addRow({
+        section: 'PEDIDOS LUPOHUB',
+        fecha: o.date ? new Date(o.date) : null,
+        tipo: o.status ?? '',
+        numero: o.id ?? '',
+        importe: Number(o.total || 0),
+        saldo: null,
+        detalle: `Cobro: ${o.payment_status || 'pendiente'}`
+      });
+    }
+
+    ws.getColumn('B').numFmt = 'dd/mm/yyyy';
+    ws.getColumn('E').numFmt = '#,##0.00';
+    ws.getColumn('F').numFmt = '#,##0.00';
+    const out = await wb.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
+    const filename = `cliente_detalle_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (error: any) {
+    console.error('exportCustomerDetailXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando detalle del cliente' });
+  }
+};
