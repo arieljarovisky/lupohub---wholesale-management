@@ -615,6 +615,19 @@ export const api = {
     }, [], 'getCustomers');
   },
 
+  /** Exporta clientes individuales (1 fila por cliente). */
+  exportCustomersIndividuals: async (): Promise<void> => {
+    const blob = await getBlob('/customers/export-individuales');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /**
    * Cartera unificada: max(0, pedidos pendientes IVA + saldo cuenta importada − recibos en Facturación).
    * Solo clientes con algún cargo, saldo importado o pago registrado.

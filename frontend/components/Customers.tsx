@@ -1545,6 +1545,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <button
               type="button"
               onClick={async () => {
+                try {
+                  await api.exportCustomersIndividuals();
+                  showToast('success', 'CSV de clientes individuales descargado.');
+                } catch (err: any) {
+                  showToast('error', err?.message || 'Error al exportar clientes individuales.');
+                }
+              }}
+              className="bg-cyan-900/40 text-cyan-100 px-4 py-2 rounded-lg hover:bg-cyan-900/55 border border-cyan-700/50 transition flex items-center gap-2 font-medium"
+              title="Descarga 1 fila por cliente con sus datos principales"
+            >
+              <Download size={18} />
+              <span>Exportar clientes individuales</span>
+            </button>
+          )}
+          {canViewSaldos && (
+            <button
+              type="button"
+              onClick={async () => {
                 setSaldosMultimediasExporting(true);
                 try {
                   await api.exportSaldosPendientesMultimedias();

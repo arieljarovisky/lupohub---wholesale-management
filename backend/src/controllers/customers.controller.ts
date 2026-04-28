@@ -68,6 +68,92 @@ export const getCustomers = async (req: Request, res: Response) => {
   }
 };
 
+/** Exportar clientes individuales (1 fila por cliente) en CSV. */
+export const exportCustomersIndividualCsv = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    const sellerFilter = authUser?.role === 'SELLER' ? ' WHERE c.seller_id = ?' : '';
+    const params = authUser?.role === 'SELLER' ? [authUser.id] : [];
+    const rows = await query(
+      `SELECT
+         c.id,
+         c.legacy_code,
+         c.business_name,
+         c.name,
+         c.email,
+         c.phone,
+         c.cuit,
+         c.city,
+         c.address,
+         c.sale_condition,
+         c.condicion_iva,
+         c.transport_number,
+         c.remito_number,
+         c.account_zone,
+         c.account_seller_label,
+         c.seller_id,
+         u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       ${sellerFilter}
+       ORDER BY c.business_name ASC, c.name ASC`,
+      params
+    );
+
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = [
+      'id',
+      'codigo_legacy',
+      'razon_social',
+      'contacto',
+      'email',
+      'telefono',
+      'cuit',
+      'ciudad',
+      'direccion',
+      'condicion_venta',
+      'condicion_iva',
+      'numero_transporte',
+      'numero_remito',
+      'zona',
+      'vendedor_habitual',
+      'seller_id',
+      'seller_name'
+    ];
+    const lines = [header.join(';')];
+    for (const r of rows as any[]) {
+      lines.push([
+        r.id ?? '',
+        r.legacy_code ?? '',
+        esc(r.business_name ?? ''),
+        esc(r.name ?? ''),
+        esc(r.email ?? ''),
+        esc(r.phone ?? ''),
+        r.cuit ?? '',
+        esc(r.city ?? ''),
+        esc(r.address ?? ''),
+        esc(r.sale_condition ?? ''),
+        esc(r.condicion_iva ?? ''),
+        esc(r.transport_number ?? ''),
+        esc(r.remito_number ?? ''),
+        esc(r.account_zone ?? ''),
+        esc(r.account_seller_label ?? ''),
+        r.seller_id ?? '',
+        esc(r.seller_name ?? '')
+      ].join(';'));
+    }
+
+    const csv = lines.join('\r\n');
+    const filename = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send('\uFEFF' + csv);
+  } catch (error: any) {
+    console.error('exportCustomersIndividualCsv:', error);
+    return res.status(500).json({ message: 'Error exportando clientes individuales' });
+  }
+};
+
 /** Crear cliente. */
 export const createCustomer = async (req: Request, res: Response) => {
   try {
