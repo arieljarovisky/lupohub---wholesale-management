@@ -2148,6 +2148,48 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       paymentsParams
     ) as any[];
 
+    // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
+    const orderAgg = await get(
+      `SELECT ROUND(COALESCE(SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)), 0), 2) AS cargos
+       FROM orders o
+       LEFT JOIN (
+         SELECT order_id, SUM(amount_credited) AS cn_total
+         FROM credit_notes
+         GROUP BY order_id
+       ) cn ON cn.order_id = o.id
+       WHERE o.customer_id = ?
+         AND o.payment_status = 'pendiente'
+         AND o.status NOT IN ('Cancelado', 'Borrador')
+         AND (o.archived = 0 OR o.archived IS NULL)`,
+      [customerId]
+    ) as any;
+    const multimediaAgg = await get(
+      `SELECT CAST(COALESCE(
+         (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+          FROM customer_multimedia_entries e_lo
+          WHERE e_lo.customer_id = ?
+          ORDER BY e_lo.line_order DESC
+          LIMIT 1),
+         (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+          FROM customer_multimedia_entries e2
+          WHERE e2.customer_id = ? AND e2.saldo IS NOT NULL
+          ORDER BY e2.line_order DESC
+          LIMIT 1),
+         0
+       ) AS DECIMAL(16,2)) AS multimediaSaldo`,
+      [customerId, customerId]
+    ) as any;
+    const paymentsAgg = await get(
+      `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS totalPagos
+       FROM payments
+       WHERE customer_id = ?`,
+      [customerId]
+    ) as any;
+    const orderCargosPendientes = Number(orderAgg?.cargos || 0);
+    const multimediaSaldo = Number(multimediaAgg?.multimediaSaldo || 0);
+    const totalPagos = Number(paymentsAgg?.totalPagos || 0);
+    const saldoUnificado = Math.round(Math.max(0, orderCargosPendientes + multimediaSaldo - totalPagos) * 100) / 100;
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
     wb.created = new Date();
@@ -2172,6 +2214,16 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       importe: '',
       saldo: '',
       detalle: `${customer.business_name || customer.name || 'Cliente'} | Vendedor: ${customer.seller_name || customer.seller_id || 'N/A'}`
+    });
+    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
+    ws.addRow({
+      section: 'RESUMEN',
+      fecha: '',
+      tipo: 'SALDO UNIFICADO',
+      numero: '',
+      importe: saldoUnificado,
+      saldo: null,
+      detalle: `Pedidos: ${orderCargosPendientes.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Cuenta importada: ${multimediaSaldo.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${totalPagos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     });
     ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
 
