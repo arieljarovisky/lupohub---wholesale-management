@@ -2177,6 +2177,96 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     [customerId, customerId, customerId]
   )) as any[];
 
+  const importedEntries = (await query(
+    `
+    SELECT
+      e.line_date AS fecha,
+      UPPER(TRIM(COALESCE(e.tipo, ''))) AS tipo_raw,
+      COALESCE(e.numero, '') AS comprobante,
+      COALESCE(e.detalle, '') AS detalle,
+      COALESCE(e.importe, 0) AS importe,
+      e.line_order
+    FROM customer_multimedia_entries e
+    WHERE e.customer_id = ?
+      AND (
+        UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
+        OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
+      )
+    ORDER BY e.line_date ASC, e.line_order ASC
+    `,
+    [customerId]
+  )) as any[];
+
+  const parseMoney = (v: any): number => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+    if (!s) return 0;
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+      const n = Number(s.replace(/\./g, '').replace(',', '.'));
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (hasComma) {
+      const n = Number(s.replace(',', '.'));
+      return Number.isFinite(n) ? n : 0;
+    }
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const normalizeDate = (v: any): string => {
+    if (typeof v === 'string') {
+      const raw = v.trim();
+      const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (m) {
+        const dd = m[1].padStart(2, '0');
+        const mm = m[2].padStart(2, '0');
+        const yyyy = m[3];
+        return `${yyyy}-${mm}-${dd}`;
+      }
+    }
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
+    return d.toISOString().slice(0, 10);
+  };
+  const normalizeDoc = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  const existingKeys = new Set<string>();
+  const toKey = (tipo: string, fecha: any, comprobante: any, debe: number, haber: number) =>
+    [
+      tipo,
+      normalizeDate(fecha),
+      normalizeDoc(comprobante),
+      Number(debe || 0).toFixed(2),
+      Number(haber || 0).toFixed(2)
+    ].join('|');
+
+  for (const m of movements) {
+    const tipo = String(m.tipo || '').toUpperCase();
+    existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
+  }
+
+  for (const e of importedEntries) {
+    const tipoRaw = String(e.tipo_raw || '');
+    const tipo: 'FACTURA' | 'RECIBO' = tipoRaw.startsWith('FAC') ? 'FACTURA' : 'RECIBO';
+    const importe = Math.round(parseMoney(e.importe) * 100) / 100;
+    const debe = tipo === 'FACTURA' ? importe : 0;
+    const haber = tipo === 'RECIBO' ? importe : 0;
+    const key = toKey(tipo, e.fecha, e.comprobante, debe, haber);
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
+    movements.push({
+      fecha: normalizeDate(e.fecha),
+      tipo,
+      comprobante: e.comprobante ?? '',
+      orderId: null,
+      debe,
+      haber,
+      detalle: e.detalle ? `Importado: ${e.detalle}` : 'Importado'
+    });
+  }
+
   let totalFacturas = 0;
   let totalNc = 0;
   let totalRecibos = 0;
@@ -2195,6 +2285,12 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       haber,
       detalle: m.detalle ?? ''
     };
+  });
+  mapped.sort((a, b) => {
+    const da = a.fecha ? new Date(a.fecha).getTime() : 0;
+    const db = b.fecha ? new Date(b.fecha).getTime() : 0;
+    if (da !== db) return da - db;
+    return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
   });
 
   totalFacturas = Math.round(totalFacturas * 100) / 100;
