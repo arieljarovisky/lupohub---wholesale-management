@@ -45,6 +45,8 @@ const CONDICIONES_VENTA = [
   'Otros medios de pago electrónico',
 ];
 
+const SELECTED_CUSTOMER_STORAGE_KEY = 'lupohub_customers_selected_customer_id';
+
 const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [], users = [] }) => {
   const { showToast } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
@@ -136,6 +138,44 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       cancelled = true;
     };
   }, [selectedCustomer?.id, canViewSaldos]);
+
+  // Mantiene la vista de cliente al refrescar la página.
+  useEffect(() => {
+    try {
+      if (!selectedCustomer?.id) {
+        sessionStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+        return;
+      }
+      sessionStorage.setItem(SELECTED_CUSTOMER_STORAGE_KEY, selectedCustomer.id);
+    } catch {
+      // ignore storage errors
+    }
+  }, [selectedCustomer?.id]);
+
+  // Restaura/actualiza el cliente seleccionado cuando cambia la lista.
+  useEffect(() => {
+    if (!Array.isArray(customers) || customers.length === 0) return;
+
+    if (selectedCustomer?.id) {
+      const refreshed = customers.find((c) => c.id === selectedCustomer.id);
+      if (!refreshed) {
+        setSelectedCustomer(null);
+        return;
+      }
+      if (refreshed !== selectedCustomer) setSelectedCustomer(refreshed);
+      return;
+    }
+
+    try {
+      const savedId = sessionStorage.getItem(SELECTED_CUSTOMER_STORAGE_KEY);
+      if (!savedId) return;
+      const savedCustomer = customers.find((c) => c.id === savedId);
+      if (savedCustomer) setSelectedCustomer(savedCustomer);
+      else sessionStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }, [customers, selectedCustomer]);
 
   // Form State
   const [newBusinessName, setNewBusinessName] = useState('');

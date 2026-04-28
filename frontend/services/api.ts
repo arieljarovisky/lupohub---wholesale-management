@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer, Transporte } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request, requestFormData, getBlob, postBlob } from './httpClient';
+import httpClient, { request, requestFormData, getBlob, getBaseUrl, postBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -820,11 +820,30 @@ export const api = {
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
     let blob: Blob;
+    let filename: string | null = null;
+    const parseFilename = (contentDisposition: string | null | undefined): string | null => {
+      if (!contentDisposition) return null;
+      const utf8Match = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+      const plainMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i) || contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+      const raw = utf8Match?.[1] || plainMatch?.[1];
+      if (!raw) return null;
+      try {
+        return decodeURIComponent(raw.trim().replace(/^["']|["']$/g, ''));
+      } catch {
+        return raw.trim().replace(/^["']|["']$/g, '');
+      }
+    };
     try {
-      blob = await getBlob(
-        `/customers/${encodeURIComponent(customerId)}/export-detalle${q.toString() ? `?${q.toString()}` : ''}`,
-        120000
+      const headers: Record<string, string> = {};
+      const token = localStorage.getItem('lupo_api_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const response = await fetch(
+        `${getBaseUrl()}/customers/${encodeURIComponent(customerId)}/export-detalle${q.toString() ? `?${q.toString()}` : ''}`,
+        { method: 'GET', headers }
       );
+      if (!response.ok) throw new Error('Error exportando detalle');
+      blob = await response.blob();
+      filename = parseFilename(response.headers.get('content-disposition'));
     } catch {
       // Fallback para entornos con ruta alternativa (cache/restart parcial del backend).
       blob = await getBlob(
@@ -835,7 +854,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `cliente_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = filename || `cliente_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

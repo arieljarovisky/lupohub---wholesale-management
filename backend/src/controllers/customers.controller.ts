@@ -2087,7 +2087,7 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
   }
 };
 
-/** Exporta en Excel el detalle del cliente (movimientos importados + pedidos LupoHub), filtrable por fecha. */
+/** Exporta en Excel el detalle del cliente como un único sistema de movimientos, filtrable por fecha. */
 export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;
@@ -2175,44 +2175,85 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     });
     ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
 
-    ws.addRow({ section: 'MOV. ARCHIVO', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: 'Multimedias / Tango' });
+    const timelineRows: Array<{
+      section: string;
+      fecha: Date | null;
+      tipo: string;
+      numero: string;
+      importe: number | null;
+      saldo: number | null;
+      detalle: string;
+      sortTs: number;
+      sortSeq: number;
+      sortNumero: string;
+    }> = [];
+
     for (const e of entries) {
-      ws.addRow({
-        section: 'MOV. ARCHIVO',
-        fecha: e.line_date ? new Date(e.line_date) : null,
+      const fecha = e.line_date ? new Date(e.line_date) : null;
+      const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      timelineRows.push({
+        section: 'SISTEMA',
+        fecha,
         tipo: e.tipo ?? '',
         numero: e.numero ?? '',
         importe: e.importe != null ? Number(e.importe) : null,
         saldo: e.saldo != null ? Number(e.saldo) : null,
-        detalle: e.detalle ?? ''
+        detalle: e.detalle ?? '',
+        sortTs: ts,
+        sortSeq: Number(e.line_order || 0),
+        sortNumero: String(e.numero || '')
       });
     }
 
-    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
-    ws.addRow({ section: 'PEDIDOS LUPOHUB', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
     for (const o of ordersRows) {
-      ws.addRow({
-        section: 'PEDIDOS LUPOHUB',
-        fecha: o.date ? new Date(o.date) : null,
-        tipo: o.status ?? '',
+      const fecha = o.date ? new Date(o.date) : null;
+      const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      timelineRows.push({
+        section: 'SISTEMA',
+        fecha,
+        tipo: `PEDIDO${o.status ? ` (${o.status})` : ''}`,
         numero: o.id ?? '',
         importe: Number(o.total || 0),
         saldo: null,
-        detalle: `Cobro: ${o.payment_status || 'pendiente'}`
+        detalle: `Cobro: ${o.payment_status || 'pendiente'}`,
+        sortTs: ts,
+        sortSeq: 1000000,
+        sortNumero: String(o.id || '')
       });
     }
 
-    ws.addRow({ section: '', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
-    ws.addRow({ section: 'RECIBOS SISTEMA NUEVO', fecha: '', tipo: '', numero: '', importe: '', saldo: '', detalle: '' });
     for (const p of paymentsRows) {
-      ws.addRow({
-        section: 'RECIBOS SISTEMA NUEVO',
-        fecha: p.date ? new Date(p.date) : null,
+      const fecha = p.date ? new Date(p.date) : null;
+      const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      timelineRows.push({
+        section: 'SISTEMA',
+        fecha,
         tipo: 'RECIBO',
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
-        detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`
+        detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
+        sortTs: ts,
+        sortSeq: 2000000,
+        sortNumero: String(p.receipt_number || '')
+      });
+    }
+
+    timelineRows.sort((a, b) => {
+      if (a.sortTs !== b.sortTs) return a.sortTs - b.sortTs;
+      if (a.sortSeq !== b.sortSeq) return a.sortSeq - b.sortSeq;
+      return a.sortNumero.localeCompare(b.sortNumero);
+    });
+
+    for (const row of timelineRows) {
+      ws.addRow({
+        section: row.section,
+        fecha: row.fecha,
+        tipo: row.tipo,
+        numero: row.numero,
+        importe: row.importe,
+        saldo: row.saldo,
+        detalle: row.detalle
       });
     }
 
