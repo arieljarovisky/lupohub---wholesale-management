@@ -47,8 +47,7 @@ export const listPayments = async (req: any, res: Response) => {
       `,
       params
     );
-
-    res.json((rows || []).map((r: any) => ({
+    const systemPayments = (rows || []).map((r: any) => ({
       id: r.id,
       customerId: r.customer_id,
       sellerId: r.seller_id ?? undefined,
@@ -66,7 +65,99 @@ export const listPayments = async (req: any, res: Response) => {
         cbteTipo: r.invoice_cbte_tipo ?? undefined,
         cbteDesde: r.invoice_cbte_desde ?? undefined
       } : undefined
-    })));
+    }));
+
+    // Integrar recibos importados desde Tango/Multimedias como parte del mismo "sistema".
+    // Se omiten si ya existe pago equivalente en tabla payments (fecha + nro + importe).
+    const includeImportedReceipts = !invoiceId && !orderId;
+    if (!includeImportedReceipts) {
+      return res.json(systemPayments);
+    }
+
+    const mmWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO')`];
+    const mmParams: any[] = [];
+    if (customerId) { mmWhere.push('e.customer_id = ?'); mmParams.push(customerId); }
+    if (desde) { mmWhere.push('e.line_date >= ?'); mmParams.push(desde); }
+    if (hasta) { mmWhere.push('e.line_date <= ?'); mmParams.push(hasta); }
+    if (user.role === 'SELLER') {
+      mmWhere.push('c.seller_id = ?');
+      mmParams.push(user.id);
+    }
+
+    const importedRows = await query(
+      `
+      SELECT
+        e.customer_id,
+        e.line_order,
+        e.line_date,
+        e.numero,
+        e.importe,
+        e.detalle,
+        c.business_name AS customer_business_name,
+        c.name AS customer_name,
+        c.seller_id,
+        u.name AS seller_name
+      FROM customer_multimedia_entries e
+      JOIN customers c ON c.id = e.customer_id
+      LEFT JOIN users u ON u.id = c.seller_id
+      WHERE ${mmWhere.join(' AND ')}
+      ORDER BY e.line_date DESC, e.line_order DESC
+      `,
+      mmParams
+    ) as any[];
+
+    const normalizeDate = (v: any) => {
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
+      return d.toISOString().slice(0, 10);
+    };
+    const normalizeNumber = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const normalizeAmount = (v: any) => Number(v || 0).toFixed(2);
+
+    const existingKeys = new Set(
+      systemPayments.map((p) => [
+        normalizeDate(p.date),
+        normalizeNumber(p.receiptNumber),
+        normalizeAmount(p.amount),
+        p.customerId
+      ].join('|'))
+    );
+
+    const importedAsPayments = importedRows
+      .filter((r) => {
+        const key = [
+          normalizeDate(r.line_date),
+          normalizeNumber(r.numero),
+          normalizeAmount(r.importe),
+          r.customer_id
+        ].join('|');
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      })
+      .map((r) => ({
+        id: `mm-${r.customer_id}-${r.line_order}`,
+        customerId: r.customer_id,
+        sellerId: r.seller_id ?? undefined,
+        sellerName: r.seller_name ?? undefined,
+        orderId: undefined,
+        invoiceId: undefined,
+        receiptNumber: String(r.numero || ''),
+        date: normalizeDate(r.line_date),
+        amount: Number(r.importe) || 0,
+        notes: r.detalle ? `Importado Tango: ${r.detalle}` : 'Importado Tango',
+        createdAt: undefined,
+        customerBusinessName: r.customer_business_name ?? r.customer_name ?? '',
+        invoice: undefined
+      }));
+
+    const allPayments = [...systemPayments, ...importedAsPayments].sort((a, b) => {
+      const da = new Date(a.date).getTime() || 0;
+      const db = new Date(b.date).getTime() || 0;
+      return db - da;
+    });
+
+    res.json(allPayments);
   } catch (e: any) {
     console.error('listPayments:', e);
     res.status(500).json({ message: 'Error listando pagos', detail: e?.message });

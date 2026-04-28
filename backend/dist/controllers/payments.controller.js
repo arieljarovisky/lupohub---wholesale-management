@@ -97,7 +97,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
       ${whereSql}
       ORDER BY p.date DESC, p.created_at DESC
       `, params);
-        res.json((rows || []).map((r) => {
+        const systemPayments = (rows || []).map((r) => {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
             return ({
                 id: r.id,
@@ -118,7 +118,100 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     cbteDesde: (_k = r.invoice_cbte_desde) !== null && _k !== void 0 ? _k : undefined
                 } : undefined
             });
-        }));
+        });
+        // Integrar recibos importados desde Tango/Multimedias como parte del mismo "sistema".
+        // Se omiten si ya existe pago equivalente en tabla payments (fecha + nro + importe).
+        const includeImportedReceipts = !invoiceId && !orderId;
+        if (!includeImportedReceipts) {
+            return res.json(systemPayments);
+        }
+        const mmWhere = [`UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO')`];
+        const mmParams = [];
+        if (customerId) {
+            mmWhere.push('e.customer_id = ?');
+            mmParams.push(customerId);
+        }
+        if (desde) {
+            mmWhere.push('e.line_date >= ?');
+            mmParams.push(desde);
+        }
+        if (hasta) {
+            mmWhere.push('e.line_date <= ?');
+            mmParams.push(hasta);
+        }
+        if (user.role === 'SELLER') {
+            mmWhere.push('c.seller_id = ?');
+            mmParams.push(user.id);
+        }
+        const importedRows = yield (0, db_1.query)(`
+      SELECT
+        e.customer_id,
+        e.line_order,
+        e.line_date,
+        e.numero,
+        e.importe,
+        e.detalle,
+        c.business_name AS customer_business_name,
+        c.name AS customer_name,
+        c.seller_id,
+        u.name AS seller_name
+      FROM customer_multimedia_entries e
+      JOIN customers c ON c.id = e.customer_id
+      LEFT JOIN users u ON u.id = c.seller_id
+      WHERE ${mmWhere.join(' AND ')}
+      ORDER BY e.line_date DESC, e.line_order DESC
+      `, mmParams);
+        const normalizeDate = (v) => {
+            const d = new Date(v);
+            if (Number.isNaN(d.getTime()))
+                return String(v || '').slice(0, 10);
+            return d.toISOString().slice(0, 10);
+        };
+        const normalizeNumber = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const normalizeAmount = (v) => Number(v || 0).toFixed(2);
+        const existingKeys = new Set(systemPayments.map((p) => [
+            normalizeDate(p.date),
+            normalizeNumber(p.receiptNumber),
+            normalizeAmount(p.amount),
+            p.customerId
+        ].join('|')));
+        const importedAsPayments = importedRows
+            .filter((r) => {
+            const key = [
+                normalizeDate(r.line_date),
+                normalizeNumber(r.numero),
+                normalizeAmount(r.importe),
+                r.customer_id
+            ].join('|');
+            if (existingKeys.has(key))
+                return false;
+            existingKeys.add(key);
+            return true;
+        })
+            .map((r) => {
+            var _a, _b, _c, _d;
+            return ({
+                id: `mm-${r.customer_id}-${r.line_order}`,
+                customerId: r.customer_id,
+                sellerId: (_a = r.seller_id) !== null && _a !== void 0 ? _a : undefined,
+                sellerName: (_b = r.seller_name) !== null && _b !== void 0 ? _b : undefined,
+                orderId: undefined,
+                invoiceId: undefined,
+                receiptNumber: String(r.numero || ''),
+                date: normalizeDate(r.line_date),
+                amount: Number(r.importe) || 0,
+                notes: r.detalle ? `Importado Tango: ${r.detalle}` : 'Importado Tango',
+                createdAt: undefined,
+                customerBusinessName: (_d = (_c = r.customer_business_name) !== null && _c !== void 0 ? _c : r.customer_name) !== null && _d !== void 0 ? _d : '',
+                invoice: undefined
+            });
+        });
+        const allPayments = [...systemPayments, ...importedAsPayments].sort((a, b) => {
+            const da = new Date(a.date).getTime() || 0;
+            const db = new Date(b.date).getTime() || 0;
+            return db - da;
+        });
+        res.json(allPayments);
     }
     catch (e) {
         console.error('listPayments:', e);
