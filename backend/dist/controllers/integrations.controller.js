@@ -1892,7 +1892,11 @@ function runAutoSyncMLtoTN() {
                     for (const vr of variantRows) {
                         const r = vr;
                         const v = variations.find((x) => String(x.id) === String(r.ml_variant_id));
-                        const mlQty = v ? ((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0) : (variations.length === 0 ? ((_b = item.available_quantity) !== null && _b !== void 0 ? _b : 0) : 0);
+                        if (!v && variations.length > 0) {
+                            console.warn(`[AutoSync ML→TN] Omitido: no se encontró variación ML ${r.ml_variant_id} en item ${mlId}. Se evita enviar 0 a TN.`);
+                            continue;
+                        }
+                        const mlQty = v ? ((_a = v.available_quantity) !== null && _a !== void 0 ? _a : 0) : ((_b = item.available_quantity) !== null && _b !== void 0 ? _b : 0);
                         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
                         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
                         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -1940,9 +1944,13 @@ function runAutoSyncMLtoTN() {
                         continue;
                     }
                     const variations = item.variations || [];
+                    if (variations.length > 1) {
+                        console.warn(`[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): tiene ${variations.length} variaciones y no se puede inferir una única.`);
+                        continue;
+                    }
                     const mlQty = variations.length === 0
                         ? ((_e = item.available_quantity) !== null && _e !== void 0 ? _e : 0)
-                        : (variations.length === 1 ? ((_f = variations[0].available_quantity) !== null && _f !== void 0 ? _f : 0) : 0);
+                        : ((_f = variations[0].available_quantity) !== null && _f !== void 0 ? _f : 0);
                     const mlPack = Math.max(1, Number(r.ml_pack) || 1);
                     const tnPack = Math.max(1, Number(r.tn_pack) || 1);
                     const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -2915,7 +2923,13 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                     address: order.shipping_address.address,
                     city: order.shipping_address.city,
                     province: order.shipping_address.province,
-                    zipcode: order.shipping_address.zipcode
+                    zipcode: order.shipping_address.zipcode,
+                    number: order.shipping_address.number,
+                    floor: order.shipping_address.floor,
+                    apartment: order.shipping_address.apartment,
+                    locality: order.shipping_address.locality,
+                    country: order.shipping_address.country,
+                    betweenStreets: order.shipping_address.between_streets
                 } : null,
                 createdAt: order.created_at,
                 updatedAt: order.updated_at

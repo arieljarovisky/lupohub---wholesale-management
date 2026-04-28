@@ -41,9 +41,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
+const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
 function resolveDespachoIdForItem(item, variantId) {
@@ -93,6 +97,7 @@ function getOrderNetFromLineItems(orderId) {
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
+        const user = req.user;
         const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
         const archivedOnly = req.query.archivedOnly === 'true' || req.query.archivedOnly === '1';
         let whereArchived = ' AND (o.archived = 0 OR o.archived IS NULL)';
@@ -100,14 +105,17 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             whereArchived = ' AND o.archived = 1';
         else if (includeArchived)
             whereArchived = '';
-        let ordersRow = yield (0, db_1.query)(`
-      SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
-      FROM orders o
-      LEFT JOIN customers c ON c.id = o.customer_id
-      WHERE 1=1 ${whereArchived}
-      ORDER BY o.date DESC
-    `);
-        const user = req.user;
+        const whereUserScope = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? ' AND c.seller_id = ?' : '';
+        const ordersParams = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? [user.id] : [];
+        let ordersRow = yield (0, db_1.query)(`SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name,
+              cu.name AS created_by_name, cu.role AS created_by_role,
+              su.name AS seller_name
+       FROM orders o
+       LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
+       WHERE 1=1 ${whereArchived}${whereUserScope}
+       ORDER BY o.date DESC`, ordersParams);
         if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
             const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
             const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
@@ -204,26 +212,51 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         catch (_) {
             // Tabla credit_notes puede no existir en DB antiguas
         }
+        let mayoristaStockLoaded = false;
+        let mayoristaStockAppliedByOrder = {};
+        try {
+            if (orderIds.length > 0) {
+                const refs = orderIds.map((oid) => `Pedido: ${oid}`);
+                const rph = refs.map(() => '?').join(',');
+                const mRows = yield (0, db_1.query)(`SELECT DISTINCT reference FROM stock_movements
+           WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference IN (${rph})`, refs);
+                const appliedRefs = new Set(mRows.map((r) => r.reference));
+                for (const oid of orderIds) {
+                    mayoristaStockAppliedByOrder[oid] = appliedRefs.has(`Pedido: ${oid}`);
+                }
+                mayoristaStockLoaded = true;
+            }
+        }
+        catch (_) {
+            // stock_movements puede no existir en DB antiguas
+        }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d, _e, _f, _g;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
                 customerBusinessName: (_b = (_a = order.customer_business_name) !== null && _a !== void 0 ? _a : order.customer_name) !== null && _b !== void 0 ? _b : undefined,
                 sellerId: order.seller_id,
+                createdBy: (_c = order.created_by) !== null && _c !== void 0 ? _c : undefined,
+                createdByName: (_d = order.created_by_name) !== null && _d !== void 0 ? _d : undefined,
+                createdByRole: (_e = order.created_by_role) !== null && _e !== void 0 ? _e : undefined,
+                sellerName: (_f = order.seller_name) !== null && _f !== void 0 ? _f : undefined,
                 date: order.date,
                 status: order.status,
                 total: Number(order.total),
-                pickedBy: (_c = order.picked_by) !== null && _c !== void 0 ? _c : undefined,
+                pickedBy: (_g = order.picked_by) !== null && _g !== void 0 ? _g : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 archived: !!(order.archived),
                 items: itemsByOrderId[order.id] || [],
-                invoice: (_d = invoiceByOrderId[order.id]) !== null && _d !== void 0 ? _d : undefined,
-                creditNotesCount: (_e = creditNotesCountByOrderId[order.id]) !== null && _e !== void 0 ? _e : 0,
-                creditNotesTotalCount: (_f = creditNotesTotalByOrderId[order.id]) !== null && _f !== void 0 ? _f : 0,
-                creditNotesItemCount: (_g = creditNotesItemByOrderId[order.id]) !== null && _g !== void 0 ? _g : 0,
+                invoice: (_h = invoiceByOrderId[order.id]) !== null && _h !== void 0 ? _h : undefined,
+                creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
+                creditNotesTotalCount: (_k = creditNotesTotalByOrderId[order.id]) !== null && _k !== void 0 ? _k : 0,
+                creditNotesItemCount: (_l = creditNotesItemByOrderId[order.id]) !== null && _l !== void 0 ? _l : 0,
                 paymentStatus: mapPaymentStatus(order),
-                noStockImpact: !!order.no_stock_impact
+                noStockImpact: !!order.no_stock_impact,
+                mayoristaStockApplied: mayoristaStockLoaded
+                    ? mayoristaStockAppliedByOrder[order.id] === true
+                    : undefined
             });
         });
         res.json(ordersFull);
@@ -235,7 +268,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getOrders = getOrders;
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const newOrder = req.body;
     if (!newOrder.customerId || !newOrder.items.length) {
         return res.status(400).json({ message: "Datos de pedido inválidos" });
@@ -266,7 +299,11 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sqlDate = toSqlDate(newOrder.date);
         const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]);
+        const createdBy = (_b = user === null || user === void 0 ? void 0 : user.id) !== null && _b !== void 0 ? _b : null;
+        const requestedStatus = String(newOrder.status || 'Borrador');
+        const shouldStayPendingAdmin = requestedStatus === 'Confirmado' && ((user === null || user === void 0 ? void 0 : user.role) === 'SELLER' || (user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER');
+        const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -284,15 +321,20 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_b = item.priceAtMoment) !== null && _b !== void 0 ? _b : 0, sellAsPack, despachoId]);
+            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_c = item.priceAtMoment) !== null && _c !== void 0 ? _c : 0, sellAsPack, despachoId]);
         }
-        if (newOrder.status === 'Confirmado' && !noStockImpact) {
+        if (statusToSave === 'Confirmado' && !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield deductStockForOrder(orderId);
             if (!result.success)
                 console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [orderId]);
+        const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+       FROM orders o
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
+       WHERE o.id = ?`, [orderId]);
         if (!created)
             return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
         const items = yield (0, db_1.query)(`
@@ -333,10 +375,14 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
+            createdBy: (_d = created.created_by) !== null && _d !== void 0 ? _d : undefined,
+            createdByName: (_e = created.created_by_name) !== null && _e !== void 0 ? _e : undefined,
+            createdByRole: (_f = created.created_by_role) !== null && _f !== void 0 ? _f : undefined,
+            sellerName: (_g = created.seller_name) !== null && _g !== void 0 ? _g : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
+            pickedBy: (_h = created.picked_by) !== null && _h !== void 0 ? _h : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
@@ -353,13 +399,30 @@ exports.createOrder = createOrder;
 const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const { status, pickedBy } = req.body;
+    const user = req.user;
     try {
         // Obtener estado anterior
         const currentOrder = yield (0, db_1.get)("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
         const previousStatus = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
         const noStockImpact = !!(currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.no_stock_impact);
-        // Si pasa de Borrador a Confirmado, descontar stock
-        if (previousStatus === 'Borrador' && status === 'Confirmado' && !noStockImpact) {
+        if (!previousStatus)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const isAdmin = (user === null || user === void 0 ? void 0 : user.role) === 'ADMIN';
+        const requestedStatus = String(status || previousStatus);
+        const nextStatus = requestedStatus === 'Confirmado' && !isAdmin
+            ? 'Pendiente confirmación admin'
+            : requestedStatus;
+        // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse por ADMIN.
+        if (previousStatus === 'Pendiente confirmación admin' &&
+            !['Pendiente confirmación admin', 'Confirmado', 'Cancelado'].includes(nextStatus)) {
+            return res.status(400).json({
+                message: 'El pedido está pendiente de confirmación de admin.'
+            });
+        }
+        // Solo al confirmar ADMIN se descuenta stock.
+        if (['Borrador', 'Pendiente confirmación admin'].includes(previousStatus) &&
+            nextStatus === 'Confirmado' &&
+            !noStockImpact) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield deductStockForOrder(id);
             if (!result.success) {
@@ -368,7 +431,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
         const hadStockDeducted = !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
-        if (status === 'Cancelado' && hadStockDeducted) {
+        if (nextStatus === 'Cancelado' && hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
             if (!result.success) {
@@ -376,16 +439,16 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
             }
         }
         // Documentar quién prepara/despacha y cuándo
-        if ((status === 'Preparando' || status === 'Preparación') && pickedBy) {
-            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [status, pickedBy, id]);
+        if ((nextStatus === 'Preparando' || nextStatus === 'Preparación') && pickedBy) {
+            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [nextStatus, pickedBy, id]);
         }
-        else if (status === 'Despachado') {
-            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = COALESCE(?, picked_by), dispatched_at = NOW() WHERE id = ?", [status, pickedBy || null, id]);
+        else if (nextStatus === 'Despachado') {
+            yield (0, db_1.execute)("UPDATE orders SET status = ?, picked_by = COALESCE(?, picked_by), dispatched_at = NOW() WHERE id = ?", [nextStatus, pickedBy || null, id]);
         }
         else {
-            yield (0, db_1.execute)("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+            yield (0, db_1.execute)("UPDATE orders SET status = ? WHERE id = ?", [nextStatus, id]);
         }
-        res.json({ id, status, previousStatus });
+        res.json({ id, status: nextStatus, previousStatus });
     }
     catch (error) {
         console.error('Error updating order status:', error);
@@ -394,7 +457,7 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { id } = req.params;
     const updated = req.body;
     if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
@@ -437,7 +500,12 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
         }
-        const created = yield (0, db_1.get)('SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
+        const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+       FROM orders o
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
+       WHERE o.id = ?`, [id]);
         if (!created)
             return res.json(Object.assign(Object.assign({}, updated), { id }));
         const itemsRows = yield (0, db_1.query)(`
@@ -478,10 +546,14 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
+            createdBy: (_c = created.created_by) !== null && _c !== void 0 ? _c : undefined,
+            createdByName: (_d = created.created_by_name) !== null && _d !== void 0 ? _d : undefined,
+            createdByRole: (_e = created.created_by_role) !== null && _e !== void 0 ? _e : undefined,
+            sellerName: (_f = created.seller_name) !== null && _f !== void 0 ? _f : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_c = created.picked_by) !== null && _c !== void 0 ? _c : undefined,
+            pickedBy: (_g = created.picked_by) !== null && _g !== void 0 ? _g : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
@@ -528,6 +600,62 @@ const patchOrderPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.patchOrderPaymentStatus = patchOrderPaymentStatus;
+/**
+ * Aplica el descuento de stock del pedido mayorista de una (idempotente).
+ * Si el pedido está en Borrador, pasa a Confirmado y luego desconta (mismo criterio que al confirmar).
+ */
+const applyMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID inválido' });
+    try {
+        const order = yield (0, db_1.get)('SELECT id, status, no_stock_impact, customer_id FROM orders WHERE id = ?', [id]);
+        if (!order)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        if (user.role === 'SELLER') {
+            const cust = order.customer_id
+                ? yield (0, db_1.get)('SELECT seller_id FROM customers WHERE id = ?', [order.customer_id])
+                : null;
+            if ((cust === null || cust === void 0 ? void 0 : cust.seller_id) && cust.seller_id !== user.id) {
+                return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+            }
+        }
+        if (order.no_stock_impact) {
+            return res.status(400).json({ message: 'Este pedido está marcado sin impacto en stock.' });
+        }
+        if (order.status === 'Cancelado') {
+            return res.status(400).json({ message: 'No aplica a pedidos cancelados.' });
+        }
+        if (yield (0, stock_controller_1.isMayoristaStockDeductedForWholesale)(id)) {
+            return res.json({
+                id,
+                alreadyApplied: true,
+                message: 'El stock de este pedido ya estaba descontado.',
+            });
+        }
+        if (order.status === 'Borrador') {
+            yield (0, db_1.execute)("UPDATE orders SET status = 'Confirmado' WHERE id = ?", [id]);
+        }
+        const result = yield (0, stock_controller_1.deductStockForOrder)(id);
+        if (!result.success) {
+            return res.status(500).json({
+                message: 'Error al descontar stock: ' + (((_a = result.errors) === null || _a === void 0 ? void 0 : _a.join(', ')) || 'desconocido'),
+                errors: result.errors
+            });
+        }
+        res.json({ id, success: true, message: 'Stock descontado correctamente.' });
+    }
+    catch (error) {
+        console.error('applyMayoristaStockDeduction:', error);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error al descontar stock' });
+    }
+});
+exports.applyMayoristaStockDeduction = applyMayoristaStockDeduction;
 /** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
 const archiveOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -809,3 +937,91 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.emitirNotaCredito = emitirNotaCredito;
+/** Exporta métricas mayoristas: artículos más pedidos (ranking). */
+const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        const user = req.user;
+        if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+            return res.status(403).json({ message: 'Sin permiso' });
+        }
+        const where = [`o.status NOT IN ('Cancelado', 'Borrador')`];
+        const params = [];
+        const from = (_b = (_a = req.query) === null || _a === void 0 ? void 0 : _a.from) === null || _b === void 0 ? void 0 : _b.trim();
+        const to = (_d = (_c = req.query) === null || _c === void 0 ? void 0 : _c.to) === null || _d === void 0 ? void 0 : _d.trim();
+        if (from) {
+            where.push('o.date >= ?');
+            params.push(from);
+        }
+        if (to) {
+            where.push('o.date <= ?');
+            params.push(to);
+        }
+        if (user.role === 'SELLER') {
+            where.push('c.seller_id = ?');
+            params.push(user.id);
+        }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const rows = yield (0, db_1.query)(`
+      SELECT
+        p.id AS product_id,
+        p.sku AS product_code,
+        p.name AS product_name,
+        SUM(oi.quantity) AS units_ordered,
+        COUNT(DISTINCT o.id) AS orders_count,
+        COUNT(DISTINCT o.customer_id) AS customers_count,
+        ROUND(SUM(oi.quantity * oi.price_at_moment), 2) AS subtotal
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN product_variants pv ON pv.id = oi.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      ${whereSql}
+      GROUP BY p.id, p.sku, p.name
+      ORDER BY units_ordered DESC, orders_count DESC, subtotal DESC
+      `, params);
+        const wb = new exceljs_1.default.Workbook();
+        wb.creator = 'LupoHub';
+        wb.created = new Date();
+        const ws = wb.addWorksheet('Top pedidos mayorista');
+        ws.columns = [
+            { header: 'Ranking', key: 'rank', width: 10 },
+            { header: 'Código', key: 'code', width: 18 },
+            { header: 'Artículo', key: 'name', width: 40 },
+            { header: 'Unidades pedidas', key: 'units', width: 18 },
+            { header: 'Pedidos', key: 'orders', width: 12 },
+            { header: 'Clientes', key: 'customers', width: 12 },
+            { header: 'Subtotal', key: 'subtotal', width: 16 }
+        ];
+        ws.getRow(1).font = { bold: true };
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+        rows.forEach((r, idx) => {
+            var _a, _b;
+            ws.addRow({
+                rank: idx + 1,
+                code: (_a = r.product_code) !== null && _a !== void 0 ? _a : '',
+                name: (_b = r.product_name) !== null && _b !== void 0 ? _b : '',
+                units: Number(r.units_ordered || 0),
+                orders: Number(r.orders_count || 0),
+                customers: Number(r.customers_count || 0),
+                subtotal: Number(r.subtotal || 0)
+            });
+        });
+        ws.getColumn('D').numFmt = '#,##0';
+        ws.getColumn('E').numFmt = '#,##0';
+        ws.getColumn('F').numFmt = '#,##0';
+        ws.getColumn('G').numFmt = '#,##0.00';
+        const out = yield wb.xlsx.writeBuffer();
+        const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
+        const filename = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buf);
+    }
+    catch (error) {
+        console.error('exportTopWholesaleProductsMetricsXlsx:', error);
+        return res.status(500).json({ message: 'Error exportando métricas mayoristas' });
+    }
+});
+exports.exportTopWholesaleProductsMetricsXlsx = exportTopWholesaleProductsMetricsXlsx;

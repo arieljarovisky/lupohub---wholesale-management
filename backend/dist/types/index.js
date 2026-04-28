@@ -11,6 +11,7 @@ var Role;
 var OrderStatus;
 (function (OrderStatus) {
     OrderStatus["DRAFT"] = "Borrador";
+    OrderStatus["PENDING_ADMIN_CONFIRMATION"] = "Pendiente confirmaci\u00F3n admin";
     OrderStatus["CONFIRMED"] = "Confirmado";
     OrderStatus["PREPARING"] = "Preparando";
     OrderStatus["PENDING_CONTROL"] = "Falta controlar";

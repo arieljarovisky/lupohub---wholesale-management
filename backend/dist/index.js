@@ -61,6 +61,7 @@ const add_external_credit_notes_table_1 = require("./database/add_external_credi
 const add_customer_multimedia_ledger_1 = require("./database/add_customer_multimedia_ledger");
 const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock_webhook_config_table");
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
+const add_order_created_by_1 = require("./database/add_order_created_by");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -174,6 +175,7 @@ function initDatabase() {
                 yield (0, add_customer_multimedia_ledger_1.addCustomerMultimediaLedger)();
                 yield (0, add_lupo_stock_webhook_config_table_1.addLupoStockWebhookConfigTable)();
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
+                yield (0, add_order_created_by_1.addOrderCreatedBy)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

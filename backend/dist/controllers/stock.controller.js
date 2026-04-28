@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
 const integrations_controller_1 = require("./integrations.controller");
@@ -255,6 +255,16 @@ function unitsToDeductForOrderItem(quantity, sellAsPack, mayoristaPackSize) {
     const packSize = Math.max(1, Number(mayoristaPackSize) || 1);
     return sellAsPack ? quantity * packSize : quantity;
 }
+/** Texto de referencia en `stock_movements` para el descuento de un pedido mayorista. */
+const wholesaleOrderStockReference = (orderId) => `Pedido: ${orderId}`;
+exports.wholesaleOrderStockReference = wholesaleOrderStockReference;
+/** Indica si ya se registró al menos un movimiento PEDIDO_MAYORISTA para este pedido (idempotencia). */
+const isMayoristaStockDeductedForWholesale = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
+    const ref = (0, exports.wholesaleOrderStockReference)(orderId);
+    const row = yield (0, db_1.get)(`SELECT 1 AS ok FROM stock_movements WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference = ? LIMIT 1`, [ref]);
+    return !!row;
+});
+exports.isMayoristaStockDeductedForWholesale = isMayoristaStockDeductedForWholesale;
 // Descontar stock por pedido mayorista
 const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -398,6 +408,25 @@ function scheduleSyncToExternalPlatforms(variantId, newStock) {
         }, SYNC_DEBOUNCE_MS)
     };
 }
+function runExternalSyncWithRetries(label_1, run_1) {
+    return __awaiter(this, arguments, void 0, function* (label, run, attempts = 3) {
+        let lastOk = false;
+        for (let i = 1; i <= attempts; i++) {
+            try {
+                lastOk = yield run();
+                if (lastOk)
+                    return true;
+            }
+            catch (error) {
+                console.warn(`[Sync] ${label} intento ${i}/${attempts} con excepción:`, (error === null || error === void 0 ? void 0 : error.message) || error);
+            }
+            if (i < attempts)
+                yield sleep(1200 * i);
+        }
+        console.warn(`[Sync] ${label} no se pudo sincronizar tras ${attempts} intentos.`);
+        return false;
+    });
+}
 // Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
 const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -408,16 +437,19 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
                 const pack = Math.max(1, Number(pub.pack_size) || 1);
                 const stockToSend = stockForPlatform(newStock, pack);
                 if (pub.platform === 'tiendanube' && pub.external_variant_id) {
-                    tasks.push((0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend));
+                    const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id} variant=${variantId}`;
+                    tasks.push(runExternalSyncWithRetries(label, () => (0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend)));
                 }
                 else if (pub.platform === 'mercadolibre') {
                     const itemId = pub.external_product_id;
                     const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
                     if (variationId) {
-                        tasks.push((0, exports.updateMercadoLibreStockByVariant)(itemId, variationId, stockToSend));
+                        const label = `ML item=${itemId} var=${variationId} variant=${variantId}`;
+                        tasks.push(runExternalSyncWithRetries(label, () => (0, exports.updateMercadoLibreStockByVariant)(itemId, variationId, stockToSend)));
                     }
                     else {
-                        tasks.push((0, exports.updateMercadoLibreStockByItem)(itemId, stockToSend));
+                        const label = `ML item=${itemId} variant=${variantId}`;
+                        tasks.push(runExternalSyncWithRetries(label, () => (0, exports.updateMercadoLibreStockByItem)(itemId, stockToSend)));
                     }
                 }
             }
@@ -440,16 +472,19 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
             const stockML = stockForPlatform(newStock, variant.ml_pack);
             const skuMLTN = variant.external_sku || variant.sku;
             if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-                yield (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
+                yield runExternalSyncWithRetries(`TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id} variant=${variantId}`, () => (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN));
             }
             if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-                yield (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
+                yield runExternalSyncWithRetries(`ML legacy=${variant.mercado_libre_id}/${variant.mercado_libre_variant_id} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML));
             }
             else if (variant.mercado_libre_item_id) {
-                yield (0, exports.updateMercadoLibreStockByItem)(variant.mercado_libre_item_id, stockML);
+                yield runExternalSyncWithRetries(`ML legacy item=${variant.mercado_libre_item_id} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByItem)(variant.mercado_libre_item_id, stockML));
             }
             else if (skuMLTN) {
-                yield (0, integrations_controller_1.updateMercadoLibreStock)(skuMLTN, stockML);
+                yield runExternalSyncWithRetries(`ML legacy sku=${skuMLTN} variant=${variantId}`, () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield (0, integrations_controller_1.updateMercadoLibreStock)(skuMLTN, stockML);
+                    return true;
+                }));
             }
         }
     }

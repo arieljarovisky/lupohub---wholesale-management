@@ -200,6 +200,32 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             yield (0, db_1.execute)('UPDATE users SET commission_percentage = ? WHERE id = ?', [commission, id]);
             didUpdate = true;
         }
+        if (body.email !== undefined) {
+            if (userRole !== 'SELLER') {
+                return res.status(400).json({ message: 'Solo se puede editar email de vendedores desde esta pantalla' });
+            }
+            const nextEmail = String(body.email || '').trim().toLowerCase();
+            if (!nextEmail || !nextEmail.includes('@')) {
+                return res.status(400).json({ message: 'Email inválido' });
+            }
+            const existingEmail = yield (0, db_1.get)('SELECT id FROM users WHERE email = ? AND id <> ?', [nextEmail, id]);
+            if (existingEmail) {
+                return res.status(409).json({ message: 'Ya existe un usuario con ese email' });
+            }
+            yield (0, db_1.execute)('UPDATE users SET email = ? WHERE id = ?', [nextEmail, id]);
+            didUpdate = true;
+        }
+        if (body.password !== undefined) {
+            if (userRole !== 'SELLER') {
+                return res.status(400).json({ message: 'Solo se puede editar contraseña de vendedores desde esta pantalla' });
+            }
+            const nextPassword = String(body.password || '');
+            if (nextPassword.length < 4) {
+                return res.status(400).json({ message: 'La contraseña debe tener al menos 4 caracteres' });
+            }
+            yield (0, db_1.execute)('UPDATE users SET password = ? WHERE id = ?', [nextPassword, id]);
+            didUpdate = true;
+        }
         if (didUpdate && userRole === 'SELLER') {
             yield (0, db_1.execute)('UPDATE users SET price_list_id = NULL WHERE id = ?', [id]);
         }
