@@ -938,14 +938,58 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
     const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
     const baseParams = user.role === 'SELLER' ? [user.id] : [];
     const paymentsSubquery = user.role === 'SELLER'
-        ? `SELECT p.customer_id, SUM(p.amount) AS total_pagos
-         FROM payments p
-         INNER JOIN customers c2 ON c2.id = p.customer_id
-         WHERE (p.seller_id = ? OR c2.seller_id = ?)
-         GROUP BY p.customer_id`
-        : `SELECT customer_id, SUM(amount) AS total_pagos
-         FROM payments
-         GROUP BY customer_id`;
+        ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT
+             p.customer_id,
+             p.date,
+             ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE
+               WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+               ELSE UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+             END AS receipt_norm
+           FROM payments p
+           INNER JOIN customers c2 ON c2.id = p.customer_id
+           WHERE (p.seller_id = ? OR c2.seller_id = ?)
+           GROUP BY
+             p.customer_id,
+             p.date,
+             ROUND(COALESCE(p.amount, 0), 2),
+             CASE
+               WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+               ELSE UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+             END
+         ) d
+         GROUP BY d.customer_id`
+        : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT
+             p.customer_id,
+             p.date,
+             ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE
+               WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+               ELSE UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+             END AS receipt_norm
+           FROM payments p
+           GROUP BY
+             p.customer_id,
+             p.date,
+             ROUND(COALESCE(p.amount, 0), 2),
+             CASE
+               WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+               ELSE UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+             END
+         ) d
+         GROUP BY d.customer_id`;
     const payParams = user.role === 'SELLER' ? [user.id, user.id] : [];
     const paramsWithNc = [...baseParams, ...payParams];
     const paramsSimple = [...baseParams, ...payParams];
