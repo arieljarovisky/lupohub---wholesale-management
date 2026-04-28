@@ -2651,16 +2651,6 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       return t === 'REC' || t === 'RECIBO';
     };
 
-    const systemReceiptKeys = new Set(
-      paymentsRows.map((p) => {
-        const fecha = p.date ? new Date(p.date) : null;
-        return [
-          normalizeDateKey(fecha),
-          normalizeNumberKey(p.receipt_number),
-          normalizeAmountKey(p.amount)
-        ].join('|');
-      })
-    );
     const normalizeUnifiedType = (tipo: any) => {
       const t = String(tipo || '').trim().toUpperCase();
       if (t === 'FAC' || t === 'FACTURA') return 'CARGO';
@@ -2671,15 +2661,6 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const e of entries) {
       const fecha = e.line_date ? new Date(e.line_date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
-      if (isReceiptType(e.tipo)) {
-        const receiptKey = [
-          normalizeDateKey(fecha),
-          normalizeNumberKey(e.numero),
-          normalizeAmountKey(e.importe)
-        ].join('|');
-        // Si existe recibo equivalente cargado en el sistema actual, priorizar el del sistema.
-        if (systemReceiptKeys.has(receiptKey)) continue;
-      }
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
