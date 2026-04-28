@@ -142,10 +142,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   // Mantiene la vista de cliente al refrescar la página.
   useEffect(() => {
     try {
-      if (!selectedCustomer?.id) {
-        sessionStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
-        return;
-      }
+      if (!selectedCustomer?.id) return;
       sessionStorage.setItem(SELECTED_CUSTOMER_STORAGE_KEY, selectedCustomer.id);
     } catch {
       // ignore storage errors
@@ -175,7 +172,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     } catch {
       // ignore storage errors
     }
-  }, [customers, selectedCustomer]);
+  }, [customers, selectedCustomer?.id]);
 
   // Form State
   const [newBusinessName, setNewBusinessName] = useState('');
