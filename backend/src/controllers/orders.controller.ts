@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { Order, OrderItem } from '../types';
+import ExcelJS from 'exceljs';
 import {
   restoreStockForOrder,
   restoreStockForOrderItem,
@@ -926,5 +927,106 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     const msg = error?.message || 'Error emitiendo nota de crédito AFIP';
     const status = msg.includes('no configurado') ? 503 : 500;
     res.status(status).json({ message: msg });
+  }
+};
+
+/** Exporta métricas mayoristas: artículos más pedidos (ranking). */
+export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+
+    const where: string[] = [`o.status NOT IN ('Cancelado', 'Borrador')`];
+    const params: any[] = [];
+    const from = (req.query?.from as string | undefined)?.trim();
+    const to = (req.query?.to as string | undefined)?.trim();
+    if (from) {
+      where.push('o.date >= ?');
+      params.push(from);
+    }
+    if (to) {
+      where.push('o.date <= ?');
+      params.push(to);
+    }
+    if (user.role === 'SELLER') {
+      where.push('c.seller_id = ?');
+      params.push(user.id);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const rows = await query(
+      `
+      SELECT
+        p.id AS product_id,
+        p.sku AS product_code,
+        p.name AS product_name,
+        SUM(oi.quantity) AS units_ordered,
+        COUNT(DISTINCT o.id) AS orders_count,
+        COUNT(DISTINCT o.customer_id) AS customers_count,
+        ROUND(SUM(oi.quantity * oi.price_at_moment), 2) AS subtotal
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN product_variants pv ON pv.id = oi.variant_id
+      JOIN product_colors pc ON pc.id = pv.product_color_id
+      JOIN products p ON p.id = pc.product_id
+      ${whereSql}
+      GROUP BY p.id, p.sku, p.name
+      ORDER BY units_ordered DESC, orders_count DESC, subtotal DESC
+      `,
+      params
+    ) as Array<{
+      product_id: string;
+      product_code: string;
+      product_name: string;
+      units_ordered: number;
+      orders_count: number;
+      customers_count: number;
+      subtotal: number;
+    }>;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'LupoHub';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Top pedidos mayorista');
+    ws.columns = [
+      { header: 'Ranking', key: 'rank', width: 10 },
+      { header: 'Código', key: 'code', width: 18 },
+      { header: 'Artículo', key: 'name', width: 40 },
+      { header: 'Unidades pedidas', key: 'units', width: 18 },
+      { header: 'Pedidos', key: 'orders', width: 12 },
+      { header: 'Clientes', key: 'customers', width: 12 },
+      { header: 'Subtotal', key: 'subtotal', width: 16 }
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    rows.forEach((r, idx) => {
+      ws.addRow({
+        rank: idx + 1,
+        code: r.product_code ?? '',
+        name: r.product_name ?? '',
+        units: Number(r.units_ordered || 0),
+        orders: Number(r.orders_count || 0),
+        customers: Number(r.customers_count || 0),
+        subtotal: Number(r.subtotal || 0)
+      });
+    });
+    ws.getColumn('D').numFmt = '#,##0';
+    ws.getColumn('E').numFmt = '#,##0';
+    ws.getColumn('F').numFmt = '#,##0';
+    ws.getColumn('G').numFmt = '#,##0.00';
+
+    const out = await wb.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
+    const filename = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (error: any) {
+    console.error('exportTopWholesaleProductsMetricsXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando métricas mayoristas' });
   }
 };

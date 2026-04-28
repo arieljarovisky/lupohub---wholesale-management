@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer, Transporte } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request, requestFormData, getBlob } from './httpClient';
+import httpClient, { request, requestFormData, getBlob, postBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -622,6 +622,37 @@ export const api = {
     const a = document.createElement('a');
     a.href = url;
     a.download = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Exporta un Excel con una hoja por cliente (opcionalmente solo IDs seleccionados). */
+  exportCustomersBySheets: async (customerIds?: string[]): Promise<void> => {
+    const blob = await postBlob('/customers/export-por-hojas', {
+      customerIds: Array.isArray(customerIds) ? customerIds : []
+    }, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clientes_por_hoja_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Métricas mayorista: ranking de artículos más pedidos (Excel). */
+  exportWholesaleTopProductsMetrics: async (params?: { from?: string; to?: string }): Promise<void> => {
+    const q = new URLSearchParams();
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    const blob = await getBlob(`/orders/metrics/top-products/export${q.toString() ? `?${q.toString()}` : ''}`, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

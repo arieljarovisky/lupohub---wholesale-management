@@ -9,6 +9,7 @@ import {
   bulkUpdateCuit,
   attachUserToCustomer,
   exportCustomersIndividualXlsx,
+  exportCustomersBySheetsXlsx,
   getSaldosPendientes,
   getCarteraTotals,
   exportSaldosPendientesCsv,
@@ -32,6 +33,7 @@ router.get('/saldos-pendientes/export-multimedias', authMiddleware as any, expor
 router.get('/saldos-pendientes/export-detalle', authMiddleware as any, exportSaldosPendientesDetalleXlsx as any);
 router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
 router.get('/export-individuales', authMiddleware as any, exportCustomersIndividualXlsx as any);
+router.post('/export-por-hojas', authMiddleware as any, exportCustomersBySheetsXlsx as any);
 router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
 router.get('/cartera-totals', authMiddleware as any, getCarteraTotals as any);
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);

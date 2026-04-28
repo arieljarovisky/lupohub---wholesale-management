@@ -135,6 +135,18 @@ export const getBlob = async (path: string, timeoutMs = 60000): Promise<Blob> =>
   return response.data;
 };
 
+/** POST que devuelve Blob (para descargar archivos con body + auth). */
+export const postBlob = async (path: string, body?: any, timeoutMs = 120000): Promise<Blob> => {
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*'
+  };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const response = await axios.post(url, body ?? {}, { responseType: 'blob', headers, timeout: timeoutMs });
+  return response.data;
+};
+
 export const getBaseUrl = () => baseUrl;
 
-export default { request, requestFormData, getBlob, setBaseUrl, setAuthToken };
+export default { request, requestFormData, getBlob, postBlob, setBaseUrl, setAuthToken };

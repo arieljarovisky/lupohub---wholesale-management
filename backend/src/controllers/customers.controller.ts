@@ -160,6 +160,261 @@ export const exportCustomersIndividualXlsx = async (req: Request, res: Response)
   }
 };
 
+/** Exportar clientes en un Excel con una hoja por cliente. */
+export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    const requestedIds = Array.isArray((req.body as any)?.customerIds)
+      ? ((req.body as any).customerIds as unknown[])
+          .filter((x) => typeof x === 'string' && x.trim().length > 0)
+          .map((x) => String(x).trim())
+      : [];
+
+    const whereParts: string[] = [];
+    const params: any[] = [];
+    if (authUser?.role === 'SELLER') {
+      whereParts.push('c.seller_id = ?');
+      params.push(authUser.id);
+    }
+    if (requestedIds.length > 0) {
+      whereParts.push(`c.id IN (${requestedIds.map(() => '?').join(',')})`);
+      params.push(...requestedIds);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const rows = await query(
+      `SELECT
+         c.id,
+         c.legacy_code,
+         c.business_name,
+         c.name,
+         c.email,
+         c.phone,
+         c.cuit,
+         c.city,
+         c.address,
+         c.sale_condition,
+         c.condicion_iva,
+         c.transport_number,
+         c.remito_number,
+         c.account_zone,
+         c.account_seller_label,
+         c.seller_id,
+         u.name AS seller_name,
+         GROUP_CONCAT(DISTINCT t.name ORDER BY t.name SEPARATOR ', ') AS transportes
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       LEFT JOIN customer_transportes ct ON ct.customer_id = c.id
+       LEFT JOIN transportes t ON t.id = ct.transporte_id
+       ${whereSql}
+       GROUP BY
+         c.id, c.legacy_code, c.business_name, c.name, c.email, c.phone, c.cuit, c.city, c.address,
+         c.sale_condition, c.condicion_iva, c.transport_number, c.remito_number,
+         c.account_zone, c.account_seller_label, c.seller_id, u.name
+       ORDER BY c.business_name ASC, c.name ASC`,
+      params
+    ) as any[];
+
+    if (!rows.length) {
+      return res.status(404).json({ message: 'No hay clientes para exportar' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LupoHub';
+    workbook.created = new Date();
+
+    const wsSummary = workbook.addWorksheet('Resumen');
+    wsSummary.columns = [
+      { header: 'Cliente', key: 'cliente', width: 40 },
+      { header: 'Contacto', key: 'contacto', width: 28 },
+      { header: 'CUIT', key: 'cuit', width: 16 },
+      { header: 'Email', key: 'email', width: 30 },
+      { header: 'Vendedor', key: 'vendedor', width: 24 }
+    ];
+    wsSummary.getRow(1).font = { bold: true };
+    wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const usedNames = new Set<string>(['Resumen']);
+    const uniqueSheetName = (raw: string, fallback: string): string => {
+      const baseRaw = (raw || fallback || 'Cliente').replace(/[:\\/?*\[\]]/g, ' ').trim();
+      const base = (baseRaw || 'Cliente').slice(0, 31);
+      let name = base;
+      let i = 2;
+      while (usedNames.has(name)) {
+        const suffix = ` (${i})`;
+        name = base.slice(0, Math.max(1, 31 - suffix.length)) + suffix;
+        i++;
+      }
+      usedNames.add(name);
+      return name;
+    };
+
+    for (const r of rows) {
+      const customerName = String(r.business_name ?? r.name ?? 'Cliente');
+      wsSummary.addRow({
+        cliente: customerName,
+        contacto: r.name ?? '',
+        cuit: r.cuit ?? '',
+        email: r.email ?? '',
+        vendedor: r.seller_name ?? r.seller_id ?? ''
+      });
+
+      const ws = workbook.addWorksheet(uniqueSheetName(customerName, String(r.id)));
+      ws.columns = [
+        { header: 'Campo', key: 'campo', width: 24 },
+        { header: 'Valor', key: 'valor', width: 58 }
+      ];
+      ws.getRow(1).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+      ws.addRows([
+        { campo: 'ID', valor: r.id ?? '' },
+        { campo: 'Código legacy', valor: r.legacy_code ?? '' },
+        { campo: 'Razón social', valor: r.business_name ?? '' },
+        { campo: 'Contacto', valor: r.name ?? '' },
+        { campo: 'Email', valor: r.email ?? '' },
+        { campo: 'Teléfono', valor: r.phone ?? '' },
+        { campo: 'CUIT', valor: r.cuit ?? '' },
+        { campo: 'Ciudad', valor: r.city ?? '' },
+        { campo: 'Dirección', valor: r.address ?? '' },
+        { campo: 'Condición de venta', valor: r.sale_condition ?? '' },
+        { campo: 'Condición IVA', valor: r.condicion_iva ?? '' },
+        { campo: 'N° transporte', valor: r.transport_number ?? '' },
+        { campo: 'N° remito', valor: r.remito_number ?? '' },
+        { campo: 'Transportes', valor: r.transportes ?? '' },
+        { campo: 'Zona', valor: r.account_zone ?? '' },
+        { campo: 'Vendedor habitual', valor: r.account_seller_label ?? '' },
+        { campo: 'Seller ID', valor: r.seller_id ?? '' },
+        { campo: 'Seller Name', valor: r.seller_name ?? '' }
+      ]);
+
+      const customerOrders = await query(
+        `SELECT id, date, status, total, payment_status
+         FROM orders
+         WHERE customer_id = ?
+         ORDER BY date DESC, id DESC`,
+        [r.id]
+      ) as any[];
+      const customerBilling = await query(
+        `SELECT *
+         FROM (
+           SELECT
+             i.created_at AS fecha,
+             'FACTURA' AS tipo,
+             CONCAT(
+               CASE WHEN i.cbte_tipo = 1 THEN 'A ' WHEN i.cbte_tipo = 6 THEN 'B ' ELSE '' END,
+               LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+               '-',
+               LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+             ) AS comprobante,
+             o.id AS order_id,
+             ROUND(COALESCE(o.total, 0) * 1.21, 2) AS importe
+           FROM invoices i
+           JOIN orders o ON o.id = i.order_id
+           WHERE o.customer_id = ?
+
+           UNION ALL
+
+           SELECT
+             cn.created_at AS fecha,
+             'NC' AS tipo,
+             CONCAT(
+               CASE WHEN cn.cbte_tipo = 3 THEN 'NC A ' WHEN cn.cbte_tipo = 8 THEN 'NC B ' ELSE 'NC ' END,
+               LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+               '-',
+               LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+             ) AS comprobante,
+             cn.order_id AS order_id,
+             ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS importe
+           FROM credit_notes cn
+           JOIN orders o ON o.id = cn.order_id
+           WHERE o.customer_id = ?
+         ) b
+         ORDER BY b.fecha DESC`,
+        [r.id, r.id]
+      ) as any[];
+      const customerPayments = await query(
+        `SELECT date, receipt_number, amount, notes
+         FROM payments
+         WHERE customer_id = ?
+         ORDER BY date DESC, created_at DESC`,
+        [r.id]
+      ) as any[];
+
+      let rowCursor = ws.rowCount + 2;
+      ws.getCell(`A${rowCursor}`).value = 'PEDIDOS';
+      ws.getCell(`A${rowCursor}`).font = { bold: true };
+      rowCursor += 1;
+      ws.getCell(`A${rowCursor}`).value = 'ID';
+      ws.getCell(`B${rowCursor}`).value = 'Fecha';
+      ws.getCell(`C${rowCursor}`).value = 'Estado';
+      ws.getCell(`D${rowCursor}`).value = 'Cobro';
+      ws.getCell(`E${rowCursor}`).value = 'Total';
+      ws.getRow(rowCursor).font = { bold: true };
+      rowCursor += 1;
+      for (const o of customerOrders) {
+        ws.getCell(`A${rowCursor}`).value = o.id ?? '';
+        ws.getCell(`B${rowCursor}`).value = o.date ? new Date(o.date) : null;
+        ws.getCell(`C${rowCursor}`).value = o.status ?? '';
+        ws.getCell(`D${rowCursor}`).value = o.payment_status ?? '';
+        ws.getCell(`E${rowCursor}`).value = Number(o.total || 0);
+        rowCursor += 1;
+      }
+
+      rowCursor += 1;
+      ws.getCell(`A${rowCursor}`).value = 'FACTURAS / NC';
+      ws.getCell(`A${rowCursor}`).font = { bold: true };
+      rowCursor += 1;
+      ws.getCell(`A${rowCursor}`).value = 'Fecha';
+      ws.getCell(`B${rowCursor}`).value = 'Tipo';
+      ws.getCell(`C${rowCursor}`).value = 'Comprobante';
+      ws.getCell(`D${rowCursor}`).value = 'Pedido';
+      ws.getCell(`E${rowCursor}`).value = 'Importe';
+      ws.getRow(rowCursor).font = { bold: true };
+      rowCursor += 1;
+      for (const b of customerBilling) {
+        ws.getCell(`A${rowCursor}`).value = b.fecha ? new Date(b.fecha) : null;
+        ws.getCell(`B${rowCursor}`).value = b.tipo ?? '';
+        ws.getCell(`C${rowCursor}`).value = b.comprobante ?? '';
+        ws.getCell(`D${rowCursor}`).value = b.order_id ?? '';
+        ws.getCell(`E${rowCursor}`).value = Number(b.importe || 0);
+        rowCursor += 1;
+      }
+
+      rowCursor += 1;
+      ws.getCell(`A${rowCursor}`).value = 'RECIBOS';
+      ws.getCell(`A${rowCursor}`).font = { bold: true };
+      rowCursor += 1;
+      ws.getCell(`A${rowCursor}`).value = 'Fecha';
+      ws.getCell(`B${rowCursor}`).value = 'Recibo';
+      ws.getCell(`C${rowCursor}`).value = 'Importe';
+      ws.getCell(`D${rowCursor}`).value = 'Observaciones';
+      ws.getRow(rowCursor).font = { bold: true };
+      rowCursor += 1;
+      for (const p of customerPayments) {
+        ws.getCell(`A${rowCursor}`).value = p.date ? new Date(p.date) : null;
+        ws.getCell(`B${rowCursor}`).value = p.receipt_number ?? '';
+        ws.getCell(`C${rowCursor}`).value = Number(p.amount || 0);
+        ws.getCell(`D${rowCursor}`).value = p.notes ?? '';
+        rowCursor += 1;
+      }
+
+      ws.getColumn('B').numFmt = 'dd/mm/yyyy';
+      ws.getColumn('C').numFmt = '#,##0.00';
+      ws.getColumn('E').numFmt = '#,##0.00';
+    }
+
+    const out = await workbook.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
+    const filename = `clientes_por_hoja_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (error: any) {
+    console.error('exportCustomersBySheetsXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando clientes por hoja' });
+  }
+};
+
 /** Crear cliente. */
 export const createCustomer = async (req: Request, res: Response) => {
   try {

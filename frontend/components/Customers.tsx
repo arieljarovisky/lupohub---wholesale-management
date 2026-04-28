@@ -160,6 +160,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [multimediaExporting, setMultimediaExporting] = useState(false);
   const [multimediaImporting, setMultimediaImporting] = useState(false);
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
+  const [wholesaleMetricsExporting, setWholesaleMetricsExporting] = useState(false);
+  const [showExportSheetsModal, setShowExportSheetsModal] = useState(false);
+  const [exportSheetSelectedIds, setExportSheetSelectedIds] = useState<string[]>([]);
+  const [exportingSheets, setExportingSheets] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
 
@@ -777,6 +781,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            <div className="flex items-center gap-2">
              <button
                onClick={() => {
+                 setExportSheetSelectedIds([selectedCustomer.id]);
+                 setShowExportSheetsModal(true);
+               }}
+               className="px-4 py-2 bg-cyan-900/40 border border-cyan-700/50 rounded-xl text-sm font-bold text-cyan-200 hover:bg-cyan-900/60 hover:text-white transition flex items-center gap-2"
+               title="Descargar Excel con una hoja por cliente"
+             >
+               <Download size={16} />
+               Exportar por hojas
+             </button>
+             <button
+               onClick={() => {
                  setNewBusinessName(selectedCustomer.businessName);
                  setNewContactName(selectedCustomer.name);
                  setNewEmail(selectedCustomer.email);
@@ -814,6 +829,93 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
              )}
            </div>
         </div>
+
+        {showExportSheetsModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="text-white font-bold">Exportar clientes por hojas</h3>
+                <button
+                  onClick={() => setShowExportSheetsModal(false)}
+                  className="text-slate-400 hover:text-white"
+                  aria-label="Cerrar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+                <p className="text-sm text-slate-400">
+                  Elegí los clientes a incluir. El Excel se genera con una hoja por cliente.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportSheetSelectedIds(displayCustomers.map((c) => c.id))}
+                    className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700"
+                  >
+                    Seleccionar visibles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportSheetSelectedIds([])}
+                    className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700"
+                  >
+                    Limpiar
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {displayCustomers.map((c) => {
+                    const checked = exportSheetSelectedIds.includes(c.id);
+                    return (
+                      <label key={c.id} className="flex items-center gap-3 p-2 rounded-lg border border-slate-800 hover:bg-slate-800/60 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setExportSheetSelectedIds((prev) =>
+                              on ? [...prev, c.id] : prev.filter((id) => id !== c.id)
+                            );
+                          }}
+                        />
+                        <span className="text-sm text-slate-200">{c.businessName || c.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-800 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExportSheetsModal(false)}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={exportingSheets || exportSheetSelectedIds.length === 0}
+                  onClick={async () => {
+                    try {
+                      setExportingSheets(true);
+                      await api.exportCustomersBySheets(exportSheetSelectedIds);
+                      showToast('success', 'Excel descargado');
+                      setShowExportSheetsModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'Error al exportar');
+                    } finally {
+                      setExportingSheets(false);
+                    }
+                  }}
+                  className="flex-1 bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2.5 rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {exportingSheets ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Descargar Excel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {role === Role.ADMIN && priceLists.length > 0 && onUpdateCustomer && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1545,18 +1647,21 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <button
               type="button"
               onClick={async () => {
+                setWholesaleMetricsExporting(true);
                 try {
-                  await api.exportCustomersIndividuals();
-                  showToast('success', 'Excel de clientes individuales descargado.');
+                  await api.exportWholesaleTopProductsMetrics();
+                  showToast('success', 'Excel de métricas mayoristas descargado.');
                 } catch (err: any) {
-                  showToast('error', err?.message || 'Error al exportar clientes individuales.');
+                  showToast('error', err?.message || 'Error al exportar métricas mayoristas.');
                 }
+                setWholesaleMetricsExporting(false);
               }}
-              className="bg-cyan-900/40 text-cyan-100 px-4 py-2 rounded-lg hover:bg-cyan-900/55 border border-cyan-700/50 transition flex items-center gap-2 font-medium"
-              title="Descarga 1 fila por cliente con sus datos principales"
+              disabled={wholesaleMetricsExporting}
+              className="bg-fuchsia-900/40 text-fuchsia-100 px-4 py-2 rounded-lg hover:bg-fuchsia-900/55 border border-fuchsia-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              title="Top de artículos más pedidos en mayorista"
             >
-              <Download size={18} />
-              <span>Exportar clientes individuales</span>
+              {wholesaleMetricsExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+              <span>{wholesaleMetricsExporting ? 'Exportando…' : 'Métricas mayorista (Top artículos)'}</span>
             </button>
           )}
           {canViewSaldos && (
