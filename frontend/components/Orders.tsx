@@ -34,6 +34,18 @@ function pickInitialTransporteId(prev: ManualFacturaFields | undefined, opts: Tr
   return '';
 }
 
+function orderRoleLabelEs(role: string | undefined): string {
+  if (!role) return '';
+  const m: Record<string, string> = {
+    ADMIN: 'Admin',
+    SELLER: 'Vendedor',
+    WAREHOUSE: 'Depósito',
+    DEPOSITO: 'Depósito',
+    CUSTOMER: 'Cliente',
+  };
+  return m[role] || role;
+}
+
 interface OrdersProps {
   orders: Order[];
   products: Product[];
@@ -721,9 +733,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ['CLIENTE', customerName, '', '', '', '', '', '', '', '', '', '', '', 'FECHA', formatOrderDate(order.date)],
       ['PEDIDO', order.id, '', '', '', '', '', '', '', '', '', '', '', 'ESTADO', order.status],
       ['TOTAL', displayTotal, '', '', '', '', '', '', '', '', '', '', '', 'UNIDADES', totalUnits],
-      [],
-      [...blockHeaders, ...separator, ...blockHeaders],
     ];
+    if (order.createdByName) {
+      const creado = `${order.createdByName}${order.createdByRole ? ` (${orderRoleLabelEs(order.createdByRole)})` : ''}`;
+      data.push(['CREADO POR', creado, '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    }
+    const sellerForExport = order.sellerName || (order.sellerId ? users.find((u) => u.id === order.sellerId)?.name : '');
+    if (order.sellerId && sellerForExport && (order.createdBy !== order.sellerId || !order.createdByName)) {
+      data.push(['VENDEDOR', sellerForExport, '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    }
+    data.push([]);
+    data.push([...blockHeaders, ...separator, ...blockHeaders]);
     for (let i = 0; i < rowsCount; i++) {
       data.push([...blockRow(left[i]), ...separator, ...blockRow(right[i])]);
     }
@@ -860,6 +880,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           {filteredOrders.map((order) => {
           const canEditOrder = canEditOrderBase && !order.invoice;
           const customer = customers.find(c => c.id === order.customerId);
+          const sellerDisplayName =
+            order.sellerName || (order.sellerId ? users.find((u) => u.id === order.sellerId)?.name : undefined);
+          const showSellerLine = Boolean(
+            order.sellerId && sellerDisplayName && (order.createdBy !== order.sellerId || !order.createdByName)
+          );
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
@@ -958,6 +983,25 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       </span>
                     )}
                   </div>
+                  {(order.createdByName || showSellerLine) && (
+                    <div className="text-xs text-slate-500 space-y-0.5 mt-1">
+                      {order.createdByName && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-slate-600">Creado por</span>
+                          <span className="text-slate-400 font-medium">{order.createdByName}</span>
+                          {order.createdByRole && (
+                            <span className="text-slate-500">({orderRoleLabelEs(order.createdByRole)})</span>
+                          )}
+                        </div>
+                      )}
+                      {showSellerLine && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-slate-600">Vendedor del pedido</span>
+                          <span className="text-slate-400 font-medium">{sellerDisplayName}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {order.status === OrderStatus.DISPATCHED && order.pickedBy && (
                     <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                       <Truck size={12} />
