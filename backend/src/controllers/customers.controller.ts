@@ -2710,6 +2710,29 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       });
     }
 
+    // Evitar duplicados de PAGO (importado + sistema) por misma fecha/número/importe.
+    // Se prioriza el registro del sistema (sortSeq mayor, detalle más trazable).
+    const paymentByKey = new Map<string, (typeof timelineRows)[number]>();
+    const nonPaymentRows: Array<(typeof timelineRows)[number]> = [];
+    for (const row of timelineRows) {
+      if (row.tipo !== 'PAGO') {
+        nonPaymentRows.push(row);
+        continue;
+      }
+      const key = [
+        normalizeDateKey(row.fecha),
+        normalizeNumberKey(row.numero),
+        normalizeAmountKey(row.importe)
+      ].join('|');
+      const existing = paymentByKey.get(key);
+      if (!existing || row.sortSeq > existing.sortSeq) {
+        paymentByKey.set(key, row);
+      }
+    }
+    const dedupedPaymentRows = Array.from(paymentByKey.values());
+    timelineRows.length = 0;
+    timelineRows.push(...nonPaymentRows, ...dedupedPaymentRows);
+
     timelineRows.sort((a, b) => {
       if (a.sortTs !== b.sortTs) return a.sortTs - b.sortTs;
       if (a.sortSeq !== b.sortSeq) return a.sortSeq - b.sortSeq;
