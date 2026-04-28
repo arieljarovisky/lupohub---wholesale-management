@@ -963,7 +963,6 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
          FROM (
            SELECT
              p.customer_id,
-             p.date,
              ROUND(COALESCE(p.amount, 0), 2) AS amount,
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -976,7 +975,6 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
            GROUP BY
              p.customer_id,
-             p.date,
              ROUND(COALESCE(p.amount, 0), 2),
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -990,7 +988,6 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
          FROM (
            SELECT
              p.customer_id,
-             p.date,
              ROUND(COALESCE(p.amount, 0), 2) AS amount,
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -1001,7 +998,6 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
            FROM payments p
            GROUP BY
              p.customer_id,
-             p.date,
              ROUND(COALESCE(p.amount, 0), 2),
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)

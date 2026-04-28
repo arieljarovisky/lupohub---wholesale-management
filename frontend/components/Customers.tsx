@@ -220,6 +220,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     | 'seller_asc';
   const [sortPreset, setSortPreset] = useState<SortPreset>('business_asc');
 
+  const clearSelectedCustomerView = () => {
+    try {
+      sessionStorage.removeItem(SELECTED_CUSTOMER_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+    setSelectedCustomer(null);
+  };
+
   const matchesSearch = (c: Customer, qRaw: string) => {
     const q = qRaw.trim().toLowerCase();
     if (!q) return true;
@@ -782,7 +791,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         <div className="flex items-center justify-between">
            <div className="flex items-center gap-3">
              <button 
-               onClick={() => setSelectedCustomer(null)} 
+               onClick={clearSelectedCustomerView} 
                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition text-slate-300"
              >
                <ArrowLeft size={20} />
@@ -871,8 +880,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
              {onDeleteCustomer && (
                <button
                  onClick={() => {
-                   if (window.confirm(`¿Eliminar el cliente "${selectedCustomer.businessName}"? Esta acción no se puede deshacer.`)) {
-                     Promise.resolve(onDeleteCustomer(selectedCustomer.id)).then(() => setSelectedCustomer(null)).catch(() => {});
+                  if (window.confirm(`¿Eliminar el cliente "${selectedCustomer.businessName}"? Esta acción no se puede deshacer.`)) {
+                    Promise.resolve(onDeleteCustomer(selectedCustomer.id)).then(() => clearSelectedCustomerView()).catch(() => {});
                    }
                  }}
                  className="px-4 py-2 bg-red-900/50 border border-red-800 rounded-xl text-sm font-bold text-red-300 hover:bg-red-900 hover:text-white transition flex items-center gap-2"
