@@ -832,6 +832,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
       else showToast('info', 'Ninguna variante con vínculo TN en la selección.');
       setServerListRefreshKey(k => k + 1);
+      // Refrescar stocks externos para ver inmediatamente si quedó sincronizado.
+      setTimeout(() => {
+        api.getVariantExternalStocks(selectedVariantIds).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a Tienda Nube');
     } finally {
@@ -848,6 +854,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       else if (res.errors > 0) showToast('warning', `${res.updated} OK, ${res.errors} errores. Revisá el detalle.`);
       else showToast('info', 'Ninguna variante con vínculo ML en la selección.');
       setServerListRefreshKey(k => k + 1);
+      // Refrescar stocks externos para ver inmediatamente si quedó sincronizado.
+      setTimeout(() => {
+        api.getVariantExternalStocks(selectedVariantIds).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a Mercado Libre');
     } finally {

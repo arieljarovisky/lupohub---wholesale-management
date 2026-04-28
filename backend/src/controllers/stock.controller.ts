@@ -439,6 +439,25 @@ function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): v
   };
 }
 
+async function runExternalSyncWithRetries(
+  label: string,
+  run: () => Promise<boolean>,
+  attempts: number = 3
+): Promise<boolean> {
+  let lastOk = false;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      lastOk = await run();
+      if (lastOk) return true;
+    } catch (error: any) {
+      console.warn(`[Sync] ${label} intento ${i}/${attempts} con excepción:`, error?.message || error);
+    }
+    if (i < attempts) await sleep(1200 * i);
+  }
+  console.warn(`[Sync] ${label} no se pudo sincronizar tras ${attempts} intentos.`);
+  return false;
+}
+
 // Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
@@ -448,19 +467,34 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
     );
 
     if (publications && (publications as any[]).length > 0) {
-      const tasks: Promise<unknown>[] = [];
+      const tasks: Promise<boolean>[] = [];
       for (const pub of publications as any[]) {
         const pack = Math.max(1, Number(pub.pack_size) || 1);
         const stockToSend = stockForPlatform(newStock, pack);
         if (pub.platform === 'tiendanube' && pub.external_variant_id) {
-          tasks.push(updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend));
+          const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id} variant=${variantId}`;
+          tasks.push(
+            runExternalSyncWithRetries(label, () =>
+              updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend)
+            )
+          );
         } else if (pub.platform === 'mercadolibre') {
           const itemId = pub.external_product_id;
           const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
           if (variationId) {
-            tasks.push(updateMercadoLibreStockByVariant(itemId, variationId, stockToSend));
+            const label = `ML item=${itemId} var=${variationId} variant=${variantId}`;
+            tasks.push(
+              runExternalSyncWithRetries(label, () =>
+                updateMercadoLibreStockByVariant(itemId, variationId, stockToSend)
+              )
+            );
           } else {
-            tasks.push(updateMercadoLibreStockByItem(itemId, stockToSend));
+            const label = `ML item=${itemId} variant=${variantId}`;
+            tasks.push(
+              runExternalSyncWithRetries(label, () =>
+                updateMercadoLibreStockByItem(itemId, stockToSend)
+              )
+            );
           }
         }
       }
@@ -486,14 +520,29 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       const skuMLTN = variant.external_sku || variant.sku;
 
       if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-        await updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN);
+        await runExternalSyncWithRetries(
+          `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id} variant=${variantId}`,
+          () => updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN)
+        );
       }
       if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-        await updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML);
+        await runExternalSyncWithRetries(
+          `ML legacy=${variant.mercado_libre_id}/${variant.mercado_libre_variant_id} variant=${variantId}`,
+          () => updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML)
+        );
       } else if (variant.mercado_libre_item_id) {
-        await updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML);
+        await runExternalSyncWithRetries(
+          `ML legacy item=${variant.mercado_libre_item_id} variant=${variantId}`,
+          () => updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML)
+        );
       } else if (skuMLTN) {
-        await updateMercadoLibreStock(skuMLTN, stockML);
+        await runExternalSyncWithRetries(
+          `ML legacy sku=${skuMLTN} variant=${variantId}`,
+          async () => {
+            await updateMercadoLibreStock(skuMLTN, stockML);
+            return true;
+          }
+        );
       }
     }
   } catch (error) {
