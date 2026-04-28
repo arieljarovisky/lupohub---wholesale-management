@@ -74,7 +74,7 @@ export const listPayments = async (req: any, res: Response) => {
       return res.json(systemPayments);
     }
 
-    const mmWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO')`];
+    const mmWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'`];
     const mmParams: any[] = [];
     if (customerId) { mmWhere.push('e.customer_id = ?'); mmParams.push(customerId); }
     if (desde) { mmWhere.push('e.line_date >= ?'); mmParams.push(desde); }
@@ -106,13 +106,31 @@ export const listPayments = async (req: any, res: Response) => {
       mmParams
     ) as any[];
 
+    const parseMoney = (v: any): number => {
+      if (v == null) return 0;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+      if (!s) return 0;
+      const hasComma = s.includes(',');
+      const hasDot = s.includes('.');
+      if (hasComma && hasDot) {
+        const n = Number(s.replace(/\./g, '').replace(',', '.'));
+        return Number.isFinite(n) ? n : 0;
+      }
+      if (hasComma) {
+        const n = Number(s.replace(',', '.'));
+        return Number.isFinite(n) ? n : 0;
+      }
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
     const normalizeDate = (v: any) => {
       const d = new Date(v);
       if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
       return d.toISOString().slice(0, 10);
     };
     const normalizeNumber = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const normalizeAmount = (v: any) => Number(v || 0).toFixed(2);
+    const normalizeAmount = (v: any) => parseMoney(v).toFixed(2);
 
     const existingKeys = new Set(
       systemPayments.map((p) => [
@@ -136,7 +154,7 @@ export const listPayments = async (req: any, res: Response) => {
         return true;
       })
       .map((r) => ({
-        id: `mm-${r.customer_id}-${r.line_order}`,
+        id: `mm-${r.customer_id}-${String(r.line_order ?? 'x')}-${normalizeDate(r.line_date)}-${normalizeNumber(r.numero)}`,
         customerId: r.customer_id,
         sellerId: r.seller_id ?? undefined,
         sellerName: r.seller_name ?? undefined,
@@ -144,7 +162,7 @@ export const listPayments = async (req: any, res: Response) => {
         invoiceId: undefined,
         receiptNumber: String(r.numero || ''),
         date: normalizeDate(r.line_date),
-        amount: Number(r.importe) || 0,
+        amount: parseMoney(r.importe),
         notes: r.detalle ? `Importado Tango: ${r.detalle}` : 'Importado Tango',
         createdAt: undefined,
         customerBusinessName: r.customer_business_name ?? r.customer_name ?? '',

@@ -125,7 +125,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!includeImportedReceipts) {
             return res.json(systemPayments);
         }
-        const mmWhere = [`UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO')`];
+        const mmWhere = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'`];
         const mmParams = [];
         if (customerId) {
             mmWhere.push('e.customer_id = ?');
@@ -161,6 +161,27 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
       WHERE ${mmWhere.join(' AND ')}
       ORDER BY e.line_date DESC, e.line_order DESC
       `, mmParams);
+        const parseMoney = (v) => {
+            if (v == null)
+                return 0;
+            if (typeof v === 'number')
+                return Number.isFinite(v) ? v : 0;
+            const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+            if (!s)
+                return 0;
+            const hasComma = s.includes(',');
+            const hasDot = s.includes('.');
+            if (hasComma && hasDot) {
+                const n = Number(s.replace(/\./g, '').replace(',', '.'));
+                return Number.isFinite(n) ? n : 0;
+            }
+            if (hasComma) {
+                const n = Number(s.replace(',', '.'));
+                return Number.isFinite(n) ? n : 0;
+            }
+            const n = Number(s);
+            return Number.isFinite(n) ? n : 0;
+        };
         const normalizeDate = (v) => {
             const d = new Date(v);
             if (Number.isNaN(d.getTime()))
@@ -168,7 +189,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return d.toISOString().slice(0, 10);
         };
         const normalizeNumber = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const normalizeAmount = (v) => Number(v || 0).toFixed(2);
+        const normalizeAmount = (v) => parseMoney(v).toFixed(2);
         const existingKeys = new Set(systemPayments.map((p) => [
             normalizeDate(p.date),
             normalizeNumber(p.receiptNumber),
@@ -189,20 +210,20 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return true;
         })
             .map((r) => {
-            var _a, _b, _c, _d;
+            var _a, _b, _c, _d, _e;
             return ({
-                id: `mm-${r.customer_id}-${r.line_order}`,
+                id: `mm-${r.customer_id}-${String((_a = r.line_order) !== null && _a !== void 0 ? _a : 'x')}-${normalizeDate(r.line_date)}-${normalizeNumber(r.numero)}`,
                 customerId: r.customer_id,
-                sellerId: (_a = r.seller_id) !== null && _a !== void 0 ? _a : undefined,
-                sellerName: (_b = r.seller_name) !== null && _b !== void 0 ? _b : undefined,
+                sellerId: (_b = r.seller_id) !== null && _b !== void 0 ? _b : undefined,
+                sellerName: (_c = r.seller_name) !== null && _c !== void 0 ? _c : undefined,
                 orderId: undefined,
                 invoiceId: undefined,
                 receiptNumber: String(r.numero || ''),
                 date: normalizeDate(r.line_date),
-                amount: Number(r.importe) || 0,
+                amount: parseMoney(r.importe),
                 notes: r.detalle ? `Importado Tango: ${r.detalle}` : 'Importado Tango',
                 createdAt: undefined,
-                customerBusinessName: (_d = (_c = r.customer_business_name) !== null && _c !== void 0 ? _c : r.customer_name) !== null && _d !== void 0 ? _d : '',
+                customerBusinessName: (_e = (_d = r.customer_business_name) !== null && _d !== void 0 ? _d : r.customer_name) !== null && _e !== void 0 ? _e : '',
                 invoice: undefined
             });
         });
