@@ -2057,7 +2057,13 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         for (const vr of variantRows) {
           const r = vr as any;
           const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
-          const mlQty = v ? (v.available_quantity ?? 0) : (variations.length === 0 ? (item.available_quantity ?? 0) : 0);
+          if (!v && variations.length > 0) {
+            console.warn(
+              `[AutoSync ML→TN] Omitido: no se encontró variación ML ${r.ml_variant_id} en item ${mlId}. Se evita enviar 0 a TN.`
+            );
+            continue;
+          }
+          const mlQty = v ? (v.available_quantity ?? 0) : (item.available_quantity ?? 0);
           const mlPack = Math.max(1, Number(r.ml_pack) || 1);
           const tnPack = Math.max(1, Number(r.tn_pack) || 1);
           const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -2110,9 +2116,15 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           continue;
         }
         const variations = item.variations || [];
+        if (variations.length > 1) {
+          console.warn(
+            `[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): tiene ${variations.length} variaciones y no se puede inferir una única.`
+          );
+          continue;
+        }
         const mlQty = variations.length === 0
           ? (item.available_quantity ?? 0)
-          : (variations.length === 1 ? (variations[0].available_quantity ?? 0) : 0);
+          : (variations[0].available_quantity ?? 0);
         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);

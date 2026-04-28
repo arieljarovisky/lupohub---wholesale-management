@@ -122,6 +122,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
+  const handleExportPendingDetail = async () => {
+    try {
+      await api.exportSaldosPendientesDetalle();
+      showToast('success', 'Descarga iniciada');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando saldos pendientes detallados');
+    }
+  };
+
   const handleImportPaymentsExcel = async (filesList: FileList | null) => {
     const files = filesList ? Array.from(filesList) : [];
     if (files.length === 0) return;
@@ -307,6 +316,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
           </button>
+          <button
+            type="button"
+            onClick={handleExportPendingDetail}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-700 text-white text-sm font-bold shadow-lg shadow-cyan-900/40 hover:bg-cyan-600"
+          >
+            <FileSpreadsheet size={16} /> Saldos pendientes (detalle)
+          </button>
           <input
             ref={paymentsExcelInputRef}
             type="file"
@@ -413,12 +429,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         {formatTipo(item)}
                       </span>
                     </td>
-                    <td className="px-3 py-2">{item.puntoVta}</td>
-                    <td className="px-3 py-2">{numero}</td>
-                    <td className="px-3 py-2">{item.orderId}</td>
-                    <td className="px-3 py-2">{item.customerBusinessName}</td>
-                    <td className="px-3 py-2 text-right">${formatMoneyAr(item.importe ?? 0)}</td>
-                    <td className="px-3 py-2 text-xs">{item.cae}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{item.puntoVta}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{numero}</td>
+                    <td className="px-3 py-2 font-mono whitespace-nowrap">{item.orderId}</td>
+                    <td className="px-3 py-2 max-w-[320px] truncate">{item.customerBusinessName}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">${formatMoneyAr(item.importe ?? 0)}</td>
+                    <td className="px-3 py-2 text-xs font-mono whitespace-nowrap">{item.cae}</td>
                     <td className="px-3 py-2 text-right">
                       <button
                         type="button"

@@ -661,6 +661,19 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Excel con saldos pendientes por cliente/vendedor + detalle de facturas, NC y recibos. */
+  exportSaldosPendientesDetalle: async (): Promise<void> => {
+    const blob = await getBlob('/customers/saldos-pendientes/export-detalle', 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saldos_pendientes_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Hoja única "Resumen" estilizada (sin columna Hoja): código, cliente, vendedor, zona, saldo final, movimientos. */
   exportSaldosPendientesMultimedias: async (): Promise<void> => {
     const blob = await getBlob('/customers/saldos-pendientes/export-multimedias', 90000);
