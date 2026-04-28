@@ -67,9 +67,13 @@ export const getOrders = async (req: any, res: any) => {
     const ordersParams = user?.role === 'SELLER' ? [user.id] : [];
 
     let ordersRow = await query(
-      `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name
+      `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name,
+              cu.name AS created_by_name, cu.role AS created_by_role,
+              su.name AS seller_name
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
        WHERE 1=1 ${whereArchived}${whereUserScope}
        ORDER BY o.date DESC`,
       ordersParams
@@ -207,6 +211,10 @@ export const getOrders = async (req: any, res: any) => {
       customerId: order.customer_id,
       customerBusinessName: order.customer_business_name ?? order.customer_name ?? undefined,
       sellerId: order.seller_id,
+      createdBy: order.created_by ?? undefined,
+      createdByName: order.created_by_name ?? undefined,
+      createdByRole: order.created_by_role ?? undefined,
+      sellerName: order.seller_name ?? undefined,
       date: order.date,
       status: order.status,
       total: Number(order.total),
@@ -266,9 +274,10 @@ export const createOrder = async (req: any, res: any) => {
     const paymentStatus =
       (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
+    const createdBy = user?.id ?? null;
     await execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, newOrder.status, newOrder.total, paymentStatus, noStockImpact, createdBy]
     );
 
     for (const item of newOrder.items as any[]) {
@@ -304,7 +313,12 @@ export const createOrder = async (req: any, res: any) => {
     }
 
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
+      `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+       FROM orders o
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
+       WHERE o.id = ?`,
       [orderId]
     );
     if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
@@ -343,6 +357,10 @@ export const createOrder = async (req: any, res: any) => {
       id: created.id,
       customerId: created.customer_id,
       sellerId: created.seller_id,
+      createdBy: (created as any).created_by ?? undefined,
+      createdByName: (created as any).created_by_name ?? undefined,
+      createdByRole: (created as any).created_by_role ?? undefined,
+      sellerName: (created as any).seller_name ?? undefined,
       date: created.date,
       status: created.status,
       total: Number(created.total),
@@ -461,7 +479,12 @@ export const updateOrder = async (req: any, res: any) => {
       );
     }
     const created = await get(
-      'SELECT id, customer_id, seller_id, date, status, total, picked_by, dispatched_at, payment_status, no_stock_impact FROM orders WHERE id = ?',
+      `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+       FROM orders o
+       LEFT JOIN users cu ON cu.id = o.created_by
+       LEFT JOIN users su ON su.id = o.seller_id
+       WHERE o.id = ?`,
       [id]
     );
     if (!created) return res.json({ ...updated, id });
@@ -500,6 +523,10 @@ export const updateOrder = async (req: any, res: any) => {
       id: created.id,
       customerId: created.customer_id,
       sellerId: created.seller_id,
+      createdBy: (created as any).created_by ?? undefined,
+      createdByName: (created as any).created_by_name ?? undefined,
+      createdByRole: (created as any).created_by_role ?? undefined,
+      sellerName: (created as any).seller_name ?? undefined,
       date: created.date,
       status: created.status,
       total: Number(created.total),

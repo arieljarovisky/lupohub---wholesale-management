@@ -165,6 +165,12 @@ export interface Order {
   /** Nombre del cliente (viene del backend para no depender de la lista visible) */
   customerBusinessName?: string;
   sellerId?: string | null; // null = pedido directo (cliente directo)
+  /** Usuario que creó el pedido (sesión al guardar) */
+  createdBy?: string;
+  createdByName?: string;
+  createdByRole?: string;
+  /** Nombre del vendedor asignado al pedido (join server) */
+  sellerName?: string;
   pickedBy?: string; // Usuario de depósito que preparó/despachó
   dispatchedAt?: string; // Fecha/hora en que se despachó
   items: OrderItem[];
