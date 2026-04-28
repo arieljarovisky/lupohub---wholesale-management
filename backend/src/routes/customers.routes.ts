@@ -8,7 +8,7 @@ import {
   importCustomers,
   bulkUpdateCuit,
   attachUserToCustomer,
-  exportCustomersIndividualCsv,
+  exportCustomersIndividualXlsx,
   getSaldosPendientes,
   getCarteraTotals,
   exportSaldosPendientesCsv,
@@ -31,7 +31,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/saldos-pendientes/export-multimedias', authMiddleware as any, exportSaldosPendientesMultimediasXlsx as any);
 router.get('/saldos-pendientes/export-detalle', authMiddleware as any, exportSaldosPendientesDetalleXlsx as any);
 router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
-router.get('/export-individuales', authMiddleware as any, exportCustomersIndividualCsv as any);
+router.get('/export-individuales', authMiddleware as any, exportCustomersIndividualXlsx as any);
 router.get('/saldos-pendientes', authMiddleware as any, getSaldosPendientes as any);
 router.get('/cartera-totals', authMiddleware as any, getCarteraTotals as any);
 router.get('/multimedia-historial/export', authMiddleware as any, exportMultimediaHistorial as any);

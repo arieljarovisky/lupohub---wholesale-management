@@ -68,8 +68,8 @@ export const getCustomers = async (req: Request, res: Response) => {
   }
 };
 
-/** Exportar clientes individuales (1 fila por cliente) en CSV. */
-export const exportCustomersIndividualCsv = async (req: Request, res: Response) => {
+/** Exportar clientes individuales (1 fila por cliente) en Excel (.xlsx). */
+export const exportCustomersIndividualXlsx = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;
     const sellerFilter = authUser?.role === 'SELLER' ? ' WHERE c.seller_id = ?' : '';
@@ -100,56 +100,62 @@ export const exportCustomersIndividualCsv = async (req: Request, res: Response) 
       params
     );
 
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const header = [
-      'id',
-      'codigo_legacy',
-      'razon_social',
-      'contacto',
-      'email',
-      'telefono',
-      'cuit',
-      'ciudad',
-      'direccion',
-      'condicion_venta',
-      'condicion_iva',
-      'numero_transporte',
-      'numero_remito',
-      'zona',
-      'vendedor_habitual',
-      'seller_id',
-      'seller_name'
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LupoHub';
+    workbook.created = new Date();
+    const ws = workbook.addWorksheet('Clientes');
+    ws.columns = [
+      { header: 'ID', key: 'id', width: 38 },
+      { header: 'Código legacy', key: 'legacy_code', width: 16 },
+      { header: 'Razón social', key: 'business_name', width: 34 },
+      { header: 'Contacto', key: 'name', width: 28 },
+      { header: 'Email', key: 'email', width: 32 },
+      { header: 'Teléfono', key: 'phone', width: 18 },
+      { header: 'CUIT', key: 'cuit', width: 16 },
+      { header: 'Ciudad', key: 'city', width: 20 },
+      { header: 'Dirección', key: 'address', width: 32 },
+      { header: 'Condición venta', key: 'sale_condition', width: 20 },
+      { header: 'Condición IVA', key: 'condicion_iva', width: 20 },
+      { header: 'N° transporte', key: 'transport_number', width: 16 },
+      { header: 'N° remito', key: 'remito_number', width: 14 },
+      { header: 'Zona', key: 'account_zone', width: 18 },
+      { header: 'Vendedor habitual', key: 'account_seller_label', width: 28 },
+      { header: 'Seller ID', key: 'seller_id', width: 38 },
+      { header: 'Seller name', key: 'seller_name', width: 24 }
     ];
-    const lines = [header.join(';')];
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
     for (const r of rows as any[]) {
-      lines.push([
-        r.id ?? '',
-        r.legacy_code ?? '',
-        esc(r.business_name ?? ''),
-        esc(r.name ?? ''),
-        esc(r.email ?? ''),
-        esc(r.phone ?? ''),
-        r.cuit ?? '',
-        esc(r.city ?? ''),
-        esc(r.address ?? ''),
-        esc(r.sale_condition ?? ''),
-        esc(r.condicion_iva ?? ''),
-        esc(r.transport_number ?? ''),
-        esc(r.remito_number ?? ''),
-        esc(r.account_zone ?? ''),
-        esc(r.account_seller_label ?? ''),
-        r.seller_id ?? '',
-        esc(r.seller_name ?? '')
-      ].join(';'));
+      ws.addRow({
+        id: r.id ?? '',
+        legacy_code: r.legacy_code ?? '',
+        business_name: r.business_name ?? '',
+        name: r.name ?? '',
+        email: r.email ?? '',
+        phone: r.phone ?? '',
+        cuit: r.cuit ?? '',
+        city: r.city ?? '',
+        address: r.address ?? '',
+        sale_condition: r.sale_condition ?? '',
+        condicion_iva: r.condicion_iva ?? '',
+        transport_number: r.transport_number ?? '',
+        remito_number: r.remito_number ?? '',
+        account_zone: r.account_zone ?? '',
+        account_seller_label: r.account_seller_label ?? '',
+        seller_id: r.seller_id ?? '',
+        seller_name: r.seller_name ?? ''
+      });
     }
 
-    const csv = lines.join('\r\n');
-    const filename = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.csv`;
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    const out = await workbook.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
+    const filename = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send('\uFEFF' + csv);
+    return res.send(buf);
   } catch (error: any) {
-    console.error('exportCustomersIndividualCsv:', error);
+    console.error('exportCustomersIndividualXlsx:', error);
     return res.status(500).json({ message: 'Error exportando clientes individuales' });
   }
 };

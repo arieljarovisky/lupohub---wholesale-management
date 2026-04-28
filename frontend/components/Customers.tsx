@@ -1547,7 +1547,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               onClick={async () => {
                 try {
                   await api.exportCustomersIndividuals();
-                  showToast('success', 'CSV de clientes individuales descargado.');
+                  showToast('success', 'Excel de clientes individuales descargado.');
                 } catch (err: any) {
                   showToast('error', err?.message || 'Error al exportar clientes individuales.');
                 }
