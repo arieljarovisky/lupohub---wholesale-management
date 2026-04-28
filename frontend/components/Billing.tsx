@@ -8,6 +8,8 @@ import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
+const BILLING_PAGE_SIZE = 25;
+const PAYMENTS_PAGE_SIZE = 25;
 
 interface BillingProps {
   role: Role;
@@ -18,6 +20,7 @@ interface BillingProps {
 
 const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [] }) => {
   const { showToast } = useNotification();
+  const [activeView, setActiveView] = useState<'billing' | 'payments'>('billing');
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [desde, setDesde] = useState<string>('');
@@ -29,6 +32,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+  const [billingPage, setBillingPage] = useState(1);
+  const [paymentsPage, setPaymentsPage] = useState(1);
 
   const parseMoneyInput = (raw: string): number => {
     const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/\$/g, '');
@@ -271,6 +276,33 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const filteredCount = items.length;
+  const pagedItems = useMemo(() => {
+    const start = (billingPage - 1) * BILLING_PAGE_SIZE;
+    return items.slice(start, start + BILLING_PAGE_SIZE);
+  }, [items, billingPage]);
+  const billingTotalPages = Math.max(1, Math.ceil(items.length / BILLING_PAGE_SIZE));
+
+  const pagedPayments = useMemo(() => {
+    const start = (paymentsPage - 1) * PAYMENTS_PAGE_SIZE;
+    return payments.slice(start, start + PAYMENTS_PAGE_SIZE);
+  }, [payments, paymentsPage]);
+  const paymentsTotalPages = Math.max(1, Math.ceil(payments.length / PAYMENTS_PAGE_SIZE));
+
+  useEffect(() => {
+    setBillingPage(1);
+  }, [items.length, desde, hasta, customerId, tipo]);
+
+  useEffect(() => {
+    setPaymentsPage(1);
+  }, [payments.length, desde, hasta, customerId]);
+
+  useEffect(() => {
+    if (billingPage > billingTotalPages) setBillingPage(billingTotalPages);
+  }, [billingPage, billingTotalPages]);
+
+  useEffect(() => {
+    if (paymentsPage > paymentsTotalPages) setPaymentsPage(paymentsTotalPages);
+  }, [paymentsPage, paymentsTotalPages]);
 
   return (
     <div className="space-y-4">
@@ -282,13 +314,29 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <p className="text-slate-400 text-sm">Listá todas las facturas y notas de crédito emitidas desde la app. Podés filtrar por fecha, cliente y tipo de comprobante.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setActiveView('billing')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeView === 'billing' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+            >
+              Facturas / NC
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveView('payments')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${activeView === 'payments' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+            >
+              Recibos
+            </button>
+          </div>
           <button
             type="button"
-            onClick={load}
-            disabled={loading}
+            onClick={() => { if (activeView === 'billing') load(); else loadPayments(); }}
+            disabled={activeView === 'billing' ? loading : loadingPayments}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-slate-100 text-sm font-medium border border-slate-700 hover:bg-slate-700 disabled:opacity-50"
           >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            {(activeView === 'billing' ? loading : loadingPayments) ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             Actualizar
           </button>
           <button
@@ -380,6 +428,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <select
             value={tipo}
             onChange={e => setTipo(e.target.value as any)}
+            disabled={activeView === 'payments'}
             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
           >
             <option value="ALL">Todos</option>
@@ -389,11 +438,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         </div>
       </div>
 
+      {activeView === 'billing' && (
       <div className="bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
           <div className="flex items-center gap-2 text-sm text-slate-400">
             <Search size={14} />
-            <span>{filteredCount} comprobante(s)</span>
+            <span>{filteredCount} comprobante(s) • Página {billingPage}/{billingTotalPages}</span>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -419,7 +469,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   </td>
                 </tr>
               )}
-              {items.map((item: any) => {
+              {pagedItems.map((item: any) => {
                 const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
                 return (
                   <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60">
@@ -451,8 +501,30 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             </tbody>
           </table>
         </div>
+        {items.length > BILLING_PAGE_SIZE && (
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-800">
+            <button
+              type="button"
+              disabled={billingPage <= 1}
+              onClick={() => setBillingPage((p) => Math.max(1, p - 1))}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold disabled:opacity-40"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              disabled={billingPage >= billingTotalPages}
+              onClick={() => setBillingPage((p) => Math.min(billingTotalPages, p + 1))}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold disabled:opacity-40"
+            >
+              Siguiente
+            </button>
+          </div>
+        )}
       </div>
+      )}
 
+      {activeView === 'payments' && (
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="text-white font-black">Pagos / Recibos</div>
@@ -471,7 +543,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <div className="py-4 text-slate-500 text-sm">No hay pagos cargados para el filtro actual.</div>
         ) : (
           <div className="space-y-2">
-            {payments.slice(0, 25).map((p) => (
+            <div className="text-xs text-slate-400 pb-1">Página {paymentsPage}/{paymentsTotalPages} • {payments.length} recibo(s)</div>
+            {pagedPayments.map((p) => (
               <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3">
                 <div className="min-w-0">
                   <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
@@ -482,12 +555,30 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
               </div>
             ))}
-            {payments.length > 25 && (
-              <div className="text-xs text-slate-500 pt-1">Mostrando 25 de {payments.length}.</div>
+            {payments.length > PAYMENTS_PAGE_SIZE && (
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={paymentsPage <= 1}
+                  onClick={() => setPaymentsPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  disabled={paymentsPage >= paymentsTotalPages}
+                  onClick={() => setPaymentsPage((p) => Math.min(paymentsTotalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
+              </div>
             )}
           </div>
         )}
       </div>
+      )}
 
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
