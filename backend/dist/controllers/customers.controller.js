@@ -1654,10 +1654,13 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         { key: 'cliente', width: 44 },
         { key: 'vendedor', width: 24 },
         { key: 'zona', width: 18 },
+        { key: 'pedidos', width: 15 },
+        { key: 'importada', width: 17 },
+        { key: 'recibos', width: 17 },
         { key: 'saldo', width: 16 },
         { key: 'movs', width: 13 }
     ];
-    const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Saldo final', 'Movimientos'];
+    const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Pedidos', 'Cuenta importada', 'Recibos sistema', 'Saldo final', 'Movimientos'];
     const headerRow = ws.addRow(headerTitles);
     headerRow.height = 26;
     headerRow.eachCell((cell, colNumber) => {
@@ -1690,9 +1693,12 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
             : '') ||
             (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '');
         const zona = r.account_zone != null ? String(r.account_zone).trim() : '';
+        const pedidos = Number(r.totalCargosPendiente) || 0;
+        const importada = Number(r.multimediaSaldo) || 0;
+        const recibosSistema = Number(r.totalPagos) || 0;
         const saldoFinal = Number(r.saldoPendiente) || 0;
         const movs = (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
-        const dataRow = ws.addRow([code, displayName, vendedor, zona, saldoFinal, movs]);
+        const dataRow = ws.addRow([code, displayName, vendedor, zona, pedidos, importada, recibosSistema, saldoFinal, movs]);
         const zebra = rowNum % 2 === 0;
         dataRow.eachCell((cell, colNumber) => {
             cell.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
@@ -1714,10 +1720,10 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
                 horizontal: colNumber >= 5 ? 'right' : 'left',
                 wrapText: colNumber === 2 || colNumber === 3
             };
-            if (colNumber === 5) {
+            if ([5, 6, 7, 8].includes(colNumber)) {
                 cell.numFmt = '#,##0.00';
             }
-            if (colNumber === 6) {
+            if (colNumber === 9) {
                 cell.numFmt = '0';
             }
         });
@@ -1726,7 +1732,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     if (mergedList.length > 0) {
         ws.autoFilter = {
             from: { row: 1, column: 1 },
-            to: { row: mergedList.length + 1, column: 6 }
+            to: { row: mergedList.length + 1, column: 9 }
         };
     }
     const out = yield workbook.xlsx.writeBuffer();
