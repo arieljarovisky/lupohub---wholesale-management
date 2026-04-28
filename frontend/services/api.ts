@@ -861,6 +861,39 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  getCustomerFinancialSummary: async (customerId: string): Promise<{
+    customerId: string;
+    customerName: string;
+    sellerName: string | null;
+    totalFacturas: number;
+    totalNc: number;
+    totalRecibos: number;
+    saldoPendiente: number;
+    movements: Array<{
+      fecha: string | null;
+      tipo: 'FACTURA' | 'NC' | 'RECIBO';
+      comprobante: string;
+      orderId: string | null;
+      debe: number;
+      haber: number;
+      detalle: string;
+    }>;
+  }> => {
+    return await request(`/customers/${encodeURIComponent(customerId)}/financial-summary`, 'GET');
+  },
+
+  exportCustomerFinancialSummary: async (customerId: string): Promise<void> => {
+    const blob = await getBlob(`/customers/${encodeURIComponent(customerId)}/financial-summary/export`, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saldo_facturas_recibos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Perfil del cliente directo (solo cuando el usuario tiene rol CUSTOMER). */
   getMyCustomer: async (): Promise<Customer | null> => {
     try {

@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportCustomerDetailXlsx = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
+exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
@@ -1961,6 +1961,226 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
     }
 });
 exports.clearDispatchedPendingsForCustomer = clearDispatchedPendingsForCustomer;
+function buildCustomerFinancialSummary(customerId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const movements = (yield (0, db_1.query)(`
+    SELECT
+      m.fecha,
+      m.tipo,
+      m.comprobante,
+      m.order_id AS orderId,
+      m.debe,
+      m.haber,
+      m.detalle
+    FROM (
+      SELECT
+        COALESCE(i.created_at, o.date) AS fecha,
+        'FACTURA' AS tipo,
+        CONCAT(
+          CASE
+            WHEN i.cbte_tipo = 1 THEN 'A '
+            WHEN i.cbte_tipo = 6 THEN 'B '
+            ELSE ''
+          END,
+          LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+          '-',
+          LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+        ) AS comprobante,
+        o.id AS order_id,
+        ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+        0 AS haber,
+        CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
+      FROM invoices i
+      JOIN orders o ON o.id = i.order_id
+      WHERE o.customer_id = ?
+
+      UNION ALL
+
+      SELECT
+        cn.created_at AS fecha,
+        'NC' AS tipo,
+        CONCAT(
+          CASE
+            WHEN cn.cbte_tipo = 3 THEN 'NC A '
+            WHEN cn.cbte_tipo = 8 THEN 'NC B '
+            ELSE 'NC '
+          END,
+          LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+          '-',
+          LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+        ) AS comprobante,
+        cn.order_id AS order_id,
+        0 AS debe,
+        ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
+        CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
+      FROM credit_notes cn
+      JOIN orders o ON o.id = cn.order_id
+      WHERE o.customer_id = ?
+
+      UNION ALL
+
+      SELECT
+        p.date AS fecha,
+        'RECIBO' AS tipo,
+        COALESCE(p.receipt_number, '') AS comprobante,
+        p.order_id AS order_id,
+        0 AS debe,
+        ROUND(COALESCE(p.amount, 0), 2) AS haber,
+        COALESCE(p.notes, '') AS detalle
+      FROM payments p
+      WHERE p.customer_id = ?
+    ) m
+    ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
+    `, [customerId, customerId, customerId]));
+        let totalFacturas = 0;
+        let totalNc = 0;
+        let totalRecibos = 0;
+        const mapped = movements.map((m) => {
+            var _a, _b, _c, _d;
+            const debe = Number(m.debe || 0);
+            const haber = Number(m.haber || 0);
+            if (m.tipo === 'FACTURA')
+                totalFacturas += debe;
+            if (m.tipo === 'NC')
+                totalNc += haber;
+            if (m.tipo === 'RECIBO')
+                totalRecibos += haber;
+            return {
+                fecha: (_a = m.fecha) !== null && _a !== void 0 ? _a : null,
+                tipo: m.tipo,
+                comprobante: (_b = m.comprobante) !== null && _b !== void 0 ? _b : '',
+                orderId: (_c = m.orderId) !== null && _c !== void 0 ? _c : null,
+                debe,
+                haber,
+                detalle: (_d = m.detalle) !== null && _d !== void 0 ? _d : ''
+            };
+        });
+        totalFacturas = Math.round(totalFacturas * 100) / 100;
+        totalNc = Math.round(totalNc * 100) / 100;
+        totalRecibos = Math.round(totalRecibos * 100) / 100;
+        const saldoPendiente = Math.round(Math.max(0, totalFacturas - totalNc - totalRecibos) * 100) / 100;
+        return {
+            totalFacturas,
+            totalNc,
+            totalRecibos,
+            saldoPendiente,
+            movements: mapped
+        };
+    });
+}
+/** Saldo por cliente desde facturas/NC y recibos (sin cuenta importada). */
+const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const authUser = req.user;
+        if (!authUser || !roleCanViewSaldos(authUser.role)) {
+            return res.status(403).json({ message: 'Sin permiso para ver saldos del cliente' });
+        }
+        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        if (!customerId)
+            return res.status(400).json({ message: 'ID de cliente requerido' });
+        const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       WHERE c.id = ?`, [customerId]);
+        if (!customer)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (authUser.role === 'SELLER' && customer.seller_id !== authUser.id) {
+            return res.status(403).json({ message: 'Solo podés ver clientes asignados a tu usuario' });
+        }
+        const summary = yield buildCustomerFinancialSummary(customerId);
+        return res.json(Object.assign({ customerId: customer.id, customerName: (_c = (_b = customer.business_name) !== null && _b !== void 0 ? _b : customer.name) !== null && _c !== void 0 ? _c : 'Cliente', sellerName: (_e = (_d = customer.seller_name) !== null && _d !== void 0 ? _d : customer.seller_id) !== null && _e !== void 0 ? _e : null }, summary));
+    }
+    catch (error) {
+        console.error('getCustomerFinancialSummary:', error);
+        return res.status(500).json({ message: 'Error obteniendo saldo de facturas y recibos' });
+    }
+});
+exports.getCustomerFinancialSummary = getCustomerFinancialSummary;
+/** Exporta Excel del saldo por facturas/NC/recibos para un cliente. */
+const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const authUser = req.user;
+        if (!authUser || !roleCanViewSaldos(authUser.role)) {
+            return res.status(403).json({ message: 'Sin permiso para exportar saldo del cliente' });
+        }
+        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        if (!customerId)
+            return res.status(400).json({ message: 'ID de cliente requerido' });
+        const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       WHERE c.id = ?`, [customerId]);
+        if (!customer)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (authUser.role === 'SELLER' && customer.seller_id !== authUser.id) {
+            return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
+        }
+        const summary = yield buildCustomerFinancialSummary(customerId);
+        const wb = new exceljs_1.default.Workbook();
+        wb.creator = 'LupoHub';
+        wb.created = new Date();
+        const ws = wb.addWorksheet('Saldo cliente');
+        ws.columns = [
+            { header: 'Sección', key: 'section', width: 20 },
+            { header: 'Fecha', key: 'fecha', width: 14 },
+            { header: 'Tipo', key: 'tipo', width: 12 },
+            { header: 'Comprobante', key: 'comprobante', width: 24 },
+            { header: 'Pedido', key: 'orderId', width: 18 },
+            { header: 'Debe', key: 'debe', width: 14 },
+            { header: 'Haber', key: 'haber', width: 14 },
+            { header: 'Saldo', key: 'saldo', width: 14 },
+            { header: 'Detalle', key: 'detalle', width: 42 }
+        ];
+        ws.getRow(1).font = { bold: true };
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+        ws.addRow({
+            section: 'CLIENTE',
+            comprobante: customer.id,
+            detalle: `${customer.business_name || customer.name || 'Cliente'} | Vendedor: ${customer.seller_name || customer.seller_id || 'N/A'}`
+        });
+        ws.addRow({
+            section: 'RESUMEN',
+            tipo: 'SALDO',
+            debe: summary.totalFacturas,
+            haber: summary.totalNc + summary.totalRecibos,
+            saldo: summary.saldoPendiente,
+            detalle: `Facturas: ${summary.totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | NC: ${summary.totalNc.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${summary.totalRecibos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        });
+        ws.addRow({});
+        let running = 0;
+        for (const m of summary.movements) {
+            running = Math.round((running + m.debe - m.haber) * 100) / 100;
+            ws.addRow({
+                section: 'MOVIMIENTO',
+                fecha: m.fecha ? new Date(m.fecha) : null,
+                tipo: m.tipo,
+                comprobante: m.comprobante,
+                orderId: (_b = m.orderId) !== null && _b !== void 0 ? _b : '',
+                debe: m.debe,
+                haber: m.haber,
+                saldo: running,
+                detalle: m.detalle
+            });
+        }
+        ws.getColumn('B').numFmt = 'dd/mm/yyyy';
+        ws.getColumn('F').numFmt = '#,##0.00';
+        ws.getColumn('G').numFmt = '#,##0.00';
+        ws.getColumn('H').numFmt = '#,##0.00';
+        const out = yield wb.xlsx.writeBuffer();
+        const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
+        const filename = `saldo_facturas_recibos_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buf);
+    }
+    catch (error) {
+        console.error('exportCustomerFinancialSummaryXlsx:', error);
+        return res.status(500).json({ message: 'Error exportando saldo de facturas y recibos' });
+    }
+});
+exports.exportCustomerFinancialSummaryXlsx = exportCustomerFinancialSummaryXlsx;
 /** Exporta en Excel el detalle del cliente como un único sistema de movimientos, filtrable por fecha. */
 const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j;

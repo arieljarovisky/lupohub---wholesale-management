@@ -139,6 +139,29 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     };
   }, [selectedCustomer?.id, canViewSaldos]);
 
+  useEffect(() => {
+    if (!selectedCustomer?.id || !canViewSaldos) {
+      setCustomerFinancialSummary(null);
+      return;
+    }
+    let cancelled = false;
+    setCustomerFinancialSummaryLoading(true);
+    api
+      .getCustomerFinancialSummary(selectedCustomer.id)
+      .then((data) => {
+        if (!cancelled) setCustomerFinancialSummary(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerFinancialSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomerFinancialSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.id, canViewSaldos]);
+
   // Mantiene la vista de cliente al refrescar la página.
   useEffect(() => {
     try {
@@ -207,6 +230,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
+  const [customerFinancialSummary, setCustomerFinancialSummary] = useState<Awaited<ReturnType<typeof api.getCustomerFinancialSummary>> | null>(null);
+  const [customerFinancialSummaryLoading, setCustomerFinancialSummaryLoading] = useState(false);
+  const [exportingCustomerFinancialSummary, setExportingCustomerFinancialSummary] = useState(false);
 
   /** Filtro por vendedor (solo ADMIN): '' = todos, '__none__' = sin vendedor, o id de usuario SELLER */
   const [sellerFilterId, setSellerFilterId] = useState<string>('');
@@ -822,6 +848,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
            </div>
            <div className="flex items-center gap-2">
              <button
+               onClick={async () => {
+                 if (!selectedCustomer) return;
+                 try {
+                   setExportingCustomerFinancialSummary(true);
+                   await api.exportCustomerFinancialSummary(selectedCustomer.id);
+                   showToast('success', 'Excel descargado con saldo de facturas y recibos.');
+                 } catch (err: any) {
+                   showToast('error', err?.message || 'Error al exportar saldo de facturas y recibos.');
+                 } finally {
+                   setExportingCustomerFinancialSummary(false);
+                 }
+               }}
+               className="px-4 py-2 bg-indigo-900/40 border border-indigo-700/50 rounded-xl text-sm font-bold text-indigo-200 hover:bg-indigo-900/60 hover:text-white transition flex items-center gap-2 disabled:opacity-60"
+               title="Exportar Excel de saldo por facturas, notas de crédito y recibos"
+               disabled={exportingCustomerFinancialSummary}
+             >
+               {exportingCustomerFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
+               Saldo facturas/recibos
+             </button>
+             <button
                onClick={() => {
                  setCustomerDetailExportFrom('');
                  setCustomerDetailExportTo('');
@@ -1203,6 +1249,99 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 })}
               </p>
             </div>
+          </div>
+        )}
+
+        {canViewSaldos && (
+          <div className="mt-6 rounded-3xl border border-indigo-500/30 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 p-6 shadow-xl shadow-black/30 ring-1 ring-indigo-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-indigo-100/90">
+                  <Receipt size={22} className="text-indigo-400 shrink-0" aria-hidden />
+                  <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo facturas y recibos</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
+                  Se calcula como total facturado menos notas de crédito menos recibos registrados en facturación.
+                </p>
+                {customerFinancialSummaryLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 size={14} className="animate-spin" /> Cargando movimientos de facturación...
+                  </div>
+                ) : customerFinancialSummary ? (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
+                    <span>
+                      Facturas: $
+                      {customerFinancialSummary.totalFacturas.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span className="text-cyan-500/90">
+                      - NC: $
+                      {customerFinancialSummary.totalNc.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span className="text-emerald-500/90">
+                      - Recibos: $
+                      {customerFinancialSummary.totalRecibos.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">No hay facturas ni recibos para este cliente.</p>
+                )}
+              </div>
+              <p className="text-3xl font-black text-white tabular-nums sm:text-right shrink-0">
+                $
+                {Number(customerFinancialSummary?.saldoPendiente || 0).toLocaleString('es-AR', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                })}
+              </p>
+            </div>
+            {customerFinancialSummary && customerFinancialSummary.movements.length > 0 && (
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-700/70">
+                <table className="min-w-full text-xs text-left">
+                  <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 bg-slate-950/90">
+                    <tr>
+                      <th className="px-3 py-2">Fecha</th>
+                      <th className="px-3 py-2">Tipo</th>
+                      <th className="px-3 py-2">Comprobante</th>
+                      <th className="px-3 py-2">Pedido</th>
+                      <th className="px-3 py-2 text-right">Debe</th>
+                      <th className="px-3 py-2 text-right">Haber</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-300 divide-y divide-slate-800/80">
+                    {[...customerFinancialSummary.movements]
+                      .sort((a, b) => {
+                        const da = a.fecha ? new Date(a.fecha).getTime() : 0;
+                        const db = b.fecha ? new Date(b.fecha).getTime() : 0;
+                        return db - da;
+                      })
+                      .slice(0, 8)
+                      .map((m, idx) => (
+                        <tr key={`${m.tipo}-${m.comprobante}-${m.fecha}-${idx}`} className="hover:bg-slate-800/30">
+                          <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{m.fecha ? formatLedgerDate(m.fecha) : '-'}</td>
+                          <td className="px-3 py-1.5">{m.tipo}</td>
+                          <td className="px-3 py-1.5 font-mono text-[11px]">{m.comprobante || '-'}</td>
+                          <td className="px-3 py-1.5">{m.orderId || '-'}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {m.debe > 0 ? `$${Number(m.debe).toLocaleString('es-AR')}` : '-'}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {m.haber > 0 ? `$${Number(m.haber).toLocaleString('es-AR')}` : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

@@ -28,6 +28,8 @@ router.post('/import', auth_1.authMiddleware, customers_controller_1.importCusto
 router.post('/bulk-update-cuit', auth_1.authMiddleware, customers_controller_1.bulkUpdateCuit);
 router.post('/:id/attach-user', auth_1.authMiddleware, customers_controller_1.attachUserToCustomer);
 router.post('/:id/clear-dispatched-pendings', auth_1.authMiddleware, customers_controller_1.clearDispatchedPendingsForCustomer);
+router.get('/:id/financial-summary', auth_1.authMiddleware, customers_controller_1.getCustomerFinancialSummary);
+router.get('/:id/financial-summary/export', auth_1.authMiddleware, customers_controller_1.exportCustomerFinancialSummaryXlsx);
 router.get('/:id/export-detalle', auth_1.authMiddleware, customers_controller_1.exportCustomerDetailXlsx);
 router.get('/export-detalle/:id', auth_1.authMiddleware, customers_controller_1.exportCustomerDetailXlsx);
 router.patch('/:id', auth_1.authMiddleware, customers_controller_1.updateCustomer);
