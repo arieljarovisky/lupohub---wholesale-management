@@ -3,7 +3,7 @@ import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRig
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
-import { labelTalle } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
@@ -179,7 +179,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of initialOrder.items || []) {
-      const sizeCode = String((item as any).sizeCode || '').trim();
+      const sizeCodeRaw = String((item as any).sizeCode || '').trim();
+      const sizeCode = codigoTalleParaSku(sizeCodeRaw) || sizeCodeRaw;
       const colorName = String((item as any).colorName || '').trim() || 'Color';
       const rawSku = String((item as any).sku || '').trim();
       const price = Number(item.priceAtMoment || 0);
@@ -288,8 +289,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
-          variantBySize[v.size_code] = v.variant_id;
-          stockBySize[v.size_code] = Math.max(0, Number(v.stock ?? 0));
+          const sizeCode = codigoTalleParaSku(v.size_code) || String(v.size_code || '').trim();
+          variantBySize[sizeCode] = v.variant_id;
+          stockBySize[sizeCode] = Math.max(0, Number(v.stock ?? 0));
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -465,10 +467,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
-          variantBySize[v.size_code] = v.variant_id;
+          const sizeCode = codigoTalleParaSku(v.size_code) || String(v.size_code || '').trim();
+          variantBySize[sizeCode] = v.variant_id;
           // Aceptar stock en snake_case (API) o camelCase
           const st = (v as any).stock ?? (v as any).stock_quantity;
-          stockBySize[v.size_code] = Math.max(0, Number(st ?? 0));
+          stockBySize[sizeCode] = Math.max(0, Number(st ?? 0));
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
