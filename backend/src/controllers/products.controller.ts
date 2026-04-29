@@ -452,8 +452,8 @@ export const patchStock = async (req: any, res: any) => {
 
 export const updateProduct = async (req: any, res: any) => {
   const { id } = req.params;
-  const { name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize, mayoristaPackSize } = req.body as {
-    name?: string; category?: string; base_price?: number; description?: string;
+  const { sku, name, category, base_price, description, mercadoLibrePackSize, tiendaNubePackSize, mayoristaPackSize } = req.body as {
+    sku?: string; name?: string; category?: string; base_price?: number; description?: string;
     mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number;
   };
   if (!id) return res.status(400).json({ message: 'ID inv?lido' });
@@ -463,6 +463,7 @@ export const updateProduct = async (req: any, res: any) => {
     const mayPack = mayoristaPackSize != null ? Math.max(1, Math.floor(Number(mayoristaPackSize))) : null;
     await execute(
       `UPDATE products SET 
+         sku = COALESCE(?, sku),
          name = COALESCE(?, name),
          category = COALESCE(?, category),
          base_price = COALESCE(?, base_price),
@@ -471,7 +472,7 @@ export const updateProduct = async (req: any, res: any) => {
          tienda_nube_pack_size = COALESCE(?, tienda_nube_pack_size),
          mayorista_pack_size = COALESCE(?, mayorista_pack_size)
        WHERE id = ?`,
-      [name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, mayPack, id]
+      [sku != null ? String(sku).trim() : null, name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, mayPack, id]
     );
     const updated = await get(`SELECT id, sku, name, category, base_price, description,
       COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
@@ -481,6 +482,9 @@ export const updateProduct = async (req: any, res: any) => {
     res.json(updated);
   } catch (error) {
     console.error(error);
+    if ((error as any)?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ya existe un artículo con ese SKU' });
+    }
     res.status(500).json({ message: 'Error actualizando producto' });
   }
 };

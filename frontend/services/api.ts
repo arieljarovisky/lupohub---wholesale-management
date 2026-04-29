@@ -384,6 +384,7 @@ export const api = {
   
   updateProduct: async (product: Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number }): Promise<Product> => {
     const payload: any = {
+      sku: product.sku,
       name: product.name,
       category: product.category,
       base_price: product.price,
