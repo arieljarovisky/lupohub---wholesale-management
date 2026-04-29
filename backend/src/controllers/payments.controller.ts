@@ -187,6 +187,8 @@ export const listPayments = async (req: any, res: Response) => {
       .map((r) => ({
         id: `mm-${r.customer_id}-${String(r.line_order ?? 'x')}-${normalizeDate(r.line_date)}-${normalizeNumber(r.numero)}`,
         customerId: r.customer_id,
+        source: 'imported',
+        importedLineOrder: Number(r.line_order) || 0,
         sellerId: r.seller_id ?? undefined,
         sellerName: r.seller_name ?? undefined,
         orderId: undefined,
@@ -210,6 +212,58 @@ export const listPayments = async (req: any, res: Response) => {
   } catch (e: any) {
     console.error('listPayments:', e);
     res.status(500).json({ message: 'Error listando pagos', detail: e?.message });
+  }
+};
+
+/** Editar fecha de un recibo histórico importado (customer_multimedia_entries tipo REC*). */
+export const updateImportedPaymentDate = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const customerId = String(req.body?.customerId || '').trim();
+    const importedLineOrder = Number(req.body?.importedLineOrder);
+    const nextDate = String(req.body?.date || '').trim();
+
+    if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
+    if (!Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+      return res.status(400).json({ message: 'Falta importedLineOrder válido' });
+    }
+    if (!nextDate || !/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      return res.status(400).json({ message: 'Fecha inválida. Formato esperado: YYYY-MM-DD' });
+    }
+
+    const cust = await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés editar recibos de tus clientes' });
+    }
+
+    const entry = await get(
+      `SELECT customer_id, line_order, tipo
+       FROM customer_multimedia_entries
+       WHERE customer_id = ? AND line_order = ?
+       LIMIT 1`,
+      [customerId, importedLineOrder]
+    );
+    if (!entry) return res.status(404).json({ message: 'Recibo importado no encontrado' });
+    if (!String(entry.tipo || '').trim().toUpperCase().startsWith('REC')) {
+      return res.status(400).json({ message: 'La línea indicada no es un recibo importado' });
+    }
+
+    await execute(
+      `UPDATE customer_multimedia_entries
+       SET line_date = ?
+       WHERE customer_id = ? AND line_order = ?`,
+      [nextDate, customerId, importedLineOrder]
+    );
+
+    return res.json({ ok: true, customerId, importedLineOrder, date: nextDate });
+  } catch (e: any) {
+    console.error('updateImportedPaymentDate:', e);
+    return res.status(500).json({ message: 'Error actualizando fecha del recibo importado', detail: e?.message });
   }
 };
 

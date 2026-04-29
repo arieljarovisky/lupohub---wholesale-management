@@ -245,6 +245,8 @@ export interface PriceList {
 /** Pago / recibo cargado para un cliente (cuenta corriente). */
 export interface Payment {
   id: string;
+  source?: 'system' | 'imported';
+  importedLineOrder?: number;
   customerId: string;
   customerBusinessName?: string;
   sellerId?: string;

@@ -599,10 +599,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     type="button"
                     className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800"
                     onClick={async () => {
-                      if (String(p.id || '').startsWith('mm-')) {
-                        showToast('error', 'Este recibo es importado histórico y no se puede editar desde acá.');
-                        return;
-                      }
                       const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
                       if (!next) return;
                       const date = next.trim();
@@ -611,7 +607,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         return;
                       }
                       try {
-                        await api.updatePaymentDate(p.id, date);
+                        if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
+                          await api.updateImportedPaymentDate({
+                            customerId: p.customerId,
+                            importedLineOrder: p.importedLineOrder,
+                            date
+                          });
+                        } else {
+                          await api.updatePaymentDate(p.id, date);
+                        }
                         showToast('success', 'Fecha del recibo actualizada.');
                         await loadPayments();
                       } catch (err: any) {
