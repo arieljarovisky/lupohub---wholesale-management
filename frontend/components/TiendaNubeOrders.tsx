@@ -311,13 +311,16 @@ const TiendaNubeOrders: React.FC = () => {
   const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
     if (order.hasExpressShipping === true) return true;
     const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
-    return /\bexpress\b|\bexpr[eé]s\b/.test(blob);
+    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
   };
 
   const openReceiptForSignature = (order: TiendaNubeOrder) => {
     const html = buildTiendaNubeReceiptHtml(order);
     const w = window.open('', '_blank');
-    if (!w) return;
+    if (!w) {
+      window.alert('El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+      return;
+    }
     w.document.write(html);
     w.document.close();
   };
@@ -692,20 +695,18 @@ const TiendaNubeOrders: React.FC = () => {
 
                     {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
-                      {hasExpressShipping(order) && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openReceiptForSignature(order);
-                          }}
-                          className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
-                          title="Generar recibo PDF para firma (solo envío express)"
-                        >
-                          <FileText size={14} />
-                          Recibo PDF
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReceiptForSignature(order);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
+                        title="Generar recibo PDF para firma"
+                      >
+                        <FileText size={14} />
+                        Recibo PDF
+                      </button>
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
                         <p className="text-xs text-slate-500">#{order.number}</p>

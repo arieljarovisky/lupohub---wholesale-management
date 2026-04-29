@@ -131,7 +131,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingProductGroupKey, setEditingProductGroupKey] = useState<string | null>(null);
-  const [editProductForm, setEditProductForm] = useState<{ name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string; mayoristaPackSize: string }>({ name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1', mayoristaPackSize: '1' });
+  const [editProductForm, setEditProductForm] = useState<{ sku: string; name: string; category: string; base_price: string; description: string; mercadoLibrePackSize: string; tiendaNubePackSize: string; mayoristaPackSize: string }>({ sku: '', name: '', category: 'General', base_price: '', description: '', mercadoLibrePackSize: '1', tiendaNubePackSize: '1', mayoristaPackSize: '1' });
   const [loadingEditProduct, setLoadingEditProduct] = useState(false);
   const [savingEditProduct, setSavingEditProduct] = useState(false);
 
@@ -1995,6 +1995,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     api.getProductById(editingProductId).then((p) => {
       if (p) {
         setEditProductForm({
+          sku: p.sku || '',
           name: p.name || '',
           category: p.category || 'General',
           base_price: String(p.base_price ?? ''),
@@ -2029,11 +2030,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const handleSaveEditProduct = async () => {
     if (!editingProductId) return;
+    const sku = editProductForm.sku.trim();
     const name = editProductForm.name.trim();
     const base_price = parseFloat(editProductForm.base_price);
     const mlPack = parseInt(editProductForm.mercadoLibrePackSize, 10);
     const tnPack = parseInt(editProductForm.tiendaNubePackSize, 10);
     const mayPack = parseInt(editProductForm.mayoristaPackSize, 10);
+    if (!sku) {
+      showToast('error', 'El SKU es obligatorio');
+      return;
+    }
     if (!name) {
       showToast('error', 'El nombre es obligatorio');
       return;
@@ -2046,6 +2052,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     try {
       await api.updateProduct({
         id: editingProductId,
+        sku,
         name,
         category: editProductForm.category || 'General',
         price: base_price,
@@ -3404,6 +3411,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 </div>
               ) : (
                 <>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">SKU</label>
+                    <input
+                      type="text"
+                      value={editProductForm.sku}
+                      onChange={(e) => setEditProductForm(f => ({ ...f, sku: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
+                      placeholder="Código del artículo"
+                    />
+                  </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nombre</label>
                     <input

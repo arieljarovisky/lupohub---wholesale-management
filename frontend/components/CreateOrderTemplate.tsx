@@ -3,7 +3,7 @@ import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRig
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
-import { labelTalle } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { useNotification } from '../context/NotificationContext';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
@@ -39,14 +39,24 @@ interface TemplateRow {
 }
 
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
-  const direct = String(value ?? '').trim();
+  const directRaw = String(value ?? '').trim();
+  const direct = codigoTalleParaSku(directRaw) || directRaw;
   if (direct) return direct;
   const sku = String(skuRaw ?? '').trim();
   if (!sku) return 'U';
   const parts = sku.split('-').filter(Boolean);
-  if (parts.length >= 2) return String(parts[parts.length - 2]).trim() || 'U';
+  if (parts.length >= 2) {
+    const fromSku = String(parts[parts.length - 2]).trim();
+    return codigoTalleParaSku(fromSku) || fromSku || 'U';
+  }
   return 'U';
 }
+
+const canonicalSizeCode = (value: unknown): string => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  return codigoTalleParaSku(raw) || raw;
+};
 
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
@@ -367,6 +377,31 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }));
   };
 
+  /** Compatibilidad con borradores viejos: talla guardada como letra/nombre en vez de código numérico. */
+  const getVariantIdBySizeCompat = (row: TemplateRow, sizeCode: string): string | undefined => {
+    const direct = row.variantBySize?.[sizeCode];
+    if (direct) return direct;
+    const target = canonicalSizeCode(sizeCode);
+    for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
+      const k = canonicalSizeCode(key);
+      if (!k || !variantId) continue;
+      if (k === target) return variantId;
+    }
+    return undefined;
+  };
+
+  const getStockBySizeCompat = (row: TemplateRow, sizeCode: string): number | undefined => {
+    const direct = row.stockBySize?.[sizeCode];
+    if (direct != null) return Number(direct);
+    const target = canonicalSizeCode(sizeCode);
+    for (const [key, stock] of Object.entries(row.stockBySize || {})) {
+      const k = canonicalSizeCode(key);
+      if (!k) continue;
+      if (k === target) return Number(stock);
+    }
+    return undefined;
+  };
+
   /** Aplicar la misma cantidad a todos los talles de la fila. */
   const setRowAllQuantities = (rowId: string, value: number) => {
     const num = Math.max(0, Math.floor(Number(value)) || 0);
@@ -529,10 +564,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const items: Array<{ variantId: string; quantity: number; priceAtMoment: number; isBackorder: boolean }> = [];
     for (const r of rows) {
       for (const [sizeCode, qty] of Object.entries(r.quantitiesBySize)) {
-        if (qty <= 0 || !r.variantBySize[sizeCode]) continue;
-        const stock = Number(r.stockBySize?.[sizeCode] ?? 0);
+        const variantId = getVariantIdBySizeCompat(r, sizeCode);
+        if (qty <= 0 || !variantId) continue;
+        const stock = Number(getStockBySizeCompat(r, sizeCode) ?? 0);
         items.push({
-          variantId: r.variantBySize[sizeCode],
+          variantId,
           quantity: qty,
           priceAtMoment: r.price,
           isBackorder: qty > stock
@@ -599,7 +635,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const hasExceededStock = useMemo(() => {
     return rows.some(r =>
       Object.entries(r.quantitiesBySize).some(([sizeCode, qty]) => {
-        const stock = r.stockBySize?.[sizeCode];
+        const stock = getStockBySizeCompat(r, sizeCode);
         return stock != null && qty > stock;
       })
     );
@@ -918,8 +954,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               </div>
                             </td>
                             {sizeColumns.map(s => {
-                              const hasVariant = !!row.variantBySize[s.code];
-                              const stock = row.stockBySize?.[s.code];
+                              const hasVariant = !!getVariantIdBySizeCompat(row, s.code);
+                              const stock = getStockBySizeCompat(row, s.code);
+                            {sizeColumns.map(s => {
+                              const hasVariant = !!getVariantIdBySizeCompat(row, s.code);
+                              const stock = getStockBySizeCompat(row, s.code);
                               const noStock = stock != null && stock <= 0;
                               const qtyVal = row.quantitiesBySize[s.code] ?? 0;
                               const exceeds = stock != null && qtyVal > stock;

@@ -384,6 +384,7 @@ export const api = {
   
   updateProduct: async (product: Product & { mercadoLibrePackSize?: number; tiendaNubePackSize?: number; mayoristaPackSize?: number }): Promise<Product> => {
     const payload: any = {
+      sku: product.sku,
       name: product.name,
       category: product.category,
       base_price: product.price,
@@ -1788,12 +1789,19 @@ export const api = {
     sellerId?: string | null;
     orderId?: string | null;
     invoiceId?: string | null;
+    invoiceIds?: string[];
     receiptNumber: string;
     date: string;
     amount: number;
     notes?: string;
   }): Promise<import('../types').Payment> => {
     return await request<any>(`/payments`, 'POST', payload) as any;
+  },
+  updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
+    return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;
+  },
+  updateImportedPaymentDate: async (payload: { customerId: string; importedLineOrder: number; date: string }): Promise<{ ok: boolean; customerId: string; importedLineOrder: number; date: string }> => {
+    return await request<any>(`/payments/imported/date`, 'PATCH', payload) as any;
   },
 
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---

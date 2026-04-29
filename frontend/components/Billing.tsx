@@ -58,7 +58,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
-  const [payInvoiceId, setPayInvoiceId] = useState<string>('');
+  const [payInvoiceIds, setPayInvoiceIds] = useState<string[]>([]);
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
@@ -166,6 +166,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     if (!payCustomerId || payCustomerId === 'ALL') return [];
     return facturaOptions.filter((f) => f.customerId === payCustomerId);
   }, [items, payCustomerId]);
+  const facturaOptionById = useMemo(
+    () => new Map(facturaOptions.map((f) => [f.invoiceId, f.label] as const)),
+    [facturaOptions]
+  );
 
   const formatDate = (d: any) => {
     if (!d) return '';
@@ -379,7 +383,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               setPayReceipt('');
               setPayAmount('');
               setPayNotes('');
-              setPayInvoiceId('');
+              setPayInvoiceIds([]);
               const cid = customerId !== 'ALL' ? customerId : 'ALL';
               setPayCustomerId(cid);
               const pre = cid !== 'ALL' ? customers.find((c) => c.id === cid) : undefined;
@@ -584,8 +588,46 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   <div className="text-xs text-slate-400">
                     Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
                   </div>
+                  {Array.isArray(p.invoiceIds) && p.invoiceIds.length > 0 && (
+                    <div className="text-[11px] text-slate-500 truncate">
+                      Facturas: {p.invoiceIds.map((id) => facturaOptionById.get(id) || id).join(' | ')}
+                    </div>
+                  )}
                 </div>
-                <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800"
+                    onClick={async () => {
+                      const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
+                      if (!next) return;
+                      const date = next.trim();
+                      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                        showToast('error', 'Fecha inválida. Usá formato YYYY-MM-DD');
+                        return;
+                      }
+                      try {
+                        if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
+                          await api.updateImportedPaymentDate({
+                            customerId: p.customerId,
+                            importedLineOrder: p.importedLineOrder,
+                            date
+                          });
+                        } else {
+                          await api.updatePaymentDate(p.id, date);
+                        }
+                        showToast('success', 'Fecha del recibo actualizada.');
+                        await loadPayments();
+                      } catch (err: any) {
+                        showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar la fecha');
+                      }
+                    }}
+                    title="Editar fecha del recibo"
+                  >
+                    Editar fecha
+                  </button>
+                  <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
+                </div>
               </div>
             ))}
             {filteredPayments.length > PAYMENTS_PAGE_SIZE && (
@@ -640,7 +682,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     onChange={(e) => {
                       const id = e.target.value;
                       setPayCustomerId(id);
-                      setPayInvoiceId('');
+                      setPayInvoiceIds([]);
                       if (id === 'ALL' || !id) {
                         setPaySellerId('');
                       } else {
@@ -657,24 +699,40 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Factura</label>
-                  <select
-                    value={payInvoiceId}
-                    onChange={(e) => setPayInvoiceId(e.target.value)}
-                    disabled={payCustomerId === 'ALL'}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">
-                      {payCustomerId === 'ALL'
-                        ? '(Elegí un cliente para ver sus facturas)'
-                        : facturaOptionsForPayment.length === 0
-                          ? '(Sin facturas en el listado actual — ampliá fechas o Actualizar)'
-                          : '(Opcional) Seleccionar factura…'}
-                    </option>
-                    {facturaOptionsForPayment.map((f) => (
-                      <option key={f.invoiceId} value={f.invoiceId}>{f.label}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Facturas (múltiple)</label>
+                  <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
+                    {payCustomerId === 'ALL' ? (
+                      <div className="text-xs text-slate-500 px-1 py-1">(Elegí un cliente para ver sus facturas)</div>
+                    ) : facturaOptionsForPayment.length === 0 ? (
+                      <div className="text-xs text-slate-500 px-1 py-1">(Sin facturas en el listado actual — ampliá fechas o Actualizar)</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {facturaOptionsForPayment.map((f) => {
+                          const checked = payInvoiceIds.includes(f.invoiceId);
+                          return (
+                            <label key={f.invoiceId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setPayInvoiceIds((prev) => Array.from(new Set([...prev, f.invoiceId])));
+                                  } else {
+                                    setPayInvoiceIds((prev) => prev.filter((x) => x !== f.invoiceId));
+                                  }
+                                }}
+                                className="accent-emerald-500"
+                              />
+                              <span className="text-xs text-slate-200">{f.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {payInvoiceIds.length > 0 && (
+                    <div className="mt-1 text-[11px] text-slate-400">{payInvoiceIds.length} factura(s) seleccionada(s)</div>
+                  )}
                 </div>
               </div>
 
@@ -720,7 +778,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       amount,
                       notes: payNotes?.trim() || undefined,
                       sellerId: paySellerId || null,
-                      invoiceId: payInvoiceId || null,
+                      invoiceId: payInvoiceIds[0] || null,
+                      invoiceIds: payInvoiceIds,
                       orderId: null,
                     });
                     showToast('success', 'Pago cargado.');

@@ -18,7 +18,17 @@ export const listPayments = async (req: any, res: Response) => {
     const where: string[] = [];
     const params: any[] = [];
     if (customerId) { where.push('p.customer_id = ?'); params.push(customerId); }
-    if (invoiceId) { where.push('p.invoice_id = ?'); params.push(invoiceId); }
+    if (invoiceId) {
+      where.push(`(
+        p.invoice_id = ?
+        OR EXISTS (
+          SELECT 1
+          FROM payment_invoices pi2
+          WHERE pi2.payment_id = p.id AND pi2.invoice_id = ?
+        )
+      )`);
+      params.push(invoiceId, invoiceId);
+    }
     if (orderId) { where.push('p.order_id = ?'); params.push(orderId); }
     if (desde) { where.push('p.date >= ?'); params.push(desde); }
     if (hasta) { where.push('p.date <= ?'); params.push(hasta); }
@@ -37,12 +47,18 @@ export const listPayments = async (req: any, res: Response) => {
         p.receipt_number, p.date, p.amount, p.notes, p.created_at,
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
-        i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde
+        i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
+        GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
       FROM payments p
       JOIN customers c ON c.id = p.customer_id
       LEFT JOIN users u ON u.id = p.seller_id
       LEFT JOIN invoices i ON i.id = p.invoice_id
+      LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
       ${whereSql}
+      GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
+               p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+               c.business_name, c.name, u.name,
+               i.punto_venta, i.cbte_tipo, i.cbte_desde
       ORDER BY p.date DESC, p.created_at DESC
       `,
       params
@@ -54,6 +70,10 @@ export const listPayments = async (req: any, res: Response) => {
       sellerName: r.seller_name ?? undefined,
       orderId: r.order_id ?? undefined,
       invoiceId: r.invoice_id ?? undefined,
+      invoiceIds: String(r.invoice_ids || r.invoice_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
       receiptNumber: r.receipt_number,
       date: r.date,
       amount: Number(r.amount) || 0,
@@ -167,6 +187,8 @@ export const listPayments = async (req: any, res: Response) => {
       .map((r) => ({
         id: `mm-${r.customer_id}-${String(r.line_order ?? 'x')}-${normalizeDate(r.line_date)}-${normalizeNumber(r.numero)}`,
         customerId: r.customer_id,
+        source: 'imported',
+        importedLineOrder: Number(r.line_order) || 0,
         sellerId: r.seller_id ?? undefined,
         sellerName: r.seller_name ?? undefined,
         orderId: undefined,
@@ -193,6 +215,58 @@ export const listPayments = async (req: any, res: Response) => {
   }
 };
 
+/** Editar fecha de un recibo histórico importado (customer_multimedia_entries tipo REC*). */
+export const updateImportedPaymentDate = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const customerId = String(req.body?.customerId || '').trim();
+    const importedLineOrder = Number(req.body?.importedLineOrder);
+    const nextDate = String(req.body?.date || '').trim();
+
+    if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
+    if (!Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+      return res.status(400).json({ message: 'Falta importedLineOrder válido' });
+    }
+    if (!nextDate || !/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      return res.status(400).json({ message: 'Fecha inválida. Formato esperado: YYYY-MM-DD' });
+    }
+
+    const cust = await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés editar recibos de tus clientes' });
+    }
+
+    const entry = await get(
+      `SELECT customer_id, line_order, tipo
+       FROM customer_multimedia_entries
+       WHERE customer_id = ? AND line_order = ?
+       LIMIT 1`,
+      [customerId, importedLineOrder]
+    );
+    if (!entry) return res.status(404).json({ message: 'Recibo importado no encontrado' });
+    if (!String(entry.tipo || '').trim().toUpperCase().startsWith('REC')) {
+      return res.status(400).json({ message: 'La línea indicada no es un recibo importado' });
+    }
+
+    await execute(
+      `UPDATE customer_multimedia_entries
+       SET line_date = ?
+       WHERE customer_id = ? AND line_order = ?`,
+      [nextDate, customerId, importedLineOrder]
+    );
+
+    return res.json({ ok: true, customerId, importedLineOrder, date: nextDate });
+  } catch (e: any) {
+    console.error('updateImportedPaymentDate:', e);
+    return res.status(500).json({ message: 'Error actualizando fecha del recibo importado', detail: e?.message });
+  }
+};
+
 /** Crear pago/recibo. */
 export const createPayment = async (req: any, res: Response) => {
   try {
@@ -206,6 +280,7 @@ export const createPayment = async (req: any, res: Response) => {
       sellerId?: string | null;
       orderId?: string | null;
       invoiceId?: string | null;
+      invoiceIds?: string[];
       receiptNumber?: string;
       date?: string;
       amount?: number;
@@ -233,7 +308,27 @@ export const createPayment = async (req: any, res: Response) => {
       : (body.sellerId ? String(body.sellerId).trim() : null);
     const orderId = body.orderId ? String(body.orderId).trim() : null;
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
+    const invoiceIds = Array.isArray(body.invoiceIds)
+      ? Array.from(new Set(body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)))
+      : [];
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
+
+    if (invoiceId && !invoiceIds.includes(invoiceId)) invoiceIds.unshift(invoiceId);
+    const primaryInvoiceId = invoiceIds[0] || null;
+
+    if (invoiceIds.length > 0) {
+      const rows = await query(
+        `SELECT id, customer_id FROM invoices WHERE id IN (${invoiceIds.map(() => '?').join(',')})`,
+        invoiceIds
+      ) as Array<{ id: string; customer_id: string }>;
+      if (rows.length !== invoiceIds.length) {
+        return res.status(400).json({ message: 'Hay facturas inválidas en la selección del recibo' });
+      }
+      const invalidByCustomer = rows.find((r) => r.customer_id !== customerId);
+      if (invalidByCustomer) {
+        return res.status(400).json({ message: 'Solo podés relacionar facturas del mismo cliente del recibo' });
+      }
+    }
 
     const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
     const existing = await get(
@@ -261,6 +356,7 @@ export const createPayment = async (req: any, res: Response) => {
         sellerId: row.seller_id ?? undefined,
         orderId: row.order_id ?? undefined,
         invoiceId: row.invoice_id ?? undefined,
+        invoiceIds: row.invoice_id ? [row.invoice_id] : [],
         receiptNumber: row.receipt_number,
         date: row.date,
         amount: Number(row.amount) || 0,
@@ -274,8 +370,16 @@ export const createPayment = async (req: any, res: Response) => {
       await execute(
         `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, customerId, sellerId, orderId, invoiceId, receiptNumber, date, amount, notes]
+        [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]
       );
+      if (invoiceIds.length > 0) {
+        for (const invId of invoiceIds) {
+          await execute(
+            `INSERT IGNORE INTO payment_invoices (payment_id, invoice_id) VALUES (?, ?)`,
+            [id, invId]
+          );
+        }
+      }
     } catch (e: any) {
       const dup =
         e?.code === 'ER_DUP_ENTRY' || String(e?.message || '').includes('Duplicate entry');
@@ -304,6 +408,7 @@ export const createPayment = async (req: any, res: Response) => {
             sellerId: rowDup.seller_id ?? undefined,
             orderId: rowDup.order_id ?? undefined,
             invoiceId: rowDup.invoice_id ?? undefined,
+            invoiceIds: rowDup.invoice_id ? [rowDup.invoice_id] : [],
             receiptNumber: rowDup.receipt_number,
             date: rowDup.date,
             amount: Number(rowDup.amount) || 0,
@@ -316,8 +421,13 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const row = await get(
-      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
-       FROM payments WHERE id = ?`,
+      `SELECT
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       WHERE p.id = ?
+       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
       [id]
     );
     res.status(201).json({
@@ -326,6 +436,10 @@ export const createPayment = async (req: any, res: Response) => {
       sellerId: row.seller_id ?? undefined,
       orderId: row.order_id ?? undefined,
       invoiceId: row.invoice_id ?? undefined,
+      invoiceIds: String(row.invoice_ids || row.invoice_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
       receiptNumber: row.receipt_number,
       date: row.date,
       amount: Number(row.amount) || 0,
@@ -335,6 +449,75 @@ export const createPayment = async (req: any, res: Response) => {
   } catch (e: any) {
     console.error('createPayment:', e);
     res.status(500).json({ message: 'Error creando pago', detail: e?.message });
+  }
+};
+
+/** Editar fecha de un recibo/pago cargado en el sistema. */
+export const updatePaymentDate = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const paymentId = String(req.params?.id || '').trim();
+    const nextDate = String(req.body?.date || '').trim();
+    if (!paymentId) return res.status(400).json({ message: 'Falta ID de pago' });
+    if (!nextDate) return res.status(400).json({ message: 'Falta fecha' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      return res.status(400).json({ message: 'Fecha inválida. Formato esperado: YYYY-MM-DD' });
+    }
+
+    const row = await get(
+      `SELECT p.id, p.customer_id, p.seller_id
+       FROM payments p
+       WHERE p.id = ?`,
+      [paymentId]
+    );
+    if (!row) return res.status(404).json({ message: 'Recibo no encontrado' });
+
+    if (user.role === 'SELLER') {
+      const cust = await get('SELECT seller_id FROM customers WHERE id = ? LIMIT 1', [row.customer_id]);
+      if (!cust || cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés editar recibos de tus clientes' });
+      }
+    }
+
+    try {
+      await execute(`UPDATE payments SET date = ? WHERE id = ?`, [nextDate, paymentId]);
+    } catch (e: any) {
+      const dup = e?.code === 'ER_DUP_ENTRY' || String(e?.message || '').includes('Duplicate entry');
+      if (dup) {
+        return res.status(409).json({
+          message: 'Ya existe un recibo con mismo cliente, número, fecha e importe'
+        });
+      }
+      throw e;
+    }
+
+    const updated = await get(
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+       FROM payments
+       WHERE id = ?`,
+      [paymentId]
+    );
+
+    return res.json({
+      id: updated.id,
+      customerId: updated.customer_id,
+      sellerId: updated.seller_id ?? undefined,
+      orderId: updated.order_id ?? undefined,
+      invoiceId: updated.invoice_id ?? undefined,
+      invoiceIds: updated.invoice_id ? [updated.invoice_id] : [],
+      receiptNumber: updated.receipt_number,
+      date: updated.date,
+      amount: Number(updated.amount) || 0,
+      notes: updated.notes ?? undefined,
+      createdAt: updated.created_at
+    });
+  } catch (e: any) {
+    console.error('updatePaymentDate:', e);
+    return res.status(500).json({ message: 'Error actualizando fecha del recibo', detail: e?.message });
   }
 };
 

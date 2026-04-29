@@ -106,6 +106,23 @@ const App: React.FC = () => {
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
+  const editingOrderIdRef = useRef<string | null>(null);
+  const DRAFT_KEY = 'lupo_order_template_draft';
+
+  const handleChangeView = useCallback((nextView: string) => {
+    const nextBase = String(nextView || '').split('?')[0];
+    if (nextBase === 'create_order' || nextBase === 'create_order_template') {
+      // "Nuevo pedido" siempre inicia limpio; editar usa handleEditOrder.
+      setEditingOrder(null);
+      editingOrderIdRef.current = null;
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+    setCurrentView(nextView);
+  }, []);
 
   // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
@@ -364,8 +381,10 @@ const App: React.FC = () => {
     if (savingOrderRef.current) return;
     savingOrderRef.current = true;
     try {
-      const isEditing = !!editingOrder;
+      const effectiveEditId = editingOrder?.id || editingOrderIdRef.current;
+      const isEditing = !!effectiveEditId && orders.some((o) => o.id === effectiveEditId);
       const orderToSave = { ...newOrder };
+      if (isEditing && effectiveEditId) orderToSave.id = effectiveEditId;
       if (currentUser?.role === Role.CUSTOMER) orderToSave.sellerId = null;
       const savedOrder = isEditing ? await api.updateOrder(orderToSave) : await api.createOrder(orderToSave);
       setOrders(prev => {
@@ -375,6 +394,7 @@ const App: React.FC = () => {
         return [savedOrder, ...prev];
       });
       setEditingOrder(null);
+      editingOrderIdRef.current = null;
       setCurrentView('orders');
       try {
         localStorage.removeItem('lupo_order_template_draft');
@@ -390,6 +410,7 @@ const App: React.FC = () => {
   };
 
   const handleEditOrder = (order: Order) => {
+    editingOrderIdRef.current = order.id;
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -770,7 +791,7 @@ const App: React.FC = () => {
       <div className="hidden md:block shrink-0">
         <Sidebar 
           currentView={baseView} 
-          onChangeView={setCurrentView} 
+          onChangeView={handleChangeView} 
           userRole={currentUser.role}
           onLogout={handleLogout}
         />
@@ -856,7 +877,7 @@ const App: React.FC = () => {
                 products={products}
                 orders={orders}
                 role={currentUser.role}
-                onNavigate={setCurrentView}
+                onNavigate={handleChangeView}
                 currentUserId={currentUser.id}
                 customers={getVisibleCustomers}
               />
@@ -884,7 +905,7 @@ const App: React.FC = () => {
                 setOrderArchivedFilter={setOrderArchivedFilter}
                 refreshOrders={() => api.getOrders({ includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' }).then(setOrders)}
                 onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
-                onNavigate={setCurrentView} onStartPicking={handleStartPicking}
+                onNavigate={handleChangeView} onStartPicking={handleStartPicking}
                 onEditOrder={handleEditOrder}
                 onDeleteOrder={handleDeleteOrder}
                 onFacturaEmitida={(orderId, invoice) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, invoice } : o))}
@@ -968,7 +989,7 @@ const App: React.FC = () => {
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+                onCancel={() => { setEditingOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 role={currentUser.role}
@@ -1000,7 +1021,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'mercadolibre_canal_difusion' && (
             <Suspense fallback={<ViewFallback />}>
-              <MercadoLibreCanalDifusion onNavigate={setCurrentView} />
+              <MercadoLibreCanalDifusion onNavigate={handleChangeView} />
             </Suspense>
           )}
           {baseView === 'mercadolibre_product_ads' && (
@@ -1043,7 +1064,7 @@ const App: React.FC = () => {
           return (
             <button 
               key={item.id}
-              onClick={() => setCurrentView(item.id)}
+              onClick={() => handleChangeView(item.id)}
               className={`flex flex-col items-center justify-center gap-1 min-h-[56px] flex-1 py-2 transition-colors touch-manipulation ${isActive ? 'text-blue-500' : 'text-slate-500 active:bg-slate-800/50 rounded-xl'}`}
             >
               <item.icon size={22} aria-hidden />
@@ -1085,7 +1106,7 @@ const App: React.FC = () => {
                         return (
                           <button
                             key={item.id}
-                            onClick={() => { setCurrentView(item.id); setMobileMenuOpen(false); }}
+                            onClick={() => { handleChangeView(item.id); setMobileMenuOpen(false); }}
                             className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left touch-manipulation min-h-[48px] ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-200 hover:bg-slate-700/50'}`}
                           >
                             <item.icon size={20} />
