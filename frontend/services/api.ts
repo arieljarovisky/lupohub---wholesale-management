@@ -1797,6 +1797,9 @@ export const api = {
   }): Promise<import('../types').Payment> => {
     return await request<any>(`/payments`, 'POST', payload) as any;
   },
+  updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
+    return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;
+  },
 
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {

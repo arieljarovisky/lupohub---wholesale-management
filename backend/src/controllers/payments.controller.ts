@@ -398,6 +398,75 @@ export const createPayment = async (req: any, res: Response) => {
   }
 };
 
+/** Editar fecha de un recibo/pago cargado en el sistema. */
+export const updatePaymentDate = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const paymentId = String(req.params?.id || '').trim();
+    const nextDate = String(req.body?.date || '').trim();
+    if (!paymentId) return res.status(400).json({ message: 'Falta ID de pago' });
+    if (!nextDate) return res.status(400).json({ message: 'Falta fecha' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      return res.status(400).json({ message: 'Fecha inválida. Formato esperado: YYYY-MM-DD' });
+    }
+
+    const row = await get(
+      `SELECT p.id, p.customer_id, p.seller_id
+       FROM payments p
+       WHERE p.id = ?`,
+      [paymentId]
+    );
+    if (!row) return res.status(404).json({ message: 'Recibo no encontrado' });
+
+    if (user.role === 'SELLER') {
+      const cust = await get('SELECT seller_id FROM customers WHERE id = ? LIMIT 1', [row.customer_id]);
+      if (!cust || cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés editar recibos de tus clientes' });
+      }
+    }
+
+    try {
+      await execute(`UPDATE payments SET date = ? WHERE id = ?`, [nextDate, paymentId]);
+    } catch (e: any) {
+      const dup = e?.code === 'ER_DUP_ENTRY' || String(e?.message || '').includes('Duplicate entry');
+      if (dup) {
+        return res.status(409).json({
+          message: 'Ya existe un recibo con mismo cliente, número, fecha e importe'
+        });
+      }
+      throw e;
+    }
+
+    const updated = await get(
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+       FROM payments
+       WHERE id = ?`,
+      [paymentId]
+    );
+
+    return res.json({
+      id: updated.id,
+      customerId: updated.customer_id,
+      sellerId: updated.seller_id ?? undefined,
+      orderId: updated.order_id ?? undefined,
+      invoiceId: updated.invoice_id ?? undefined,
+      invoiceIds: updated.invoice_id ? [updated.invoice_id] : [],
+      receiptNumber: updated.receipt_number,
+      date: updated.date,
+      amount: Number(updated.amount) || 0,
+      notes: updated.notes ?? undefined,
+      createdAt: updated.created_at
+    });
+  } catch (e: any) {
+    console.error('updatePaymentDate:', e);
+    return res.status(500).json({ message: 'Error actualizando fecha del recibo', detail: e?.message });
+  }
+};
+
 function normalizeNameForMatch(v: unknown): string {
   return String(v ?? '')
     .normalize('NFD')
