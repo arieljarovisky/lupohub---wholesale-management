@@ -106,6 +106,7 @@ const App: React.FC = () => {
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
+  const editingOrderIdRef = useRef<string | null>(null);
   const DRAFT_KEY = 'lupo_order_template_draft';
 
   const handleChangeView = useCallback((nextView: string) => {
@@ -113,6 +114,7 @@ const App: React.FC = () => {
     if (nextBase === 'create_order' || nextBase === 'create_order_template') {
       // "Nuevo pedido" siempre inicia limpio; editar usa handleEditOrder.
       setEditingOrder(null);
+      editingOrderIdRef.current = null;
       try {
         localStorage.removeItem(DRAFT_KEY);
       } catch {
@@ -379,8 +381,10 @@ const App: React.FC = () => {
     if (savingOrderRef.current) return;
     savingOrderRef.current = true;
     try {
-      const isEditing = !!editingOrder;
+      const effectiveEditId = editingOrder?.id || editingOrderIdRef.current;
+      const isEditing = !!effectiveEditId && orders.some((o) => o.id === effectiveEditId);
       const orderToSave = { ...newOrder };
+      if (isEditing && effectiveEditId) orderToSave.id = effectiveEditId;
       if (currentUser?.role === Role.CUSTOMER) orderToSave.sellerId = null;
       const savedOrder = isEditing ? await api.updateOrder(orderToSave) : await api.createOrder(orderToSave);
       setOrders(prev => {
@@ -390,6 +394,7 @@ const App: React.FC = () => {
         return [savedOrder, ...prev];
       });
       setEditingOrder(null);
+      editingOrderIdRef.current = null;
       setCurrentView('orders');
       try {
         localStorage.removeItem('lupo_order_template_draft');
@@ -405,6 +410,7 @@ const App: React.FC = () => {
   };
 
   const handleEditOrder = (order: Order) => {
+    editingOrderIdRef.current = order.id;
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -983,7 +989,7 @@ const App: React.FC = () => {
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); setCurrentView('orders'); }}
+                onCancel={() => { setEditingOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 role={currentUser.role}
