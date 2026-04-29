@@ -3089,7 +3089,7 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
         .filter(Boolean);
       const shippingMethod = shippingCandidates[0] || '';
       const expressBlob = shippingCandidates.join(' ').toLowerCase();
-      const hasExpressShipping = /\bexpress\b|\bexpr[eé]s\b/.test(expressBlob);
+      const hasExpressShipping = /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(expressBlob);
 
       return {
       id: order.id,

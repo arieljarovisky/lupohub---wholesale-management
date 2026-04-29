@@ -311,13 +311,16 @@ const TiendaNubeOrders: React.FC = () => {
   const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
     if (order.hasExpressShipping === true) return true;
     const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
-    return /\bexpress\b|\bexpr[eé]s\b/.test(blob);
+    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
   };
 
   const openReceiptForSignature = (order: TiendaNubeOrder) => {
     const html = buildTiendaNubeReceiptHtml(order);
     const w = window.open('', '_blank');
-    if (!w) return;
+    if (!w) {
+      window.alert('El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+      return;
+    }
     w.document.write(html);
     w.document.close();
   };
