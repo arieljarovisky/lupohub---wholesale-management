@@ -36,7 +36,7 @@ interface OrderRow {
 
 const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, onCancel, sellerId, initialOrder, role, priceLists = [], selectedPriceListId = null, onPriceListChange }) => {
   const hideStock = role === Role.SELLER || role === Role.CUSTOMER;
-  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
+  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
@@ -294,13 +294,27 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
 
   const handleSave = () => {
     if (!selectedCustomerId || rows.length === 0 || isReadOnly) return;
+    const resolveProductId = (row: OrderRow): string | undefined => {
+      if (row.productId) return row.productId;
+      const byVariant = row.variantId
+        ? products.find(
+            p =>
+              String(p.id) === String(row.variantId) ||
+              String((p as any).variant_id || '') === String(row.variantId)
+          )
+        : undefined;
+      if (byVariant?.product_id) return String(byVariant.product_id);
+      if (byVariant?.id) return String(byVariant.id);
+      const bySku = products.find(p => p.sku === row.sku || (p as any).base_sku === row.sku);
+      return bySku?.product_id ?? bySku?.id;
+    };
     onSave({
       id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
       customerId: selectedCustomerId,
       sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: rows.map(r => ({
         variantId: r.variantId,
-        productId: products.find(p => p.sku === r.sku)?.id,
+        productId: resolveProductId(r),
         quantity: r.quantity,
         priceAtMoment: r.price,
         isBackorder: r.isBackorder,

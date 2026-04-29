@@ -89,7 +89,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
-  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length >= 0;
+  const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const draftRestoredRef = useRef(false);
 
   const isEditing = !!initialOrder;
