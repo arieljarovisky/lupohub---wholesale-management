@@ -474,6 +474,18 @@ export const updateProduct = async (req: any, res: any) => {
        WHERE id = ?`,
       [sku != null ? String(sku).trim() : null, name ?? null, category ?? null, base_price ?? null, description ?? null, mlPack, tnPack, mayPack, id]
     );
+    // Normalizar SKUs de variantes al formato baseSku-sizeCode-colorCode
+    // (evita sufijos con nombre de color o letra de talle).
+    await execute(
+      `UPDATE product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       JOIN sizes s ON s.id = pv.size_id
+       JOIN colors c ON c.id = pc.color_id
+       SET pv.sku = CONCAT(p.sku, '-', s.size_code, '-', c.code)
+       WHERE p.id = ?`,
+      [id]
+    );
     const updated = await get(`SELECT id, sku, name, category, base_price, description,
       COALESCE(mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
       COALESCE(tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
@@ -894,8 +906,22 @@ export const updateVariant = async (req: Request, res: Response) => {
     const updates: string[] = [];
     const values: any[] = [];
     if (sku !== undefined) {
+      // Siempre guardar SKU de variante en formato canónico: baseSku-sizeCode-colorCode.
+      const variantMeta = await get(
+        `SELECT p.sku AS base_sku, s.size_code, c.code AS color_code
+         FROM product_variants pv
+         JOIN product_colors pc ON pc.id = pv.product_color_id
+         JOIN products p ON p.id = pc.product_id
+         JOIN sizes s ON s.id = pv.size_id
+         JOIN colors c ON c.id = pc.color_id
+         WHERE pv.id = ?`,
+        [variantId]
+      );
+      const canonicalSku = variantMeta?.base_sku && variantMeta?.size_code && variantMeta?.color_code
+        ? `${variantMeta.base_sku}-${variantMeta.size_code}-${variantMeta.color_code}`
+        : (sku === '' ? null : String(sku).trim());
       updates.push('sku = ?');
-      values.push(sku === '' ? null : String(sku).trim());
+      values.push(canonicalSku);
     }
     if (externalSku !== undefined) {
       updates.push('external_sku = ?');
