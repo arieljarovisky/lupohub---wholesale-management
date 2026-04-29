@@ -956,9 +956,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                             {sizeColumns.map(s => {
                               const hasVariant = !!getVariantIdBySizeCompat(row, s.code);
                               const stock = getStockBySizeCompat(row, s.code);
-                            {sizeColumns.map(s => {
-                              const hasVariant = !!getVariantIdBySizeCompat(row, s.code);
-                              const stock = getStockBySizeCompat(row, s.code);
                               const noStock = stock != null && stock <= 0;
                               const qtyVal = row.quantitiesBySize[s.code] ?? 0;
                               const exceeds = stock != null && qtyVal > stock;
