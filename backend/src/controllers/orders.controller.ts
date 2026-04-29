@@ -311,11 +311,7 @@ export const createOrder = async (req: any, res: any) => {
       );
     }
 
-    if (statusToSave === 'Confirmado' && !noStockImpact) {
-      const { deductStockForOrder } = await import('./stock.controller');
-      const result = await deductStockForOrder(orderId);
-      if (!result.success) console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
-    }
+    // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
 
     const created = await get(
       `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
@@ -411,11 +407,15 @@ export const updateOrderStatus = async (req: any, res: any) => {
       });
     }
 
-    // Solo al confirmar ADMIN se descuenta stock.
+    // Descontar stock cuando finaliza picking (Falta controlar / Controlado / Despachado).
+    const pickingDoneStatuses = ['Falta controlar', 'Controlado', 'Despachado'];
+    const entersPickingDone =
+      !pickingDoneStatuses.includes(previousStatus) &&
+      pickingDoneStatuses.includes(nextStatus);
     if (
-      ['Borrador', 'Pendiente confirmación admin'].includes(previousStatus) &&
-      nextStatus === 'Confirmado' &&
-      !noStockImpact
+      entersPickingDone &&
+      !noStockImpact &&
+      !(await isMayoristaStockDeductedForWholesale(id))
     ) {
       const { deductStockForOrder } = await import('./stock.controller');
       const result = await deductStockForOrder(id);
@@ -425,9 +425,9 @@ export const updateOrderStatus = async (req: any, res: any) => {
       }
     }
 
-    // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
+    // Si se cancela y el stock ya estaba descontado de verdad, restaurar.
     const hadStockDeducted =
-      !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+      !noStockImpact && (await isMayoristaStockDeductedForWholesale(id));
     if (nextStatus === 'Cancelado' && hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
@@ -682,10 +682,9 @@ export const deleteOrder = async (req: any, res: any) => {
       });
     }
     const currentOrder = await get("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
-    const status = currentOrder?.status;
     const hadStockDeducted =
       !currentOrder?.no_stock_impact &&
-      ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+      (await isMayoristaStockDeductedForWholesale(id));
     if (hadStockDeducted) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
