@@ -38,6 +38,16 @@ interface TemplateRow {
   price: number;
 }
 
+function normalizeSizeCode(value: unknown, skuRaw?: string): string {
+  const direct = String(value ?? '').trim();
+  if (direct) return direct;
+  const sku = String(skuRaw ?? '').trim();
+  if (!sku) return 'U';
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 2) return String(parts[parts.length - 2]).trim() || 'U';
+  return 'U';
+}
+
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
   customers,
@@ -73,6 +83,29 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const draftRestoredRef = useRef(false);
 
   const isEditing = !!initialOrder;
+  const sizeColumns = useMemo(() => {
+    const map = new Map<string, { code: string; name: string }>();
+    for (const s of sizes) {
+      const code = String(s.code || '').trim();
+      if (!code) continue;
+      map.set(code, { code, name: s.name || s.code });
+    }
+    for (const r of rows) {
+      for (const code of Object.keys(r.variantBySize || {})) {
+        const c = String(code || '').trim();
+        if (!c || map.has(c)) continue;
+        map.set(c, { code: c, name: c });
+      }
+      for (const code of Object.keys(r.quantitiesBySize || {})) {
+        const c = String(code || '').trim();
+        if (!c || map.has(c)) continue;
+        map.set(c, { code: c, name: c });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.code).localeCompare(String(b.code), undefined, { numeric: true })
+    );
+  }, [sizes, rows]);
 
   /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
   useEffect(() => {
@@ -173,13 +206,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of initialOrder.items || []) {
-      const sizeCode = String((item as any).sizeCode || '').trim();
+      const sizeCode = normalizeSizeCode((item as any).sizeCode, String((item as any).sku || ''));
       const colorName = String((item as any).colorName || '').trim() || 'Color';
       const rawSku = String((item as any).sku || '').trim();
       const price = Number(item.priceAtMoment || 0);
       const productId = String((item as any).productId || '');
       const variantId = String((item as any).variantId || '').trim();
-      if (!sizeCode || !variantId) continue;
+      if (!variantId) continue;
       const productCode = getBaseArticleCode(rawSku, productId) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
       const colorCode = String((item as any).colorCode || '').trim() || colorName;
 
@@ -282,8 +315,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
-          variantBySize[v.size_code] = v.variant_id;
-          stockBySize[v.size_code] = Math.max(0, Number(v.stock ?? 0));
+          const sizeCode = normalizeSizeCode(v.size_code, product.sku);
+          variantBySize[sizeCode] = v.variant_id;
+          stockBySize[sizeCode] = Math.max(0, Number(v.stock ?? 0));
+          if (defaultQtys[sizeCode] == null) defaultQtys[sizeCode] = 0;
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -432,10 +467,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
         vars.forEach(v => {
-          variantBySize[v.size_code] = v.variant_id;
+          const sizeCode = normalizeSizeCode(v.size_code, product.sku);
+          variantBySize[sizeCode] = v.variant_id;
           // Aceptar stock en snake_case (API) o camelCase
           const st = (v as any).stock ?? (v as any).stock_quantity;
-          stockBySize[v.size_code] = Math.max(0, Number(st ?? 0));
+          stockBySize[sizeCode] = Math.max(0, Number(st ?? 0));
+          if (defaultQtys[sizeCode] == null) defaultQtys[sizeCode] = 0;
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -773,7 +810,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                   <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky left-0 bg-slate-800/95 z-10 rounded-tl-xl">Código</th>
                   <th className="text-left text-slate-400 font-semibold py-3 px-3">Color</th>
                   <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px]" title="Misma cantidad en todos los talles">Todas</th>
-                  {sizes.map(s => (
+                  {sizeColumns.map(s => (
                     <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px]">
                       {labelTalle(s.code) || s.name || s.code}
                     </th>
@@ -809,7 +846,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                           {group.rows.length} colores · {groupUnits} un.
                         </td>
                         <td className="py-3 px-2">—</td>
-                        {sizes.map(s => (
+                        {sizeColumns.map(s => (
                           <td key={s.code} className="py-3 px-2 text-center text-slate-500">—</td>
                         ))}
                         <td className="py-3 px-3 text-right font-mono text-sm text-emerald-400">${groupTotal.toLocaleString()}</td>
@@ -880,7 +917,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </button>
                               </div>
                             </td>
-                            {sizes.map(s => {
+                            {sizeColumns.map(s => {
                               const hasVariant = !!row.variantBySize[s.code];
                               const stock = row.stockBySize?.[s.code];
                               const noStock = stock != null && stock <= 0;
@@ -934,7 +971,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         );
                       })}
                       <tr className="border-b border-slate-700/30 bg-slate-800/30">
-                        <td colSpan={3 + sizes.length + 2} className="py-2 px-3">
+                        <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
                           <button
                             type="button"
                             onClick={() => addMissingColorsToArticle(group.productCode)}
