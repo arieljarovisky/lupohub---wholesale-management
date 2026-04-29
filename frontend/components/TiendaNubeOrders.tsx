@@ -695,20 +695,18 @@ const TiendaNubeOrders: React.FC = () => {
 
                     {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
-                      {hasExpressShipping(order) && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openReceiptForSignature(order);
-                          }}
-                          className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
-                          title="Generar recibo PDF para firma (solo envío express)"
-                        >
-                          <FileText size={14} />
-                          Recibo PDF
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReceiptForSignature(order);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
+                        title="Generar recibo PDF para firma"
+                      >
+                        <FileText size={14} />
+                        Recibo PDF
+                      </button>
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
                         <p className="text-xs text-slate-500">#{order.number}</p>
