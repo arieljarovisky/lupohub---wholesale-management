@@ -1789,6 +1789,7 @@ export const api = {
     sellerId?: string | null;
     orderId?: string | null;
     invoiceId?: string | null;
+    invoiceIds?: string[];
     receiptNumber: string;
     date: string;
     amount: number;

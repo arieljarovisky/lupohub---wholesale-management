@@ -251,6 +251,7 @@ export interface Payment {
   sellerName?: string;
   orderId?: string;
   invoiceId?: string;
+  invoiceIds?: string[];
   receiptNumber: string;
   date: string; // YYYY-MM-DD
   amount: number;
