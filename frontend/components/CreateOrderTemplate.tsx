@@ -38,11 +38,11 @@ interface TemplateRow {
   price: number;
 }
 
-const normalizeSizeKey = (value: unknown): string =>
-  String(value ?? '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
+const canonicalSizeCode = (value: unknown): string => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  return codigoTalleParaSku(raw) || raw;
+};
 
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
@@ -344,12 +344,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const getVariantIdBySizeCompat = (row: TemplateRow, sizeCode: string): string | undefined => {
     const direct = row.variantBySize?.[sizeCode];
     if (direct) return direct;
-    const target = normalizeSizeKey(sizeCode);
-    const targetLabel = normalizeSizeKey(labelTalle(sizeCode));
+    const target = canonicalSizeCode(sizeCode);
     for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
-      const k = normalizeSizeKey(key);
+      const k = canonicalSizeCode(key);
       if (!k || !variantId) continue;
-      if (k === target || (targetLabel && k === targetLabel)) return variantId;
+      if (k === target) return variantId;
     }
     return undefined;
   };
@@ -357,12 +356,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const getStockBySizeCompat = (row: TemplateRow, sizeCode: string): number | undefined => {
     const direct = row.stockBySize?.[sizeCode];
     if (direct != null) return Number(direct);
-    const target = normalizeSizeKey(sizeCode);
-    const targetLabel = normalizeSizeKey(labelTalle(sizeCode));
+    const target = canonicalSizeCode(sizeCode);
     for (const [key, stock] of Object.entries(row.stockBySize || {})) {
-      const k = normalizeSizeKey(key);
+      const k = canonicalSizeCode(key);
       if (!k) continue;
-      if (k === target || (targetLabel && k === targetLabel)) return Number(stock);
+      if (k === target) return Number(stock);
     }
     return undefined;
   };
