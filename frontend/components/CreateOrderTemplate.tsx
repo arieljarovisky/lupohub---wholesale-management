@@ -38,6 +38,12 @@ interface TemplateRow {
   price: number;
 }
 
+const normalizeSizeKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
   customers,
@@ -332,6 +338,33 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }));
   };
 
+  /** Compatibilidad con borradores viejos: talla guardada como letra/nombre en vez de código numérico. */
+  const getVariantIdBySizeCompat = (row: TemplateRow, sizeCode: string): string | undefined => {
+    const direct = row.variantBySize?.[sizeCode];
+    if (direct) return direct;
+    const target = normalizeSizeKey(sizeCode);
+    const targetLabel = normalizeSizeKey(labelTalle(sizeCode));
+    for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
+      const k = normalizeSizeKey(key);
+      if (!k || !variantId) continue;
+      if (k === target || (targetLabel && k === targetLabel)) return variantId;
+    }
+    return undefined;
+  };
+
+  const getStockBySizeCompat = (row: TemplateRow, sizeCode: string): number | undefined => {
+    const direct = row.stockBySize?.[sizeCode];
+    if (direct != null) return Number(direct);
+    const target = normalizeSizeKey(sizeCode);
+    const targetLabel = normalizeSizeKey(labelTalle(sizeCode));
+    for (const [key, stock] of Object.entries(row.stockBySize || {})) {
+      const k = normalizeSizeKey(key);
+      if (!k) continue;
+      if (k === target || (targetLabel && k === targetLabel)) return Number(stock);
+    }
+    return undefined;
+  };
+
   /** Aplicar la misma cantidad a todos los talles de la fila. */
   const setRowAllQuantities = (rowId: string, value: number) => {
     const num = Math.max(0, Math.floor(Number(value)) || 0);
@@ -492,10 +525,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const items: Array<{ variantId: string; quantity: number; priceAtMoment: number; isBackorder: boolean }> = [];
     for (const r of rows) {
       for (const [sizeCode, qty] of Object.entries(r.quantitiesBySize)) {
-        if (qty <= 0 || !r.variantBySize[sizeCode]) continue;
-        const stock = Number(r.stockBySize?.[sizeCode] ?? 0);
+        const variantId = getVariantIdBySizeCompat(r, sizeCode);
+        if (qty <= 0 || !variantId) continue;
+        const stock = Number(getStockBySizeCompat(r, sizeCode) ?? 0);
         items.push({
-          variantId: r.variantBySize[sizeCode],
+          variantId,
           quantity: qty,
           priceAtMoment: r.price,
           isBackorder: qty > stock
@@ -562,7 +596,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const hasExceededStock = useMemo(() => {
     return rows.some(r =>
       Object.entries(r.quantitiesBySize).some(([sizeCode, qty]) => {
-        const stock = r.stockBySize?.[sizeCode];
+        const stock = getStockBySizeCompat(r, sizeCode);
         return stock != null && qty > stock;
       })
     );
@@ -881,8 +915,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               </div>
                             </td>
                             {sizes.map(s => {
-                              const hasVariant = !!row.variantBySize[s.code];
-                              const stock = row.stockBySize?.[s.code];
+                              const hasVariant = !!getVariantIdBySizeCompat(row, s.code);
+                              const stock = getStockBySizeCompat(row, s.code);
                               const noStock = stock != null && stock <= 0;
                               const qtyVal = row.quantitiesBySize[s.code] ?? 0;
                               const exceeds = stock != null && qtyVal > stock;
