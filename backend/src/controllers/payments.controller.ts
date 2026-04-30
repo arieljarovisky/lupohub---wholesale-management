@@ -368,11 +368,20 @@ export const createPayment = async (req: any, res: Response) => {
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
 
     if (invoiceId && !invoiceIds.includes(invoiceId)) invoiceIds.unshift(invoiceId);
+    const hasImportedInvoiceId = invoiceIds.some((id) => id.startsWith('mm-fac-'));
+    if (hasImportedInvoiceId) {
+      return res.status(400).json({
+        message: 'Las facturas importadas (Tango) no se pueden relacionar al recibo. Seleccioná facturas emitidas en LupoHub.'
+      });
+    }
     const primaryInvoiceId = invoiceIds[0] || null;
 
     if (invoiceIds.length > 0) {
       const rows = await query(
-        `SELECT id, customer_id FROM invoices WHERE id IN (${invoiceIds.map(() => '?').join(',')})`,
+        `SELECT i.id, o.customer_id
+         FROM invoices i
+         JOIN orders o ON o.id = i.order_id
+         WHERE i.id IN (${invoiceIds.map(() => '?').join(',')})`,
         invoiceIds
       ) as Array<{ id: string; customer_id: string }>;
       if (rows.length !== invoiceIds.length) {

@@ -167,7 +167,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   /** Facturas del modal de pago: solo las del cliente elegido (misma lista que la grilla según filtros actuales). */
   const facturaOptionsForPayment = useMemo(() => {
     if (!payCustomerId || payCustomerId === 'ALL') return [];
-    return facturaOptions.filter((f) => f.customerId === payCustomerId);
+    return facturaOptions.filter((f) => f.customerId === payCustomerId && !String(f.invoiceId).startsWith('mm-fac-'));
   }, [items, payCustomerId]);
   const facturaOptionById = useMemo(
     () => new Map(facturaOptions.map((f) => [f.invoiceId, f.label] as const)),
