@@ -242,6 +242,15 @@ export interface PriceList {
   updatedAt?: string;
 }
 
+export interface UserTask {
+  id: string;
+  message: string;
+  assignedToEmail: string;
+  createdByEmail: string;
+  expiresAt: string;
+  createdAt?: string;
+}
+
 /** Pago / recibo cargado para un cliente (cuenta corriente). */
 export interface Payment {
   id: string;

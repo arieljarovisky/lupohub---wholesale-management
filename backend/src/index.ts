@@ -18,6 +18,7 @@ import catalogsRoutes from './routes/catalogs.routes';
 import billingRoutes from './routes/billing.routes';
 import afipRoutes from './routes/afip.routes';
 import paymentsRoutes from './routes/payments.routes';
+import userTasksRoutes from './routes/userTasks.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
@@ -50,6 +51,7 @@ import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_
 import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhook_config_table';
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addOrderCreatedBy } from './database/add_order_created_by';
+import { addUserTasksTable } from './database/add_user_tasks_table';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -113,6 +115,7 @@ app.use('/api/catalogs', catalogsRoutes);
 app.use('/api/afip', afipRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/user-tasks', userTasksRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -167,6 +170,7 @@ async function initDatabase() {
       await addLupoStockWebhookConfigTable();
       await addVariantLuposhopStockTable();
       await addOrderCreatedBy();
+      await addUserTasksTable();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

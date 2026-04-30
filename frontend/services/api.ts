@@ -1,4 +1,4 @@
-import { Product, Order, OrderStatus, User, Customer, Transporte } from '../types';
+import { Product, Order, OrderStatus, User, Customer, Transporte, UserTask } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request, requestFormData, getBlob, getBaseUrl, postBlob } from './httpClient';
 
@@ -70,6 +70,19 @@ export const api = {
   },
   deleteUser: async (id: string): Promise<void> => {
     await request<void>(`/users/${id}`, 'DELETE');
+  },
+
+  getAssignedUserTasks: async (): Promise<UserTask[]> => {
+    return await request<UserTask[]>('/user-tasks', 'GET');
+  },
+  getMyUserTasks: async (): Promise<UserTask[]> => {
+    return await request<UserTask[]>('/user-tasks/mine', 'GET');
+  },
+  createAssignedUserTask: async (payload: { message: string; assignedToEmail: string; expiresAt: string }): Promise<UserTask> => {
+    return await request<UserTask>('/user-tasks', 'POST', payload);
+  },
+  deleteAssignedUserTask: async (id: string): Promise<{ id: string }> => {
+    return await request<{ id: string }>(`/user-tasks/${encodeURIComponent(id)}`, 'DELETE');
   },
 
   importSellers: async (payload: {

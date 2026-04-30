@@ -108,3 +108,6 @@ export const MOCK_VISITS: Visit[] = [
 /** Aviso prioritario solo para este usuario; deja de mostrarse cuando pasa esta fecha (ISO, offset Argentina). Ajustá la fecha para renovar la ventana. */
 export const DAMIAN_TASKS_BANNER_EMAIL = 'damian@lupo.ar';
 export const DAMIAN_TASKS_BANNER_UNTIL_MS = Date.parse('2026-04-21T23:59:59-03:00');
+
+/** Usuario habilitado para asignar tareas con carteles temporales. */
+export const ARIEL_TASKS_OWNER_EMAIL = 'ariel@lupo.ar';

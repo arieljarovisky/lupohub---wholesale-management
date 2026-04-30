@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone, Sparkles, LayoutGrid, Radio, Percent } from 'lucide-react';
-import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES, DAMIAN_TASKS_BANNER_EMAIL, DAMIAN_TASKS_BANNER_UNTIL_MS } from './constants';
-import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte } from './types';
+import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES, DAMIAN_TASKS_BANNER_EMAIL, DAMIAN_TASKS_BANNER_UNTIL_MS, ARIEL_TASKS_OWNER_EMAIL } from './constants';
+import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte, UserTask } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
@@ -50,6 +50,7 @@ const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'))
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
+const UserTaskManager = lazyWithReload(() => import('./components/UserTaskManager'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
@@ -104,6 +105,7 @@ const App: React.FC = () => {
   const [orderArchivedFilter, setOrderArchivedFilter] = useState<'no' | 'yes' | 'only'>('no');
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
+  const [myUserTasks, setMyUserTasks] = useState<UserTask[]>([]);
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
   const editingOrderIdRef = useRef<string | null>(null);
@@ -192,6 +194,19 @@ const App: React.FC = () => {
     }
     loadData();
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setMyUserTasks([]);
+      return;
+    }
+    const loadTasks = () => {
+      api.getMyUserTasks().then((rows) => setMyUserTasks(Array.isArray(rows) ? rows : [])).catch(() => setMyUserTasks([]));
+    };
+    loadTasks();
+    const timer = setInterval(loadTasks, 60000);
+    return () => clearInterval(timer);
+  }, [currentUser?.id]);
 
   // Persist current view on changes
   useEffect(() => {
@@ -785,6 +800,8 @@ const App: React.FC = () => {
     !!currentUser.email &&
     currentUser.email.trim().toLowerCase() === DAMIAN_TASKS_BANNER_EMAIL &&
     Date.now() < DAMIAN_TASKS_BANNER_UNTIL_MS;
+  const canManageAssignedTasks =
+    !!currentUser.email && currentUser.email.trim().toLowerCase() === ARIEL_TASKS_OWNER_EMAIL;
 
   return (
     <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
@@ -832,6 +849,21 @@ const App: React.FC = () => {
                   </ol>
                 </div>
               </div>
+            </div>
+          )}
+          {myUserTasks.length > 0 && (
+            <div className="mb-5 space-y-2">
+              {myUserTasks.map((t) => (
+                <div
+                  key={t.id}
+                  className="rounded-xl border border-amber-600/60 bg-amber-900/25 px-4 py-3 text-amber-100"
+                >
+                  <p className="font-semibold">{t.message}</p>
+                  <p className="text-xs text-amber-200/80 mt-1">
+                    Vigente hasta {new Date(t.expiresAt).toLocaleString('es-AR')}
+                  </p>
+                </div>
+              ))}
             </div>
           )}
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
@@ -956,31 +988,36 @@ const App: React.FC = () => {
           )}
           {baseView === 'settings' && (
             <Suspense fallback={<ViewFallback />}>
-              <Settings 
-                attributes={attributes} 
-                onCreateAttribute={handleCreateAttribute} 
-                onDeleteAttribute={handleDeleteAttribute} 
-                onRefreshData={loadData}
-                role={currentUser.role} 
-                users={users}
-                onUpdateUser={handleUpdateUser}
-                onCreateUser={handleCreateUser}
-                onDeleteUser={handleDeleteUser}
-                currentUser={currentUser}
-                transportes={transportes}
-                onCreateTransporte={async (name, address) => {
-                  const t = await api.createTransporte(name, address);
-                  setTransportes(prev => [...prev, t]);
-                }}
-                onUpdateTransporte={async (id, name, address) => {
-                  const t = await api.updateTransporte(id, name, address);
-                  setTransportes(prev => prev.map(x => x.id === id ? t : x));
-                }}
-                onDeleteTransporte={async (id) => {
-                  await api.deleteTransporte(id);
-                  setTransportes(prev => prev.filter(x => x.id !== id));
-                }}
-              />
+              <>
+                {canManageAssignedTasks && (
+                  <UserTaskManager users={users} />
+                )}
+                <Settings 
+                  attributes={attributes} 
+                  onCreateAttribute={handleCreateAttribute} 
+                  onDeleteAttribute={handleDeleteAttribute} 
+                  onRefreshData={loadData}
+                  role={currentUser.role} 
+                  users={users}
+                  onUpdateUser={handleUpdateUser}
+                  onCreateUser={handleCreateUser}
+                  onDeleteUser={handleDeleteUser}
+                  currentUser={currentUser}
+                  transportes={transportes}
+                  onCreateTransporte={async (name, address) => {
+                    const t = await api.createTransporte(name, address);
+                    setTransportes(prev => [...prev, t]);
+                  }}
+                  onUpdateTransporte={async (id, name, address) => {
+                    const t = await api.updateTransporte(id, name, address);
+                    setTransportes(prev => prev.map(x => x.id === id ? t : x));
+                  }}
+                  onDeleteTransporte={async (id) => {
+                    await api.deleteTransporte(id);
+                    setTransportes(prev => prev.filter(x => x.id !== id));
+                  }}
+                />
+              </>
             </Suspense>
           )}
           {baseView === 'create_order' || baseView === 'create_order_template' ? (
