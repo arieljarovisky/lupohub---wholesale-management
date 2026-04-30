@@ -6,6 +6,39 @@ import * as XLSX from 'xlsx';
 const canManagePayments = (role?: string) =>
   role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 
+let paymentInvoicesTableReady: boolean | null = null;
+async function ensurePaymentInvoicesTable(): Promise<boolean> {
+  if (paymentInvoicesTableReady === true) return true;
+  try {
+    await execute(`
+      CREATE TABLE IF NOT EXISTS payment_invoices (
+        payment_id VARCHAR(36) NOT NULL,
+        invoice_id VARCHAR(36) NOT NULL,
+        amount_applied DECIMAL(12,2) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (payment_id, invoice_id),
+        INDEX idx_payment_invoices_invoice (invoice_id),
+        CONSTRAINT fk_payment_invoices_payment
+          FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+        CONSTRAINT fk_payment_invoices_invoice
+          FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `);
+    await execute(`
+      INSERT IGNORE INTO payment_invoices (payment_id, invoice_id)
+      SELECT p.id, p.invoice_id
+      FROM payments p
+      WHERE p.invoice_id IS NOT NULL AND TRIM(p.invoice_id) <> ''
+    `);
+    paymentInvoicesTableReady = true;
+    return true;
+  } catch (e: any) {
+    console.error('[payments] ensurePaymentInvoicesTable:', e?.message || e);
+    paymentInvoicesTableReady = false;
+    return false;
+  }
+}
+
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
 export const listPayments = async (req: any, res: Response) => {
   try {
@@ -14,11 +47,12 @@ export const listPayments = async (req: any, res: Response) => {
       return res.status(403).json({ message: 'No autorizado' });
     }
 
+    const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
     const { customerId, invoiceId, orderId, desde, hasta } = req.query as any;
     const where: string[] = [];
     const params: any[] = [];
     if (customerId) { where.push('p.customer_id = ?'); params.push(customerId); }
-    if (invoiceId) {
+    if (invoiceId && paymentInvoicesEnabled) {
       where.push(`(
         p.invoice_id = ?
         OR EXISTS (
@@ -28,6 +62,9 @@ export const listPayments = async (req: any, res: Response) => {
         )
       )`);
       params.push(invoiceId, invoiceId);
+    } else if (invoiceId) {
+      where.push('p.invoice_id = ?');
+      params.push(invoiceId);
     }
     if (orderId) { where.push('p.order_id = ?'); params.push(orderId); }
     if (desde) { where.push('p.date >= ?'); params.push(desde); }
@@ -41,7 +78,8 @@ export const listPayments = async (req: any, res: Response) => {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = await query(
-      `
+      paymentInvoicesEnabled
+        ? `
       SELECT
         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
         p.receipt_number, p.date, p.amount, p.notes, p.created_at,
@@ -59,6 +97,21 @@ export const listPayments = async (req: any, res: Response) => {
                p.receipt_number, p.date, p.amount, p.notes, p.created_at,
                c.business_name, c.name, u.name,
                i.punto_venta, i.cbte_tipo, i.cbte_desde
+      ORDER BY p.date DESC, p.created_at DESC
+      `
+        : `
+      SELECT
+        p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
+        p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+        c.business_name AS customer_business_name, c.name AS customer_name,
+        u.name AS seller_name,
+        i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
+        NULL AS invoice_ids
+      FROM payments p
+      JOIN customers c ON c.id = p.customer_id
+      LEFT JOIN users u ON u.id = p.seller_id
+      LEFT JOIN invoices i ON i.id = p.invoice_id
+      ${whereSql}
       ORDER BY p.date DESC, p.created_at DESC
       `,
       params
@@ -275,6 +328,7 @@ export const createPayment = async (req: any, res: Response) => {
       return res.status(403).json({ message: 'No autorizado' });
     }
 
+    const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
     const body = req.body as {
       customerId?: string;
       sellerId?: string | null;
@@ -372,7 +426,7 @@ export const createPayment = async (req: any, res: Response) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]
       );
-      if (invoiceIds.length > 0) {
+      if (invoiceIds.length > 0 && paymentInvoicesEnabled) {
         for (const invId of invoiceIds) {
           await execute(
             `INSERT IGNORE INTO payment_invoices (payment_id, invoice_id) VALUES (?, ?)`,
@@ -421,13 +475,19 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const row = await get(
-      `SELECT
+      paymentInvoicesEnabled
+        ? `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
        WHERE p.id = ?
-       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
+       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`
+        : `SELECT
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         NULL AS invoice_ids
+       FROM payments p
+       WHERE p.id = ?`,
       [id]
     );
     res.status(201).json({
