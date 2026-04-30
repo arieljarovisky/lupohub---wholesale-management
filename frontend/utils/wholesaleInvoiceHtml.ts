@@ -391,10 +391,11 @@ export function buildWholesaleCreditNoteHtml(params: {
 }): string {
   const { order, nc, customer, products, remitente } = params;
 
-  const items = sortOrderItemsForPrint(
-    order.items.map((i) => enrichOrderItem(i, products)),
-    products
-  );
+  // Mantener ambos órdenes:
+  // - original: para mapear nc.itemIndex (guardado contra order.items ORDER BY id)
+  // - ordenado: para visualización cuando la NC es total
+  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
+  const items = sortOrderItemsForPrint(itemsOriginal, products);
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
