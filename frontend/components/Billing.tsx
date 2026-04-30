@@ -155,11 +155,20 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
   const facturaOptions = items
     .filter((x) => x?.tipo === 'FACTURA')
-    .map((x) => ({
+    .map((x) => {
+      const hasAfipNumber = Number.isFinite(Number(x.puntoVta)) && Number.isFinite(Number(x.numeroDesde));
+      const afipPrefix = x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : '';
+      const comprobante = hasAfipNumber
+        ? `${afipPrefix} ${String(Number(x.puntoVta)).padStart(5, '0')}-${String(Number(x.numeroDesde)).padStart(8, '0')}`.trim()
+        : String(x.numeroDesde || x.numeroHasta || '').trim() || 'Comprobante s/n';
+      return {
       invoiceId: x.id,
-      label: `${x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : ''} ${String(x.puntoVta).padStart(5, '0')}-${String(x.numeroDesde).padStart(8, '0')} — ${x.customerBusinessName || ''}`.trim(),
+      label: `${comprobante} — ${x.customerBusinessName || ''} — ${(() => {
+        const d = new Date(x.fecha);
+        return Number.isNaN(d.getTime()) ? String(x.fecha || '') : d.toLocaleDateString('es-AR');
+      })()} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
       customerId: x.customerId,
-    }));
+    };});
 
   /** Facturas del modal de pago: solo las del cliente elegido (misma lista que la grilla según filtros actuales). */
   const facturaOptionsForPayment = useMemo(() => {

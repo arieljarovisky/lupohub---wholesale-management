@@ -505,21 +505,41 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
   type LedgerEntry = NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number];
 
-  const migratedBuckets = useMemo(() => {
+  const unifiedLedgerEntries = useMemo(() => {
     const entries = multimediaLedger?.entries;
-    if (!entries?.length) return null;
-    const recibos: LedgerEntry[] = [];
-    const facturas: LedgerEntry[] = [];
-    const pedidosTango: LedgerEntry[] = [];
-    const otros: LedgerEntry[] = [];
-    for (const e of entries) {
-      const u = `${e.tipo} ${e.detalle || ''}`.toUpperCase();
-      if (/RECIBO|COBRO|PAGO|NC\s*A|INGRESO/i.test(u)) recibos.push(e);
-      else if (/FACT|FCA|FCE|NOTA\s*DE\s*CR|COMPROBANTE|CREDITO|DEBITO|NC\s*D/i.test(u)) facturas.push(e);
-      else if (/PEDIDO|REMITO|PRESUP|PREFACT|ORDEN/i.test(u)) pedidosTango.push(e);
-      else otros.push(e);
-    }
-    return { recibos, facturas, pedidosTango, otros };
+    if (!entries?.length) return [];
+    const normalizeDocType = (tipo: string, detalle?: string | null) => {
+      const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
+      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
+      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
+      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
+      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
+      return (tipo || '').toUpperCase();
+    };
+    const rows = [...entries];
+    let runningSaldo = 0;
+    let hasRunningSaldo = false;
+    return rows.map((row) => {
+      const next = { ...row };
+      if (next.saldo != null && Number.isFinite(Number(next.saldo))) {
+        runningSaldo = Number(next.saldo);
+        hasRunningSaldo = true;
+        return next;
+      }
+      if (next.importe != null && Number.isFinite(Number(next.importe))) {
+        const amount = Number(next.importe);
+        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
+        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
+          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
+          hasRunningSaldo = true;
+        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
+          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
+          hasRunningSaldo = true;
+        }
+      }
+      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+      return next;
+    });
   }, [multimediaLedger]);
 
   const pendingShipLines = useMemo(() => {
@@ -1406,8 +1426,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-                  Historial de movimientos tal como viene del archivo. Los recibos que cargás hoy en Facturación no se listan
-                  acá: impactan en el <strong className="text-slate-300">saldo unificado</strong> de arriba.
+                  Historial unificado: movimientos importados + recibos cargados en Facturación. Todo impacta en el
+                  <strong className="text-slate-300"> saldo unificado</strong>.
                 </p>
               </div>
             {multimediaLedgerLoading ? (
@@ -1418,35 +1438,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
               <div className="space-y-5">
                 <p className="text-xs text-slate-400 font-medium">
-                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos en
-                  archivo
+                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos
                   {multimediaLedger.legacyCode ? (
                     <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
                   ) : null}
                 </p>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {migratedBuckets &&
-                    renderLedgerTable('Recibos / pagos', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, migratedBuckets.recibos)}
-                  {migratedBuckets &&
-                    renderLedgerTable(
-                      'Facturas y comprobantes',
-                      <FileText size={16} className="text-sky-400 shrink-0" aria-hidden />,
-                      migratedBuckets.facturas
-                    )}
-                  {migratedBuckets &&
-                    renderLedgerTable(
-                      'Pedidos (sistema anterior)',
-                      <Package size={16} className="text-violet-400 shrink-0" aria-hidden />,
-                      migratedBuckets.pedidosTango
-                    )}
-                </div>
-                {migratedBuckets && migratedBuckets.otros.length > 0
-                  ? renderLedgerTable(
-                      'Movimientos sin clasificar',
-                      <Clock size={16} className="text-amber-400/90 shrink-0" aria-hidden />,
-                      migratedBuckets.otros
-                    )
-                  : null}
+                {renderLedgerTable('Movimientos unificados', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, unifiedLedgerEntries)}
               </div>
             ) : (
               <p className="text-sm text-slate-500 leading-relaxed">
