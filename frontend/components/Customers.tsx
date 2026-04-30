@@ -1745,7 +1745,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     <div className="space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-white">Cartera de Clientes</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full xl:w-auto">
           <input
             ref={importExcelInputRef}
             type="file"
@@ -1792,11 +1792,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 setWholesaleMetricsExporting(false);
               }}
               disabled={wholesaleMetricsExporting}
-              className="bg-fuchsia-900/40 text-fuchsia-100 px-4 py-2 rounded-lg hover:bg-fuchsia-900/55 border border-fuchsia-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              className="bg-fuchsia-900/40 text-fuchsia-100 px-3 py-2.5 rounded-lg hover:bg-fuchsia-900/55 border border-fuchsia-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
               title="Top de artículos más pedidos en mayorista"
             >
               {wholesaleMetricsExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span>{wholesaleMetricsExporting ? 'Exportando…' : 'Métricas mayorista (Top artículos)'}</span>
+              <span className="leading-tight break-words">{wholesaleMetricsExporting ? 'Exportando…' : 'Métricas mayorista (Top artículos)'}</span>
             </button>
           )}
           {canViewSaldos && (
@@ -1813,11 +1813,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 setSaldosMultimediasExporting(false);
               }}
               disabled={saldosMultimediasExporting}
-              className="bg-amber-900/40 text-amber-100 px-4 py-2 rounded-lg hover:bg-amber-900/55 border border-amber-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              className="bg-amber-900/40 text-amber-100 px-3 py-2.5 rounded-lg hover:bg-amber-900/55 border border-amber-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
               title="Una hoja Resumen con formato: código, cliente, vendedor, zona, saldo pendiente unificado, movimientos (sin columna Hoja)"
             >
               {saldosMultimediasExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span>{saldosMultimediasExporting ? 'Exportando…' : 'Excel saldos pendientes (Resumen)'}</span>
+              <span className="leading-tight break-words">{saldosMultimediasExporting ? 'Exportando…' : 'Excel saldos pendientes (Resumen)'}</span>
             </button>
           )}
           {canViewSaldos && (
@@ -1834,11 +1834,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 setMultimediaExporting(false);
               }}
               disabled={multimediaExporting}
-              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
               title="Genera el mismo formato que el Excel historial_clientes_multimedias (Resumen + una hoja por cliente)"
             >
               {multimediaExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-              <span>{multimediaExporting ? 'Exportando…' : 'Exportar historial Multimedias'}</span>
+              <span className="leading-tight break-words">{multimediaExporting ? 'Exportando…' : 'Exportar historial Multimedias'}</span>
             </button>
           )}
           {canViewSaldos && (
@@ -1846,11 +1846,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               type="button"
               onClick={() => multimediaHistorialInputRef.current?.click()}
               disabled={multimediaImporting}
-              className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
               title="Importa movimientos desde el Excel; reemplaza el historial guardado por cada cliente que se pueda vincular"
             >
               {multimediaImporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span>{multimediaImporting ? 'Importando…' : 'Importar historial Multimedias'}</span>
+              <span className="leading-tight break-words">{multimediaImporting ? 'Importando…' : 'Importar historial Multimedias'}</span>
             </button>
           )}
           {role === Role.ADMIN && (
@@ -1858,35 +1858,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               type="button"
               onClick={() => assignSellersResumenInputRef.current?.click()}
               disabled={assigningSellersResumen}
-              className="bg-indigo-900/50 text-indigo-100 px-4 py-2 rounded-lg hover:bg-indigo-900/70 border border-indigo-700/40 transition flex items-center gap-2 font-medium disabled:opacity-50"
+              className="bg-indigo-900/50 text-indigo-100 px-3 py-2.5 rounded-lg hover:bg-indigo-900/70 border border-indigo-700/40 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
               title="Misma hoja Resumen del Excel Multimedias: asigna cada cliente al vendedor de la columna Vendedor habitual (usuarios importados vendedor.N@importado.lupohub.local)"
             >
               {assigningSellersResumen ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
-              <span>{assigningSellersResumen ? 'Asignando…' : 'Asignar vendedores (Resumen)'}</span>
+              <span className="leading-tight break-words">{assigningSellersResumen ? 'Asignando…' : 'Asignar vendedores (Resumen)'}</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => cuitUpdateInputRef.current?.click()}
             disabled={updatingCuit}
-            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+            className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
             title="Excel con Razón social o Email + CUIT para actualizar solo el CUIT de clientes existentes"
           >
             {updatingCuit ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-            <span>{updatingCuit ? 'Actualizando…' : 'Actualizar CUIT en lote'}</span>
+            <span className="leading-tight break-words">{updatingCuit ? 'Actualizando…' : 'Actualizar CUIT en lote'}</span>
           </button>
           <button
             type="button"
             onClick={() => importExcelInputRef.current?.click()}
             disabled={importingExcel}
-            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50"
+            className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
           >
             {importingExcel ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-            <span>{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
+            <span className="leading-tight break-words">{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
           </button>
           <button 
             onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium"
+            className="bg-blue-600 text-white px-3 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium min-h-[44px] whitespace-normal text-left"
           >
             <Plus size={18} />
             <span>Nuevo Cliente</span>
