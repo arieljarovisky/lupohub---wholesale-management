@@ -1040,6 +1040,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     SELECT
       c.id AS customerId,
       ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(cnc.notas_credito, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
@@ -1059,11 +1060,23 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) oc ON oc.customer_id = c.id
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(COALESCE(cn.amount_credited, 0), 2)) AS notas_credito
+      FROM credit_notes cn
+      INNER JOIN orders o ON o.id = cn.order_id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+      GROUP BY o.customer_id
+    ) cnc ON cnc.customer_id = c.id
     LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND (
         COALESCE(oc.cargos, 0) > 0.005
+        OR COALESCE(cnc.notas_credito, 0) > 0.005
         OR COALESCE(mm.last_saldo, 0) > 0.005
         OR COALESCE(pay.total_pagos, 0) > 0.005
       )
@@ -1074,6 +1087,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     SELECT
       c.id AS customerId,
       ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(cnc.notas_credito, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
@@ -1088,11 +1102,23 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) oc ON oc.customer_id = c.id
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(COALESCE(cn.amount_credited, 0), 2)) AS notas_credito
+      FROM credit_notes cn
+      INNER JOIN orders o ON o.id = cn.order_id
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+      GROUP BY o.customer_id
+    ) cnc ON cnc.customer_id = c.id
     LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND (
         COALESCE(oc.cargos, 0) > 0.005
+        OR COALESCE(cnc.notas_credito, 0) > 0.005
         OR COALESCE(mm.last_saldo, 0) > 0.005
         OR COALESCE(pay.total_pagos, 0) > 0.005
       )
@@ -1105,6 +1131,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       (rows as any[]).map((r) => ({
         customerId: r.customerId,
         orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+        totalNotasCredito: Number(r.totalNotasCredito) || 0,
         multimediaSaldo: Number(r.multimediaSaldo) || 0,
         totalPagos: Number(r.totalPagos) || 0,
         saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
@@ -1118,6 +1145,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         (rows as any[]).map((r) => ({
           customerId: r.customerId,
           orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+          totalNotasCredito: Number(r.totalNotasCredito) || 0,
           multimediaSaldo: Number(r.multimediaSaldo) || 0,
           totalPagos: Number(r.totalPagos) || 0,
           saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0

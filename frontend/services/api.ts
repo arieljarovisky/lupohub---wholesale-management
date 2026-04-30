@@ -681,6 +681,7 @@ export const api = {
     Array<{
       customerId: string;
       orderCargosPendientes: number;
+      totalNotasCredito: number;
       multimediaSaldo: number;
       totalPagos: number;
       saldoPendienteUnificado: number;

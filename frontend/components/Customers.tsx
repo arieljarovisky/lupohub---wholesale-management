@@ -73,6 +73,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       {
         saldoPendienteUnificado: number;
         orderCargosPendientes: number;
+        totalNotasCredito: number;
         multimediaSaldo: number;
         totalPagos: number;
       }
@@ -91,6 +92,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           {
             saldoPendienteUnificado: number;
             orderCargosPendientes: number;
+            totalNotasCredito: number;
             multimediaSaldo: number;
             totalPagos: number;
           }
@@ -99,6 +101,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           m[r.customerId] = {
             saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0,
             orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
+            totalNotasCredito: Number(r.totalNotasCredito) || 0,
             multimediaSaldo: Number(r.multimediaSaldo) || 0,
             totalPagos: Number(r.totalPagos) || 0
           };
@@ -1203,6 +1206,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <span>
                       Pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span className="text-violet-400/90">
+                      − Notas de crédito: $
+                      {carteraById[selectedCustomer.id].totalNotasCredito.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                       })}
