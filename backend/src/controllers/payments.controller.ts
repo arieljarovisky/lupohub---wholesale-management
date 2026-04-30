@@ -7,6 +7,7 @@ const canManagePayments = (role?: string) =>
   role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 
 let paymentInvoicesTableReady: boolean | null = null;
+let paymentInvoiceRefsTableReady: boolean | null = null;
 async function ensurePaymentInvoicesTable(): Promise<boolean> {
   if (paymentInvoicesTableReady === true) return true;
   try {
@@ -39,6 +40,30 @@ async function ensurePaymentInvoicesTable(): Promise<boolean> {
   }
 }
 
+async function ensurePaymentInvoiceRefsTable(): Promise<boolean> {
+  if (paymentInvoiceRefsTableReady === true) return true;
+  try {
+    await execute(`
+      CREATE TABLE IF NOT EXISTS payment_invoice_refs (
+        payment_id VARCHAR(36) NOT NULL,
+        invoice_ref VARCHAR(255) NOT NULL,
+        source VARCHAR(40) NOT NULL DEFAULT 'IMPORTED',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (payment_id, invoice_ref),
+        INDEX idx_payment_invoice_refs_ref (invoice_ref),
+        CONSTRAINT fk_payment_invoice_refs_payment
+          FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
+      )
+    `);
+    paymentInvoiceRefsTableReady = true;
+    return true;
+  } catch (e: any) {
+    console.error('[payments] ensurePaymentInvoiceRefsTable:', e?.message || e);
+    paymentInvoiceRefsTableReady = false;
+    return false;
+  }
+}
+
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
 export const listPayments = async (req: any, res: Response) => {
   try {
@@ -48,6 +73,7 @@ export const listPayments = async (req: any, res: Response) => {
     }
 
     const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
+    const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
     const { customerId, invoiceId, orderId, desde, hasta } = req.query as any;
     const where: string[] = [];
     const params: any[] = [];
@@ -86,12 +112,14 @@ export const listPayments = async (req: any, res: Response) => {
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
-        GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+        GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+        ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
       FROM payments p
       JOIN customers c ON c.id = p.customer_id
       LEFT JOIN users u ON u.id = p.seller_id
       LEFT JOIN invoices i ON i.id = p.invoice_id
       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+      ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
       ${whereSql}
       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
                p.receipt_number, p.date, p.amount, p.notes, p.created_at,
@@ -106,7 +134,8 @@ export const listPayments = async (req: any, res: Response) => {
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
-        NULL AS invoice_ids
+        NULL AS invoice_ids,
+        ${paymentInvoiceRefsEnabled ? `(SELECT GROUP_CONCAT(DISTINCT pir.invoice_ref) FROM payment_invoice_refs pir WHERE pir.payment_id = p.id) AS invoice_refs` : `NULL AS invoice_refs`}
       FROM payments p
       JOIN customers c ON c.id = p.customer_id
       LEFT JOIN users u ON u.id = p.seller_id
@@ -123,10 +152,16 @@ export const listPayments = async (req: any, res: Response) => {
       sellerName: r.seller_name ?? undefined,
       orderId: r.order_id ?? undefined,
       invoiceId: r.invoice_id ?? undefined,
-      invoiceIds: String(r.invoice_ids || r.invoice_id || '')
-        .split(',')
-        .map((x: string) => x.trim())
-        .filter(Boolean),
+      invoiceIds: Array.from(new Set([
+        ...String(r.invoice_ids || r.invoice_id || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean),
+        ...String(r.invoice_refs || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean),
+      ])),
       receiptNumber: r.receipt_number,
       date: r.date,
       amount: Number(r.amount) || 0,
@@ -329,6 +364,7 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
+    const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
     const body = req.body as {
       customerId?: string;
       sellerId?: string | null;
@@ -368,23 +404,19 @@ export const createPayment = async (req: any, res: Response) => {
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
 
     if (invoiceId && !invoiceIds.includes(invoiceId)) invoiceIds.unshift(invoiceId);
-    const hasImportedInvoiceId = invoiceIds.some((id) => id.startsWith('mm-fac-'));
-    if (hasImportedInvoiceId) {
-      return res.status(400).json({
-        message: 'Las facturas importadas (Tango) no se pueden relacionar al recibo. Seleccioná facturas emitidas en LupoHub.'
-      });
-    }
-    const primaryInvoiceId = invoiceIds[0] || null;
+    const systemInvoiceIds = invoiceIds.filter((id) => !id.startsWith('mm-fac-'));
+    const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
+    const primaryInvoiceId = systemInvoiceIds[0] || null;
 
-    if (invoiceIds.length > 0) {
+    if (systemInvoiceIds.length > 0) {
       const rows = await query(
         `SELECT i.id, o.customer_id
          FROM invoices i
          JOIN orders o ON o.id = i.order_id
-         WHERE i.id IN (${invoiceIds.map(() => '?').join(',')})`,
-        invoiceIds
+         WHERE i.id IN (${systemInvoiceIds.map(() => '?').join(',')})`,
+        systemInvoiceIds
       ) as Array<{ id: string; customer_id: string }>;
-      if (rows.length !== invoiceIds.length) {
+      if (rows.length !== systemInvoiceIds.length) {
         return res.status(400).json({ message: 'Hay facturas inválidas en la selección del recibo' });
       }
       const invalidByCustomer = rows.find((r) => r.customer_id !== customerId);
@@ -435,11 +467,19 @@ export const createPayment = async (req: any, res: Response) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]
       );
-      if (invoiceIds.length > 0 && paymentInvoicesEnabled) {
-        for (const invId of invoiceIds) {
+      if (systemInvoiceIds.length > 0 && paymentInvoicesEnabled) {
+        for (const invId of systemInvoiceIds) {
           await execute(
             `INSERT IGNORE INTO payment_invoices (payment_id, invoice_id) VALUES (?, ?)`,
             [id, invId]
+          );
+        }
+      }
+      if (importedInvoiceRefs.length > 0 && paymentInvoiceRefsEnabled) {
+        for (const invRef of importedInvoiceRefs) {
+          await execute(
+            `INSERT IGNORE INTO payment_invoice_refs (payment_id, invoice_ref, source) VALUES (?, ?, 'IMPORTED')`,
+            [id, invRef]
           );
         }
       }
@@ -487,14 +527,17 @@ export const createPayment = async (req: any, res: Response) => {
       paymentInvoicesEnabled
         ? `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
-         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`
         : `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
-         NULL AS invoice_ids
+         NULL AS invoice_ids,
+         ${paymentInvoiceRefsEnabled ? `(SELECT GROUP_CONCAT(DISTINCT pir.invoice_ref) FROM payment_invoice_refs pir WHERE pir.payment_id = p.id) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        WHERE p.id = ?`,
       [id]
@@ -505,10 +548,16 @@ export const createPayment = async (req: any, res: Response) => {
       sellerId: row.seller_id ?? undefined,
       orderId: row.order_id ?? undefined,
       invoiceId: row.invoice_id ?? undefined,
-      invoiceIds: String(row.invoice_ids || row.invoice_id || '')
-        .split(',')
-        .map((x: string) => x.trim())
-        .filter(Boolean),
+      invoiceIds: Array.from(new Set([
+        ...String(row.invoice_ids || row.invoice_id || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean),
+        ...String(row.invoice_refs || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean),
+      ])),
       receiptNumber: row.receipt_number,
       date: row.date,
       amount: Number(row.amount) || 0,
