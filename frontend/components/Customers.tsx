@@ -508,7 +508,38 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const unifiedLedgerEntries = useMemo(() => {
     const entries = multimediaLedger?.entries;
     if (!entries?.length) return [];
-    return [...entries];
+    const normalizeDocType = (tipo: string, detalle?: string | null) => {
+      const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
+      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
+      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
+      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
+      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
+      return (tipo || '').toUpperCase();
+    };
+    const rows = [...entries];
+    let runningSaldo = 0;
+    let hasRunningSaldo = false;
+    return rows.map((row) => {
+      const next = { ...row };
+      if (next.saldo != null && Number.isFinite(Number(next.saldo))) {
+        runningSaldo = Number(next.saldo);
+        hasRunningSaldo = true;
+        return next;
+      }
+      if (next.importe != null && Number.isFinite(Number(next.importe))) {
+        const amount = Number(next.importe);
+        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
+        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
+          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
+          hasRunningSaldo = true;
+        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
+          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
+          hasRunningSaldo = true;
+        }
+      }
+      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+      return next;
+    });
   }, [multimediaLedger]);
 
   const pendingShipLines = useMemo(() => {
