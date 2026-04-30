@@ -420,8 +420,12 @@ export function buildWholesaleCreditNoteHtml(params: {
     return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
   };
   const descOf = (i: OrderItem) => {
+    const variantId = i.variantId ?? i.productId;
+    const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+    const localSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
     const name = (i.productName ?? '').toString().trim();
-    return name || '—';
+    if (localSku && name) return `${localSku} — ${name}`;
+    return localSku || name || '—';
   };
 
   const scope = nc.scope || 'total';
