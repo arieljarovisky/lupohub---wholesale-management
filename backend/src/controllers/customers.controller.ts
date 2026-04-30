@@ -972,7 +972,36 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
              END AS receipt_norm
            FROM payments p
            INNER JOIN customers c2 ON c2.id = p.customer_id
+           LEFT JOIN (
+             SELECT
+               e.customer_id,
+               DATE(e.line_date) AS line_date,
+               ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               ) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+               AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY
+               e.customer_id,
+               DATE(e.line_date),
+               ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+           ) me_rec
+             ON me_rec.customer_id = p.customer_id
+            AND me_rec.line_date = DATE(p.date)
+            AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+            AND me_rec.receipt_norm = CASE
+              WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+              ELSE UPPER(
+                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+              )
+            END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
+             AND me_rec.customer_id IS NULL
            GROUP BY
              p.customer_id,
              DATE(p.date),
@@ -997,6 +1026,35 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
                )
              END AS receipt_norm
            FROM payments p
+           LEFT JOIN (
+             SELECT
+               e.customer_id,
+               DATE(e.line_date) AS line_date,
+               ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               ) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+               AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY
+               e.customer_id,
+               DATE(e.line_date),
+               ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+               )
+           ) me_rec
+             ON me_rec.customer_id = p.customer_id
+            AND me_rec.line_date = DATE(p.date)
+            AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+            AND me_rec.receipt_norm = CASE
+              WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+              ELSE UPPER(
+                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+              )
+            END
+           WHERE me_rec.customer_id IS NULL
            GROUP BY
              p.customer_id,
              DATE(p.date),
