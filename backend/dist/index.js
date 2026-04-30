@@ -32,6 +32,7 @@ const catalogs_routes_1 = __importDefault(require("./routes/catalogs.routes"));
 const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
 const afip_routes_1 = __importDefault(require("./routes/afip.routes"));
 const payments_routes_1 = __importDefault(require("./routes/payments.routes"));
+const userTasks_routes_1 = __importDefault(require("./routes/userTasks.routes"));
 const add_stock_movements_table_1 = require("./database/add_stock_movements_table");
 const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders");
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
@@ -54,6 +55,7 @@ const add_catalogs_table_1 = require("./database/add_catalogs_table");
 const add_remitente_table_1 = require("./database/add_remitente_table");
 const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
 const add_payments_table_1 = require("./database/add_payments_table");
+const add_payment_invoices_table_1 = require("./database/add_payment_invoices_table");
 const add_no_stock_impact_orders_1 = require("./database/add_no_stock_impact_orders");
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
 const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
@@ -62,6 +64,7 @@ const add_customer_multimedia_ledger_1 = require("./database/add_customer_multim
 const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock_webhook_config_table");
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
+const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -124,6 +127,7 @@ app.use('/api/catalogs', catalogs_routes_1.default);
 app.use('/api/afip', afip_routes_1.default);
 app.use('/api/billing', billing_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
+app.use('/api/user-tasks', userTasks_routes_1.default);
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err, _req, res, _next) => {
     const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
@@ -168,6 +172,7 @@ function initDatabase() {
                 yield (0, add_remitente_table_1.addRemitenteTable)();
                 yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
                 yield (0, add_payments_table_1.addPaymentsTable)();
+                yield (0, add_payment_invoices_table_1.addPaymentInvoicesTable)();
                 yield (0, add_no_stock_impact_orders_1.addNoStockImpactToOrders)();
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
                 yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
@@ -176,6 +181,7 @@ function initDatabase() {
                 yield (0, add_lupo_stock_webhook_config_table_1.addLupoStockWebhookConfigTable)();
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
+                yield (0, add_user_tasks_table_1.addUserTasksTable)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

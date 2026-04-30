@@ -323,12 +323,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const despachoId = yield resolveDespachoIdForItem(item, variantId);
             yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_c = item.priceAtMoment) !== null && _c !== void 0 ? _c : 0, sellAsPack, despachoId]);
         }
-        if (statusToSave === 'Confirmado' && !noStockImpact) {
-            const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
-            const result = yield deductStockForOrder(orderId);
-            if (!result.success)
-                console.error('Errores descontando stock al crear pedido confirmado:', result.errors);
-        }
+        // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
               o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
        FROM orders o
@@ -419,18 +414,21 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 message: 'El pedido está pendiente de confirmación de admin.'
             });
         }
-        // Solo al confirmar ADMIN se descuenta stock.
-        if (['Borrador', 'Pendiente confirmación admin'].includes(previousStatus) &&
-            nextStatus === 'Confirmado' &&
-            !noStockImpact) {
+        // Descontar stock cuando finaliza picking (Falta controlar / Controlado / Despachado).
+        const pickingDoneStatuses = ['Falta controlar', 'Controlado', 'Despachado'];
+        const entersPickingDone = !pickingDoneStatuses.includes(previousStatus) &&
+            pickingDoneStatuses.includes(nextStatus);
+        if (entersPickingDone &&
+            !noStockImpact &&
+            !(yield (0, stock_controller_1.isMayoristaStockDeductedForWholesale)(id))) {
             const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield deductStockForOrder(id);
             if (!result.success) {
                 console.error('Errores descontando stock:', result.errors);
             }
         }
-        // Si se cancela un pedido que ya tenía stock descontado, restaurar stock (todos los estados salvo Borrador y Despachado)
-        const hadStockDeducted = !noStockImpact && ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(previousStatus);
+        // Si se cancela y el stock ya estaba descontado de verdad, restaurar.
+        const hadStockDeducted = !noStockImpact && (yield (0, stock_controller_1.isMayoristaStockDeductedForWholesale)(id));
         if (nextStatus === 'Cancelado' && hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);
@@ -689,9 +687,8 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             });
         }
         const currentOrder = yield (0, db_1.get)("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
-        const status = currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.status;
         const hadStockDeducted = !(currentOrder === null || currentOrder === void 0 ? void 0 : currentOrder.no_stock_impact) &&
-            ['Confirmado', 'Preparando', 'Preparación', 'Falta controlar', 'Controlado'].includes(status);
+            (yield (0, stock_controller_1.isMayoristaStockDeductedForWholesale)(id));
         if (hadStockDeducted) {
             const { restoreStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
             const result = yield restoreStockForOrder(id);

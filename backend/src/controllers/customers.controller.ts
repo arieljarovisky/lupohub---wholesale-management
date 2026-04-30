@@ -975,6 +975,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
            GROUP BY
              p.customer_id,
+             DATE(p.date),
              ROUND(COALESCE(p.amount, 0), 2),
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -998,6 +999,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
            FROM payments p
            GROUP BY
              p.customer_id,
+             DATE(p.date),
              ROUND(COALESCE(p.amount, 0), 2),
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -1139,16 +1141,60 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
   const paymentsJoin =
     user.role === 'SELLER'
       ? `LEFT JOIN (
-      SELECT p.customer_id, SUM(p.amount) AS total_pagos
-      FROM payments p
-      INNER JOIN customers c2 ON c2.id = p.customer_id
-      WHERE (p.seller_id = ? OR c2.seller_id = ?)
-      GROUP BY p.customer_id
+      SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      FROM (
+        SELECT
+          p.customer_id,
+          ROUND(COALESCE(p.amount, 0), 2) AS amount,
+          CASE
+            WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+            ELSE UPPER(
+              REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+            )
+          END AS receipt_norm,
+          DATE(p.date) AS pay_date
+        FROM payments p
+        INNER JOIN customers c2 ON c2.id = p.customer_id
+        WHERE (p.seller_id = ? OR c2.seller_id = ?)
+        GROUP BY
+          p.customer_id,
+          DATE(p.date),
+          ROUND(COALESCE(p.amount, 0), 2),
+          CASE
+            WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+            ELSE UPPER(
+              REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+            )
+          END
+      ) d
+      GROUP BY d.customer_id
     ) pay ON pay.customer_id = t.customerId`
       : `LEFT JOIN (
-      SELECT customer_id, SUM(amount) AS total_pagos
-      FROM payments
-      GROUP BY customer_id
+      SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      FROM (
+        SELECT
+          p.customer_id,
+          ROUND(COALESCE(p.amount, 0), 2) AS amount,
+          CASE
+            WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+            ELSE UPPER(
+              REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+            )
+          END AS receipt_norm,
+          DATE(p.date) AS pay_date
+        FROM payments p
+        GROUP BY
+          p.customer_id,
+          DATE(p.date),
+          ROUND(COALESCE(p.amount, 0), 2),
+          CASE
+            WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+            ELSE UPPER(
+              REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+            )
+          END
+      ) d
+      GROUP BY d.customer_id
     ) pay ON pay.customer_id = t.customerId`;
   const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
   const paramsWithNc = [...baseParams, ...payParams];
@@ -2584,8 +2630,9 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     if (from) { paymentsWhere.push('p.date >= ?'); paymentsParams.push(from); }
     if (to) { paymentsWhere.push('p.date <= ?'); paymentsParams.push(to); }
     const paymentsRows = await query(
-      `SELECT p.date, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
+      `SELECT p.date, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id, i.cae AS invoice_cae
        FROM payments p
+       LEFT JOIN invoices i ON i.id = p.invoice_id
        WHERE ${paymentsWhere.join(' AND ')}
        ORDER BY p.date DESC, p.created_at DESC`,
       paymentsParams
@@ -2623,9 +2670,29 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       [customerId, customerId]
     ) as any;
     const paymentsAgg = await get(
-      `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS totalPagos
-       FROM payments
-       WHERE customer_id = ?`,
+      `SELECT ROUND(COALESCE(SUM(d.amount), 0), 2) AS totalPagos
+       FROM (
+         SELECT
+           ROUND(COALESCE(p.amount, 0), 2) AS amount,
+           DATE(p.date) AS pay_date,
+           CASE
+             WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+             )
+           END AS receipt_norm
+         FROM payments p
+         WHERE p.customer_id = ?
+         GROUP BY
+           DATE(p.date),
+           ROUND(COALESCE(p.amount, 0), 2),
+           CASE
+             WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+             )
+           END
+       ) d`,
       [customerId]
     ) as any;
     const orderCargosPendientes = Number(orderAgg?.cargos || 0);
@@ -2739,7 +2806,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
-        detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
+        detalle: `Factura (CAE): ${p.invoice_cae || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
         sortTs: ts,
         sortSeq: 2000000,
         sortNumero: String(p.receipt_number || '')

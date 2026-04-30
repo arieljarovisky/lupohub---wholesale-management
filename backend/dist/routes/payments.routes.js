@@ -12,5 +12,7 @@ router.use(auth_1.authMiddleware);
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 router.get('/', payments_controller_1.listPayments);
 router.post('/', payments_controller_1.createPayment);
+router.patch('/imported/date', payments_controller_1.updateImportedPaymentDate);
+router.patch('/:id/date', payments_controller_1.updatePaymentDate);
 router.post('/import-excel', upload.array('files', 10), payments_controller_1.importPaymentsFromExcel);
 exports.default = router;
