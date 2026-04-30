@@ -1042,7 +1042,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(GREATEST(0, COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendienteUnificado
+      ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1076,7 +1076,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(GREATEST(0, COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendienteUnificado
+      ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1763,7 +1763,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       totalCargosPendiente: C,
       totalPagos: P,
       multimediaSaldo: 0,
-      saldoPendiente: Math.round(Math.max(0, C + 0 - P) * 100) / 100,
+      saldoPendiente: Math.round((C + 0 - P) * 100) / 100,
       pedidosPendientes: Number(r.pedidosPendientes) || 0,
       seller_name: r.seller_name,
       movementCountExcel: 0
@@ -1777,7 +1777,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     const existing = byId.get(id);
     const C = existing?.totalCargosPendiente ?? 0;
     const P = existing?.totalPagos ?? Pmm;
-    const unified = Math.round(Math.max(0, C + excelSaldo - P) * 100) / 100;
+    const unified = Math.round((C + excelSaldo - P) * 100) / 100;
     if (existing) {
       existing.multimediaSaldo = excelSaldo;
       existing.totalPagos = P;
@@ -1796,7 +1796,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         totalCargosPendiente: 0,
         totalPagos: Pmm,
         multimediaSaldo: excelSaldo,
-        saldoPendiente: Math.round(Math.max(0, 0 + excelSaldo - Pmm) * 100) / 100,
+        saldoPendiente: Math.round((0 + excelSaldo - Pmm) * 100) / 100,
         pedidosPendientes: 0,
         seller_name: m.seller_name,
         movementCountExcel: mmCnt
@@ -2440,7 +2440,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   totalFacturas = Math.round(totalFacturas * 100) / 100;
   totalNc = Math.round(totalNc * 100) / 100;
   totalRecibos = Math.round(totalRecibos * 100) / 100;
-  const saldoPendiente = Math.round(Math.max(0, totalFacturas - totalNc - totalRecibos) * 100) / 100;
+    const saldoPendiente = Math.round((totalFacturas - totalNc - totalRecibos) * 100) / 100;
 
   return {
     totalFacturas,
@@ -2711,7 +2711,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     const orderCargosPendientes = Number(orderAgg?.cargos || 0);
     const multimediaSaldo = Number(multimediaAgg?.multimediaSaldo || 0);
     const totalPagos = Number(paymentsAgg?.totalPagos || 0);
-    const saldoUnificado = Math.round(Math.max(0, orderCargosPendientes + multimediaSaldo - totalPagos) * 100) / 100;
+    const saldoUnificado = Math.round((orderCargosPendientes + multimediaSaldo - totalPagos) * 100) / 100;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
@@ -2812,13 +2812,10 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const p of paymentsRows) {
       const fecha = p.date ? new Date(p.date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
-      const refs = Array.from(new Set([
-        ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x: string) => x.trim()).filter(Boolean),
-        ...String(p.invoice_refs || '').split(',').map((x: string) => x.trim()).filter(Boolean),
-      ]));
       const caes = Array.from(
         new Set(String(p.invoice_caes || '').split(',').map((x: string) => x.trim()).filter(Boolean))
       );
+      const caeFromNumero = String(p.receipt_number || '').trim();
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
@@ -2826,7 +2823,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
-        detalle: `Factura (CAE): ${caes.length ? caes.join(' | ') : '-'}${p.notes ? ` | ${p.notes}` : ''}`,
+        detalle: `Factura (CAE): ${caeFromNumero || (caes.length ? caes.join(' | ') : '-')}${p.notes ? ` | ${p.notes}` : ''}`,
         sortTs: ts,
         sortSeq: 2000000,
         sortNumero: String(p.receipt_number || '')
