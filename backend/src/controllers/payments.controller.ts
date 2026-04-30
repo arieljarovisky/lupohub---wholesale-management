@@ -125,7 +125,7 @@ export const listPayments = async (req: any, res: Response) => {
                p.receipt_number, p.date, p.amount, p.notes, p.created_at,
                c.business_name, c.name, u.name,
                i.punto_venta, i.cbte_tipo, i.cbte_desde
-      ORDER BY p.date DESC, p.created_at DESC
+      ORDER BY p.created_at DESC, p.date DESC
       `
         : `
       SELECT
@@ -141,7 +141,7 @@ export const listPayments = async (req: any, res: Response) => {
       LEFT JOIN users u ON u.id = p.seller_id
       LEFT JOIN invoices i ON i.id = p.invoice_id
       ${whereSql}
-      ORDER BY p.date DESC, p.created_at DESC
+      ORDER BY p.created_at DESC, p.date DESC
       `,
       params
     );
@@ -291,6 +291,9 @@ export const listPayments = async (req: any, res: Response) => {
       }));
 
     const allPayments = [...systemPayments, ...importedAsPayments].sort((a, b) => {
+      const ca = a.createdAt ? (new Date(a.createdAt).getTime() || 0) : 0;
+      const cb = b.createdAt ? (new Date(b.createdAt).getTime() || 0) : 0;
+      if (cb !== ca) return cb - ca;
       const da = new Date(a.date).getTime() || 0;
       const db = new Date(b.date).getTime() || 0;
       return db - da;

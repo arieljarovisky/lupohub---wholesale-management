@@ -1406,8 +1406,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-                  Historial de movimientos tal como viene del archivo. Los recibos que cargás hoy en Facturación no se listan
-                  acá: impactan en el <strong className="text-slate-300">saldo unificado</strong> de arriba.
+                  Historial unificado: movimientos importados + recibos cargados en Facturación. Todo impacta en el
+                  <strong className="text-slate-300"> saldo unificado</strong>.
                 </p>
               </div>
             {multimediaLedgerLoading ? (

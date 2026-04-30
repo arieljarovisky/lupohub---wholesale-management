@@ -392,6 +392,25 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`,
       [id]
     )) as any[];
+    const paymentEntries = (await query(
+      `SELECT
+         p.id,
+         p.date,
+         p.created_at,
+         p.receipt_number,
+         p.amount,
+         p.notes,
+         p.invoice_id,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+       WHERE p.customer_id = ?
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id
+       ORDER BY p.created_at ASC, p.date ASC`,
+      [id]
+    )) as any[];
     let lastSaldo = 0;
     if (entries.length > 0) {
       const tail = entries[entries.length - 1];
@@ -406,14 +425,29 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         }
       }
     }
-    res.json({
-      customerId: id,
-      legacyCode: cust.legacy_code ?? null,
-      accountZone: cust.account_zone ?? null,
-      accountSellerLabel: cust.account_seller_label ?? null,
-      movementCount: entries.length,
-      lastSaldo,
-      entries: entries.map((e) => ({
+    const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
+    const paymentAsEntries = paymentEntries.map((p, idx) => {
+      const refs = Array.from(new Set([
+        ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x: string) => x.trim()).filter(Boolean),
+        ...String(p.invoice_refs || '').split(',').map((x: string) => x.trim()).filter(Boolean),
+      ]));
+      const refsText = refs.length ? `Factura(s): ${refs.join(' | ')}` : 'Factura(s): -';
+      const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
+      return {
+        lineOrder: maxLineOrder + 100000 + idx,
+        lineDate: p.date,
+        tipo: 'REC',
+        numero: p.receipt_number || '',
+        edc: null,
+        vto: null,
+        importe: p.amount != null ? Number(p.amount) : null,
+        saldo: null,
+        detalle: detail,
+        paginaPdf: null
+      };
+    });
+    const mergedEntries = [
+      ...entries.map((e) => ({
         lineOrder: e.line_order,
         lineDate: e.line_date,
         tipo: e.tipo,
@@ -424,7 +458,23 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         saldo: e.saldo != null ? Number(e.saldo) : null,
         detalle: e.detalle,
         paginaPdf: e.pagina_pdf
-      }))
+      })),
+      ...paymentAsEntries
+    ].sort((a, b) => {
+      const da = new Date(a.lineDate || 0).getTime() || 0;
+      const db = new Date(b.lineDate || 0).getTime() || 0;
+      if (da !== db) return da - db;
+      return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
+    });
+
+    res.json({
+      customerId: id,
+      legacyCode: cust.legacy_code ?? null,
+      accountZone: cust.account_zone ?? null,
+      accountSellerLabel: cust.account_seller_label ?? null,
+      movementCount: mergedEntries.length,
+      lastSaldo,
+      entries: mergedEntries
     });
   } catch (e: any) {
     console.error('getCustomerMultimediaLedger:', e);

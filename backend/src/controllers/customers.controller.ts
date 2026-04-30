@@ -2584,10 +2584,22 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     if (from) { paymentsWhere.push('p.date >= ?'); paymentsParams.push(from); }
     if (to) { paymentsWhere.push('p.date <= ?'); paymentsParams.push(to); }
     const paymentsRows = await query(
-      `SELECT p.date, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
+      `SELECT
+         p.date,
+         p.created_at,
+         p.receipt_number,
+         p.amount,
+         p.notes,
+         p.invoice_id,
+         p.order_id,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
        FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
        WHERE ${paymentsWhere.join(' AND ')}
-       ORDER BY p.date DESC, p.created_at DESC`,
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
+       ORDER BY p.created_at DESC, p.date DESC`,
       paymentsParams
     ) as any[];
 
@@ -2732,6 +2744,10 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const p of paymentsRows) {
       const fecha = p.date ? new Date(p.date) : null;
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+      const refs = Array.from(new Set([
+        ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x: string) => x.trim()).filter(Boolean),
+        ...String(p.invoice_refs || '').split(',').map((x: string) => x.trim()).filter(Boolean),
+      ]));
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
@@ -2739,7 +2755,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
-        detalle: `Factura: ${p.invoice_id || '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
+        detalle: `Factura: ${refs.length ? refs.join(' | ') : '-'} | Pedido: ${p.order_id || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
         sortTs: ts,
         sortSeq: 2000000,
         sortNumero: String(p.receipt_number || '')
