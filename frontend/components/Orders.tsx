@@ -899,7 +899,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             >
               <div className="flex justify-between items-start">
                 <div className="space-y-1 min-w-0 flex-1">
-                  <h3 className="text-xl font-black text-white truncate">{order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}</h3>
+                  <h3 className="text-lg sm:text-xl font-black text-white leading-tight break-words line-clamp-2 sm:line-clamp-1">
+                    {order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}
+                  </h3>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>
