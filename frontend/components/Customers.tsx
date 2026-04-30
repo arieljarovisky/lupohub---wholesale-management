@@ -505,21 +505,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
   type LedgerEntry = NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number];
 
-  const migratedBuckets = useMemo(() => {
+  const unifiedLedgerEntries = useMemo(() => {
     const entries = multimediaLedger?.entries;
-    if (!entries?.length) return null;
-    const recibos: LedgerEntry[] = [];
-    const facturas: LedgerEntry[] = [];
-    const pedidosTango: LedgerEntry[] = [];
-    const otros: LedgerEntry[] = [];
-    for (const e of entries) {
-      const u = `${e.tipo} ${e.detalle || ''}`.toUpperCase();
-      if (/RECIBO|COBRO|PAGO|NC\s*A|INGRESO/i.test(u)) recibos.push(e);
-      else if (/FACT|FCA|FCE|NOTA\s*DE\s*CR|COMPROBANTE|CREDITO|DEBITO|NC\s*D/i.test(u)) facturas.push(e);
-      else if (/PEDIDO|REMITO|PRESUP|PREFACT|ORDEN/i.test(u)) pedidosTango.push(e);
-      else otros.push(e);
-    }
-    return { recibos, facturas, pedidosTango, otros };
+    if (!entries?.length) return [];
+    return [...entries];
   }, [multimediaLedger]);
 
   const pendingShipLines = useMemo(() => {
@@ -1418,35 +1407,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
               <div className="space-y-5">
                 <p className="text-xs text-slate-400 font-medium">
-                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos en
-                  archivo
+                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos
                   {multimediaLedger.legacyCode ? (
                     <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
                   ) : null}
                 </p>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {migratedBuckets &&
-                    renderLedgerTable('Recibos / pagos', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, migratedBuckets.recibos)}
-                  {migratedBuckets &&
-                    renderLedgerTable(
-                      'Facturas y comprobantes',
-                      <FileText size={16} className="text-sky-400 shrink-0" aria-hidden />,
-                      migratedBuckets.facturas
-                    )}
-                  {migratedBuckets &&
-                    renderLedgerTable(
-                      'Pedidos (sistema anterior)',
-                      <Package size={16} className="text-violet-400 shrink-0" aria-hidden />,
-                      migratedBuckets.pedidosTango
-                    )}
-                </div>
-                {migratedBuckets && migratedBuckets.otros.length > 0
-                  ? renderLedgerTable(
-                      'Movimientos sin clasificar',
-                      <Clock size={16} className="text-amber-400/90 shrink-0" aria-hidden />,
-                      migratedBuckets.otros
-                    )
-                  : null}
+                {renderLedgerTable('Movimientos unificados', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, unifiedLedgerEntries)}
               </div>
             ) : (
               <p className="text-sm text-slate-500 leading-relaxed">

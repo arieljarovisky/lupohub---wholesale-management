@@ -443,7 +443,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         importe: p.amount != null ? Number(p.amount) : null,
         saldo: null,
         detalle: detail,
-        paginaPdf: null
+        paginaPdf: null,
+        source: 'system'
       };
     });
     const mergedEntries = [
@@ -457,10 +458,38 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         importe: e.importe != null ? Number(e.importe) : null,
         saldo: e.saldo != null ? Number(e.saldo) : null,
         detalle: e.detalle,
-        paginaPdf: e.pagina_pdf
+        paginaPdf: e.pagina_pdf,
+        source: 'imported'
       })),
       ...paymentAsEntries
-    ].sort((a, b) => {
+    ];
+
+    // Unificación real: evitar REC duplicados (importado + sistema).
+    const deduped: any[] = [];
+    const recByKey = new Map<string, any>();
+    for (const row of mergedEntries) {
+      const tipoNorm = String(row.tipo || '').trim().toUpperCase();
+      if (tipoNorm !== 'REC') {
+        deduped.push(row);
+        continue;
+      }
+      const key = [
+        String(row.lineDate || '').slice(0, 10),
+        String(row.numero || '').trim().toUpperCase(),
+        Number(row.importe || 0).toFixed(2),
+      ].join('|');
+      const prev = recByKey.get(key);
+      if (!prev) {
+        recByKey.set(key, row);
+      } else {
+        // Priorizar el registro del sistema actual por tener referencias de factura reales.
+        const prevSystem = prev.source === 'system';
+        const rowSystem = row.source === 'system';
+        if (!prevSystem && rowSystem) recByKey.set(key, row);
+      }
+    }
+    deduped.push(...Array.from(recByKey.values()));
+    deduped.sort((a, b) => {
       const da = new Date(a.lineDate || 0).getTime() || 0;
       const db = new Date(b.lineDate || 0).getTime() || 0;
       if (da !== db) return da - db;
@@ -472,9 +501,9 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       legacyCode: cust.legacy_code ?? null,
       accountZone: cust.account_zone ?? null,
       accountSellerLabel: cust.account_seller_label ?? null,
-      movementCount: mergedEntries.length,
+      movementCount: deduped.length,
       lastSaldo,
-      entries: mergedEntries
+      entries: deduped
     });
   } catch (e: any) {
     console.error('getCustomerMultimediaLedger:', e);
