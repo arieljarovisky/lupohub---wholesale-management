@@ -827,7 +827,7 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getOrderCreditNotes = getOrderCreditNotes;
 /** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
 const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -835,9 +835,9 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
-    const { tipo, itemIndex, quantity } = req.body || {};
-    if (!tipo || (tipo !== 'total' && tipo !== 'item')) {
-        return res.status(400).json({ message: 'Body debe incluir tipo: "total" o "item"' });
+    const { tipo, itemIndex, quantity, items } = req.body || {};
+    if (!tipo || (tipo !== 'total' && tipo !== 'item' && tipo !== 'items')) {
+        return res.status(400).json({ message: 'Body debe incluir tipo: "total", "item" o "items"' });
     }
     try {
         const orderRow = yield (0, db_1.get)('SELECT id, customer_id, total FROM orders WHERE id = ?', [id]);
@@ -859,13 +859,14 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         let amountToCredit;
         let creditNoteItemQuantity = null;
+        let itemsToCredit = [];
         if (tipo === 'total') {
             const netFromItems = yield getOrderNetFromLineItems(id);
             amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
             if (amountToCredit <= 0)
                 return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
         }
-        else {
+        else if (tipo === 'item') {
             const itemsRows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [id]);
             const items = itemsRows;
             if (!items.length)
@@ -893,28 +894,94 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     message: `No se puede creditar más de lo facturado para este artículo. Ya creditado: $${yaCreditadoItem.toFixed(2)}. Máximo a creditar para este ítem: $${(itemLineTotal - yaCreditadoItem).toFixed(2)}.`,
                 });
             }
+            itemsToCredit = [{ itemIndex: idx, quantity: qty, amount: amountToCredit }];
+        }
+        else {
+            const itemsRows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [id]);
+            const orderItems = itemsRows;
+            if (!orderItems.length)
+                return res.status(400).json({ message: 'El pedido no tiene ítems.' });
+            const rawItems = Array.isArray(items) ? items : [];
+            if (rawItems.length === 0) {
+                return res.status(400).json({ message: 'Para tipo "items" debés enviar al menos un artículo con su cantidad.' });
+            }
+            const byIndex = new Map();
+            for (const it of rawItems) {
+                const idx = typeof (it === null || it === void 0 ? void 0 : it.itemIndex) === 'number' ? it.itemIndex : parseInt(String(it === null || it === void 0 ? void 0 : it.itemIndex), 10);
+                const qty = typeof (it === null || it === void 0 ? void 0 : it.quantity) === 'number' ? it.quantity : parseInt(String(it === null || it === void 0 ? void 0 : it.quantity), 10);
+                if (isNaN(idx) || idx < 0 || idx >= orderItems.length) {
+                    return res.status(400).json({ message: `itemIndex inválido en selección múltiple: ${String((_a = it === null || it === void 0 ? void 0 : it.itemIndex) !== null && _a !== void 0 ? _a : '')}` });
+                }
+                if (isNaN(qty) || qty <= 0) {
+                    return res.status(400).json({ message: `quantity inválida para itemIndex ${idx}. Debe ser mayor a 0.` });
+                }
+                byIndex.set(idx, (byIndex.get(idx) || 0) + qty);
+            }
+            itemsToCredit = [];
+            for (const [idx, qty] of byIndex.entries()) {
+                const item = orderItems[idx];
+                if (qty > item.quantity) {
+                    return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para itemIndex ${idx}` });
+                }
+                const price = Number(item.price_at_moment) || 0;
+                const lineAmount = Math.round(qty * price * 100) / 100;
+                if (lineAmount <= 0) {
+                    return res.status(400).json({ message: `El monto a creditar del itemIndex ${idx} es 0.` });
+                }
+                const itemLineTotal = Math.round(Number(item.quantity) * price * 100) / 100;
+                const yaCreditadoItem = existingNCs
+                    .filter((r) => (r.scope || '') === 'item' && r.item_index === idx)
+                    .reduce((sum, r) => sum + Number(r.amount_credited || 0), 0);
+                if (yaCreditadoItem + lineAmount > itemLineTotal + 0.01) {
+                    return res.status(400).json({
+                        message: `No se puede creditar más de lo facturado para el artículo ${idx + 1}. Ya creditado: $${yaCreditadoItem.toFixed(2)}. Máximo a creditar: $${(itemLineTotal - yaCreditadoItem).toFixed(2)}.`,
+                    });
+                }
+                itemsToCredit.push({ itemIndex: idx, quantity: qty, amount: lineAmount });
+            }
+            amountToCredit = Math.round(itemsToCredit.reduce((sum, i) => sum + i.amount, 0) * 100) / 100;
+            if (amountToCredit <= 0) {
+                return res.status(400).json({ message: 'El monto total a creditar debe ser mayor a 0.' });
+            }
         }
         const { emitirNotaCredito: emitirNCAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '', cuit: customerRow.cuit, condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : undefined }, amountToCredit);
-        const creditNoteId = (0, uuid_1.v4)();
-        const scope = tipo;
+        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '', cuit: customerRow.cuit, condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined }, amountToCredit);
+        const scope = tipo === 'items' ? 'item' : tipo;
         const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
-        yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [creditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]);
+        const firstCreditNoteId = (0, uuid_1.v4)();
+        if (tipo === 'items') {
+            for (let i = 0; i < itemsToCredit.length; i++) {
+                const it = itemsToCredit[i];
+                yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [i === 0 ? firstCreditNoteId : (0, uuid_1.v4)(), id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, it.amount, 'item', it.itemIndex]);
+            }
+        }
+        else {
+            yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [firstCreditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]);
+        }
         if (scope === 'total') {
             const stockResult = yield (0, stock_controller_1.restoreStockForOrder)(id);
             if (!stockResult.success) {
                 return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito total', errors: stockResult.errors });
             }
         }
-        else if (scope === 'item' && typeof itemIndexVal === 'number') {
+        else if (tipo === 'item' && typeof itemIndexVal === 'number') {
             const stockResult = yield (0, stock_controller_1.restoreStockForOrderItem)(id, itemIndexVal, creditNoteItemQuantity !== null && creditNoteItemQuantity !== void 0 ? creditNoteItemQuantity : undefined);
             if (!stockResult.success) {
                 return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial', errors: stockResult.errors });
             }
         }
+        else if (tipo === 'items') {
+            for (const it of itemsToCredit) {
+                const stockResult = yield (0, stock_controller_1.restoreStockForOrderItem)(id, it.itemIndex, it.quantity);
+                if (!stockResult.success) {
+                    return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial múltiple', errors: stockResult.errors });
+                }
+            }
+        }
         res.status(201).json({
-            id: creditNoteId,
+            id: firstCreditNoteId,
             orderId: id,
             invoiceId: invRow.id,
             cae: result.cae,

@@ -363,29 +363,66 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         }
         const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
-        let lastSaldo = 0;
-        if (entries.length > 0) {
-            const tail = entries[entries.length - 1];
-            if (tail.saldo != null) {
-                lastSaldo = Number(tail.saldo) || 0;
-            }
-            else {
-                for (let i = entries.length - 1; i >= 0; i--) {
-                    if (entries[i].saldo != null) {
-                        lastSaldo = Number(entries[i].saldo) || 0;
-                        break;
-                    }
-                }
-            }
-        }
-        res.json({
-            customerId: id,
-            legacyCode: (_a = cust.legacy_code) !== null && _a !== void 0 ? _a : null,
-            accountZone: (_b = cust.account_zone) !== null && _b !== void 0 ? _b : null,
-            accountSellerLabel: (_c = cust.account_seller_label) !== null && _c !== void 0 ? _c : null,
-            movementCount: entries.length,
-            lastSaldo,
-            entries: entries.map((e) => ({
+        const paymentEntries = (yield (0, db_1.query)(`SELECT
+         p.id,
+         p.date,
+         p.created_at,
+         p.receipt_number,
+         p.amount,
+         p.notes,
+         p.invoice_id,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+       WHERE p.customer_id = ?
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id
+       ORDER BY p.created_at ASC, p.date ASC`, [id]));
+        const normalizeDocNumber = (value) => {
+            const raw = String(value || '').trim().toUpperCase();
+            if (!raw)
+                return '';
+            const cleaned = raw.replace(/[^A-Z0-9-]/g, '');
+            const parts = cleaned.split('-').map((p) => p.replace(/^0+/, '') || '0');
+            return parts.join('-');
+        };
+        const normalizeDocType = (tipo, detalle) => {
+            const t = `${String(tipo || '')} ${String(detalle || '')}`.toUpperCase();
+            if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t))
+                return 'REC';
+            if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t))
+                return 'FAC';
+            if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t))
+                return 'NC';
+            if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t))
+                return 'ND';
+            return String(tipo || '').trim().toUpperCase();
+        };
+        const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
+        const paymentAsEntries = paymentEntries.map((p, idx) => {
+            const refs = Array.from(new Set([
+                ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x) => x.trim()).filter(Boolean),
+                ...String(p.invoice_refs || '').split(',').map((x) => x.trim()).filter(Boolean),
+            ]));
+            const refsText = refs.length ? `Factura(s): ${refs.join(' | ')}` : 'Factura(s): -';
+            const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
+            return {
+                lineOrder: maxLineOrder + 100000 + idx,
+                lineDate: p.date,
+                tipo: 'REC',
+                numero: p.receipt_number || '',
+                edc: null,
+                vto: null,
+                importe: p.amount != null ? Number(p.amount) : null,
+                saldo: null,
+                detalle: detail,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
+        const mergedEntries = [
+            ...entries.map((e) => ({
                 lineOrder: e.line_order,
                 lineDate: e.line_date,
                 tipo: e.tipo,
@@ -395,8 +432,76 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 importe: e.importe != null ? Number(e.importe) : null,
                 saldo: e.saldo != null ? Number(e.saldo) : null,
                 detalle: e.detalle,
-                paginaPdf: e.pagina_pdf
-            }))
+                paginaPdf: e.pagina_pdf,
+                source: 'imported'
+            })),
+            ...paymentAsEntries
+        ];
+        // Unificación real: evitar duplicados entre importado y sistema.
+        const deduped = [];
+        const movementByKey = new Map();
+        for (const row of mergedEntries) {
+            const tipoNorm = normalizeDocType(row.tipo, row.detalle);
+            if (!['REC', 'FAC', 'NC', 'ND'].includes(tipoNorm)) {
+                deduped.push(row);
+                continue;
+            }
+            const key = [
+                tipoNorm,
+                String(row.lineDate || '').slice(0, 10),
+                normalizeDocNumber(row.numero),
+                Number(row.importe || 0).toFixed(2),
+            ].join('|');
+            const prev = movementByKey.get(key);
+            if (!prev) {
+                movementByKey.set(key, row);
+            }
+            else {
+                // Priorizar registro del sistema actual sobre importado al detectar duplicado.
+                const prevSystem = prev.source === 'system';
+                const rowSystem = row.source === 'system';
+                if (!prevSystem && rowSystem)
+                    movementByKey.set(key, row);
+            }
+        }
+        deduped.push(...Array.from(movementByKey.values()));
+        deduped.sort((a, b) => {
+            const da = new Date(a.lineDate || 0).getTime() || 0;
+            const db = new Date(b.lineDate || 0).getTime() || 0;
+            if (da !== db)
+                return da - db;
+            return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
+        });
+        let runningSaldo = 0;
+        let hasRunningSaldo = false;
+        for (const row of deduped) {
+            if (row.saldo != null) {
+                runningSaldo = Number(row.saldo) || 0;
+                hasRunningSaldo = true;
+            }
+            else if (row.importe != null) {
+                const tipoNorm = normalizeDocType(row.tipo, row.detalle);
+                const amount = Number(row.importe) || 0;
+                if (tipoNorm === 'REC' || tipoNorm === 'NC') {
+                    runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
+                    hasRunningSaldo = true;
+                }
+                else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
+                    runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
+                    hasRunningSaldo = true;
+                }
+            }
+            row.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+        }
+        const lastSaldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : 0;
+        res.json({
+            customerId: id,
+            legacyCode: (_a = cust.legacy_code) !== null && _a !== void 0 ? _a : null,
+            accountZone: (_b = cust.account_zone) !== null && _b !== void 0 ? _b : null,
+            accountSellerLabel: (_c = cust.account_seller_label) !== null && _c !== void 0 ? _c : null,
+            movementCount: deduped.length,
+            lastSaldo,
+            entries: deduped
         });
     }
     catch (e) {

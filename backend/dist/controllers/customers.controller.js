@@ -2478,11 +2478,24 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
             paymentsWhere.push('p.date <= ?');
             paymentsParams.push(to);
         }
-        const paymentsRows = yield (0, db_1.query)(`SELECT p.date, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id, i.cae AS invoice_cae
+        const paymentsRows = yield (0, db_1.query)(`SELECT
+         p.date,
+         p.created_at,
+         p.receipt_number,
+         p.amount,
+         p.notes,
+         p.invoice_id,
+         p.order_id,
+         GROUP_CONCAT(DISTINCT i.cae) AS invoice_caes,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
        FROM payments p
-       LEFT JOIN invoices i ON i.id = p.invoice_id
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+       LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
        WHERE ${paymentsWhere.join(' AND ')}
-       ORDER BY p.date DESC, p.created_at DESC`, paymentsParams);
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
+       ORDER BY p.created_at DESC, p.date DESC`, paymentsParams);
         // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
         const orderAgg = yield (0, db_1.get)(`SELECT ROUND(COALESCE(SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)), 0), 2) AS cargos
        FROM orders o
@@ -2621,6 +2634,11 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
         for (const p of paymentsRows) {
             const fecha = p.date ? new Date(p.date) : null;
             const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
+            const refs = Array.from(new Set([
+                ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x) => x.trim()).filter(Boolean),
+                ...String(p.invoice_refs || '').split(',').map((x) => x.trim()).filter(Boolean),
+            ]));
+            const caes = Array.from(new Set(String(p.invoice_caes || '').split(',').map((x) => x.trim()).filter(Boolean)));
             timelineRows.push({
                 section: 'SISTEMA',
                 fecha,
@@ -2628,7 +2646,7 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 numero: (_j = p.receipt_number) !== null && _j !== void 0 ? _j : '',
                 importe: Number(p.amount || 0),
                 saldo: null,
-                detalle: `Factura (CAE): ${p.invoice_cae || '-'}${p.notes ? ` | ${p.notes}` : ''}`,
+                detalle: `Factura (CAE): ${caes.length ? caes.join(' | ') : '-'}${p.notes ? ` | ${p.notes}` : ''}`,
                 sortTs: ts,
                 sortSeq: 2000000,
                 sortNumero: String(p.receipt_number || '')

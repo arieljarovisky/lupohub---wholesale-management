@@ -47,6 +47,70 @@ const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const XLSX = __importStar(require("xlsx"));
 const canManagePayments = (role) => role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
+let paymentInvoicesTableReady = null;
+let paymentInvoiceRefsTableReady = null;
+function ensurePaymentInvoicesTable() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (paymentInvoicesTableReady === true)
+            return true;
+        try {
+            yield (0, db_1.execute)(`
+      CREATE TABLE IF NOT EXISTS payment_invoices (
+        payment_id VARCHAR(36) NOT NULL,
+        invoice_id VARCHAR(36) NOT NULL,
+        amount_applied DECIMAL(12,2) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (payment_id, invoice_id),
+        INDEX idx_payment_invoices_invoice (invoice_id),
+        CONSTRAINT fk_payment_invoices_payment
+          FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+        CONSTRAINT fk_payment_invoices_invoice
+          FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `);
+            yield (0, db_1.execute)(`
+      INSERT IGNORE INTO payment_invoices (payment_id, invoice_id)
+      SELECT p.id, p.invoice_id
+      FROM payments p
+      WHERE p.invoice_id IS NOT NULL AND TRIM(p.invoice_id) <> ''
+    `);
+            paymentInvoicesTableReady = true;
+            return true;
+        }
+        catch (e) {
+            console.error('[payments] ensurePaymentInvoicesTable:', (e === null || e === void 0 ? void 0 : e.message) || e);
+            paymentInvoicesTableReady = false;
+            return false;
+        }
+    });
+}
+function ensurePaymentInvoiceRefsTable() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (paymentInvoiceRefsTableReady === true)
+            return true;
+        try {
+            yield (0, db_1.execute)(`
+      CREATE TABLE IF NOT EXISTS payment_invoice_refs (
+        payment_id VARCHAR(36) NOT NULL,
+        invoice_ref VARCHAR(255) NOT NULL,
+        source VARCHAR(40) NOT NULL DEFAULT 'IMPORTED',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (payment_id, invoice_ref),
+        INDEX idx_payment_invoice_refs_ref (invoice_ref),
+        CONSTRAINT fk_payment_invoice_refs_payment
+          FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
+      )
+    `);
+            paymentInvoiceRefsTableReady = true;
+            return true;
+        }
+        catch (e) {
+            console.error('[payments] ensurePaymentInvoiceRefsTable:', (e === null || e === void 0 ? void 0 : e.message) || e);
+            paymentInvoiceRefsTableReady = false;
+            return false;
+        }
+    });
+}
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
 const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -54,6 +118,8 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (!user || !canManagePayments(user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
+        const paymentInvoicesEnabled = yield ensurePaymentInvoicesTable();
+        const paymentInvoiceRefsEnabled = yield ensurePaymentInvoiceRefsTable();
         const { customerId, invoiceId, orderId, desde, hasta } = req.query;
         const where = [];
         const params = [];
@@ -61,7 +127,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             where.push('p.customer_id = ?');
             params.push(customerId);
         }
-        if (invoiceId) {
+        if (invoiceId && paymentInvoicesEnabled) {
             where.push(`(
         p.invoice_id = ?
         OR EXISTS (
@@ -71,6 +137,10 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         )
       )`);
             params.push(invoiceId, invoiceId);
+        }
+        else if (invoiceId) {
+            where.push('p.invoice_id = ?');
+            params.push(invoiceId);
         }
         if (orderId) {
             where.push('p.order_id = ?');
@@ -90,25 +160,44 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             params.push(user.id);
         }
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-        const rows = yield (0, db_1.query)(`
+        const rows = yield (0, db_1.query)(paymentInvoicesEnabled
+            ? `
       SELECT
         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
         p.receipt_number, p.date, p.amount, p.notes, p.created_at,
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
-        GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+        GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+        ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
       FROM payments p
       JOIN customers c ON c.id = p.customer_id
       LEFT JOIN users u ON u.id = p.seller_id
       LEFT JOIN invoices i ON i.id = p.invoice_id
       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+      ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
       ${whereSql}
       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
                p.receipt_number, p.date, p.amount, p.notes, p.created_at,
                c.business_name, c.name, u.name,
                i.punto_venta, i.cbte_tipo, i.cbte_desde
-      ORDER BY p.date DESC, p.created_at DESC
+      ORDER BY p.created_at DESC, p.date DESC
+      `
+            : `
+      SELECT
+        p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
+        p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+        c.business_name AS customer_business_name, c.name AS customer_name,
+        u.name AS seller_name,
+        i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
+        NULL AS invoice_ids,
+        ${paymentInvoiceRefsEnabled ? `(SELECT GROUP_CONCAT(DISTINCT pir.invoice_ref) FROM payment_invoice_refs pir WHERE pir.payment_id = p.id) AS invoice_refs` : `NULL AS invoice_refs`}
+      FROM payments p
+      JOIN customers c ON c.id = p.customer_id
+      LEFT JOIN users u ON u.id = p.seller_id
+      LEFT JOIN invoices i ON i.id = p.invoice_id
+      ${whereSql}
+      ORDER BY p.created_at DESC, p.date DESC
       `, params);
         const systemPayments = (rows || []).map((r) => {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
@@ -119,10 +208,16 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 sellerName: (_b = r.seller_name) !== null && _b !== void 0 ? _b : undefined,
                 orderId: (_c = r.order_id) !== null && _c !== void 0 ? _c : undefined,
                 invoiceId: (_d = r.invoice_id) !== null && _d !== void 0 ? _d : undefined,
-                invoiceIds: String(r.invoice_ids || r.invoice_id || '')
-                    .split(',')
-                    .map((x) => x.trim())
-                    .filter(Boolean),
+                invoiceIds: Array.from(new Set([
+                    ...String(r.invoice_ids || r.invoice_id || '')
+                        .split(',')
+                        .map((x) => x.trim())
+                        .filter(Boolean),
+                    ...String(r.invoice_refs || '')
+                        .split(',')
+                        .map((x) => x.trim())
+                        .filter(Boolean),
+                ])),
                 receiptNumber: r.receipt_number,
                 date: r.date,
                 amount: Number(r.amount) || 0,
@@ -254,6 +349,10 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             });
         });
         const allPayments = [...systemPayments, ...importedAsPayments].sort((a, b) => {
+            const ca = a.createdAt ? (new Date(a.createdAt).getTime() || 0) : 0;
+            const cb = b.createdAt ? (new Date(b.createdAt).getTime() || 0) : 0;
+            if (cb !== ca)
+                return cb - ca;
             const da = new Date(a.date).getTime() || 0;
             const db = new Date(b.date).getTime() || 0;
             return db - da;
@@ -319,6 +418,8 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!user || !canManagePayments(user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
+        const paymentInvoicesEnabled = yield ensurePaymentInvoicesTable();
+        const paymentInvoiceRefsEnabled = yield ensurePaymentInvoiceRefsTable();
         const body = req.body;
         const customerId = (body.customerId || '').toString().trim();
         const receiptNumber = (body.receiptNumber || '').toString().trim();
@@ -349,10 +450,15 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
         if (invoiceId && !invoiceIds.includes(invoiceId))
             invoiceIds.unshift(invoiceId);
-        const primaryInvoiceId = invoiceIds[0] || null;
-        if (invoiceIds.length > 0) {
-            const rows = yield (0, db_1.query)(`SELECT id, customer_id FROM invoices WHERE id IN (${invoiceIds.map(() => '?').join(',')})`, invoiceIds);
-            if (rows.length !== invoiceIds.length) {
+        const systemInvoiceIds = invoiceIds.filter((id) => !id.startsWith('mm-fac-'));
+        const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
+        const primaryInvoiceId = systemInvoiceIds[0] || null;
+        if (systemInvoiceIds.length > 0) {
+            const rows = yield (0, db_1.query)(`SELECT i.id, o.customer_id
+         FROM invoices i
+         JOIN orders o ON o.id = i.order_id
+         WHERE i.id IN (${systemInvoiceIds.map(() => '?').join(',')})`, systemInvoiceIds);
+            if (rows.length !== systemInvoiceIds.length) {
                 return res.status(400).json({ message: 'Hay facturas inválidas en la selección del recibo' });
             }
             const invalidByCustomer = rows.find((r) => r.customer_id !== customerId);
@@ -395,9 +501,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         try {
             yield (0, db_1.execute)(`INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]);
-            if (invoiceIds.length > 0) {
-                for (const invId of invoiceIds) {
+            if (systemInvoiceIds.length > 0 && paymentInvoicesEnabled) {
+                for (const invId of systemInvoiceIds) {
                     yield (0, db_1.execute)(`INSERT IGNORE INTO payment_invoices (payment_id, invoice_id) VALUES (?, ?)`, [id, invId]);
+                }
+            }
+            if (importedInvoiceRefs.length > 0 && paymentInvoiceRefsEnabled) {
+                for (const invRef of importedInvoiceRefs) {
+                    yield (0, db_1.execute)(`INSERT IGNORE INTO payment_invoice_refs (payment_id, invoice_ref, source) VALUES (?, ?, 'IMPORTED')`, [id, invRef]);
                 }
             }
         }
@@ -436,23 +547,38 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
             throw e;
         }
-        const row = yield (0, db_1.get)(`SELECT
+        const row = yield (0, db_1.get)(paymentInvoicesEnabled
+            ? `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
-         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
-       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`, [id]);
+       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`
+            : `SELECT
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         NULL AS invoice_ids,
+         ${paymentInvoiceRefsEnabled ? `(SELECT GROUP_CONCAT(DISTINCT pir.invoice_ref) FROM payment_invoice_refs pir WHERE pir.payment_id = p.id) AS invoice_refs` : `NULL AS invoice_refs`}
+       FROM payments p
+       WHERE p.id = ?`, [id]);
         res.status(201).json({
             id: row.id,
             customerId: row.customer_id,
             sellerId: (_j = row.seller_id) !== null && _j !== void 0 ? _j : undefined,
             orderId: (_k = row.order_id) !== null && _k !== void 0 ? _k : undefined,
             invoiceId: (_l = row.invoice_id) !== null && _l !== void 0 ? _l : undefined,
-            invoiceIds: String(row.invoice_ids || row.invoice_id || '')
-                .split(',')
-                .map((x) => x.trim())
-                .filter(Boolean),
+            invoiceIds: Array.from(new Set([
+                ...String(row.invoice_ids || row.invoice_id || '')
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                ...String(row.invoice_refs || '')
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+            ])),
             receiptNumber: row.receipt_number,
             date: row.date,
             amount: Number(row.amount) || 0,
