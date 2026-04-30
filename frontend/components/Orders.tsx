@@ -593,7 +593,46 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         showToast('info', 'No hay notas de crédito para este pedido');
         return;
       }
-      const nc = notes[0];
+      const byVoucher = new Map<string, CreditNote[]>();
+      for (const n of notes) {
+        const k = `${n.puntoVta}|${n.cbteTipo}|${n.cbteDesde}|${n.cae}`;
+        if (!byVoucher.has(k)) byVoucher.set(k, []);
+        byVoucher.get(k)!.push(n);
+      }
+      const grouped = Array.from(byVoucher.values()).sort((a, b) => {
+        const da = new Date(a[0]?.createdAt || 0).getTime() || 0;
+        const db = new Date(b[0]?.createdAt || 0).getTime() || 0;
+        return db - da;
+      });
+      const selectedGroup = grouped[0] || [];
+      const baseNc = selectedGroup[0];
+      if (!baseNc) {
+        showToast('info', 'No hay notas de crédito para este pedido');
+        return;
+      }
+      const amountByItemIndex: Record<number, number> = {};
+      const quantityByItemIndex: Record<number, number> = {};
+      const itemIndexes: number[] = [];
+      selectedGroup
+        .filter((n) => (n.scope || 'total') === 'item' && typeof n.itemIndex === 'number')
+        .forEach((n) => {
+          const idx = Number(n.itemIndex);
+          if (!Number.isInteger(idx) || idx < 0) return;
+          itemIndexes.push(idx);
+          amountByItemIndex[idx] = (amountByItemIndex[idx] || 0) + Number(n.amountCredited || 0);
+          const price = Number(order.items[idx]?.priceAtMoment ?? 0);
+          if (price > 0) {
+            const q = Number(n.amountCredited || 0) / price;
+            quantityByItemIndex[idx] = (quantityByItemIndex[idx] || 0) + q;
+          }
+        });
+      const nc = {
+        ...baseNc,
+        amountCredited: selectedGroup.reduce((s, n) => s + Number(n.amountCredited || 0), 0),
+        itemIndexes: Array.from(new Set(itemIndexes)),
+        amountByItemIndex,
+        quantityByItemIndex
+      } as CreditNote & { itemIndexes?: number[]; amountByItemIndex?: Record<number, number>; quantityByItemIndex?: Record<number, number> };
       const html = buildCreditNoteHtml(order, nc);
       if (!html) {
         showToast('error', 'No se pudo generar la nota de crédito');

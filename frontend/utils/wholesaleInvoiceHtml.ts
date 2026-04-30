@@ -428,8 +428,31 @@ export function buildWholesaleCreditNoteHtml(params: {
 
   const scope = nc.scope || 'total';
   const itemIdx = nc.itemIndex;
+  const itemIndexesMulti = Array.isArray((nc as any).itemIndexes)
+    ? ((nc as any).itemIndexes as number[]).filter((x) => Number.isInteger(x) && x >= 0)
+    : [];
+  const amountByItemIndex = ((nc as any).amountByItemIndex || {}) as Record<number, number>;
+  const quantityByItemIndex = ((nc as any).quantityByItemIndex || {}) as Record<number, number>;
   let rows: string;
-  if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
+  if (scope === 'item' && itemIndexesMulti.length > 0) {
+    const selectedRows = itemIndexesMulti
+      .filter((idx) => typeof idx === 'number' && idx >= 0 && !!itemsOriginal[idx])
+      .map((idx) => {
+        const i = itemsOriginal[idx];
+        const price = Number(i.priceAtMoment ?? 0);
+        const netoLinea = Number(amountByItemIndex[idx] ?? 0);
+        const netoSafe = netoLinea > 0 ? netoLinea : Math.round((Number(nc.amountCredited || 0) / Math.max(1, itemIndexesMulti.length)) * 100) / 100;
+        const qtyNcRaw = Number(quantityByItemIndex[idx]);
+        const qtyNc = Number.isFinite(qtyNcRaw) && qtyNcRaw > 0
+          ? qtyNcRaw
+          : (price > 0 ? Math.round((netoSafe / price) * 1000) / 1000 : Number(i.quantity || 0));
+        const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
+        const ivaLinea = Math.round(netoSafe * 0.21 * 100) / 100;
+        const totalLinea = Math.round((netoSafe + ivaLinea) * 100) / 100;
+        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoSafe)}</td><td class="col-r">$${formatMoneyAr(ivaLinea)}</td><td class="col-r">$${formatMoneyAr(totalLinea)}</td></tr>`;
+      });
+    rows = selectedRows.join('');
+  } else if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
     // itemIndex se guarda contra el orden original de order.items en backend.
     const i = itemsOriginal[itemIdx];
     const price = Number(i.priceAtMoment ?? 0);
