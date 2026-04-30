@@ -1297,7 +1297,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       {/* Modal: elegir tipo de factura (A o B) antes de emitir */}
       {showEmitirFacturaModal && orderToEmitFactura && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
             <p className="text-sm text-slate-400 mb-4">Pedido #{orderToEmitFactura.id} — {orderToEmitFactura.customerBusinessName || getCustomerName(orderToEmitFactura)}</p>
             <p className="text-xs text-slate-500 mb-4">
@@ -1641,11 +1641,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   >
                     {ncOrder.items.map((item, i) => {
                       const en = enrichItem(item);
-                      const label = [en.productName ?? en.sku ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
+                      const code = String((en.sku || item.sku || item.productId || '')).trim();
+                      const label = [en.productName ?? 'Ítem', en.sizeCode, en.colorName].filter(Boolean).join(' · ') || `Ítem ${i + 1}`;
                       const cred = creditedByItemIndex[i] ?? 0;
-                      const lineTotal = (item.quantity * Number(item.priceAtMoment ?? 0));
                       const yaCred = cred > 0 ? ` — Ya creditado $${formatMoneyAr(cred)}` : '';
-                      return <option key={i} value={i}>{label} — {item.quantity} u × ${formatMoneyAr(Number(item.priceAtMoment))}{yaCred}</option>;
+                      return <option key={i} value={i}>{label} {code ? `[${code}]` : ''} — {item.quantity} u × ${formatMoneyAr(Number(item.priceAtMoment))}{yaCred}</option>;
                     })}
                   </select>
                   {creditedItem > 0 && (
@@ -1696,16 +1696,42 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               })()}
               {ncTipo === 'items' && (
                 <div className="space-y-3 pl-1">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase">Artículos a incluir</label>
-                  <div className="max-h-60 overflow-auto space-y-2 pr-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase">Artículos a incluir</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-[11px] font-bold text-slate-200"
+                        onClick={() => {
+                          const next: Record<number, number> = {};
+                          multiCandidates.forEach((c) => { next[c.index] = c.maxQty; });
+                          setNcItemsQuantities(next);
+                        }}
+                      >
+                        Completar máximos
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-[11px] font-bold text-slate-200"
+                        onClick={() => setNcItemsQuantities({})}
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-auto space-y-2 pr-1">
                     {multiCandidates.map((c) => {
                       const en = enrichItem(c.item);
-                      const label = [en.productName ?? en.sku ?? `Ítem ${c.index + 1}`, en.sizeCode, en.colorName].filter(Boolean).join(' · ');
+                      const code = String((en.sku || c.item.sku || c.item.productId || '')).trim();
+                      const label = [en.productName ?? `Ítem ${c.index + 1}`, en.sizeCode, en.colorName].filter(Boolean).join(' · ');
                       const selectedQty = Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0)));
                       return (
-                        <div key={c.index} className="rounded-lg border border-slate-700 bg-slate-900/60 p-2.5">
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <div className="text-xs text-slate-200">{label}</div>
+                        <div key={c.index} className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] items-start gap-2 mb-2">
+                            <div>
+                              <div className="text-sm text-slate-100 font-semibold">{label}</div>
+                              <div className="text-[11px] text-slate-400">{code ? `Código: ${code}` : 'Sin código'}</div>
+                            </div>
                             <div className="text-[11px] text-slate-400">{c.qty} u × ${formatMoneyAr(c.price)}</div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1721,6 +1747,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               className="w-24 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                             <span className="text-[11px] text-slate-500">máx: {c.maxQty} u</span>
+                            <span className="text-[11px] text-slate-500">importe: ${formatMoneyAr(selectedQty * c.price)}</span>
                           </div>
                           {c.credited > 0 && (
                             <div className="text-[11px] text-amber-400 mt-1">
