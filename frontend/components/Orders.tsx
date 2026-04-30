@@ -116,9 +116,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
-  const [ncTipo, setNcTipo] = useState<'total' | 'item'>('total');
+  const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
   const [ncItemIndex, setNcItemIndex] = useState(0);
   const [ncQuantity, setNcQuantity] = useState<number>(1);
+  const [ncItemsQuantities, setNcItemsQuantities] = useState<Record<number, number>>({});
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
@@ -145,7 +146,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
     api.getOrderCreditNotes(ncOrder.id).then((notes) => {
       setOrderCreditNotes(notes);
-      if (notes.some((n) => (n.scope || 'total') === 'total')) setNcTipo('item');
+      if (notes.some((n) => (n.scope || 'total') === 'total')) setNcTipo('items');
     }).catch(() => setOrderCreditNotes([]));
   }, [ncOrder?.id]);
 
@@ -1181,6 +1182,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         setNcTipo('total');
                         setNcItemIndex(0);
                         setNcQuantity(order.items[0]?.quantity ?? 1);
+                        setNcItemsQuantities({});
                       }}
                       className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
                       title="Emitir nota de crédito AFIP (total o por artículo)"
@@ -1575,6 +1577,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         const maxQtyRemaining = remainingCredit <= 0 ? 0 : Math.min(itemQty, Math.floor(remainingCredit / itemPrice + 0.001));
         const canEmitTotal = !hasNCTotal;
         const canEmitItem = maxQtyRemaining > 0;
+        const multiCandidates = ncOrder.items.map((item, i) => {
+          const price = Number(item?.priceAtMoment ?? 0);
+          const qty = Number(item?.quantity ?? 0);
+          const lineTotal = Math.round(qty * price * 100) / 100;
+          const credited = creditedByItemIndex[i] ?? 0;
+          const remaining = Math.round((lineTotal - credited) * 100) / 100;
+          const maxQty = remaining <= 0 || price <= 0 ? 0 : Math.min(qty, Math.floor(remaining / price + 0.001));
+          return { index: i, item, price, qty, credited, remaining, maxQty };
+        });
+        const selectedMulti = multiCandidates
+          .map((c) => ({ ...c, selectedQty: Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0))) }))
+          .filter((c) => c.selectedQty > 0);
+        const canEmitItems = selectedMulti.length > 0;
         return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
@@ -1601,6 +1616,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="radio" name="ncTipo" checked={ncTipo === 'item'} onChange={() => setNcTipo('item')} className="rounded border-slate-500 text-amber-500" />
                   <span className="text-white">Un artículo</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ncTipo" checked={ncTipo === 'items'} onChange={() => setNcTipo('items')} className="rounded border-slate-500 text-amber-500" />
+                  <span className="text-white">Varios artículos</span>
                 </label>
               </div>
               {ncTipo === 'item' && ncOrder.items.length > 0 && (
@@ -1675,6 +1694,59 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </div>
                 );
               })()}
+              {ncTipo === 'items' && (
+                <div className="space-y-3 pl-1">
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">Artículos a incluir</label>
+                  <div className="max-h-60 overflow-auto space-y-2 pr-1">
+                    {multiCandidates.map((c) => {
+                      const en = enrichItem(c.item);
+                      const label = [en.productName ?? en.sku ?? `Ítem ${c.index + 1}`, en.sizeCode, en.colorName].filter(Boolean).join(' · ');
+                      const selectedQty = Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0)));
+                      return (
+                        <div key={c.index} className="rounded-lg border border-slate-700 bg-slate-900/60 p-2.5">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="text-xs text-slate-200">{label}</div>
+                            <div className="text-[11px] text-slate-400">{c.qty} u × ${formatMoneyAr(c.price)}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              max={c.maxQty}
+                              value={selectedQty}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(c.maxQty, parseInt(e.target.value, 10) || 0));
+                                setNcItemsQuantities((prev) => ({ ...prev, [c.index]: next }));
+                              }}
+                              className="w-24 bg-slate-800 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                            <span className="text-[11px] text-slate-500">máx: {c.maxQty} u</span>
+                          </div>
+                          {c.credited > 0 && (
+                            <div className="text-[11px] text-amber-400 mt-1">
+                              Ya creditado: ${formatMoneyAr(c.credited)} · disponible: ${formatMoneyAr(c.remaining)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {(() => {
+                      const net = selectedMulti.reduce((sum, c) => sum + (c.selectedQty * c.price), 0);
+                      const { iva, impTotal } = afipDesdeNeto(net);
+                      return (
+                        <>
+                          Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(net)}</strong>
+                          <span className="block mt-1 text-slate-400">
+                            AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </p>
+                </div>
+              )}
                 </>
               )}
             </div>
@@ -1683,15 +1755,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               {!hasNCTotal && (
               <button
                 type="button"
-                disabled={emitiendoNC || (ncTipo === 'total' ? !canEmitTotal : !canEmitItem || ncQuantity < 1 || (ncTipo === 'item' && ncQuantity > maxQtyRemaining))}
+                disabled={emitiendoNC || (ncTipo === 'total'
+                  ? !canEmitTotal
+                  : ncTipo === 'item'
+                    ? (!canEmitItem || ncQuantity < 1 || ncQuantity > maxQtyRemaining)
+                    : !canEmitItems)}
                 onClick={async () => {
                   if (!ncOrder) return;
                   setEmitiendoNC(true);
                   try {
-                    const payload: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number } = { tipo: ncTipo };
+                    const payload: { tipo: 'total' | 'item' | 'items'; itemIndex?: number; quantity?: number; items?: Array<{ itemIndex: number; quantity: number }> } = { tipo: ncTipo };
                     if (ncTipo === 'item') {
                       payload.itemIndex = ncItemIndex;
                       payload.quantity = ncQuantity;
+                    } else if (ncTipo === 'items') {
+                      payload.items = selectedMulti.map((c) => ({ itemIndex: c.index, quantity: c.selectedQty }));
                     }
                     const res = await api.emitirNotaCredito(ncOrder.id, payload);
                     showToast('success', `Nota de crédito emitida. CAE ${res.cae}`);

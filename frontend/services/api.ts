@@ -596,7 +596,7 @@ export const api = {
   /** Emite una Nota de Crédito AFIP: todo el pedido (tipo: 'total') o un ítem (tipo: 'item', itemIndex, quantity opcional). */
   emitirNotaCredito: async (
     orderId: string,
-    data: { tipo: 'total' | 'item'; itemIndex?: number; quantity?: number }
+    data: { tipo: 'total' | 'item' | 'items'; itemIndex?: number; quantity?: number; items?: Array<{ itemIndex: number; quantity: number }> }
   ): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; amountCredited: number }> => {
     return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data);
   },
