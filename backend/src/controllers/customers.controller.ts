@@ -2395,7 +2395,36 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         ROUND(COALESCE(p.amount, 0), 2) AS haber,
         COALESCE(p.notes, '') AS detalle
       FROM payments p
+      LEFT JOIN (
+        SELECT
+          e.customer_id,
+          DATE(e.line_date) AS line_date,
+          ROUND(COALESCE(e.importe, 0), 2) AS amount,
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          ) AS receipt_norm
+        FROM customer_multimedia_entries e
+        WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+          AND TRIM(COALESCE(e.numero, '')) <> ''
+        GROUP BY
+          e.customer_id,
+          DATE(e.line_date),
+          ROUND(COALESCE(e.importe, 0), 2),
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+      ) me_rec
+        ON me_rec.customer_id = p.customer_id
+       AND me_rec.line_date = DATE(p.date)
+       AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+       AND me_rec.receipt_norm = CASE
+         WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+         ELSE UPPER(
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+         )
+       END
       WHERE p.customer_id = ?
+        AND me_rec.customer_id IS NULL
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
     `,
