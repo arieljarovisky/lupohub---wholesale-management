@@ -15,7 +15,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       title: 'Principal',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-        { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE] },
+        { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
         { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER], color: 'emerald' },
         { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'purple' },
         { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN], color: 'indigo' },
@@ -24,7 +24,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     {
       title: 'Pedidos',
       items: [
-        { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+        { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
       ]
     },
     {
@@ -50,7 +50,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     {
       title: 'Sistema',
       items: [
-        { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO], color: 'emerald' },
+        { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE], color: 'emerald' },
         { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN, Role.WAREHOUSE] },
       ]
     }

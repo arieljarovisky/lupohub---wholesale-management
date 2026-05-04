@@ -110,9 +110,44 @@ const App: React.FC = () => {
   const savingOrderRef = useRef(false);
   const editingOrderIdRef = useRef<string | null>(null);
   const DRAFT_KEY = 'lupo_order_template_draft';
+  const allowedByRole: Record<string, Role[]> = {
+    dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
+    inventory: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
+    orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
+    create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
+    bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
+    tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_canal_difusion: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_brand_ads: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_display_ads: [Role.ADMIN, Role.WAREHOUSE],
+    stock_history: [Role.ADMIN, Role.WAREHOUSE],
+    despachos: [Role.ADMIN],
+    customers: [Role.ADMIN, Role.SELLER],
+    sellers: [Role.ADMIN, Role.SELLER],
+    visits: [Role.ADMIN, Role.SELLER],
+    catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
+    settings: [Role.ADMIN],
+    facturacion: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+    order_picking: [Role.ADMIN, Role.WAREHOUSE],
+  };
+  const defaultViewForRole = useCallback((role: Role): string => {
+    if (role === Role.DEPOSITO) return 'inventory';
+    if (role === Role.CUSTOMER) return 'orders';
+    return 'dashboard';
+  }, []);
+  const isViewAllowedForRole = useCallback((view: string, role: Role): boolean => {
+    return !!allowedByRole[view]?.includes(role);
+  }, []);
 
   const handleChangeView = useCallback((nextView: string) => {
     const nextBase = String(nextView || '').split('?')[0];
+    if (currentUser && !isViewAllowedForRole(nextBase, currentUser.role)) {
+      const fallback = defaultViewForRole(currentUser.role);
+      setCurrentView(fallback);
+      return;
+    }
     if (nextBase === 'create_order' || nextBase === 'create_order_template') {
       // "Nuevo pedido" siempre inicia limpio; editar usa handleEditOrder.
       setEditingOrder(null);
@@ -124,7 +159,7 @@ const App: React.FC = () => {
       }
     }
     setCurrentView(nextView);
-  }, []);
+  }, [currentUser, defaultViewForRole, isViewAllowedForRole]);
 
   // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
@@ -167,33 +202,20 @@ const App: React.FC = () => {
     const savedView = localStorage.getItem('lupo_current_view');
     if (savedView && currentUser) {
       const role = currentUser.role;
-      const allowedByRole: Record<string, Role[]> = {
-        dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
-        inventory: [Role.ADMIN, Role.WAREHOUSE],
-        orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
-        create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
-        bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
-        tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
-        mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
-        mercadolibre_canal_difusion: [Role.ADMIN, Role.WAREHOUSE],
-        mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE],
-        mercadolibre_brand_ads: [Role.ADMIN, Role.WAREHOUSE],
-        mercadolibre_display_ads: [Role.ADMIN, Role.WAREHOUSE],
-        stock_history: [Role.ADMIN, Role.WAREHOUSE],
-        despachos: [Role.ADMIN],
-        customers: [Role.ADMIN, Role.SELLER],
-        sellers: [Role.ADMIN, Role.SELLER],
-        visits: [Role.ADMIN, Role.SELLER],
-        catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
-        settings: [Role.ADMIN]
-      };
       const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
-      if (!isSpecial && allowedByRole[savedView]?.includes(role)) {
+      if (!isSpecial && isViewAllowedForRole(savedView, role)) {
         setCurrentView(savedView);
       }
     }
     loadData();
-  }, [currentUser]);
+  }, [currentUser, isViewAllowedForRole]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!isViewAllowedForRole(baseView, currentUser.role)) {
+      setCurrentView(defaultViewForRole(currentUser.role));
+    }
+  }, [baseView, currentUser, defaultViewForRole, isViewAllowedForRole]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -332,7 +354,7 @@ const App: React.FC = () => {
         localStorage.setItem('lupo_api_token', res.token);
         setAuthToken(res.token);
       }
-      setCurrentView('dashboard');
+      setCurrentView(defaultViewForRole(res.user.role));
       setLoginEmail('');
       setLoginPassword('');
     } catch (err: any) {
@@ -761,8 +783,8 @@ const App: React.FC = () => {
 
   const mobileNavItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-    { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE] },
-    { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+    { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
+    { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
     { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
     { id: 'sellers', icon: Percent, label: 'Vendedores', roles: [Role.ADMIN, Role.SELLER] },
     { id: 'catalogs', icon: BookOpen, label: 'Catálogos', roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
@@ -771,12 +793,12 @@ const App: React.FC = () => {
   const allMobileNavSections = [
     { title: 'Principal', items: [
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-      { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
     ]},
     { title: 'Pedidos y canales', items: [
-      { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+      { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
@@ -791,7 +813,7 @@ const App: React.FC = () => {
       { id: 'sellers', label: 'Vendedores', icon: Percent, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
-      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO] },
+      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
   ];
