@@ -702,12 +702,26 @@ exports.updateTiendaNubeSku = updateTiendaNubeSku;
 // Endpoint: Obtener historial de movimientos de stock
 const getStockMovements = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { variantId, type, from, to, limit = '50' } = req.query;
+        const { variantId, variantIds, productId, type, from, to, limit = '50' } = req.query;
         let whereClause = '1=1';
         const params = [];
         if (variantId) {
             whereClause += ' AND sm.variant_id = ?';
             params.push(variantId);
+        }
+        if (variantIds) {
+            const ids = String(variantIds)
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean);
+            if (ids.length > 0) {
+                whereClause += ` AND sm.variant_id IN (${ids.map(() => '?').join(',')})`;
+                params.push(...ids);
+            }
+        }
+        if (productId) {
+            whereClause += ' AND p.id = ?';
+            params.push(productId);
         }
         if (type) {
             whereClause += ' AND sm.movement_type = ?';
@@ -723,11 +737,24 @@ const getStockMovements = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
         params.push(limitNum);
-        const movements = yield (0, db_1.query)(`SELECT sm.*, pv.sku, p.name as product_name
+        const movements = yield (0, db_1.query)(`SELECT
+         sm.*,
+         pv.sku,
+         p.name as product_name,
+         o.id as order_id,
+         c.business_name as customer_name,
+         ua.name as adjust_user_name
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN orders o
+         ON sm.movement_type = 'PEDIDO_MAYORISTA'
+        AND o.id = TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
+       LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users ua
+         ON sm.movement_type = 'AJUSTE_MANUAL'
+        AND ua.id = TRIM(REPLACE(sm.reference, 'Ajuste por usuario', ''))
        WHERE ${whereClause}
        ORDER BY sm.created_at DESC
        LIMIT ?`, params);

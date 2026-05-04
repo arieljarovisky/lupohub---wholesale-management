@@ -1776,6 +1776,63 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            THEN 'FACTURA_IMPORTADA'
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            THEN 'RECIBO_IMPORTADO'
+            ELSE 'MOV_IMPORTADO'
+          END AS tipo,
+          TRIM(CONCAT(
+            COALESCE(NULLIF(TRIM(e.numero), ''), ''),
+            CASE WHEN TRIM(COALESCE(e.detalle, '')) <> '' THEN CONCAT(' — ', LEFT(TRIM(e.detalle), 120)) ELSE '' END
+          )) AS comprobante,
+          NULL AS order_id,
+          CASE
+            WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+              OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE e.importe IS NOT NULL
+          AND ABS(COALESCE(e.importe, 0)) > 0.001
+          AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
+          AND (
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+          )
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -1787,7 +1844,14 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       seller_id: string | null;
       seller_name: string | null;
       fecha: string;
-      tipo: 'FACTURA' | 'NOTA_CREDITO' | 'NOTA_CREDITO_IMPORTADA' | 'RECIBO';
+      tipo:
+        | 'FACTURA'
+        | 'NOTA_CREDITO'
+        | 'NOTA_CREDITO_IMPORTADA'
+        | 'RECIBO'
+        | 'FACTURA_IMPORTADA'
+        | 'RECIBO_IMPORTADO'
+        | 'MOV_IMPORTADO';
       comprobante: string;
       order_id: string | null;
       debe: number;
@@ -2069,9 +2133,19 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
         saldo = Math.round((saldo + debe - haber) * 100) / 100;
+        const tipoLabel =
+          m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
+            ? 'NC'
+            : m.tipo === 'FACTURA_IMPORTADA'
+              ? 'FACTURA (imp.)'
+              : m.tipo === 'RECIBO_IMPORTADO'
+                ? 'RECIBO (imp.)'
+                : m.tipo === 'MOV_IMPORTADO'
+                  ? 'MOV. (imp.)'
+                  : m.tipo;
         ws.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
-          tipo: (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') ? 'NC' : m.tipo,
+          tipo: tipoLabel,
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
           debe,

@@ -45,8 +45,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
-exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = void 0;
+exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.duplicateTiendaNubeProduct = exports.createTiendaNubeProduct = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = void 0;
 exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
 exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
 exports.getValidMLToken = getValidMLToken;
@@ -4395,6 +4395,223 @@ const getTiendaNubeProductVariants = (req, res) => __awaiter(void 0, void 0, voi
     }
 });
 exports.getTiendaNubeProductVariants = getTiendaNubeProductVariants;
+function fetchAllTiendaNubeProductVariantsApi(storeId, accessToken, productId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const headers = { Authentication: `bearer ${accessToken}`, 'User-Agent': TN_USER_AGENT };
+        let variantsList = [];
+        const perPage = 200;
+        let vPage = 1;
+        let hasMoreVariants = true;
+        while (hasMoreVariants) {
+            const variantsRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, {
+                headers,
+                params: { page: vPage, per_page: perPage },
+                validateStatus: () => true
+            });
+            const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
+            variantsList = variantsList.concat(chunk);
+            if (chunk.length < perPage)
+                hasMoreVariants = false;
+            else
+                vPage++;
+            if (vPage > 50)
+                hasMoreVariants = false;
+        }
+        return variantsList;
+    });
+}
+function appendSuffixToLocalizedName(field, suffix) {
+    if (!suffix)
+        return field;
+    if (field == null)
+        return field;
+    if (typeof field === 'string')
+        return `${field}${suffix}`;
+    if (typeof field === 'object') {
+        const out = Object.assign({}, field);
+        for (const k of Object.keys(out)) {
+            const v = out[k];
+            if (typeof v === 'string' && v.trim())
+                out[k] = `${v}${suffix}`;
+        }
+        return out;
+    }
+    return field;
+}
+function tiendaNubeCategoryIdsOnly(raw) {
+    if (!Array.isArray(raw))
+        return [];
+    return raw
+        .map((c) => (typeof c === 'object' && c != null ? c.id : c))
+        .filter((id) => id != null && String(id).trim() !== '')
+        .map((id) => Number(id))
+        .filter((n) => Number.isFinite(n));
+}
+function stripVariantForTiendaNubeCreate(v, skuSuffix, idx) {
+    const baseSku = (v === null || v === void 0 ? void 0 : v.sku) != null && String(v.sku).trim() !== '' ? String(v.sku).trim() : `VAR-${idx + 1}`;
+    const out = {
+        price: v.price != null ? String(v.price) : '0',
+        stock_management: v.stock_management !== false,
+        stock: Number(v.stock) || 0,
+        sku: `${baseSku}${skuSuffix}`,
+        values: Array.isArray(v.values) ? v.values : []
+    };
+    if (v.promotional_price != null && String(v.promotional_price).trim() !== '') {
+        out.promotional_price = String(v.promotional_price);
+    }
+    if (v.weight != null && String(v.weight).trim() !== '')
+        out.weight = v.weight;
+    if (v.width != null && String(v.width).trim() !== '')
+        out.width = v.width;
+    if (v.height != null && String(v.height).trim() !== '')
+        out.height = v.height;
+    if (v.depth != null && String(v.depth).trim() !== '')
+        out.depth = v.depth;
+    if (v.cost != null && String(v.cost).trim() !== '')
+        out.cost = v.cost;
+    return out;
+}
+function buildTiendaNubeDuplicateCreateBody(product, variantsList, opts) {
+    var _a;
+    const titleSuffix = opts.titleSuffix;
+    const skuSuffix = opts.skuSuffix;
+    const variantSource = variantsList.length > 0 ? variantsList : Array.isArray(product === null || product === void 0 ? void 0 : product.variants) ? product.variants : [];
+    let variants = variantSource.map((v, i) => stripVariantForTiendaNubeCreate(v, skuSuffix, i));
+    if (variants.length === 0) {
+        variants = [stripVariantForTiendaNubeCreate({ price: '0', stock: 0, stock_management: true, values: [] }, skuSuffix, 0)];
+    }
+    const body = {
+        name: appendSuffixToLocalizedName(product.name, titleSuffix),
+        description: (_a = product.description) !== null && _a !== void 0 ? _a : { es: '', en: '', pt: '' },
+        attributes: Array.isArray(product.attributes) ? product.attributes : [],
+        categories: tiendaNubeCategoryIdsOnly(product.categories),
+        published: opts.published,
+        free_shipping: !!product.free_shipping,
+        tags: typeof product.tags === 'string' ? product.tags : '',
+        variants
+    };
+    if (product.brand != null && String(product.brand).trim() !== '')
+        body.brand = product.brand;
+    if (product.video_url && String(product.video_url).startsWith('https://'))
+        body.video_url = product.video_url;
+    if (product.seo_title != null)
+        body.seo_title = appendSuffixToLocalizedName(product.seo_title, titleSuffix);
+    if (product.seo_description != null)
+        body.seo_description = product.seo_description;
+    if (product.requires_shipping === false)
+        body.requires_shipping = false;
+    const imgs = (Array.isArray(product.images) ? product.images : [])
+        .slice(0, 9)
+        .map((im) => ((im === null || im === void 0 ? void 0 : im.src) ? { src: im.src } : null))
+        .filter(Boolean);
+    if (imgs.length > 0)
+        body.images = imgs;
+    return body;
+}
+/** Crea un producto en Tienda Nube (payload según documentación POST /products). */
+const createTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const body = req.body;
+        if (!body || typeof body !== 'object') {
+            return res.status(400).json({ message: 'Enviá un objeto JSON con name y variants' });
+        }
+        if (!body.name)
+            return res.status(400).json({ message: 'Falta name (objeto por idioma, ej. { es: "..." })' });
+        if (!Array.isArray(body.variants) || body.variants.length === 0) {
+            return res.status(400).json({ message: 'Falta variants: al menos una variante (price, stock, etc.)' });
+        }
+        const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
+            return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+        const storeId = integration.store_id || integration.user_id;
+        if (!storeId)
+            return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+        const url = `https://api.tiendanube.com/v1/${storeId}/products`;
+        const headers = {
+            Authentication: `bearer ${integration.access_token}`,
+            'User-Agent': TN_USER_AGENT,
+            'Content-Type': 'application/json'
+        };
+        const r = yield (0, tiendanubeClient_1.tnPostWithRetry)(axios_1.default, url, body, { headers, validateStatus: () => true });
+        if (r.status === 201) {
+            return res.status(201).json({
+                product: r.data,
+                id: (_a = r.data) === null || _a === void 0 ? void 0 : _a.id,
+                message: 'Producto creado en Tienda Nube'
+            });
+        }
+        const detail = ((_b = r.data) === null || _b === void 0 ? void 0 : _b.description) || ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || r.statusText;
+        return res.status(r.status >= 400 ? r.status : 502).json({
+            message: ['Tienda Nube rechazó la creación del producto', detail].filter(Boolean).join(' — '),
+            errors: r.data
+        });
+    }
+    catch (error) {
+        const detail = ((_e = (_d = error.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.description) || ((_g = (_f = error.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.message) || error.message;
+        console.error('createTiendaNubeProduct:', detail);
+        res.status(500).json({ message: 'Error creando producto en Tienda Nube', detail });
+    }
+});
+exports.createTiendaNubeProduct = createTiendaNubeProduct;
+/**
+ * Duplica un producto existente en Tienda Nube (nueva publicación).
+ * Útil para packs: mismo contenido con otro título y SKU (sufijos configurables).
+ */
+const duplicateTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    try {
+        const { productId } = req.params;
+        if (!productId)
+            return res.status(400).json({ message: 'Falta productId' });
+        const titleSuffix = ((_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.titleSuffix) !== null && _b !== void 0 ? _b : ' (pack)').toString();
+        const skuSuffix = ((_d = (_c = req.body) === null || _c === void 0 ? void 0 : _c.skuSuffix) !== null && _d !== void 0 ? _d : '-PACK').toString();
+        const published = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.published) !== false;
+        const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
+            return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+        const storeId = integration.store_id || integration.user_id;
+        if (!storeId)
+            return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+        const headers = { Authentication: `bearer ${integration.access_token}`, 'User-Agent': TN_USER_AGENT };
+        const productRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, {
+            headers,
+            validateStatus: () => true
+        });
+        if (productRes.status !== 200) {
+            const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
+            return res.status(productRes.status >= 400 ? 404 : 502).json({
+                message: 'Producto no encontrado en Tienda Nube',
+                detail: errMsg
+            });
+        }
+        const p = productRes.data;
+        const variantsList = yield fetchAllTiendaNubeProductVariantsApi(storeId, integration.access_token, String(productId));
+        const createBody = buildTiendaNubeDuplicateCreateBody(p, variantsList, { titleSuffix, skuSuffix, published });
+        const url = `https://api.tiendanube.com/v1/${storeId}/products`;
+        const postHeaders = Object.assign(Object.assign({}, headers), { 'Content-Type': 'application/json' });
+        const r = yield (0, tiendanubeClient_1.tnPostWithRetry)(axios_1.default, url, createBody, { headers: postHeaders, validateStatus: () => true });
+        if (r.status === 201) {
+            return res.status(201).json({
+                sourceProductId: productId,
+                newProductId: (_f = r.data) === null || _f === void 0 ? void 0 : _f.id,
+                product: r.data,
+                message: 'Publicación duplicada en Tienda Nube'
+            });
+        }
+        const detail = ((_g = r.data) === null || _g === void 0 ? void 0 : _g.description) || ((_h = r.data) === null || _h === void 0 ? void 0 : _h.message) || r.statusText;
+        return res.status(r.status >= 400 ? r.status : 502).json({
+            message: ['Tienda Nube rechazó la duplicación', detail].filter(Boolean).join(' — '),
+            errors: r.data
+        });
+    }
+    catch (error) {
+        const detail = ((_k = (_j = error.response) === null || _j === void 0 ? void 0 : _j.data) === null || _k === void 0 ? void 0 : _k.description) || ((_m = (_l = error.response) === null || _l === void 0 ? void 0 : _l.data) === null || _m === void 0 ? void 0 : _m.message) || error.message;
+        console.error('duplicateTiendaNubeProduct:', detail);
+        res.status(500).json({ message: 'Error duplicando producto en Tienda Nube', detail });
+    }
+});
+exports.duplicateTiendaNubeProduct = duplicateTiendaNubeProduct;
 /** Asegurar que exista un talle; si no existe, crearlo. Devuelve id del size. */
 function ensureSize(sizeCode) {
     return __awaiter(this, void 0, void 0, function* () {

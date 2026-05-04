@@ -12,6 +12,7 @@ const router = (0, express_1.Router)();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 router.get('/saldos-pendientes/export-multimedias', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesMultimediasXlsx);
 router.get('/saldos-pendientes/export-detalle', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesDetalleXlsx);
+router.get('/saldos-pendientes/export-por-cliente', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesByCustomerSheetsXlsx);
 router.get('/saldos-pendientes/export', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesCsv);
 router.get('/export-individuales', auth_1.authMiddleware, customers_controller_1.exportCustomersIndividualXlsx);
 router.post('/export-por-hojas', auth_1.authMiddleware, customers_controller_1.exportCustomersBySheetsXlsx);

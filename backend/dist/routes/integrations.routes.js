@@ -61,6 +61,8 @@ router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
+router.post('/tiendanube/products', integrations_controller_1.createTiendaNubeProduct);
+router.post('/tiendanube/products/:productId/duplicate', integrations_controller_1.duplicateTiendaNubeProduct);
 router.post('/tiendanube/sync', integrations_controller_1.syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', integrations_controller_1.syncAllStockToTiendaNube);
 router.post('/tiendanube/sync-stock-selected', integrations_controller_1.syncSelectedStockToTiendaNube);

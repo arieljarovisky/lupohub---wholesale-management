@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
+exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesByCustomerSheetsXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
@@ -1459,6 +1459,50 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
+          e.line_date AS fecha,
+          'NOTA_CREDITO_IMPORTADA' AS tipo,
+          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
+          NULL AS order_id,
+          0 AS debe,
+          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE (
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+        )
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          'NOTA_CREDITO_IMPORTADA' AS tipo,
+          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
+          NULL AS order_id,
+          0 AS debe,
+          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE (
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+        )
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
           p.receipt_number AS comprobante,
@@ -1527,7 +1571,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     cliente: c.customer_name,
                     vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
-                    tipo: m.tipo === 'NOTA_CREDITO' ? 'NC' : m.tipo,
+                    tipo: (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') ? 'NC' : m.tipo,
                     comprobante: m.comprobante,
                     pedido: (_c = m.order_id) !== null && _c !== void 0 ? _c : '',
                     debe,
@@ -1571,6 +1615,479 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
     }
 });
 exports.exportSaldosPendientesDetalleXlsx = exportSaldosPendientesDetalleXlsx;
+/**
+ * Exporta saldos pendientes en Excel con una hoja por cliente.
+ * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
+ */
+const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const user = req.user;
+    if (!user || !roleCanViewSaldos(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+    }
+    try {
+        const requestedSellerId = String(req.query.sellerId || '').trim();
+        const sellerIdFilter = user.role === 'SELLER'
+            ? user.id
+            : (user.role === 'ADMIN' || user.role === 'WAREHOUSE') && requestedSellerId
+                ? requestedSellerId
+                : '';
+        const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
+        const sellerParams = sellerIdFilter ? [sellerIdFilter] : [];
+        const movements = yield (0, db_1.query)(`
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(i.created_at, o.date) AS fecha,
+          'FACTURA' AS tipo,
+          CONCAT(
+            CASE
+              WHEN i.cbte_tipo = 1 THEN 'A '
+              WHEN i.cbte_tipo = 6 THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          o.id AS order_id,
+          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          0 AS haber
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          cn.created_at AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN cn.cbte_tipo = 3 THEN 'NC A '
+              WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          cn.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          p.date AS fecha,
+          'RECIBO' AS tipo,
+          p.receipt_number AS comprobante,
+          p.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(p.amount, 0), 2) AS haber
+        FROM payments p
+        JOIN customers c ON c.id = p.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            THEN 'FACTURA_IMPORTADA'
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            THEN 'RECIBO_IMPORTADO'
+            ELSE 'MOV_IMPORTADO'
+          END AS tipo,
+          TRIM(CONCAT(
+            COALESCE(NULLIF(TRIM(e.numero), ''), ''),
+            CASE WHEN TRIM(COALESCE(e.detalle, '')) <> '' THEN CONCAT(' — ', LEFT(TRIM(e.detalle), 120)) ELSE '' END
+          )) AS comprobante,
+          NULL AS order_id,
+          CASE
+            WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+              OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE e.importe IS NOT NULL
+          AND ABS(COALESCE(e.importe, 0)) > 0.001
+          AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
+          AND (
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+            OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+          )
+      ) m
+      ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
+      ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
+      `, sellerParams);
+        const customers = yield (0, db_1.query)(`SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       ${sellerWhere}
+       ORDER BY customer_name ASC`, sellerParams);
+        // Saldo unificado (exactamente la misma base que getCarteraTotals, incluyendo dedupe de recibos importados).
+        const carteraSellerFilter = sellerIdFilter ? ' AND c.seller_id = ?' : '';
+        const carteraBaseParams = sellerIdFilter ? [sellerIdFilter] : [];
+        const paymentsSubquery = sellerIdFilter
+            ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+           FROM (
+             SELECT
+               p.customer_id,
+               ROUND(COALESCE(p.amount, 0), 2) AS amount,
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END AS receipt_norm
+             FROM payments p
+             INNER JOIN customers c2 ON c2.id = p.customer_id
+             LEFT JOIN (
+               SELECT
+                 e.customer_id,
+                 DATE(e.line_date) AS line_date,
+                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) AS receipt_norm
+               FROM customer_multimedia_entries e
+               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+                 AND TRIM(COALESCE(e.numero, '')) <> ''
+               GROUP BY
+                 e.customer_id,
+                 DATE(e.line_date),
+                 ROUND(COALESCE(e.importe, 0), 2),
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+             ) me_rec
+               ON me_rec.customer_id = p.customer_id
+              AND me_rec.line_date = DATE(p.date)
+              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+              AND me_rec.receipt_norm = CASE
+                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                ELSE UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                )
+              END
+             WHERE (p.seller_id = ? OR c2.seller_id = ?)
+               AND me_rec.customer_id IS NULL
+             GROUP BY
+               p.customer_id,
+               DATE(p.date),
+               ROUND(COALESCE(p.amount, 0), 2),
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END
+           ) d
+           GROUP BY d.customer_id`
+            : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+           FROM (
+             SELECT
+               p.customer_id,
+               ROUND(COALESCE(p.amount, 0), 2) AS amount,
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END AS receipt_norm
+             FROM payments p
+             LEFT JOIN (
+               SELECT
+                 e.customer_id,
+                 DATE(e.line_date) AS line_date,
+                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) AS receipt_norm
+               FROM customer_multimedia_entries e
+               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+                 AND TRIM(COALESCE(e.numero, '')) <> ''
+               GROUP BY
+                 e.customer_id,
+                 DATE(e.line_date),
+                 ROUND(COALESCE(e.importe, 0), 2),
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+             ) me_rec
+               ON me_rec.customer_id = p.customer_id
+              AND me_rec.line_date = DATE(p.date)
+              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+              AND me_rec.receipt_norm = CASE
+                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                ELSE UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                )
+              END
+             WHERE me_rec.customer_id IS NULL
+             GROUP BY
+               p.customer_id,
+               DATE(p.date),
+               ROUND(COALESCE(p.amount, 0), 2),
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END
+           ) d
+           GROUP BY d.customer_id`;
+        const carteraPayParams = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
+        const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams];
+        const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams];
+        const mmSubquery = `
+      SELECT
+        agg.customer_id,
+        CAST(COALESCE(
+          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+           FROM customer_multimedia_entries e_lo
+           WHERE e_lo.customer_id = agg.customer_id
+           ORDER BY e_lo.line_order DESC
+           LIMIT 1),
+          (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+           FROM customer_multimedia_entries e2
+           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+           ORDER BY e2.line_order DESC
+           LIMIT 1),
+          0
+        ) AS DECIMAL(16,2)) AS last_saldo
+      FROM (
+        SELECT customer_id
+        FROM customer_multimedia_entries
+        GROUP BY customer_id
+      ) agg`;
+        const carteraSqlWithNc = `
+      SELECT
+        c.id AS customerId,
+        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+      FROM customers c
+      LEFT JOIN (
+        SELECT
+          o.customer_id,
+          SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargos
+        FROM orders o
+        LEFT JOIN (
+          SELECT order_id, SUM(amount_credited) AS cn_total
+          FROM credit_notes
+          GROUP BY order_id
+        ) cn ON cn.order_id = o.id
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) oc ON oc.customer_id = c.id
+      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      WHERE 1=1 ${carteraSellerFilter}
+    `;
+        const carteraSqlSimple = `
+      SELECT
+        c.id AS customerId,
+        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+      FROM customers c
+      LEFT JOIN (
+        SELECT
+          o.customer_id,
+          SUM(ROUND(o.total * 1.21, 2)) AS cargos
+        FROM orders o
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) oc ON oc.customer_id = c.id
+      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      WHERE 1=1 ${carteraSellerFilter}
+    `;
+        let carteraRows = [];
+        try {
+            carteraRows = (yield (0, db_1.query)(carteraSqlWithNc, carteraParamsWithNc));
+        }
+        catch (_e) {
+            carteraRows = (yield (0, db_1.query)(carteraSqlSimple, carteraParamsSimple));
+        }
+        const saldoUnificadoByCustomer = new Map();
+        for (const r of carteraRows) {
+            saldoUnificadoByCustomer.set(r.customerId, Number(r.saldoPendienteUnificado) || 0);
+        }
+        const byCustomer = new Map();
+        for (const m of movements) {
+            if (!byCustomer.has(m.customer_id))
+                byCustomer.set(m.customer_id, []);
+            byCustomer.get(m.customer_id).push(m);
+        }
+        const workbook = new exceljs_1.default.Workbook();
+        workbook.creator = 'LupoHub';
+        workbook.created = new Date();
+        const wsSummary = workbook.addWorksheet('Resumen');
+        wsSummary.columns = [
+            { header: 'Cliente', key: 'cliente', width: 40 },
+            { header: 'Vendedor', key: 'vendedor', width: 28 },
+            { header: 'Saldo pendiente', key: 'saldo', width: 18 }
+        ];
+        wsSummary.getRow(1).font = { bold: true };
+        wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
+        wsSummary.getColumn('C').numFmt = '#,##0.00';
+        const usedSheetNames = new Set(['Resumen']);
+        const uniqueSheetName = (raw, fallback) => {
+            const base = (raw || fallback || 'Cliente')
+                .toString()
+                .replace(/[\\/*?:[\]]/g, '')
+                .trim()
+                .slice(0, 31) || 'Cliente';
+            let name = base;
+            let i = 1;
+            while (usedSheetNames.has(name)) {
+                const suffix = ` (${i})`;
+                name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+                i++;
+            }
+            usedSheetNames.add(name);
+            return name;
+        };
+        for (const c of customers) {
+            const movs = byCustomer.get(c.id) || [];
+            let running = 0;
+            for (const m of movs) {
+                running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+            }
+            const saldoTarget = Number((_a = saldoUnificadoByCustomer.get(c.id)) !== null && _a !== void 0 ? _a : running) || 0;
+            const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
+            wsSummary.addRow({
+                cliente: c.customer_name,
+                vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                saldo: saldoPendiente
+            });
+            const ws = workbook.addWorksheet(uniqueSheetName(c.customer_name, c.id));
+            ws.columns = [
+                { header: 'Fecha', key: 'fecha', width: 14 },
+                { header: 'Tipo', key: 'tipo', width: 14 },
+                { header: 'Comprobante', key: 'comprobante', width: 24 },
+                { header: 'Pedido', key: 'pedido', width: 16 },
+                { header: 'Debe', key: 'debe', width: 14 },
+                { header: 'Haber', key: 'haber', width: 14 },
+                { header: 'Saldo', key: 'saldo', width: 16 }
+            ];
+            ws.getRow(1).font = { bold: true };
+            ws.views = [{ state: 'frozen', ySplit: 1 }];
+            ws.getColumn('A').numFmt = 'dd/mm/yyyy';
+            ws.getColumn('E').numFmt = '#,##0.00';
+            ws.getColumn('F').numFmt = '#,##0.00';
+            ws.getColumn('G').numFmt = '#,##0.00';
+            let saldo = 0;
+            for (const m of movs) {
+                const debe = Number(m.debe || 0);
+                const haber = Number(m.haber || 0);
+                saldo = Math.round((saldo + debe - haber) * 100) / 100;
+                const tipoLabel = m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
+                    ? 'NC'
+                    : m.tipo === 'FACTURA_IMPORTADA'
+                        ? 'FACTURA (imp.)'
+                        : m.tipo === 'RECIBO_IMPORTADO'
+                            ? 'RECIBO (imp.)'
+                            : m.tipo === 'MOV_IMPORTADO'
+                                ? 'MOV. (imp.)'
+                                : m.tipo;
+                ws.addRow({
+                    fecha: m.fecha ? new Date(m.fecha) : null,
+                    tipo: tipoLabel,
+                    comprobante: m.comprobante,
+                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
+                    debe,
+                    haber,
+                    saldo
+                });
+            }
+            // Si el saldo unificado no coincide con el detalle de movimientos
+            // (por ejemplo por cuenta importada), agregamos una línea de ajuste
+            // para que la hoja del cliente cierre con el mismo saldo que la vista.
+            const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
+            if (Math.abs(delta) > 0.01) {
+                ws.addRow({
+                    fecha: null,
+                    tipo: 'AJUSTE',
+                    comprobante: 'Saldo unificado cartera',
+                    pedido: '',
+                    debe: delta > 0 ? delta : 0,
+                    haber: delta < 0 ? Math.abs(delta) : 0,
+                    saldo: saldoPendiente
+                });
+            }
+        }
+        const out = yield workbook.xlsx.writeBuffer();
+        const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
+        const filename = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buf);
+    }
+    catch (error) {
+        console.error('exportSaldosPendientesByCustomerSheetsXlsx:', error);
+        return res.status(500).json({ message: 'Error exportando saldos pendientes por cliente' });
+    }
+});
+exports.exportSaldosPendientesByCustomerSheetsXlsx = exportSaldosPendientesByCustomerSheetsXlsx;
 /**
  * Excel una sola hoja "Resumen" estilizada: Código, Cliente, Vendedor habitual, Zona, Saldo final, Movimientos.
  * Saldo final = max(0, C + M − P): pedidos pendientes IVA + último saldo cuenta importada − pagos registrados.
