@@ -1641,6 +1641,7 @@ export const api = {
   // Historial de movimientos de stock
   getStockMovements: async (params?: { 
     variantId?: string; 
+    productId?: string;
     type?: string; 
     from?: string; 
     to?: string; 
@@ -1650,6 +1651,7 @@ export const api = {
     return handleRequest(async () => {
       const queryParams = new URLSearchParams();
       if (params?.variantId) queryParams.append('variantId', params.variantId);
+      if (params?.productId) queryParams.append('productId', params.productId);
       if (params?.type) queryParams.append('type', params.type);
       if (params?.from) queryParams.append('from', params.from);
       if (params?.to) queryParams.append('to', params.to);

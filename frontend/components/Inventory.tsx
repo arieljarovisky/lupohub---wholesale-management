@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -38,6 +38,19 @@ interface InventoryProps {
   onCreateProducts?: (products: Product[]) => void;
   onUpdateStock?: (productId: string, newStock: number) => void | Promise<void>;
   onImportComplete?: () => void;
+}
+
+interface ArticleStockMovement {
+  id: string;
+  variant_id: string;
+  previous_stock: number;
+  new_stock: number;
+  quantity_change: number;
+  movement_type: string;
+  reference: string | null;
+  created_at: string;
+  sku: string;
+  product_name: string;
 }
 
 /** Formato de talle para dropdowns de vinculación: muestra código numérico y nombre (ej. "160 - GG") para que coincida con la columna local. */
@@ -150,6 +163,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [despachoCantidad, setDespachoCantidad] = useState('');
   const [despachoCosto, setDespachoCosto] = useState('');
   const [savingDespacho, setSavingDespacho] = useState(false);
+  const [showStockHistoryModal, setShowStockHistoryModal] = useState(false);
+  const [stockHistoryLoading, setStockHistoryLoading] = useState(false);
+  const [stockHistoryRows, setStockHistoryRows] = useState<ArticleStockMovement[]>([]);
+  const [stockHistoryArticle, setStockHistoryArticle] = useState<{ productId: string; title: string } | null>(null);
 
   // Import Tango State
   const [importingTango, setImportingTango] = useState(false);
@@ -370,6 +387,50 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     } finally {
       setSavingDespacho(false);
     }
+  };
+
+  const openArticleStockHistory = async (productId: string, title: string) => {
+    setStockHistoryArticle({ productId, title });
+    setShowStockHistoryModal(true);
+    setStockHistoryLoading(true);
+    setStockHistoryRows([]);
+    try {
+      const rows = await api.getStockMovements({ productId, limit: 200 });
+      setStockHistoryRows(Array.isArray(rows) ? rows : []);
+    } catch (e: any) {
+      setStockHistoryRows([]);
+      showToast('error', e?.message || 'No se pudo cargar el historial de stock del artículo');
+    } finally {
+      setStockHistoryLoading(false);
+    }
+  };
+
+  const formatMovementDateTime = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value || '—';
+    return d.toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const movementTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      PEDIDO_MAYORISTA: 'Pedido mayorista',
+      VENTA_TIENDA_NUBE: 'Venta Tienda Nube',
+      VENTA_MERCADO_LIBRE: 'Venta Mercado Libre',
+      CANCEL_VENTA_TIENDA_NUBE: 'Cancelación TN',
+      AJUSTE_MANUAL: 'Ajuste manual',
+      DEVOLUCION: 'Devolución',
+      IMPORTACION_TN: 'Importación TN',
+      IMPORTACION_ML: 'Importación ML',
+      IMPORTACION_EXCEL: 'Importación Excel',
+      SNAPSHOT_INICIAL: 'Snapshot inicial',
+    };
+    return labels[type] || type || 'Movimiento';
   };
 
   // 1. Server: cargar todos los productos (en páginas de 100) para que el paginado sea solo de vista
@@ -2737,6 +2798,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const rawName = (groupVariants[0]?.name || '').toString().trim();
           const displayName = rawName ? `${skuLabel} - ${rawName}` : skuLabel;
           const codigoLabel = `Código: ${skuLabel}`;
+          const articleProductId = (groupVariants[0] as any)?.product_id as string | undefined;
           
           const displayTotalStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
           const hasLowStock = getGroupHasLowStock(groupKey, groupVariants);
@@ -3210,6 +3272,68 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         >
           <Plus size={24} />
         </button>
+      )}
+
+      {showStockHistoryModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-700 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-white font-black text-base sm:text-lg">Historial de stock por artículo</h3>
+                <p className="text-slate-400 text-xs truncate">{stockHistoryArticle?.title || '—'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStockHistoryModal(false)}
+                className="p-2 min-w-[40px] min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                aria-label="Cerrar historial"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 overflow-auto">
+              {stockHistoryLoading ? (
+                <div className="py-10 text-slate-400 flex items-center justify-center gap-2 text-sm">
+                  <Loader2 size={16} className="animate-spin" />
+                  Cargando historial...
+                </div>
+              ) : stockHistoryRows.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 text-sm">No hay movimientos de stock para este artículo.</div>
+              ) : (
+                <div className="overflow-auto rounded-xl border border-slate-700">
+                  <table className="min-w-full text-xs sm:text-sm">
+                    <thead className="bg-slate-800/80 text-slate-300 sticky top-0">
+                      <tr>
+                        <th className="text-left px-3 py-2">Fecha</th>
+                        <th className="text-left px-3 py-2">Tipo</th>
+                        <th className="text-left px-3 py-2">SKU variante</th>
+                        <th className="text-right px-3 py-2">Cambio</th>
+                        <th className="text-right px-3 py-2">Anterior</th>
+                        <th className="text-right px-3 py-2">Nuevo</th>
+                        <th className="text-left px-3 py-2">Referencia</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {stockHistoryRows.map((m) => (
+                        <tr key={m.id} className="text-slate-200 hover:bg-slate-800/40">
+                          <td className="px-3 py-2 whitespace-nowrap">{formatMovementDateTime(m.created_at)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{movementTypeLabel(m.movement_type)}</td>
+                          <td className="px-3 py-2 font-mono">{m.sku || '—'}</td>
+                          <td className={`px-3 py-2 text-right font-bold ${Number(m.quantity_change) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                            {Number(m.quantity_change) > 0 ? `+${m.quantity_change}` : m.quantity_change}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.previous_stock}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{m.new_stock}</td>
+                          <td className="px-3 py-2 max-w-[320px] truncate" title={m.reference || ''}>{m.reference || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* CREATE PRODUCT MODAL */}
@@ -4056,6 +4180,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       />
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!articleProductId) return;
+                      openArticleStockHistory(articleProductId, displayName);
+                    }}
+                    disabled={!articleProductId}
+                    className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-violet-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Ver historial de stock del artículo"
+                  >
+                    <History size={20} />
+                  </button>
                   {bulkLinkVariants.length > 0 && (
                     <div className="rounded-xl border border-slate-700 overflow-x-auto touch-scroll scrollbar-hide -mx-1 sm:mx-0">
                       <table className="w-full min-w-[520px] text-sm">
