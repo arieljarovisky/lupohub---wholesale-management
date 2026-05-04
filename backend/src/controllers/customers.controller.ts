@@ -1759,6 +1759,67 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       sellerParams
     ) as Array<{ id: string; customer_name: string; seller_id: string | null; seller_name: string | null }>;
 
+    // Saldo unificado (misma base que la vista de cartera/clientes).
+    const carteraSql = `
+      SELECT
+        c.id AS customerId,
+        ROUND(
+          COALESCE(oc.cargos, 0) +
+          COALESCE(mm.last_saldo, 0) -
+          COALESCE(pay.total_pagos, 0),
+          2
+        ) AS saldoPendienteUnificado
+      FROM customers c
+      LEFT JOIN (
+        SELECT
+          o.customer_id,
+          SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargos
+        FROM orders o
+        LEFT JOIN (
+          SELECT order_id, SUM(amount_credited) AS cn_total
+          FROM credit_notes
+          GROUP BY order_id
+        ) cn ON cn.order_id = o.id
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) oc ON oc.customer_id = c.id
+      LEFT JOIN (
+        SELECT
+          agg.customer_id,
+          CAST(COALESCE(
+            (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+             FROM customer_multimedia_entries e_lo
+             WHERE e_lo.customer_id = agg.customer_id
+             ORDER BY e_lo.line_order DESC
+             LIMIT 1),
+            (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+             FROM customer_multimedia_entries e2
+             WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+             ORDER BY e2.line_order DESC
+             LIMIT 1),
+            0
+          ) AS DECIMAL(16,2)) AS last_saldo
+        FROM (
+          SELECT customer_id
+          FROM customer_multimedia_entries
+          GROUP BY customer_id
+        ) agg
+      ) mm ON mm.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) AS total_pagos
+        FROM payments
+        GROUP BY customer_id
+      ) pay ON pay.customer_id = c.id
+      ${sellerWhere}
+    `;
+    const carteraRows = await query(carteraSql, sellerParams) as Array<{ customerId: string; saldoPendienteUnificado: number }>;
+    const saldoUnificadoByCustomer = new Map<string, number>();
+    for (const r of carteraRows) {
+      saldoUnificadoByCustomer.set(r.customerId, Number(r.saldoPendienteUnificado) || 0);
+    }
+
     const byCustomer = new Map<string, typeof movements>();
     for (const m of movements) {
       if (!byCustomer.has(m.customer_id)) byCustomer.set(m.customer_id, []);
@@ -1803,7 +1864,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       for (const m of movs) {
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
-      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
+      const saldoTarget = Number(saldoUnificadoByCustomer.get(c.id) ?? running) || 0;
+      const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
 
       wsSummary.addRow({
         cliente: c.customer_name,
@@ -1841,6 +1903,22 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           debe,
           haber,
           saldo
+        });
+      }
+
+      // Si el saldo unificado no coincide con el detalle de movimientos
+      // (por ejemplo por cuenta importada), agregamos una línea de ajuste
+      // para que la hoja del cliente cierre con el mismo saldo que la vista.
+      const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
+      if (Math.abs(delta) > 0.01) {
+        ws.addRow({
+          fecha: null,
+          tipo: 'AJUSTE',
+          comprobante: 'Saldo unificado cartera',
+          pedido: '',
+          debe: delta > 0 ? delta : 0,
+          haber: delta < 0 ? Math.abs(delta) : 0,
+          saldo: saldoPendiente
         });
       }
     }
