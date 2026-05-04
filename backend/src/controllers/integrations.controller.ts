@@ -3,7 +3,7 @@ import axios from 'axios';
 import { execute, query, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
-import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
@@ -4656,6 +4656,218 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
     const detail = error.response?.data?.description || error.response?.data?.message || error.message;
     console.error('Error fetching TN product variants:', detail);
     res.status(500).json({ message: 'Error obteniendo variantes de Tienda Nube', detail });
+  }
+};
+
+async function fetchAllTiendaNubeProductVariantsApi(
+  storeId: string,
+  accessToken: string,
+  productId: string
+): Promise<any[]> {
+  const headers = { Authentication: `bearer ${accessToken}`, 'User-Agent': TN_USER_AGENT };
+  let variantsList: any[] = [];
+  const perPage = 200;
+  let vPage = 1;
+  let hasMoreVariants = true;
+  while (hasMoreVariants) {
+    const variantsRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`, {
+      headers,
+      params: { page: vPage, per_page: perPage },
+      validateStatus: () => true
+    });
+    const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
+    variantsList = variantsList.concat(chunk);
+    if (chunk.length < perPage) hasMoreVariants = false;
+    else vPage++;
+    if (vPage > 50) hasMoreVariants = false;
+  }
+  return variantsList;
+}
+
+function appendSuffixToLocalizedName(field: any, suffix: string): any {
+  if (!suffix) return field;
+  if (field == null) return field;
+  if (typeof field === 'string') return `${field}${suffix}`;
+  if (typeof field === 'object') {
+    const out: Record<string, string> = { ...field };
+    for (const k of Object.keys(out)) {
+      const v = out[k];
+      if (typeof v === 'string' && v.trim()) out[k] = `${v}${suffix}`;
+    }
+    return out;
+  }
+  return field;
+}
+
+function tiendaNubeCategoryIdsOnly(raw: any): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c: any) => (typeof c === 'object' && c != null ? c.id : c))
+    .filter((id: any) => id != null && String(id).trim() !== '')
+    .map((id: any) => Number(id))
+    .filter((n: number) => Number.isFinite(n));
+}
+
+function stripVariantForTiendaNubeCreate(v: any, skuSuffix: string, idx: number): any {
+  const baseSku =
+    v?.sku != null && String(v.sku).trim() !== '' ? String(v.sku).trim() : `VAR-${idx + 1}`;
+  const out: any = {
+    price: v.price != null ? String(v.price) : '0',
+    stock_management: v.stock_management !== false,
+    stock: Number(v.stock) || 0,
+    sku: `${baseSku}${skuSuffix}`,
+    values: Array.isArray(v.values) ? v.values : []
+  };
+  if (v.promotional_price != null && String(v.promotional_price).trim() !== '') {
+    out.promotional_price = String(v.promotional_price);
+  }
+  if (v.weight != null && String(v.weight).trim() !== '') out.weight = v.weight;
+  if (v.width != null && String(v.width).trim() !== '') out.width = v.width;
+  if (v.height != null && String(v.height).trim() !== '') out.height = v.height;
+  if (v.depth != null && String(v.depth).trim() !== '') out.depth = v.depth;
+  if (v.cost != null && String(v.cost).trim() !== '') out.cost = v.cost;
+  return out;
+}
+
+function buildTiendaNubeDuplicateCreateBody(
+  product: any,
+  variantsList: any[],
+  opts: { titleSuffix: string; skuSuffix: string; published: boolean }
+): any {
+  const titleSuffix = opts.titleSuffix;
+  const skuSuffix = opts.skuSuffix;
+  const variantSource =
+    variantsList.length > 0 ? variantsList : Array.isArray(product?.variants) ? product.variants : [];
+  let variants = variantSource.map((v: any, i: number) => stripVariantForTiendaNubeCreate(v, skuSuffix, i));
+  if (variants.length === 0) {
+    variants = [stripVariantForTiendaNubeCreate({ price: '0', stock: 0, stock_management: true, values: [] }, skuSuffix, 0)];
+  }
+
+  const body: any = {
+    name: appendSuffixToLocalizedName(product.name, titleSuffix),
+    description: product.description ?? { es: '', en: '', pt: '' },
+    attributes: Array.isArray(product.attributes) ? product.attributes : [],
+    categories: tiendaNubeCategoryIdsOnly(product.categories),
+    published: opts.published,
+    free_shipping: !!product.free_shipping,
+    tags: typeof product.tags === 'string' ? product.tags : '',
+    variants
+  };
+  if (product.brand != null && String(product.brand).trim() !== '') body.brand = product.brand;
+  if (product.video_url && String(product.video_url).startsWith('https://')) body.video_url = product.video_url;
+  if (product.seo_title != null) body.seo_title = appendSuffixToLocalizedName(product.seo_title, titleSuffix);
+  if (product.seo_description != null) body.seo_description = product.seo_description;
+  if (product.requires_shipping === false) body.requires_shipping = false;
+  const imgs = (Array.isArray(product.images) ? product.images : [])
+    .slice(0, 9)
+    .map((im: any) => (im?.src ? { src: im.src } : null))
+    .filter(Boolean);
+  if (imgs.length > 0) body.images = imgs;
+  return body;
+}
+
+/** Crea un producto en Tienda Nube (payload según documentación POST /products). */
+export const createTiendaNubeProduct = async (req: Request, res: Response) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object') {
+      return res.status(400).json({ message: 'Enviá un objeto JSON con name y variants' });
+    }
+    if (!body.name) return res.status(400).json({ message: 'Falta name (objeto por idioma, ej. { es: "..." })' });
+    if (!Array.isArray(body.variants) || body.variants.length === 0) {
+      return res.status(400).json({ message: 'Falta variants: al menos una variante (price, stock, etc.)' });
+    }
+
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+
+    const url = `https://api.tiendanube.com/v1/${storeId}/products`;
+    const headers = {
+      Authentication: `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT,
+      'Content-Type': 'application/json'
+    };
+    const r = await tnPostWithRetry(axios, url, body, { headers, validateStatus: () => true });
+    if (r.status === 201) {
+      return res.status(201).json({
+        product: r.data,
+        id: r.data?.id,
+        message: 'Producto creado en Tienda Nube'
+      });
+    }
+    const detail = r.data?.description || r.data?.message || r.statusText;
+    return res.status(r.status >= 400 ? r.status : 502).json({
+      message: ['Tienda Nube rechazó la creación del producto', detail].filter(Boolean).join(' — '),
+      errors: r.data
+    });
+  } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
+    console.error('createTiendaNubeProduct:', detail);
+    res.status(500).json({ message: 'Error creando producto en Tienda Nube', detail });
+  }
+};
+
+/**
+ * Duplica un producto existente en Tienda Nube (nueva publicación).
+ * Útil para packs: mismo contenido con otro título y SKU (sufijos configurables).
+ */
+export const duplicateTiendaNubeProduct = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+    if (!productId) return res.status(400).json({ message: 'Falta productId' });
+
+    const titleSuffix = (req.body?.titleSuffix ?? ' (pack)').toString();
+    const skuSuffix = (req.body?.skuSuffix ?? '-PACK').toString();
+    const published = req.body?.published !== false;
+
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    const storeId = integration.store_id || integration.user_id;
+    if (!storeId) return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
+
+    const headers = { Authentication: `bearer ${integration.access_token}`, 'User-Agent': TN_USER_AGENT };
+    const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, {
+      headers,
+      validateStatus: () => true
+    });
+    if (productRes.status !== 200) {
+      const errMsg =
+        (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
+      return res.status(productRes.status >= 400 ? 404 : 502).json({
+        message: 'Producto no encontrado en Tienda Nube',
+        detail: errMsg
+      });
+    }
+
+    const p = productRes.data;
+    const variantsList = await fetchAllTiendaNubeProductVariantsApi(storeId, integration.access_token, String(productId));
+    const createBody = buildTiendaNubeDuplicateCreateBody(p, variantsList, { titleSuffix, skuSuffix, published });
+
+    const url = `https://api.tiendanube.com/v1/${storeId}/products`;
+    const postHeaders = {
+      ...headers,
+      'Content-Type': 'application/json'
+    };
+    const r = await tnPostWithRetry(axios, url, createBody, { headers: postHeaders, validateStatus: () => true });
+    if (r.status === 201) {
+      return res.status(201).json({
+        sourceProductId: productId,
+        newProductId: r.data?.id,
+        product: r.data,
+        message: 'Publicación duplicada en Tienda Nube'
+      });
+    }
+    const detail = r.data?.description || r.data?.message || r.statusText;
+    return res.status(r.status >= 400 ? r.status : 502).json({
+      message: ['Tienda Nube rechazó la duplicación', detail].filter(Boolean).join(' — '),
+      errors: r.data
+    });
+  } catch (error: any) {
+    const detail = error.response?.data?.description || error.response?.data?.message || error.message;
+    console.error('duplicateTiendaNubeProduct:', detail);
+    res.status(500).json({ message: 'Error duplicando producto en Tienda Nube', detail });
   }
 };
 

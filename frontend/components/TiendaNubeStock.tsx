@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
+import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download, SquareStack, Plus } from 'lucide-react';
 import { api } from '../services/api';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
@@ -53,6 +53,16 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [importingItemId, setImportingItemId] = useState<string | null>(null);
+  const [dupModal, setDupModal] = useState<{ id: string; title: string } | null>(null);
+  const [dupTitleSuffix, setDupTitleSuffix] = useState(' (pack)');
+  const [dupSkuSuffix, setDupSkuSuffix] = useState('-PACK');
+  const [dupSubmitting, setDupSubmitting] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createPrice, setCreatePrice] = useState('');
+  const [createStock, setCreateStock] = useState('0');
+  const [createSku, setCreateSku] = useState('');
+  const [createSubmitting, setCreateSubmitting] = useState(false);
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(String(text)).then(() => {
       setCopiedId(label);
@@ -197,17 +207,37 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
           </div>
           <div>
             <h2 className="text-2xl font-black text-white">Stock Tienda Nube</h2>
-            <p className="text-slate-400 text-sm">Inventario de tus productos en Tienda Nube</p>
+            <p className="text-slate-400 text-sm">
+              Inventario en Tienda Nube: creá una publicación simple o duplicá una existente con otro nombre y SKU (ideal para packs).
+            </p>
           </div>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={loading}
-          className="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-cyan-900/30 transition-all"
-        >
-          {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
-          Actualizar
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCreateModalOpen(true);
+              setCreateName('');
+              setCreatePrice('');
+              setCreateStock('0');
+              setCreateSku('');
+            }}
+            disabled={loading || createSubmitting || dupSubmitting}
+            className="bg-slate-700 hover:bg-slate-600 border border-slate-500/80 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 transition-all"
+          >
+            <Plus size={18} />
+            Nuevo en TN
+          </button>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-cyan-900/30 transition-all"
+          >
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            Actualizar
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -428,29 +458,46 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                       <p className="text-slate-500 text-sm mb-3">Sin variaciones (producto único)</p>
                     )}
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (importingItemId) return;
-                          setImportingItemId(item.id);
-                          try {
-                            const res = await api.importProductFromTiendaNube(item.id);
-                            showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
-                            onProductImported?.(res.baseSku);
-                          } catch (err: any) {
-                            showToast?.('error', err?.message || 'Error al agregar a tu inventario');
-                          } finally {
-                            setImportingItemId(null);
-                          }
-                        }}
-                        disabled={!!importingItemId}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50 transition-colors"
-                        title="Crear producto en Mi inventario y vincular con Tienda Nube"
-                      >
-                        {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                        Agregar a mi stock
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (importingItemId || dupSubmitting) return;
+                            setImportingItemId(item.id);
+                            try {
+                              const res = await api.importProductFromTiendaNube(item.id);
+                              showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                              onProductImported?.(res.baseSku);
+                            } catch (err: any) {
+                              showToast?.('error', err?.message || 'Error al agregar a tu inventario');
+                            } finally {
+                              setImportingItemId(null);
+                            }
+                          }}
+                          disabled={!!importingItemId || dupSubmitting}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50 transition-colors"
+                          title="Crear producto en Mi inventario y vincular con Tienda Nube"
+                        >
+                          {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                          Agregar a mi stock
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDupModal({ id: item.id, title: item.title });
+                            setDupTitleSuffix(' (pack)');
+                            setDupSkuSuffix('-PACK');
+                          }}
+                          disabled={!!importingItemId || dupSubmitting}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 border border-slate-500/80 text-white font-bold disabled:opacity-50 transition-colors"
+                          title="Crear una copia en Tienda Nube con otro título y SKU (ideal para packs)"
+                        >
+                          <SquareStack size={18} />
+                          Duplicar en TN
+                        </button>
+                      </div>
                     {item.permalink && item.permalink !== 'https://tiendanube.com' && (
                       <a
                           href={item.permalink}
@@ -468,6 +515,203 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
               </div>
             );
           })}
+        </div>
+      )}
+
+      {createModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tn-create-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !createSubmitting) setCreateModalOpen(false);
+          }}
+        >
+          <div
+            className="bg-slate-800 border border-slate-600 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-black/40"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="tn-create-modal-title" className="text-lg font-black text-white mb-1">Nueva publicación en Tienda Nube</h3>
+            <p className="text-slate-500 text-xs mb-4">
+              Publicación con una sola variante (sin talles ni colores). Para descripciones, fotos o muchas variantes, duplicá un producto similar o editá en el panel de Tienda Nube.
+            </p>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Nombre</label>
+            <input
+              type="text"
+              value={createName}
+              onChange={e => setCreateName(e.target.value)}
+              placeholder="Ej. Pack x6 Boxer negro"
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              disabled={createSubmitting}
+            />
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Precio</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={createPrice}
+                  onChange={e => setCreatePrice(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  disabled={createSubmitting}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Stock</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={createStock}
+                  onChange={e => setCreateStock(e.target.value)}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  disabled={createSubmitting}
+                />
+              </div>
+            </div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">SKU (opcional)</label>
+            <input
+              type="text"
+              value={createSku}
+              onChange={e => setCreateSku(e.target.value)}
+              placeholder="Código único"
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-5 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              disabled={createSubmitting}
+            />
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                disabled={createSubmitting}
+                onClick={() => !createSubmitting && setCreateModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:bg-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={createSubmitting || !createName.trim()}
+                onClick={async () => {
+                  const name = createName.trim();
+                  const priceNum = Number(String(createPrice).replace(',', '.'));
+                  const priceStr = Number.isFinite(priceNum) ? String(priceNum) : '0';
+                  const stockNum = Math.max(0, Math.floor(Number(createStock)));
+                  setCreateSubmitting(true);
+                  try {
+                    const variant: Record<string, unknown> = {
+                      price: priceStr,
+                      stock_management: true,
+                      stock: stockNum,
+                      values: []
+                    };
+                    const sku = createSku.trim();
+                    if (sku) variant.sku = sku;
+                    const res = await api.createTiendaNubeProduct({
+                      name: { es: name, en: name, pt: name },
+                      published: true,
+                      variants: [variant]
+                    });
+                    const nid = res.id ?? (res.product as { id?: number })?.id;
+                    showToast?.(
+                      'success',
+                      nid != null
+                        ? `Publicación creada en Tienda Nube (ID ${nid}).`
+                        : (res.message || 'Producto creado.')
+                    );
+                    setCreateModalOpen(false);
+                    handleRefresh();
+                  } catch (err: any) {
+                    showToast?.('error', err?.message || 'No se pudo crear');
+                  } finally {
+                    setCreateSubmitting(false);
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm disabled:opacity-50"
+              >
+                {createSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                Crear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dupModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tn-dup-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !dupSubmitting) setDupModal(null);
+          }}
+        >
+          <div
+            className="bg-slate-800 border border-slate-600 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-black/40"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="tn-dup-modal-title" className="text-lg font-black text-white mb-1">Duplicar publicación</h3>
+            <p className="text-slate-400 text-sm mb-4 line-clamp-2" title={dupModal.title}>{dupModal.title}</p>
+            <p className="text-slate-500 text-xs mb-4">
+              Se crea un producto nuevo en Tienda Nube con las mismas fotos (hasta 9), categorías, precios y stock. Ajustá los sufijos para que el nombre y los SKU no choquen con la publicación original (ej. pack x6: sufijo SKU <code className="text-cyan-400/90">-PX6</code>).
+            </p>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Sufijo del nombre (todos los idiomas)</label>
+            <input
+              type="text"
+              value={dupTitleSuffix}
+              onChange={e => setDupTitleSuffix(e.target.value)}
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              disabled={dupSubmitting}
+            />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Sufijo del SKU (cada variante)</label>
+            <input
+              type="text"
+              value={dupSkuSuffix}
+              onChange={e => setDupSkuSuffix(e.target.value)}
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-5 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              disabled={dupSubmitting}
+            />
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                disabled={dupSubmitting}
+                onClick={() => !dupSubmitting && setDupModal(null)}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:bg-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={dupSubmitting || !dupSkuSuffix.trim()}
+                onClick={async () => {
+                  setDupSubmitting(true);
+                  try {
+                    const res = await api.duplicateTiendaNubeProduct(dupModal.id, {
+                      titleSuffix: dupTitleSuffix,
+                      skuSuffix: dupSkuSuffix.trim() || '-PACK'
+                    });
+                    const nid = res.newProductId ?? (res.product as { id?: number })?.id;
+                    showToast?.(
+                      'success',
+                      nid != null
+                        ? `Nueva publicación en Tienda Nube (ID ${nid}). Actualizá la lista para verla.`
+                        : (res.message || 'Duplicado creado.')
+                    );
+                    setDupModal(null);
+                    handleRefresh();
+                  } catch (err: any) {
+                    showToast?.('error', err?.message || 'No se pudo duplicar');
+                  } finally {
+                    setDupSubmitting(false);
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm disabled:opacity-50"
+              >
+                {dupSubmitting ? <Loader2 size={18} className="animate-spin" /> : <SquareStack size={18} />}
+                Crear duplicado
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

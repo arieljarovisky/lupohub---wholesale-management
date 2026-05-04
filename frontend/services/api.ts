@@ -1281,6 +1281,39 @@ export const api = {
     }, { productId: '', baseSku: '', name: '', variantsCreated: 0 }, 'importProductFromTiendaNube');
   },
 
+  /**
+   * Crea un producto en Tienda Nube (cuerpo igual a POST /products de la API oficial: name, variants, etc.).
+   */
+  createTiendaNubeProduct: async (productPayload: Record<string, unknown>): Promise<{ id?: number; product?: unknown; message?: string }> => {
+    return await request<{ id?: number; product?: unknown; message?: string }>(
+      '/integrations/tiendanube/products',
+      'POST',
+      productPayload,
+      undefined,
+      120000
+    );
+  },
+
+  /**
+   * Duplica una publicación en Tienda Nube (nuevo producto con sufijos en nombre y SKU).
+   */
+  duplicateTiendaNubeProduct: async (
+    productId: string | number,
+    opts?: { titleSuffix?: string; skuSuffix?: string; published?: boolean }
+  ): Promise<{ sourceProductId?: string; newProductId?: number; product?: unknown; message?: string }> => {
+    return await request<{ sourceProductId?: string; newProductId?: number; product?: unknown; message?: string }>(
+      `/integrations/tiendanube/products/${encodeURIComponent(String(productId))}/duplicate`,
+      'POST',
+      {
+        titleSuffix: opts?.titleSuffix,
+        skuSuffix: opts?.skuSuffix,
+        published: opts?.published
+      },
+      undefined,
+      120000
+    );
+  },
+
   // Órdenes de Tienda Nube
   getTiendaNubeOrders: async (params?: { page?: number; per_page?: number; status?: string; created_at_min?: string; created_at_max?: string; only_paid_pending_shipment?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {

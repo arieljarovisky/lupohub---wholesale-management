@@ -37,6 +37,8 @@ import {
   processMLQuestionsAi,
   importProductFromMercadoLibre,
   importProductFromTiendaNube,
+  createTiendaNubeProduct,
+  duplicateTiendaNubeProduct,
   testTiendaNubeOrder,
   syncTiendaNubeOrdersFromDate,
   syncMercadoLibreOrdersFromDate,
@@ -121,6 +123,8 @@ router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
+router.post('/tiendanube/products', createTiendaNubeProduct);
+router.post('/tiendanube/products/:productId/duplicate', duplicateTiendaNubeProduct);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', syncAllStockToTiendaNube);
 router.post('/tiendanube/sync-stock-selected', syncSelectedStockToTiendaNube);

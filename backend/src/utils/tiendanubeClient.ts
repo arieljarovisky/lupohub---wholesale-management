@@ -66,3 +66,34 @@ export async function tnPutWithRetry(
   }
 }
 
+export async function tnPostWithRetry(
+  axiosInstance: { post: (url: string, body: any, config: any) => Promise<any> },
+  url: string,
+  body: any,
+  config: any,
+  opts?: { maxRetries?: number; minIntervalMs?: number }
+): Promise<any> {
+  const maxRetries = Math.max(0, opts?.maxRetries ?? 4);
+  const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
+  const resolvedInterval = opts?.minIntervalMs ?? (Number.isFinite(envInterval) ? envInterval : 800);
+  const minIntervalMs = Math.max(0, resolvedInterval);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await scheduleTn(() => axiosInstance.post(url, body, config), minIntervalMs);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const is429 = status === 429;
+      const isNetwork = e?.code === 'ECONNRESET' || e?.code === 'ETIMEDOUT' || e?.code === 'ECONNREFUSED';
+      if ((is429 || isNetwork) && attempt < maxRetries) {
+        const retryAfterMs = is429 ? getRetryAfterMs(e) : null;
+        const backoffMs = 1500 + attempt * 1500;
+        await sleep(Math.max(retryAfterMs ?? 0, backoffMs));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('tnPostWithRetry: retries exhausted');
+}
+
