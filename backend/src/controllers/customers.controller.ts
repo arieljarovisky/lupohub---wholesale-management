@@ -1759,16 +1759,147 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       sellerParams
     ) as Array<{ id: string; customer_name: string; seller_id: string | null; seller_name: string | null }>;
 
-    // Saldo unificado (misma base que la vista de cartera/clientes).
-    const carteraSql = `
+    // Saldo unificado (exactamente la misma base que getCarteraTotals, incluyendo dedupe de recibos importados).
+    const carteraSellerFilter = sellerIdFilter ? ' AND c.seller_id = ?' : '';
+    const carteraBaseParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
+    const paymentsSubquery =
+      sellerIdFilter
+        ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+           FROM (
+             SELECT
+               p.customer_id,
+               ROUND(COALESCE(p.amount, 0), 2) AS amount,
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END AS receipt_norm
+             FROM payments p
+             INNER JOIN customers c2 ON c2.id = p.customer_id
+             LEFT JOIN (
+               SELECT
+                 e.customer_id,
+                 DATE(e.line_date) AS line_date,
+                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) AS receipt_norm
+               FROM customer_multimedia_entries e
+               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+                 AND TRIM(COALESCE(e.numero, '')) <> ''
+               GROUP BY
+                 e.customer_id,
+                 DATE(e.line_date),
+                 ROUND(COALESCE(e.importe, 0), 2),
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+             ) me_rec
+               ON me_rec.customer_id = p.customer_id
+              AND me_rec.line_date = DATE(p.date)
+              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+              AND me_rec.receipt_norm = CASE
+                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                ELSE UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                )
+              END
+             WHERE (p.seller_id = ? OR c2.seller_id = ?)
+               AND me_rec.customer_id IS NULL
+             GROUP BY
+               p.customer_id,
+               DATE(p.date),
+               ROUND(COALESCE(p.amount, 0), 2),
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END
+           ) d
+           GROUP BY d.customer_id`
+        : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+           FROM (
+             SELECT
+               p.customer_id,
+               ROUND(COALESCE(p.amount, 0), 2) AS amount,
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END AS receipt_norm
+             FROM payments p
+             LEFT JOIN (
+               SELECT
+                 e.customer_id,
+                 DATE(e.line_date) AS line_date,
+                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 ) AS receipt_norm
+               FROM customer_multimedia_entries e
+               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+                 AND TRIM(COALESCE(e.numero, '')) <> ''
+               GROUP BY
+                 e.customer_id,
+                 DATE(e.line_date),
+                 ROUND(COALESCE(e.importe, 0), 2),
+                 UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+             ) me_rec
+               ON me_rec.customer_id = p.customer_id
+              AND me_rec.line_date = DATE(p.date)
+              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+              AND me_rec.receipt_norm = CASE
+                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                ELSE UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                )
+              END
+             WHERE me_rec.customer_id IS NULL
+             GROUP BY
+               p.customer_id,
+               DATE(p.date),
+               ROUND(COALESCE(p.amount, 0), 2),
+               CASE
+                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                 ELSE UPPER(
+                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                 )
+               END
+           ) d
+           GROUP BY d.customer_id`;
+    const carteraPayParams: any[] = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
+    const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams];
+    const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams];
+    const mmSubquery = `
+      SELECT
+        agg.customer_id,
+        CAST(COALESCE(
+          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+           FROM customer_multimedia_entries e_lo
+           WHERE e_lo.customer_id = agg.customer_id
+           ORDER BY e_lo.line_order DESC
+           LIMIT 1),
+          (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+           FROM customer_multimedia_entries e2
+           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+           ORDER BY e2.line_order DESC
+           LIMIT 1),
+          0
+        ) AS DECIMAL(16,2)) AS last_saldo
+      FROM (
+        SELECT customer_id
+        FROM customer_multimedia_entries
+        GROUP BY customer_id
+      ) agg`;
+    const carteraSqlWithNc = `
       SELECT
         c.id AS customerId,
-        ROUND(
-          COALESCE(oc.cargos, 0) +
-          COALESCE(mm.last_saldo, 0) -
-          COALESCE(pay.total_pagos, 0),
-          2
-        ) AS saldoPendienteUnificado
+        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
       FROM customers c
       LEFT JOIN (
         SELECT
@@ -1785,36 +1916,35 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           AND (o.archived = 0 OR o.archived IS NULL)
         GROUP BY o.customer_id
       ) oc ON oc.customer_id = c.id
+      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      WHERE 1=1 ${carteraSellerFilter}
+    `;
+    const carteraSqlSimple = `
+      SELECT
+        c.id AS customerId,
+        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+      FROM customers c
       LEFT JOIN (
         SELECT
-          agg.customer_id,
-          CAST(COALESCE(
-            (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
-             FROM customer_multimedia_entries e_lo
-             WHERE e_lo.customer_id = agg.customer_id
-             ORDER BY e_lo.line_order DESC
-             LIMIT 1),
-            (SELECT CAST(e2.saldo AS DECIMAL(16,2))
-             FROM customer_multimedia_entries e2
-             WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-             ORDER BY e2.line_order DESC
-             LIMIT 1),
-            0
-          ) AS DECIMAL(16,2)) AS last_saldo
-        FROM (
-          SELECT customer_id
-          FROM customer_multimedia_entries
-          GROUP BY customer_id
-        ) agg
-      ) mm ON mm.customer_id = c.id
-      LEFT JOIN (
-        SELECT customer_id, SUM(amount) AS total_pagos
-        FROM payments
-        GROUP BY customer_id
-      ) pay ON pay.customer_id = c.id
-      ${sellerWhere}
+          o.customer_id,
+          SUM(ROUND(o.total * 1.21, 2)) AS cargos
+        FROM orders o
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) oc ON oc.customer_id = c.id
+      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      WHERE 1=1 ${carteraSellerFilter}
     `;
-    const carteraRows = await query(carteraSql, sellerParams) as Array<{ customerId: string; saldoPendienteUnificado: number }>;
+    let carteraRows: Array<{ customerId: string; saldoPendienteUnificado: number }> = [];
+    try {
+      carteraRows = (await query(carteraSqlWithNc, carteraParamsWithNc)) as Array<{ customerId: string; saldoPendienteUnificado: number }>;
+    } catch {
+      carteraRows = (await query(carteraSqlSimple, carteraParamsSimple)) as Array<{ customerId: string; saldoPendienteUnificado: number }>;
+    }
     const saldoUnificadoByCustomer = new Map<string, number>();
     for (const r of carteraRows) {
       saldoUnificadoByCustomer.set(r.customerId, Number(r.saldoPendienteUnificado) || 0);
