@@ -51,6 +51,8 @@ interface ArticleStockMovement {
   created_at: string;
   sku: string;
   product_name: string;
+  order_id?: string | null;
+  customer_name?: string | null;
 }
 
 /** Formato de talle para dropdowns de vinculación: muestra código numérico y nombre (ej. "160 - GG") para que coincida con la columna local. */
@@ -435,6 +437,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       SNAPSHOT_INICIAL: 'Snapshot inicial',
     };
     return labels[type] || type || 'Movimiento';
+  };
+
+  const movementReferenceLabel = (m: ArticleStockMovement) => {
+    const baseRef = (m.reference || '').trim();
+    if (m.movement_type === 'PEDIDO_MAYORISTA') {
+      const parts: string[] = [];
+      if (m.order_id || baseRef) parts.push(m.order_id ? `Pedido: ${m.order_id}` : baseRef);
+      if (m.customer_name) parts.push(`Cliente: ${m.customer_name}`);
+      return parts.join(' | ') || 'Pedido mayorista';
+    }
+    return baseRef || '—';
   };
 
   // 1. Server: cargar todos los productos (en páginas de 100) para que el paginado sea solo de vista
@@ -3349,7 +3362,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums">{m.previous_stock}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{m.new_stock}</td>
-                          <td className="px-3 py-2 max-w-[320px] truncate" title={m.reference || ''}>{m.reference || '—'}</td>
+                          <td className="px-3 py-2 max-w-[360px] truncate" title={movementReferenceLabel(m)}>{movementReferenceLabel(m)}</td>
                         </tr>
                       ))}
                     </tbody>

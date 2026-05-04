@@ -870,11 +870,20 @@ export const getStockMovements = async (req: Request, res: Response) => {
     params.push(limitNum);
 
     const movements = await query(
-      `SELECT sm.*, pv.sku, p.name as product_name
+      `SELECT
+         sm.*,
+         pv.sku,
+         p.name as product_name,
+         o.id as order_id,
+         c.business_name as customer_name
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN orders o
+         ON sm.movement_type = 'PEDIDO_MAYORISTA'
+        AND o.id = TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
+       LEFT JOIN customers c ON c.id = o.customer_id
        WHERE ${whereClause}
        ORDER BY sm.created_at DESC
        LIMIT ?`,
