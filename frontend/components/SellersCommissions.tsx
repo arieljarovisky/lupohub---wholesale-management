@@ -12,7 +12,8 @@ import {
   Building2,
   Calendar,
   Loader2,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
 import { Customer, Order, Role, User } from '../types';
 import { api } from '../services/api';
@@ -302,6 +303,19 @@ function SellerDetailView({
         >
           {saldosLoading ? <Loader2 size={16} className="animate-spin" /> : null}
           Actualizar saldos
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            api
+              .exportSaldosPendientesPorCliente(seller.id)
+              .catch(() => {});
+          }}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition"
+          title="Exportar saldos pendientes (una hoja por cliente)"
+        >
+          <Download size={16} />
+          Exportar Excel por cliente
         </button>
       </div>
 

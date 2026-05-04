@@ -733,6 +733,20 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Excel de saldos pendientes: resumen + una hoja por cliente. */
+  exportSaldosPendientesPorCliente: async (sellerId?: string): Promise<void> => {
+    const qs = sellerId ? `?sellerId=${encodeURIComponent(sellerId)}` : '';
+    const blob = await getBlob(`/customers/saldos-pendientes/export-por-cliente${qs}`, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Hoja única "Resumen" estilizada (sin columna Hoja): código, cliente, vendedor, zona, saldo final, movimientos. */
   exportSaldosPendientesMultimedias: async (): Promise<void> => {
     const blob = await getBlob('/customers/saldos-pendientes/export-multimedias', 90000);

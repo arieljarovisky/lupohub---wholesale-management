@@ -1628,6 +1628,236 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
   }
 };
 
+/**
+ * Exporta saldos pendientes en Excel con una hoja por cliente.
+ * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
+ */
+export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  if (!user || !roleCanViewSaldos(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+  }
+
+  try {
+    const requestedSellerId = String(req.query.sellerId || '').trim();
+    const sellerIdFilter =
+      user.role === 'SELLER'
+        ? user.id
+        : (user.role === 'ADMIN' || user.role === 'WAREHOUSE') && requestedSellerId
+          ? requestedSellerId
+          : '';
+
+    const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
+    const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
+
+    const movements = await query(
+      `
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(i.created_at, o.date) AS fecha,
+          'FACTURA' AS tipo,
+          CONCAT(
+            CASE
+              WHEN i.cbte_tipo = 1 THEN 'A '
+              WHEN i.cbte_tipo = 6 THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          o.id AS order_id,
+          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          0 AS haber
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          cn.created_at AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN cn.cbte_tipo = 3 THEN 'NC A '
+              WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          cn.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          p.date AS fecha,
+          'RECIBO' AS tipo,
+          p.receipt_number AS comprobante,
+          p.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(p.amount, 0), 2) AS haber
+        FROM payments p
+        JOIN customers c ON c.id = p.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+      ) m
+      ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
+      ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
+      `,
+      sellerParams
+    ) as Array<{
+      customer_id: string;
+      customer_name: string;
+      seller_id: string | null;
+      seller_name: string | null;
+      fecha: string;
+      tipo: 'FACTURA' | 'NOTA_CREDITO' | 'RECIBO';
+      comprobante: string;
+      order_id: string | null;
+      debe: number;
+      haber: number;
+    }>;
+
+    const customers = await query(
+      `SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       ${sellerWhere}
+       ORDER BY customer_name ASC`,
+      sellerParams
+    ) as Array<{ id: string; customer_name: string; seller_id: string | null; seller_name: string | null }>;
+
+    const byCustomer = new Map<string, typeof movements>();
+    for (const m of movements) {
+      if (!byCustomer.has(m.customer_id)) byCustomer.set(m.customer_id, []);
+      byCustomer.get(m.customer_id)!.push(m);
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LupoHub';
+    workbook.created = new Date();
+
+    const wsSummary = workbook.addWorksheet('Resumen');
+    wsSummary.columns = [
+      { header: 'Cliente', key: 'cliente', width: 40 },
+      { header: 'Vendedor', key: 'vendedor', width: 28 },
+      { header: 'Saldo pendiente', key: 'saldo', width: 18 }
+    ];
+    wsSummary.getRow(1).font = { bold: true };
+    wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
+    wsSummary.getColumn('C').numFmt = '#,##0.00';
+
+    const usedSheetNames = new Set<string>(['Resumen']);
+    const uniqueSheetName = (raw: string, fallback: string): string => {
+      const base = (raw || fallback || 'Cliente')
+        .toString()
+        .replace(/[\\/*?:[\]]/g, '')
+        .trim()
+        .slice(0, 31) || 'Cliente';
+      let name = base;
+      let i = 1;
+      while (usedSheetNames.has(name)) {
+        const suffix = ` (${i})`;
+        name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+        i++;
+      }
+      usedSheetNames.add(name);
+      return name;
+    };
+
+    for (const c of customers) {
+      const movs = byCustomer.get(c.id) || [];
+      let running = 0;
+      for (const m of movs) {
+        running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+      }
+      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
+      if (saldoPendiente <= 0.01) continue;
+
+      wsSummary.addRow({
+        cliente: c.customer_name,
+        vendedor: c.seller_name ?? c.seller_id ?? '',
+        saldo: saldoPendiente
+      });
+
+      const ws = workbook.addWorksheet(uniqueSheetName(c.customer_name, c.id));
+      ws.columns = [
+        { header: 'Fecha', key: 'fecha', width: 14 },
+        { header: 'Tipo', key: 'tipo', width: 14 },
+        { header: 'Comprobante', key: 'comprobante', width: 24 },
+        { header: 'Pedido', key: 'pedido', width: 16 },
+        { header: 'Debe', key: 'debe', width: 14 },
+        { header: 'Haber', key: 'haber', width: 14 },
+        { header: 'Saldo', key: 'saldo', width: 16 }
+      ];
+      ws.getRow(1).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+      ws.getColumn('A').numFmt = 'dd/mm/yyyy';
+      ws.getColumn('E').numFmt = '#,##0.00';
+      ws.getColumn('F').numFmt = '#,##0.00';
+      ws.getColumn('G').numFmt = '#,##0.00';
+
+      let saldo = 0;
+      for (const m of movs) {
+        const debe = Number(m.debe || 0);
+        const haber = Number(m.haber || 0);
+        saldo = Math.round((saldo + debe - haber) * 100) / 100;
+        ws.addRow({
+          fecha: m.fecha ? new Date(m.fecha) : null,
+          tipo: m.tipo === 'NOTA_CREDITO' ? 'NC' : m.tipo,
+          comprobante: m.comprobante,
+          pedido: m.order_id ?? '',
+          debe,
+          haber,
+          saldo
+        });
+      }
+    }
+
+    const out = await workbook.xlsx.writeBuffer();
+    const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
+    const filename = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
+  } catch (error: any) {
+    console.error('exportSaldosPendientesByCustomerSheetsXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando saldos pendientes por cliente' });
+  }
+};
+
 type MergedResumenRow = {
   customerId: string;
   legacy_code: unknown;
