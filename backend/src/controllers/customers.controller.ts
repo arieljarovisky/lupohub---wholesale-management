@@ -1804,7 +1804,6 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
       const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-      if (saldoPendiente <= 0.01) continue;
 
       wsSummary.addRow({
         cliente: c.customer_name,
