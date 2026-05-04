@@ -90,3 +90,37 @@ input[type="number"] {
     }
   }
 }
+
+/* Fix global de modales en móvil:
+   - bloquea scroll del fondo
+   - evita "scroll chaining" hacia atrás
+   - fuerza área scrolleable dentro de la modal */
+@media (max-width: 900px) {
+  body:has(.fixed.inset-0[class*="z-50"]),
+  body:has(.fixed.inset-0[class*="z-[60]"]),
+  body:has(.fixed.inset-0[class*="z-[70]"]),
+  body:has(.fixed.inset-0[class*="z-[80]"]),
+  body:has(.fixed.inset-0[class*="z-[90]"]) {
+    overflow: hidden;
+  }
+
+  .fixed.inset-0[class*="z-50"],
+  .fixed.inset-0[class*="z-[60]"],
+  .fixed.inset-0[class*="z-[70]"],
+  .fixed.inset-0[class*="z-[80]"],
+  .fixed.inset-0[class*="z-[90]"] {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .fixed.inset-0[class*="z-50"] > div,
+  .fixed.inset-0[class*="z-[60]"] > div,
+  .fixed.inset-0[class*="z-[70]"] > div,
+  .fixed.inset-0[class*="z-[80]"] > div,
+  .fixed.inset-0[class*="z-[90]"] > div {
+    max-height: calc(100dvh - env(safe-area-inset-top, 0) - env(safe-area-inset-bottom, 0) - 0.75rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}

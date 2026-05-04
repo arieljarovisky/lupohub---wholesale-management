@@ -937,7 +937,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               onClick={() => canEditOrder && onEditOrder?.(order)}
               className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation ${stockImpact.cardAccentClass}`}
             >
-              <div className="flex justify-between items-start">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                 <div className="space-y-1 min-w-0 flex-1">
                   <h3 className="text-lg sm:text-xl font-black text-white leading-tight break-words line-clamp-2 sm:line-clamp-1">
                     {order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}
@@ -1056,7 +1056,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 self-end sm:self-auto max-w-full [&>button]:min-w-[40px] [&>button]:min-h-[40px]">
                   {afipConfigured && canEmitirFactura && !order.invoice && (() => {
                     const customer = customers.find(c => c.id === order.customerId);
                     const tipoFactura = getTipoFacturaParaCliente(order);
@@ -1287,11 +1287,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700/50">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-3 border-t border-slate-700/50">
                 <div className="text-xs text-slate-500">
                   {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
                 </div>
-                <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap w-full sm:w-auto">
                    {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) &&
                     [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED].includes(order.status) && (
                      <button
@@ -1315,7 +1315,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className="text-right">
+                   <div className="text-right ml-auto sm:ml-0">
                      <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
                    </div>
