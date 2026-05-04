@@ -3159,6 +3159,20 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       >
                                        <Link size={16} />
                                       </button>
+                                      <button
+                                       type="button"
+                                       onClick={() => {
+                                         openArticleStockHistory({
+                                           productId: articleProductId,
+                                           variantIds: articleVariantIds,
+                                           title: displayName
+                                         });
+                                       }}
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-violet-700 rounded-lg text-slate-400 hover:text-violet-200 border border-slate-700 transition-colors touch-manipulation"
+                                       title="Ver historial de stock del artículo"
+                                      >
+                                       <History size={16} />
+                                      </button>
                                       <button 
                                        onClick={() => setEditingVariantId(product.id)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-400 border border-slate-700 transition-colors touch-manipulation"
