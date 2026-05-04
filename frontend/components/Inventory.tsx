@@ -3685,8 +3685,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* EDIT VARIANT MODAL */}
       {editingVariantId && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-slate-900 rounded-t-3xl sm:rounded-2xl border border-slate-700 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[92vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 rounded-t-3xl sm:rounded-2xl border border-slate-700 w-full sm:max-w-lg flex flex-col shadow-2xl animate-fade-in-up max-h-[100dvh] sm:max-h-[92vh] overflow-hidden flex-1 sm:flex-initial pt-[env(safe-area-inset-top)] sm:pt-0">
             <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700 flex justify-between items-center">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Tag size={20} className="text-amber-400" />
@@ -3760,7 +3760,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               )}
             </div>
             {!loadingEditVariant && (
-              <div className="shrink-0 p-4 border-t border-slate-700 flex gap-3 justify-end">
+              <div className="shrink-0 p-4 border-t border-slate-700 flex gap-3 justify-end pb-[max(1rem,env(safe-area-inset-bottom))]">
                 <button onClick={() => setEditingVariantId(null)} className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-medium">
                   Cancelar
                 </button>
