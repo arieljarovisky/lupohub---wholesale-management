@@ -248,7 +248,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return false;
   };
 
-  /** Un solo saldo: pedidos + cuenta importada − recibos (Facturación). */
+  /** Saldo unificado API: cuenta importada + facturas/pedidos (IVA) − NC (IVA) − recibos. */
   const getSaldoPendienteTotal = (c: Customer) => {
     const t = carteraById[c.id];
     return t != null ? Number(t.saldoPendienteUnificado) || 0 : 0;
@@ -1198,28 +1198,28 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente unificado</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Pedidos LupoHub con cobro pendiente, más el último saldo de cuenta importada (Tango / Multimedias), menos los
-                  recibos cargados en Facturación.
+                  Último saldo de cuenta importada (Tango / Multimedias), más facturas y pedidos LupoHub pendientes con IVA,
+                  menos notas de crédito (IVA) y menos recibos cargados en Facturación.
                 </p>
                 {selectedCustomer && carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
                     <span>
-                      Pedidos: $
+                      Cuenta importada: $
+                      {carteraById[selectedCustomer.id].multimediaSaldo.toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </span>
+                    <span>
+                      + Facturas/pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                       })}
                     </span>
                     <span className="text-violet-400/90">
-                      − Notas de crédito: $
+                      − Notas de crédito (IVA): $
                       {carteraById[selectedCustomer.id].totalNotasCredito.toLocaleString('es-AR', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
-                    </span>
-                    <span>
-                      Cuenta importada: $
-                      {carteraById[selectedCustomer.id].multimediaSaldo.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                       })}

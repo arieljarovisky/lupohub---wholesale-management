@@ -945,9 +945,11 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
 };
 
 /**
- * Cartera unificada por cliente: max(0, C + M − P).
- * C = suma pedidos con cobro pendiente (IVA incl.), M = último saldo cuenta importada (Tango/Multimedias), P = recibos en Facturación.
- * Los pagos se aplican al total (no solo a pedidos LupoHub), para que un recibo descuente también de la cuenta importada.
+ * Cartera unificada por cliente: M + F − NC − P (mismo resultado que antes: F−NC = cargo neto por pedido).
+ * M = último saldo cuenta importada (Tango/Multimedias).
+ * F = suma de totales de pedidos pendientes × 1,21 (facturas/pedidos, IVA incl.).
+ * NC = notas de crédito aplicadas a esos pedidos × 1,21, sin superar el total de cada pedido (LEST(cn_total, o.total)).
+ * P = recibos en Facturación (deduplicados vs líneas REC importadas con mismo nº/importe/fecha).
  */
 export const getCarteraTotals = async (req: Request, res: Response) => {
   const user = (req as any).user;
@@ -1097,16 +1099,32 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   const sqlWithNc = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(cnc.notas_credito, 0), 2) AS totalNotasCredito,
+      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+      ROUND(
+        COALESCE(ob.facturas_bruto, 0)
+        + COALESCE(mm.last_saldo, 0)
+        - COALESCE(ncv.nc_iva, 0)
+        - COALESCE(pay.total_pagos, 0),
+        2
+      ) AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargos
+        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+      FROM orders o
+      WHERE o.payment_status = 'pendiente'
+        AND o.status NOT IN ('Cancelado', 'Borrador')
+        AND (o.archived = 0 OR o.archived IS NULL)
+      GROUP BY o.customer_id
+    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1117,66 +1135,66 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND o.status NOT IN ('Cancelado', 'Borrador')
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
-    ) oc ON oc.customer_id = c.id
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(ROUND(COALESCE(cn.amount_credited, 0), 2)) AS notas_credito
-      FROM credit_notes cn
-      INNER JOIN orders o ON o.id = cn.order_id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
-      GROUP BY o.customer_id
-    ) cnc ON cnc.customer_id = c.id
+    ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND (
-        COALESCE(oc.cargos, 0) > 0.005
-        OR COALESCE(cnc.notas_credito, 0) > 0.005
+        COALESCE(ob.facturas_bruto, 0) > 0.005
+        OR COALESCE(ncv.nc_iva, 0) > 0.005
         OR COALESCE(mm.last_saldo, 0) > 0.005
         OR COALESCE(pay.total_pagos, 0) > 0.005
       )
     ORDER BY c.business_name ASC, c.name ASC
   `;
 
+  /** Misma lógica que sqlWithNc; reintento si la consulta anterior falla (p. ej. esquema antiguo). */
   const sqlSimple = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(oc.cargos, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(cnc.notas_credito, 0), 2) AS totalNotasCredito,
+      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+      ROUND(
+        COALESCE(ob.facturas_bruto, 0)
+        + COALESCE(mm.last_saldo, 0)
+        - COALESCE(ncv.nc_iva, 0)
+        - COALESCE(pay.total_pagos, 0),
+        2
+      ) AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargos
+        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
       FROM orders o
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
-    ) oc ON oc.customer_id = c.id
+    ) ob ON ob.customer_id = c.id
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(COALESCE(cn.amount_credited, 0), 2)) AS notas_credito
-      FROM credit_notes cn
-      INNER JOIN orders o ON o.id = cn.order_id
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
-    ) cnc ON cnc.customer_id = c.id
+    ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND (
-        COALESCE(oc.cargos, 0) > 0.005
-        OR COALESCE(cnc.notas_credito, 0) > 0.005
+        COALESCE(ob.facturas_bruto, 0) > 0.005
+        OR COALESCE(ncv.nc_iva, 0) > 0.005
         OR COALESCE(mm.last_saldo, 0) > 0.005
         OR COALESCE(pay.total_pagos, 0) > 0.005
       )
@@ -2007,12 +2025,28 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const carteraSqlWithNc = `
       SELECT
         c.id AS customerId,
-        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+        ROUND(
+          COALESCE(ob.facturas_bruto, 0)
+          + COALESCE(mm.last_saldo, 0)
+          - COALESCE(ncv.nc_iva, 0)
+          - COALESCE(pay.total_pagos, 0),
+          2
+        ) AS saldoPendienteUnificado
       FROM customers c
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargos
+          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+        FROM orders o
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) ob ON ob.customer_id = c.id
+      LEFT JOIN (
+        SELECT
+          o.customer_id,
+          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
         FROM orders o
         LEFT JOIN (
           SELECT order_id, SUM(amount_credited) AS cn_total
@@ -2023,7 +2057,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           AND o.status NOT IN ('Cancelado', 'Borrador')
           AND (o.archived = 0 OR o.archived IS NULL)
         GROUP BY o.customer_id
-      ) oc ON oc.customer_id = c.id
+      ) ncv ON ncv.customer_id = c.id
       LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
       LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
       WHERE 1=1 ${carteraSellerFilter}
@@ -2031,18 +2065,39 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const carteraSqlSimple = `
       SELECT
         c.id AS customerId,
-        ROUND(COALESCE(oc.cargos, 0) + COALESCE(mm.last_saldo, 0) - COALESCE(pay.total_pagos, 0), 2) AS saldoPendienteUnificado
+        ROUND(
+          COALESCE(ob.facturas_bruto, 0)
+          + COALESCE(mm.last_saldo, 0)
+          - COALESCE(ncv.nc_iva, 0)
+          - COALESCE(pay.total_pagos, 0),
+          2
+        ) AS saldoPendienteUnificado
       FROM customers c
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS cargos
+          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
         FROM orders o
         WHERE o.payment_status = 'pendiente'
           AND o.status NOT IN ('Cancelado', 'Borrador')
           AND (o.archived = 0 OR o.archived IS NULL)
         GROUP BY o.customer_id
-      ) oc ON oc.customer_id = c.id
+      ) ob ON ob.customer_id = c.id
+      LEFT JOIN (
+        SELECT
+          o.customer_id,
+          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        FROM orders o
+        LEFT JOIN (
+          SELECT order_id, SUM(amount_credited) AS cn_total
+          FROM credit_notes
+          GROUP BY order_id
+        ) cn ON cn.order_id = o.id
+        WHERE o.payment_status = 'pendiente'
+          AND o.status NOT IN ('Cancelado', 'Borrador')
+          AND (o.archived = 0 OR o.archived IS NULL)
+        GROUP BY o.customer_id
+      ) ncv ON ncv.customer_id = c.id
       LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
       LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
       WHERE 1=1 ${carteraSellerFilter}
@@ -3323,7 +3378,9 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
 
     // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
     const orderAgg = await get(
-      `SELECT ROUND(COALESCE(SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)), 0), 2) AS cargos
+      `SELECT
+         ROUND(COALESCE(SUM(ROUND(o.total * 1.21, 2)), 0), 2) AS facturas_bruto,
+         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
@@ -3409,10 +3466,11 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
        ) d`,
       [customerId]
     ) as any;
-    const orderCargosPendientes = Number(orderAgg?.cargos || 0);
+    const facturasBruto = Number(orderAgg?.facturas_bruto || 0);
+    const ncIva = Number(orderAgg?.nc_iva || 0);
     const multimediaSaldo = Number(multimediaAgg?.multimediaSaldo || 0);
     const totalPagos = Number(paymentsAgg?.totalPagos || 0);
-    const saldoUnificado = Math.round((orderCargosPendientes + multimediaSaldo - totalPagos) * 100) / 100;
+    const saldoUnificado = Math.round((multimediaSaldo + facturasBruto - ncIva - totalPagos) * 100) / 100;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';

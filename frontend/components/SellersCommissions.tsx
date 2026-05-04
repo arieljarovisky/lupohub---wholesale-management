@@ -371,7 +371,7 @@ function SellerDetailView({
           <p className="text-xl font-black text-amber-100 tabular-nums">
             {saldosLoading ? '…' : fmtMoney(saldoTotal)}
           </p>
-          <p className="text-[10px] text-slate-500 mt-1">Cuenta importada + LupoHub (cartera)</p>
+          <p className="text-[10px] text-slate-500 mt-1">Importado + facturas/pedidos − NC − recibos (cartera)</p>
         </div>
         <div className="bg-indigo-950/50 rounded-2xl border border-indigo-800/50 p-4">
           <div className="flex items-center gap-2 text-indigo-400 text-[10px] font-black uppercase mb-1">

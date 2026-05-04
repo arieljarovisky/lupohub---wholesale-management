@@ -674,13 +674,15 @@ export const api = {
   },
 
   /**
-   * Cartera unificada: max(0, pedidos pendientes IVA + saldo cuenta importada − recibos en Facturación).
-   * Solo clientes con algún cargo, saldo importado o pago registrado.
+   * Cartera unificada: saldo importado + facturas/pedidos pendientes (IVA) − NC (IVA) − recibos (Facturación).
+   * orderCargosPendientes = suma brutos pedidos × 1,21; totalNotasCredito = NC aplicadas × 1,21 (tope por pedido).
    */
   getCarteraTotals: async (): Promise<
     Array<{
       customerId: string;
+      /** Suma de totales de pedidos pendientes × 1,21 (antes de restar NC). */
       orderCargosPendientes: number;
+      /** Notas de crédito sobre esos pedidos × 1,21 (sin exceder el total de cada pedido). */
       totalNotasCredito: number;
       multimediaSaldo: number;
       totalPagos: number;
