@@ -389,13 +389,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
-  const openArticleStockHistory = async (productId: string, title: string) => {
-    setStockHistoryArticle({ productId, title });
+  const openArticleStockHistory = async (opts: { productId?: string; variantIds: string[]; title: string }) => {
+    setStockHistoryArticle({ productId: opts.productId || '', title: opts.title });
     setShowStockHistoryModal(true);
     setStockHistoryLoading(true);
     setStockHistoryRows([]);
     try {
-      const rows = await api.getStockMovements({ productId, limit: 200 });
+      const rows = await api.getStockMovements({
+        ...(opts.productId ? { productId: opts.productId } : {}),
+        variantIds: opts.variantIds,
+        limit: 200
+      });
       setStockHistoryRows(Array.isArray(rows) ? rows : []);
     } catch (e: any) {
       setStockHistoryRows([]);
@@ -2799,6 +2803,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const displayName = rawName ? `${skuLabel} - ${rawName}` : skuLabel;
           const codigoLabel = `Código: ${skuLabel}`;
           const articleProductId = (groupVariants[0] as any)?.product_id as string | undefined;
+          const articleVariantIds = Array.from(
+            new Set(
+              (groupVariants || [])
+                .map((v: any) => String(v?.id || '').trim())
+                .filter(Boolean)
+            )
+          );
           
           const displayTotalStock = getGroupDisplayStockResolved(groupKey, groupVariants, totalStock);
           const hasLowStock = getGroupHasLowStock(groupKey, groupVariants);
@@ -4185,14 +4196,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!articleProductId) return;
-                      openArticleStockHistory(articleProductId, displayName);
+                      if (!articleProductId && articleVariantIds.length === 0) return;
+                      openArticleStockHistory({
+                        productId: articleProductId,
+                        variantIds: articleVariantIds,
+                        title: displayName
+                      });
                     }}
-                    disabled={!articleProductId}
-                    className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-violet-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={!articleProductId && articleVariantIds.length === 0}
+                    className="px-3 py-2.5 min-h-[44px] inline-flex items-center justify-center gap-2 bg-slate-700 hover:bg-violet-600 hover:text-white rounded-lg text-slate-200 text-sm font-semibold transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Ver historial de stock del artículo"
                   >
-                    <History size={20} />
+                    <History size={18} />
+                    <span className="hidden sm:inline">Historial</span>
                   </button>
                   {bulkLinkVariants.length > 0 && (
                     <div className="rounded-xl border border-slate-700 overflow-x-auto touch-scroll scrollbar-hide -mx-1 sm:mx-0">

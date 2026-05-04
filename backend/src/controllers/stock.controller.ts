@@ -827,7 +827,7 @@ export const updateTiendaNubeSku = async (
 // Endpoint: Obtener historial de movimientos de stock
 export const getStockMovements = async (req: Request, res: Response) => {
   try {
-    const { variantId, productId, type, from, to, limit = '50' } = req.query;
+    const { variantId, variantIds, productId, type, from, to, limit = '50' } = req.query;
     
     let whereClause = '1=1';
     const params: any[] = [];
@@ -835,6 +835,16 @@ export const getStockMovements = async (req: Request, res: Response) => {
     if (variantId) {
       whereClause += ' AND sm.variant_id = ?';
       params.push(variantId);
+    }
+    if (variantIds) {
+      const ids = String(variantIds)
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (ids.length > 0) {
+        whereClause += ` AND sm.variant_id IN (${ids.map(() => '?').join(',')})`;
+        params.push(...ids);
+      }
     }
     if (productId) {
       whereClause += ' AND p.id = ?';
