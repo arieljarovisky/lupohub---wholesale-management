@@ -1851,6 +1851,25 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
           )
+          AND NOT (
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            AND TRIM(COALESCE(e.numero, '')) <> ''
+            AND EXISTS (
+              SELECT 1
+              FROM payments p
+              WHERE p.customer_id = e.customer_id
+                AND DATE(p.date) = DATE(e.line_date)
+                AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+                AND UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                ) = CASE
+                  WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                  ELSE UPPER(
+                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                  )
+                END
+            )
+          )
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
