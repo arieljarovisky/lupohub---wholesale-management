@@ -1515,6 +1515,28 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
+          e.line_date AS fecha,
+          'NOTA_CREDITO_IMPORTADA' AS tipo,
+          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
+          NULL AS order_id,
+          0 AS debe,
+          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE (
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+        )
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
           p.receipt_number AS comprobante,
@@ -1765,7 +1787,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       seller_id: string | null;
       seller_name: string | null;
       fecha: string;
-      tipo: 'FACTURA' | 'NOTA_CREDITO' | 'RECIBO';
+      tipo: 'FACTURA' | 'NOTA_CREDITO' | 'NOTA_CREDITO_IMPORTADA' | 'RECIBO';
       comprobante: string;
       order_id: string | null;
       debe: number;
