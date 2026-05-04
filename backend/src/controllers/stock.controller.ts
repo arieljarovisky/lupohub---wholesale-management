@@ -875,7 +875,8 @@ export const getStockMovements = async (req: Request, res: Response) => {
          pv.sku,
          p.name as product_name,
          o.id as order_id,
-         c.business_name as customer_name
+         c.business_name as customer_name,
+         ua.name as adjust_user_name
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -884,6 +885,9 @@ export const getStockMovements = async (req: Request, res: Response) => {
          ON sm.movement_type = 'PEDIDO_MAYORISTA'
         AND o.id = TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
        LEFT JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN users ua
+         ON sm.movement_type = 'AJUSTE_MANUAL'
+        AND ua.id = TRIM(REPLACE(sm.reference, 'Ajuste por usuario', ''))
        WHERE ${whereClause}
        ORDER BY sm.created_at DESC
        LIMIT ?`,

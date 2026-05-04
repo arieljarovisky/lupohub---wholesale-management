@@ -53,6 +53,7 @@ interface ArticleStockMovement {
   product_name: string;
   order_id?: string | null;
   customer_name?: string | null;
+  adjust_user_name?: string | null;
 }
 
 /** Formato de talle para dropdowns de vinculación: muestra código numérico y nombre (ej. "160 - GG") para que coincida con la columna local. */
@@ -446,6 +447,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (m.order_id || baseRef) parts.push(m.order_id ? `Pedido: ${m.order_id}` : baseRef);
       if (m.customer_name) parts.push(`Cliente: ${m.customer_name}`);
       return parts.join(' | ') || 'Pedido mayorista';
+    }
+    if (m.movement_type === 'AJUSTE_MANUAL') {
+      if (m.adjust_user_name) return `Ajuste por usuario: ${m.adjust_user_name}`;
+      return baseRef || 'Ajuste manual';
     }
     return baseRef || '—';
   };
