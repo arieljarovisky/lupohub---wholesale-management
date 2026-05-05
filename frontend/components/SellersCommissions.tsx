@@ -44,6 +44,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
+  const [massExporting, setMassExporting] = useState(false);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
 
@@ -194,10 +195,29 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      <p className="text-sm text-slate-400">
-        Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Los vendedores se administran en{' '}
-        <strong className="text-slate-300">Configuración → Usuarios</strong> o importación Excel.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-400">
+          Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Los vendedores se administran en{' '}
+          <strong className="text-slate-300">Configuración → Usuarios</strong> o importación Excel.
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              setMassExporting(true);
+              await api.exportSaldosPendientesPorCliente();
+            } finally {
+              setMassExporting(false);
+            }
+          }}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
+          title="Descargar saldos pendientes de todos los vendedores en un solo Excel"
+          disabled={massExporting}
+        >
+          {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          {massExporting ? 'Exportando masivo…' : 'Descarga masiva saldos'}
+        </button>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {sellers.map((seller) => {
           const sellerSales = salesTotalForSeller(orders, seller.id);

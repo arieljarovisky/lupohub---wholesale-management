@@ -2192,7 +2192,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       wsDetalle.getColumn(col).alignment = { horizontal: 'left', vertical: 'middle' };
     }
 
-    for (const c of customers) {
+    const customersOrdered = [...customers].sort(
+      (a, b) =>
+        String(a.seller_name || a.seller_id || '').localeCompare(String(b.seller_name || b.seller_id || ''), 'es') ||
+        String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'es')
+    );
+    let lastSellerGroup = '';
+    for (const c of customersOrdered) {
       const movs = byCustomer.get(c.id) || [];
       let running = 0;
       for (const m of movs) {
@@ -2208,6 +2214,19 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       });
 
       // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
+      if (!sellerIdFilter) {
+        const sellerGroup = String(c.seller_name || c.seller_id || 'Sin vendedor');
+        if (sellerGroup !== lastSellerGroup) {
+          const sellerRow = wsDetalle.addRow([`VENDEDOR: ${sellerGroup}`, '', '', '', '', '', '']);
+          wsDetalle.mergeCells(sellerRow.number, 1, sellerRow.number, 7);
+          sellerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          sellerRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+          sellerRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+          wsDetalle.addRow(['', '', '', '', '', '', '']);
+          lastSellerGroup = sellerGroup;
+        }
+      }
+
       const titleRow = wsDetalle.addRow([`CLIENTE: ${c.customer_name}`, `VENDEDOR: ${c.seller_name ?? c.seller_id ?? '-'}`, '', '', '', '', `SALDO: ${saldoPendiente.toFixed(2)}`]);
       wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
       wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
