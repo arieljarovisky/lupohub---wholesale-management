@@ -72,6 +72,12 @@ const TiendaNubeOrders: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>(todayIso);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
   const [bulkInvoicing, setBulkInvoicing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    processed: number;
+    total: number;
+    chunksDone: number;
+    chunksTotal: number;
+  } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const perPage = 15;
@@ -367,18 +373,33 @@ const TiendaNubeOrders: React.FC = () => {
     }
     if (!window.confirm(`¿Facturar masivamente ${selectedOrderIds.length} orden(es) de Tienda Nube?`)) return;
     setBulkInvoicing(true);
+    setBulkProgress(null);
     try {
       const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : undefined;
       const ids = Array.from(new Set(selectedOrderIds));
       const chunkSize = 100;
+      const chunksTotal = Math.ceil(ids.length / chunkSize);
       const summary = { invoiced: 0, alreadyInvoiced: 0, skippedUnpaid: 0, errors: 0 };
       for (let i = 0; i < ids.length; i += chunkSize) {
         const chunk = ids.slice(i, i + chunkSize);
+        const chunkIndex = Math.floor(i / chunkSize) + 1;
+        setBulkProgress({
+          processed: i,
+          total: ids.length,
+          chunksDone: chunkIndex - 1,
+          chunksTotal
+        });
         const res = await api.invoiceTiendaNubeOrdersBulk({ orderIds: chunk, cbteTipo });
         summary.invoiced += Number(res.summary?.invoiced || 0);
         summary.alreadyInvoiced += Number(res.summary?.alreadyInvoiced || 0);
         summary.skippedUnpaid += Number(res.summary?.skippedUnpaid || 0);
         summary.errors += Number(res.summary?.errors || 0);
+        setBulkProgress({
+          processed: Math.min(i + chunk.length, ids.length),
+          total: ids.length,
+          chunksDone: chunkIndex,
+          chunksTotal
+        });
       }
       window.alert(
         `Facturación masiva finalizada.\n\n` +
@@ -392,6 +413,7 @@ const TiendaNubeOrders: React.FC = () => {
       window.alert(error?.message || 'No se pudo completar la facturación masiva');
     } finally {
       setBulkInvoicing(false);
+      setBulkProgress(null);
     }
   };
 
@@ -448,7 +470,9 @@ const TiendaNubeOrders: React.FC = () => {
             disabled={bulkInvoicing || selectedOrderIds.length === 0}
             className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-black disabled:opacity-50"
           >
-            {bulkInvoicing ? 'Facturando...' : `Facturar masivo (${selectedOrderIds.length})`}
+            {bulkInvoicing
+              ? `Facturando ${bulkProgress?.processed || 0}/${bulkProgress?.total || selectedOrderIds.length}`
+              : `Facturar masivo (${selectedOrderIds.length})`}
           </button>
           <button
             onClick={fetchOrders}
@@ -460,6 +484,11 @@ const TiendaNubeOrders: React.FC = () => {
           </button>
         </div>
       </div>
+      {bulkInvoicing && bulkProgress && (
+        <div className="text-xs text-emerald-300 bg-emerald-900/20 border border-emerald-700/40 rounded-xl px-3 py-2">
+          Facturando lote {bulkProgress.chunksDone}/{bulkProgress.chunksTotal} - {bulkProgress.processed}/{bulkProgress.total} ordenes procesadas.
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
