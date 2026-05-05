@@ -41,10 +41,18 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   currentUser,
   onUpdateUser
 }) => {
+  const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const monthStartYmd = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
   const [receiptsMonthBySeller, setReceiptsMonthBySeller] = useState<Record<string, number>>({});
+  const [commissionFrom, setCommissionFrom] = useState<string>(monthStartYmd);
+  const [commissionTo, setCommissionTo] = useState<string>(todayYmd);
+  const [commissionRangeLoading, setCommissionRangeLoading] = useState(false);
   const [massExporting, setMassExporting] = useState(false);
   const [massExportModalOpen, setMassExportModalOpen] = useState(false);
   const [massExportFrom, setMassExportFrom] = useState<string>('');
@@ -72,12 +80,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     loadSaldosCartera();
   }, [loadSaldosCartera]);
 
-  const loadReceiptsMonth = useCallback(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const from = `${y}-${m}-01`;
-    const to = new Date(y, now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const loadReceiptsInRange = useCallback((from: string, to: string) => {
+    setCommissionRangeLoading(true);
     api
       .getPayments({ desde: from, hasta: to })
       .then((rows) => {
@@ -94,12 +98,13 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         }
         setReceiptsMonthBySeller(bySeller);
       })
-      .catch(() => setReceiptsMonthBySeller({}));
+      .catch(() => setReceiptsMonthBySeller({}))
+      .finally(() => setCommissionRangeLoading(false));
   }, [customers, sellers]);
 
   useEffect(() => {
-    loadReceiptsMonth();
-  }, [loadReceiptsMonth]);
+    loadReceiptsInRange(monthStartYmd, todayYmd);
+  }, [loadReceiptsInRange, monthStartYmd, todayYmd]);
 
   const updateCommission = async (userId: string, value: string) => {
     const user = users.find((u) => u.id === userId);
@@ -263,6 +268,45 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
+      <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500 mb-1">Comisión desde</label>
+          <input
+            type="date"
+            value={commissionFrom}
+            onChange={(e) => setCommissionFrom(e.target.value)}
+            className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500 mb-1">Comisión hasta</label>
+          <input
+            type="date"
+            value={commissionTo}
+            onChange={(e) => setCommissionTo(e.target.value)}
+            className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (!commissionFrom || !commissionTo) {
+              window.alert('Completá ambas fechas para calcular comisión.');
+              return;
+            }
+            if (commissionFrom > commissionTo) {
+              window.alert('El rango es inválido: "desde" no puede ser mayor que "hasta".');
+              return;
+            }
+            loadReceiptsInRange(commissionFrom, commissionTo);
+          }}
+          disabled={commissionRangeLoading}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition disabled:opacity-50"
+        >
+          {commissionRangeLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+          Calcular comisión
+        </button>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-400">
           Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Los vendedores se administran en{' '}
