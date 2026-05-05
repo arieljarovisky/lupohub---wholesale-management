@@ -206,9 +206,15 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const ws = wb.addWorksheet('Detalle comisiones');
     ws.columns = [{ width: 14 }, { width: 34 }, { width: 18 }, { width: 14 }, { width: 14 }];
     let rowIdx = 1;
+    let grandTotalAmount = 0;
+    let grandTotalCommission = 0;
 
     for (const seller of sellersToExport) {
       const detailRows = getCommissionDetailsForSeller(seller, rows);
+      const sellerTotalAmount = detailRows.reduce((sum, r) => sum + r.amount, 0);
+      const sellerTotalCommission = detailRows.reduce((sum, r) => sum + r.commissionAmount, 0);
+      grandTotalAmount += sellerTotalAmount;
+      grandTotalCommission += sellerTotalCommission;
       ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
       const title = ws.getCell(`A${rowIdx}`);
       title.value = `Vendedor: ${seller.name} (${from || 'inicio'} a ${to || 'hoy'})`;
@@ -242,7 +248,28 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         rowIdx += 1;
       }
 
+      const totalRow = ws.getRow(rowIdx);
+      totalRow.values = ['', '', 'TOTAL VENDEDOR', sellerTotalAmount, sellerTotalCommission];
+      totalRow.font = { bold: true };
+      totalRow.getCell(3).alignment = { horizontal: 'right' };
+      totalRow.getCell(4).numFmt = '#,##0.00';
+      totalRow.getCell(5).numFmt = '#,##0.00';
+      for (let c = 3; c <= 5; c++) {
+        totalRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+      }
+      rowIdx += 1;
+
       rowIdx += 2;
+    }
+
+    const grandRow = ws.getRow(rowIdx);
+    grandRow.values = ['', '', 'TOTAL GENERAL', grandTotalAmount, grandTotalCommission];
+    grandRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    grandRow.getCell(3).alignment = { horizontal: 'right' };
+    grandRow.getCell(4).numFmt = '#,##0.00';
+    grandRow.getCell(5).numFmt = '#,##0.00';
+    for (let c = 3; c <= 5; c++) {
+      grandRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
     }
 
     const buffer = await wb.xlsx.writeBuffer();
