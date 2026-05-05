@@ -3221,6 +3221,16 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const results: any[] = [];
+    const payableOrders: Array<{
+      orderId: string;
+      orderNumber: string;
+      total: number;
+      date: string;
+      customerId: string;
+      customerName: string;
+      customerCuit?: string;
+      condicionIva: string;
+    }> = [];
 
     for (const orderId of orderIds) {
       const orderIdStr = String(orderId);
@@ -3284,22 +3294,46 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           || 'Consumidor Final'
         ).toString();
 
-        const afipResult = await emitirAfip(
-          {
-            id: `TN-${order.id}`,
-            date: order?.created_at || new Date().toISOString().slice(0, 10),
-            total,
-            customerId: `TN-${order?.customer?.id || order.id}`
-          },
-          {
-            id: `TN-${order?.customer?.id || order.id}`,
-            businessName: customerName,
-            cuit: maybeCuit,
-            condicionIva: condicionIvaRaw
-          },
-          forceCbteTipo
-        );
+        payableOrders.push({
+          orderId: String(order.id),
+          orderNumber: String(order.number ?? order.id),
+          total,
+          date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
+          customerId: `TN-${order?.customer?.id || order.id}`,
+          customerName,
+          customerCuit: maybeCuit,
+          condicionIva: condicionIvaRaw || 'Consumidor Final'
+        });
+      } catch (e: any) {
+        results.push({
+          orderId: orderIdStr,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
+        });
+      }
+    }
 
+    if (payableOrders.length > 0) {
+      const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
+      const base = payableOrders[0];
+      const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
+      const afipResult = await emitirAfip(
+        {
+          id: `TN-BULK-${Date.now()}`,
+          date: base.date,
+          total: totalLote,
+          customerId: sameCustomer ? base.customerId : 'TN-BULK-CF'
+        },
+        {
+          id: sameCustomer ? base.customerId : 'TN-BULK-CF',
+          businessName: sameCustomer ? base.customerName : 'Consumidor Final',
+          cuit: sameCustomer ? base.customerCuit : undefined,
+          condicionIva: sameCustomer ? base.condicionIva : 'Consumidor Final'
+        },
+        forceCbteTipo
+      );
+
+      for (const o of payableOrders) {
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
@@ -3307,12 +3341,12 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
            VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
-            String(order.id),
-            String(order.number ?? order.id),
-            customerName,
-            maybeCuit || null,
-            condicionIvaRaw || null,
-            total,
+            o.orderId,
+            o.orderNumber,
+            o.customerName,
+            o.customerCuit || null,
+            o.condicionIva || null,
+            o.total,
             afipResult.cae,
             afipResult.caeFchVto || null,
             afipResult.puntoVta,
@@ -3321,21 +3355,14 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
             afipResult.cbteHasta
           ]
         );
-
         results.push({
-          orderId: String(order.id),
+          orderId: o.orderId,
           status: 'invoiced',
           invoiceId,
           cae: afipResult.cae,
           cbteTipo: afipResult.cbteTipo,
           cbteDesde: afipResult.cbteDesde,
           cbteHasta: afipResult.cbteHasta
-        });
-      } catch (e: any) {
-        results.push({
-          orderId: orderIdStr,
-          status: 'error',
-          message: e?.message || 'Error emitiendo factura'
         });
       }
     }
@@ -3380,6 +3407,13 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const results: any[] = [];
+    const payableOrders: Array<{
+      orderId: string;
+      total: number;
+      date: string;
+      customerId: string;
+      customerName: string;
+    }> = [];
 
     for (const orderId of orderIds) {
       const orderIdStr = String(orderId);
@@ -3430,22 +3464,43 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
           || (order?.buyer?.nickname || '').toString().trim()
           || 'Consumidor Final';
 
-        const afipResult = await emitirAfip(
-          {
-            id: `ML-${order.id}`,
-            date: order?.date_created || new Date().toISOString().slice(0, 10),
-            total,
-            customerId: `ML-${order?.buyer?.id || order.id}`
-          },
-          {
-            id: `ML-${order?.buyer?.id || order.id}`,
-            businessName: customerName,
-            cuit: undefined,
-            condicionIva: 'Consumidor Final'
-          },
-          forceCbteTipo
-        );
+        payableOrders.push({
+          orderId: String(order.id),
+          total,
+          date: String(order?.date_created || new Date().toISOString().slice(0, 10)),
+          customerId: `ML-${order?.buyer?.id || order.id}`,
+          customerName
+        });
+      } catch (e: any) {
+        results.push({
+          orderId: orderIdStr,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
+        });
+      }
+    }
 
+    if (payableOrders.length > 0) {
+      const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
+      const base = payableOrders[0];
+      const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
+      const afipResult = await emitirAfip(
+        {
+          id: `ML-BULK-${Date.now()}`,
+          date: base.date,
+          total: totalLote,
+          customerId: sameCustomer ? base.customerId : 'ML-BULK-CF'
+        },
+        {
+          id: sameCustomer ? base.customerId : 'ML-BULK-CF',
+          businessName: sameCustomer ? base.customerName : 'Consumidor Final',
+          cuit: undefined,
+          condicionIva: 'Consumidor Final'
+        },
+        forceCbteTipo
+      );
+
+      for (const o of payableOrders) {
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
@@ -3453,12 +3508,12 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
            VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
-            String(order.id),
-            String(order.id),
-            customerName,
+            o.orderId,
+            o.orderId,
+            o.customerName,
             null,
             'Consumidor Final',
-            total,
+            o.total,
             afipResult.cae,
             afipResult.caeFchVto || null,
             afipResult.puntoVta,
@@ -3467,21 +3522,14 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
             afipResult.cbteHasta
           ]
         );
-
         results.push({
-          orderId: String(order.id),
+          orderId: o.orderId,
           status: 'invoiced',
           invoiceId,
           cae: afipResult.cae,
           cbteTipo: afipResult.cbteTipo,
           cbteDesde: afipResult.cbteDesde,
           cbteHasta: afipResult.cbteHasta
-        });
-      } catch (e: any) {
-        results.push({
-          orderId: orderIdStr,
-          status: 'error',
-          message: e?.message || 'Error emitiendo factura'
         });
       }
     }
