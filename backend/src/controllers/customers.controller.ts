@@ -2173,23 +2173,24 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
     wsSummary.getColumn('C').numFmt = '#,##0.00';
 
-    const usedSheetNames = new Set<string>(['Resumen']);
-    const uniqueSheetName = (raw: string, fallback: string): string => {
-      const base = (raw || fallback || 'Cliente')
-        .toString()
-        .replace(/[\\/*?:[\]]/g, '')
-        .trim()
-        .slice(0, 31) || 'Cliente';
-      let name = base;
-      let i = 1;
-      while (usedSheetNames.has(name)) {
-        const suffix = ` (${i})`;
-        name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
-        i++;
-      }
-      usedSheetNames.add(name);
-      return name;
-    };
+    const wsDetalle = workbook.addWorksheet('Detalle clientes');
+    wsDetalle.columns = [
+      { header: 'Fecha', key: 'fecha', width: 14 },
+      { header: 'Tipo', key: 'tipo', width: 14 },
+      { header: 'Comprobante', key: 'comprobante', width: 36 },
+      { header: 'Pedido', key: 'pedido', width: 16 },
+      { header: 'Debe', key: 'debe', width: 14 },
+      { header: 'Haber', key: 'haber', width: 14 },
+      { header: 'Saldo', key: 'saldo', width: 16 }
+    ];
+    wsDetalle.views = [{ state: 'frozen', ySplit: 1 }];
+    wsDetalle.getColumn('A').numFmt = 'dd/mm/yyyy';
+    wsDetalle.getColumn('E').numFmt = '#,##0.00';
+    wsDetalle.getColumn('F').numFmt = '#,##0.00';
+    wsDetalle.getColumn('G').numFmt = '#,##0.00';
+    for (const col of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
+      wsDetalle.getColumn(col).alignment = { horizontal: 'left', vertical: 'middle' };
+    }
 
     for (const c of customers) {
       const movs = byCustomer.get(c.id) || [];
@@ -2206,25 +2207,22 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         saldo: saldoPendiente
       });
 
-      const ws = workbook.addWorksheet(uniqueSheetName(c.customer_name, c.id));
-      ws.columns = [
-        { header: 'Fecha', key: 'fecha', width: 14 },
-        { header: 'Tipo', key: 'tipo', width: 14 },
-        { header: 'Comprobante', key: 'comprobante', width: 24 },
-        { header: 'Pedido', key: 'pedido', width: 16 },
-        { header: 'Debe', key: 'debe', width: 14 },
-        { header: 'Haber', key: 'haber', width: 14 },
-        { header: 'Saldo', key: 'saldo', width: 16 }
-      ];
-      ws.getRow(1).font = { bold: true };
-      ws.views = [{ state: 'frozen', ySplit: 1 }];
-      ws.getColumn('A').numFmt = 'dd/mm/yyyy';
-      ws.getColumn('E').numFmt = '#,##0.00';
-      ws.getColumn('F').numFmt = '#,##0.00';
-      ws.getColumn('G').numFmt = '#,##0.00';
-      for (const col of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
-        ws.getColumn(col).alignment = { horizontal: 'left', vertical: 'middle' };
-      }
+      // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
+      const titleRow = wsDetalle.addRow([`CLIENTE: ${c.customer_name}`, `VENDEDOR: ${c.seller_name ?? c.seller_id ?? '-'}`, '', '', '', '', `SALDO: ${saldoPendiente.toFixed(2)}`]);
+      wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
+      wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
+      titleRow.font = { bold: true, color: { argb: 'FF0F172A' } };
+      titleRow.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      });
+
+      const blockHeader = wsDetalle.addRow(['Fecha', 'Tipo', 'Comprobante', 'Pedido', 'Debe', 'Haber', 'Saldo']);
+      blockHeader.font = { bold: true, color: { argb: 'FF1E293B' } };
+      blockHeader.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      });
 
       let saldo = 0;
       for (const m of movs) {
@@ -2241,7 +2239,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
                 : m.tipo === 'MOV_IMPORTADO'
                   ? 'MOV.'
                   : m.tipo;
-        ws.addRow({
+        wsDetalle.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
           tipo: tipoLabel,
           comprobante: m.comprobante,
@@ -2257,7 +2255,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       // para que la hoja del cliente cierre con el mismo saldo que la vista.
       const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
       if (Math.abs(delta) > 0.01) {
-        ws.addRow({
+        wsDetalle.addRow({
           fecha: null,
           tipo: 'AJUSTE',
           comprobante: 'SALDO',
@@ -2267,6 +2265,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           saldo: saldoPendiente
         });
       }
+
+      wsDetalle.addRow(['', '', '', '', '', '', '']);
     }
 
     const out = await workbook.xlsx.writeBuffer();
