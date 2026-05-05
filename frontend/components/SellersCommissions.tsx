@@ -284,6 +284,8 @@ function SellerDetailView({
   onUpdateCommission: (userId: string, value: string) => void | Promise<void>;
 }) {
   const { custs, ords, sales, rate, commission, saldoTotal } = detail;
+  const [exportFrom, setExportFrom] = useState<string>('');
+  const [exportTo, setExportTo] = useState<string>('');
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
@@ -304,11 +306,31 @@ function SellerDetailView({
           {saldosLoading ? <Loader2 size={16} className="animate-spin" /> : null}
           Actualizar saldos
         </button>
+        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 text-sm">
+          <span className="text-slate-400">Desde</span>
+          <input
+            type="date"
+            value={exportFrom}
+            onChange={(e) => setExportFrom(e.target.value)}
+            className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <span className="text-slate-400">Hasta</span>
+          <input
+            type="date"
+            value={exportTo}
+            onChange={(e) => setExportTo(e.target.value)}
+            className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
         <button
           type="button"
           onClick={() => {
             api
-              .exportSaldosPendientesPorCliente(seller.id)
+              .exportSaldosPendientesPorCliente({
+                sellerId: seller.id,
+                from: exportFrom || undefined,
+                to: exportTo || undefined
+              })
               .catch(() => {});
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition"

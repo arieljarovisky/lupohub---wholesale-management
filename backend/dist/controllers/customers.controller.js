@@ -1645,6 +1645,9 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
     }
     try {
         const requestedSellerId = String(req.query.sellerId || '').trim();
+        const from = String(req.query.from || '').trim();
+        const to = String(req.query.to || '').trim();
+        const hasDateRange = Boolean(from || to);
         const sellerIdFilter = user.role === 'SELLER'
             ? user.id
             : (user.role === 'ADMIN' || user.role === 'WAREHOUSE') && requestedSellerId
@@ -1652,6 +1655,29 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 : '';
         const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
         const sellerParams = sellerIdFilter ? [sellerIdFilter] : [];
+        const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
+        const ncDateFilter = `${from ? ' AND DATE(cn.created_at) >= ?' : ''}${to ? ' AND DATE(cn.created_at) <= ?' : ''}`;
+        const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
+        const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
+        const movementParams = [];
+        if (from)
+            movementParams.push(from);
+        if (to)
+            movementParams.push(to);
+        if (from)
+            movementParams.push(from);
+        if (to)
+            movementParams.push(to);
+        if (from)
+            movementParams.push(from);
+        if (to)
+            movementParams.push(to);
+        if (from)
+            movementParams.push(from);
+        if (to)
+            movementParams.push(to);
+        if (sellerIdFilter)
+            movementParams.push(sellerIdFilter);
         const movements = yield (0, db_1.query)(`
       SELECT
         m.customer_id,
@@ -1689,6 +1715,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${invoiceDateFilter}
 
         UNION ALL
 
@@ -1716,6 +1743,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${ncDateFilter}
 
         UNION ALL
 
@@ -1733,6 +1761,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${receiptDateFilter}
 
         UNION ALL
 
@@ -1782,6 +1811,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE e.importe IS NOT NULL
           AND ABS(COALESCE(e.importe, 0)) > 0.001
+          ${importedDateFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
           AND (
             UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
@@ -1812,7 +1842,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
-      `, sellerParams);
+      `, movementParams);
         const customers = yield (0, db_1.query)(`SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
        FROM customers c
        LEFT JOIN users u ON u.id = c.seller_id
@@ -2086,7 +2116,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             for (const m of movs) {
                 running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
             }
-            const saldoTarget = Number((_a = saldoUnificadoByCustomer.get(c.id)) !== null && _a !== void 0 ? _a : running) || 0;
+            const saldoTarget = hasDateRange ? running : Number((_a = saldoUnificadoByCustomer.get(c.id)) !== null && _a !== void 0 ? _a : running) || 0;
             const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
             wsSummary.addRow({
                 cliente: c.customer_name,
@@ -2117,11 +2147,11 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 const tipoLabel = m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
                     ? 'NC'
                     : m.tipo === 'FACTURA_IMPORTADA'
-                        ? 'FACTURA (imp.)'
+                        ? 'FACTURA'
                         : m.tipo === 'RECIBO_IMPORTADO'
-                            ? 'RECIBO (imp.)'
+                            ? 'RECIBO'
                             : m.tipo === 'MOV_IMPORTADO'
-                                ? 'MOV. (imp.)'
+                                ? 'MOV.'
                                 : m.tipo;
                 ws.addRow({
                     fecha: m.fecha ? new Date(m.fecha) : null,
@@ -2137,7 +2167,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             // (por ejemplo por cuenta importada), agregamos una línea de ajuste
             // para que la hoja del cliente cierre con el mismo saldo que la vista.
             const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
-            if (Math.abs(delta) > 0.01) {
+            if (!hasDateRange && Math.abs(delta) > 0.01) {
                 ws.addRow({
                     fecha: null,
                     tipo: 'AJUSTE',

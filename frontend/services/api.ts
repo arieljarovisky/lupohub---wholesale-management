@@ -735,9 +735,13 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  /** Excel de saldos pendientes: resumen + una hoja por cliente. */
-  exportSaldosPendientesPorCliente: async (sellerId?: string): Promise<void> => {
-    const qs = sellerId ? `?sellerId=${encodeURIComponent(sellerId)}` : '';
+  /** Excel de saldos pendientes: resumen + una hoja por cliente (opcional rango de fechas). */
+  exportSaldosPendientesPorCliente: async (params?: { sellerId?: string; from?: string; to?: string }): Promise<void> => {
+    const q = new URLSearchParams();
+    if (params?.sellerId) q.set('sellerId', params.sellerId);
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    const qs = q.toString() ? `?${q.toString()}` : '';
     const blob = await getBlob(`/customers/saldos-pendientes/export-por-cliente${qs}`, 120000);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
