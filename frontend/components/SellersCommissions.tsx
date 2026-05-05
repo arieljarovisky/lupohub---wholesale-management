@@ -509,7 +509,7 @@ function SellerDetailView({
   const { custs, ords, sales, rate, commission, commissionBase, saldoTotal, commissionDetails } = detail;
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
-  const downloadCommissionDetailCsv = () => {
+  const downloadCommissionDetailExcel = () => {
     const rows = [
       ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'],
       ...commissionDetails.map((r) => [
@@ -587,6 +587,15 @@ function SellerDetailView({
           <Download size={16} />
           Exportar Excel por cliente
         </button>
+        <button
+          type="button"
+          onClick={downloadCommissionDetailExcel}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition"
+          title="Descargar detalle de comisiones por recibo"
+        >
+          <Download size={16} />
+          Exportar detalle de comisiones
+        </button>
       </div>
 
       <div className="flex flex-wrap items-start gap-4 justify-between">
@@ -659,7 +668,7 @@ function SellerDetailView({
           </h3>
           <button
             type="button"
-            onClick={downloadCommissionDetailCsv}
+            onClick={downloadCommissionDetailExcel}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-xs font-semibold transition"
           >
             <Download size={14} /> Descargar detalle
