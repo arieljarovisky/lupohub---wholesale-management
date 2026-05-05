@@ -28,6 +28,7 @@ const IVA_RESPONSABLE_INSCRIPTO = 1;
 const CONSUMIDOR_FINAL = 5;
 /** Alícuota IVA 21% = Id 5 */
 const ID_IVA_21 = 5;
+const AFIP_MAX_IMP_NETO = 9_999_999_999_999.99; // 13 enteros + 2 decimales
 
 export interface OrderForAfip {
   id: string;
@@ -209,8 +210,14 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   }
 
   // En la app el total del pedido se maneja en neto; para AFIP emitimos total con IVA 21%.
-  const impNeto = Number(order.total) || 0;
+  const impNetoRaw = Number(order.total);
+  const impNeto = Math.round((Number.isFinite(impNetoRaw) ? impNetoRaw : 0) * 100) / 100;
   if (impNeto <= 0) throw new Error('El total neto del pedido debe ser mayor a 0.');
+  if (impNeto > AFIP_MAX_IMP_NETO) {
+    throw new Error(
+      `El total neto (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP para un comprobante (${AFIP_MAX_IMP_NETO.toFixed(2)}).`
+    );
+  }
   const impIva = Math.round(impNeto * 0.21 * 100) / 100;
   const total = Math.round((impNeto + impIva) * 100) / 100;
 
@@ -360,8 +367,14 @@ export async function emitirNotaCredito(
     }
   }
 
-  const impNeto = Number(amountToCredit) || 0;
+  const impNetoRaw = Number(amountToCredit);
+  const impNeto = Math.round((Number.isFinite(impNetoRaw) ? impNetoRaw : 0) * 100) / 100;
   if (impNeto <= 0) throw new Error('El monto neto a creditar debe ser mayor a 0.');
+  if (impNeto > AFIP_MAX_IMP_NETO) {
+    throw new Error(
+      `El monto neto de la nota de crédito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`
+    );
+  }
   const impIva = Math.round(impNeto * 0.21 * 100) / 100;
   const total = Math.round((impNeto + impIva) * 100) / 100;
 
