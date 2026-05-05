@@ -36,6 +36,12 @@ const toYmd = (value?: string) => {
   return String(value).slice(0, 10);
 };
 
+const COMMISSION_FIXED_RATE = 10;
+const IVA_DIVISOR = 1.21;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const netWithoutIva = (gross: number) => gross / IVA_DIVISOR;
+const commissionFromGross = (gross: number) => round2(netWithoutIva(gross) * (COMMISSION_FIXED_RATE / 100));
+
 const salesTotalForSeller = (olist: Order[], sellerId: string) =>
   olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
@@ -177,7 +183,6 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const getCommissionDetailsForSeller = (seller: User, rows: Payment[]) => {
     const customerToSeller = new Map<string, string>();
     for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
-    const rate = Number(seller.commissionPercentage || 0);
     return rows
       .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === seller.id)
       .map((p) => {
@@ -188,7 +193,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           customerName: p.customerBusinessName || p.customerId || '',
           receiptNumber: p.receiptNumber || '',
           amount,
-          commissionAmount: Math.round((amount * rate) / 100 * 100) / 100
+          commissionAmount: commissionFromGross(amount)
         };
       })
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
@@ -318,15 +323,9 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const ords = ordersForSeller(sid).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const sales = salesTotalForSeller(orders, sid);
     const u = users.find((x) => x.id === sid);
-    const rate = Number(
-      u?.commissionPercentage != null
-        ? u.commissionPercentage
-        : sid === currentUser.id
-          ? currentUser.commissionPercentage ?? 0
-          : 0
-    );
-    const commissionBase = receiptsMonthForSeller(sid);
-    const commission = commissionBase * (rate / 100);
+    const rate = COMMISSION_FIXED_RATE;
+    const commissionBase = netWithoutIva(receiptsMonthForSeller(sid));
+    const commission = round2(commissionBase * (rate / 100));
     const saldoTotal = totalSaldoCarteraForSeller(sid);
     const commissionDetails = getCommissionDetailsForSeller(
       u || currentUser,
@@ -337,10 +336,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);
-    const rate = currentUser.commissionPercentage ?? 0;
+    const rate = COMMISSION_FIXED_RATE;
     const sid = currentUser.id;
-    const commissionBase = receiptsMonthForSeller(sid);
-    const commissionAmount = commissionBase * (rate / 100);
+    const commissionBase = netWithoutIva(receiptsMonthForSeller(sid));
+    const commissionAmount = round2(commissionBase * (rate / 100));
 
     if (selectedSellerId === sid && sellerDetail) {
       return (
@@ -521,9 +520,9 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {sellers.map((seller) => {
           const sellerSales = salesTotalForSeller(orders, seller.id);
-          const commissionRate = seller.commissionPercentage || 0;
-          const commissionBase = receiptsMonthForSeller(seller.id);
-          const commissionAmount = commissionBase * (commissionRate / 100);
+          const commissionRate = COMMISSION_FIXED_RATE;
+          const commissionBase = netWithoutIva(receiptsMonthForSeller(seller.id));
+          const commissionAmount = round2(commissionBase * (commissionRate / 100));
           const nCli = customersForSeller(seller.id).length;
           const nOrd = ordersForSeller(seller.id).length;
 
@@ -774,16 +773,8 @@ function SellerDetailView({
         </div>
         {commissionEditable && (
           <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2">
-            <span className="text-xs text-slate-500">Comisión %</span>
-            <input
-              type="number"
-              step="0.1"
-              min={0}
-              max={100}
-              value={rate}
-              onChange={(e) => onUpdateCommission(seller.id, e.target.value)}
-              className="w-16 bg-slate-900 border border-slate-600 rounded-lg p-1.5 text-center text-white font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <span className="text-xs text-slate-400">Comisión fija</span>
+            <span className="text-sm font-bold text-indigo-200">{COMMISSION_FIXED_RATE}%</span>
           </div>
         )}
       </div>
@@ -821,7 +812,9 @@ function SellerDetailView({
             <TrendingUp size={12} /> Comisión est.
           </div>
           <p className="text-xl font-black text-indigo-200 tabular-nums">{fmtMoney(commission)}</p>
-          <p className="text-[10px] text-slate-500 mt-1">{rate}% sobre recibos del mes ({fmtMoney(commissionBase)})</p>
+          <p className="text-[10px] text-slate-500 mt-1">
+            {rate}% sobre neto sin IVA ({fmtMoney(commissionBase)})
+          </p>
         </div>
       </div>
 
