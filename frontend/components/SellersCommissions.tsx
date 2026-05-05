@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import ExcelJS from 'exceljs';
 import {
   User as UserIcon,
   TrendingUp,
@@ -29,6 +30,11 @@ interface SellersCommissionsProps {
 
 const fmtMoney = (n: number) =>
   `$${Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const toYmd = (value?: string) => {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+};
 
 const salesTotalForSeller = (olist: Order[], sellerId: string) =>
   olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
@@ -168,47 +174,85 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     }
   };
 
-  const downloadCommissionDetailCsvForSeller = (
-    seller: User,
-    from: string,
-    to: string,
-    rows: Payment[]
-  ) => {
+  const getCommissionDetailsForSeller = (seller: User, rows: Payment[]) => {
     const customerToSeller = new Map<string, string>();
     for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
     const rate = Number(seller.commissionPercentage || 0);
-    const details = rows
+    return rows
       .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === seller.id)
       .map((p) => {
         const amount = Number(p.amount) || 0;
         return {
-          date: p.date || '',
+          id: p.id,
+          date: toYmd(p.date),
           customerName: p.customerBusinessName || p.customerId || '',
           receiptNumber: p.receiptNumber || '',
           amount,
-          commissionAmount: Math.round(amount * rate) / 100
+          commissionAmount: Math.round((amount * rate) / 100 * 100) / 100
         };
       })
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  };
 
-    const csvRows = [
-      ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'],
-      ...details.map((r) => [
-        r.date,
-        r.customerName,
-        r.receiptNumber,
-        String(r.amount.toFixed(2)),
-        String(r.commissionAmount.toFixed(2))
-      ])
-    ];
-    const csv = csvRows
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const downloadCommissionWorkbook = async (opts: {
+    sellersToExport: User[];
+    from: string;
+    to: string;
+    rows: Payment[];
+    fileName: string;
+  }) => {
+    const { sellersToExport, from, to, rows, fileName } = opts;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Detalle comisiones');
+    ws.columns = [{ width: 14 }, { width: 34 }, { width: 18 }, { width: 14 }, { width: 14 }];
+    let rowIdx = 1;
+
+    for (const seller of sellersToExport) {
+      const detailRows = getCommissionDetailsForSeller(seller, rows);
+      ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+      const title = ws.getCell(`A${rowIdx}`);
+      title.value = `Vendedor: ${seller.name} (${from || 'inicio'} a ${to || 'hoy'})`;
+      title.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+      title.alignment = { horizontal: 'left', vertical: 'middle' };
+      rowIdx += 1;
+
+      const header = ws.getRow(rowIdx);
+      header.values = ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'];
+      header.font = { bold: true };
+      for (let c = 1; c <= 5; c++) {
+        const cell = header.getCell(c);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        cell.alignment = { horizontal: 'left' };
+      }
+      rowIdx += 1;
+
+      for (const r of detailRows) {
+        const row = ws.getRow(rowIdx);
+        row.values = [r.date, r.customerName, r.receiptNumber, r.amount, r.commissionAmount];
+        row.getCell(4).numFmt = '#,##0.00';
+        row.getCell(5).numFmt = '#,##0.00';
+        rowIdx += 1;
+      }
+
+      if (detailRows.length === 0) {
+        ws.mergeCells(`A${rowIdx}:E${rowIdx}`);
+        ws.getCell(`A${rowIdx}`).value = 'Sin recibos en el rango.';
+        ws.getCell(`A${rowIdx}`).font = { italic: true, color: { argb: 'FF64748B' } };
+        rowIdx += 1;
+      }
+
+      rowIdx += 2;
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `detalle_comision_${seller.name}_${from || 'desde'}_${to || 'hasta'}.csv`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -227,9 +271,13 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     setMassExporting(true);
     try {
       const rows = await api.getPayments({ desde: from || undefined, hasta: to || undefined });
-      for (const seller of sellers) {
-        downloadCommissionDetailCsvForSeller(seller, from, to, rows || []);
-      }
+      await downloadCommissionWorkbook({
+        sellersToExport: sellers,
+        from,
+        to,
+        rows: rows || [],
+        fileName: `detalle_comisiones_vendedores_${from || 'desde'}_${to || 'hasta'}.xlsx`
+      });
       setMassExportModalOpen(false);
     } finally {
       setMassExporting(false);
@@ -253,19 +301,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const commissionBase = receiptsMonthForSeller(sid);
     const commission = commissionBase * (rate / 100);
     const saldoTotal = totalSaldoCarteraForSeller(sid);
-    const customerToSeller = new Map<string, string>();
-    for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
-    const commissionDetails = receiptRowsInRange
-      .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === sid)
-      .map((p) => ({
-        id: p.id,
-        date: p.date,
-        customerName: p.customerBusinessName || p.customerId,
-        receiptNumber: p.receiptNumber,
-        amount: Number(p.amount) || 0,
-        commissionAmount: Math.round(((Number(p.amount) || 0) * rate) * 100) / 10000
-      }))
-      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const commissionDetails = getCommissionDetailsForSeller(
+      u || currentUser,
+      receiptRowsInRange
+    );
     return { custs, ords, sales, rate, commission, saldoTotal, commissionBase, commissionDetails };
   }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller, receiptRowsInRange]);
 
@@ -283,6 +322,16 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           detail={sellerDetail}
           commissionFrom={commissionFrom}
           commissionTo={commissionTo}
+          onExportCommissionDetail={async (from, to) => {
+            const rows = await api.getPayments({ desde: from || undefined, hasta: to || undefined });
+            await downloadCommissionWorkbook({
+              sellersToExport: [currentUser],
+              from,
+              to,
+              rows: rows || [],
+              fileName: `detalle_comision_${currentUser.name}_${from || 'desde'}_${to || 'hasta'}.xlsx`
+            });
+          }}
           saldosLoading={saldosLoading}
           unifiedSaldoForCustomer={unifiedSaldoForCustomer}
           onBack={() => setSelectedSellerId(null)}
@@ -347,6 +396,16 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         detail={sellerDetail}
         commissionFrom={commissionFrom}
         commissionTo={commissionTo}
+        onExportCommissionDetail={async (from, to) => {
+          const rows = await api.getPayments({ desde: from || undefined, hasta: to || undefined });
+          await downloadCommissionWorkbook({
+            sellersToExport: [selectedSeller],
+            from,
+            to,
+            rows: rows || [],
+            fileName: `detalle_comision_${selectedSeller.name}_${from || 'desde'}_${to || 'hasta'}.xlsx`
+          });
+        }}
         saldosLoading={saldosLoading}
         unifiedSaldoForCustomer={unifiedSaldoForCustomer}
         onBack={() => setSelectedSellerId(null)}
@@ -576,6 +635,7 @@ function SellerDetailView({
   detail,
   commissionFrom,
   commissionTo,
+  onExportCommissionDetail,
   saldosLoading,
   unifiedSaldoForCustomer,
   onBack,
@@ -587,6 +647,7 @@ function SellerDetailView({
   detail: DetailShape;
   commissionFrom: string;
   commissionTo: string;
+  onExportCommissionDetail: (from: string, to: string) => Promise<void>;
   saldosLoading: boolean;
   unifiedSaldoForCustomer: (customerId: string) => number;
   onBack: () => void;
@@ -597,29 +658,14 @@ function SellerDetailView({
   const { custs, ords, sales, rate, commission, commissionBase, saldoTotal, commissionDetails } = detail;
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
-  const downloadCommissionDetailExcel = () => {
-    const rows = [
-      ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'],
-      ...commissionDetails.map((r) => [
-        r.date || '',
-        r.customerName || '',
-        r.receiptNumber || '',
-        String(r.amount.toFixed(2)),
-        String(r.commissionAmount.toFixed(2))
-      ])
-    ];
-    const csv = rows
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `detalle_comision_${seller.name}_${commissionFrom || 'desde'}_${commissionTo || 'hasta'}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  const [commissionExporting, setCommissionExporting] = useState(false);
+  const downloadCommissionDetailExcel = async () => {
+    setCommissionExporting(true);
+    try {
+      await onExportCommissionDetail(commissionFrom, commissionTo);
+    } finally {
+      setCommissionExporting(false);
+    }
   };
 
   return (
@@ -677,11 +723,14 @@ function SellerDetailView({
         </button>
         <button
           type="button"
-          onClick={downloadCommissionDetailExcel}
+          onClick={() => {
+            void downloadCommissionDetailExcel();
+          }}
+          disabled={commissionExporting}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition"
           title="Descargar detalle de comisiones por recibo"
         >
-          <Download size={16} />
+          {commissionExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Exportar detalle de comisiones
         </button>
       </div>
@@ -756,10 +805,13 @@ function SellerDetailView({
           </h3>
           <button
             type="button"
-            onClick={downloadCommissionDetailExcel}
+            onClick={() => {
+              void downloadCommissionDetailExcel();
+            }}
+            disabled={commissionExporting}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-xs font-semibold transition"
           >
-            <Download size={14} /> Descargar detalle
+            {commissionExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Descargar detalle
           </button>
         </div>
         <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-800">
