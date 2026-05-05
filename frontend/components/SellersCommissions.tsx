@@ -44,6 +44,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
+  const [receiptsMonthBySeller, setReceiptsMonthBySeller] = useState<Record<string, number>>({});
   const [massExporting, setMassExporting] = useState(false);
   const [massExportModalOpen, setMassExportModalOpen] = useState(false);
   const [massExportFrom, setMassExportFrom] = useState<string>('');
@@ -71,6 +72,35 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     loadSaldosCartera();
   }, [loadSaldosCartera]);
 
+  const loadReceiptsMonth = useCallback(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const from = `${y}-${m}-01`;
+    const to = new Date(y, now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    api
+      .getPayments({ desde: from, hasta: to })
+      .then((rows) => {
+        const bySeller: Record<string, number> = {};
+        for (const s of sellers) bySeller[s.id] = 0;
+        const customerToSeller = new Map<string, string>();
+        for (const c of customers) {
+          if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
+        }
+        for (const p of rows || []) {
+          const sellerId = p.sellerId || customerToSeller.get(p.customerId) || '';
+          if (!sellerId) continue;
+          bySeller[sellerId] = (bySeller[sellerId] || 0) + (Number(p.amount) || 0);
+        }
+        setReceiptsMonthBySeller(bySeller);
+      })
+      .catch(() => setReceiptsMonthBySeller({}));
+  }, [customers, sellers]);
+
+  useEffect(() => {
+    loadReceiptsMonth();
+  }, [loadReceiptsMonth]);
+
   const updateCommission = async (userId: string, value: string) => {
     const user = users.find((u) => u.id === userId);
     if (user && onUpdateUser) {
@@ -92,6 +122,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const ids = customersForSeller(sellerId).map((c) => c.id);
     return ids.reduce((sum, id) => sum + unifiedSaldoForCustomer(id), 0);
   };
+  const receiptsMonthForSeller = (sellerId: string) => receiptsMonthBySeller[sellerId] ?? 0;
 
   const selectedSeller = selectedSellerId ? users.find((u) => u.id === selectedSellerId) : null;
   const validateMassExportDates = (from: string, to: string): string => {
@@ -140,15 +171,17 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           ? currentUser.commissionPercentage ?? 0
           : 0
     );
-    const commission = sales * (rate / 100);
+    const commissionBase = receiptsMonthForSeller(sid);
+    const commission = commissionBase * (rate / 100);
     const saldoTotal = totalSaldoCarteraForSeller(sid);
-    return { custs, ords, sales, rate, commission, saldoTotal };
-  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser]);
+    return { custs, ords, sales, rate, commission, saldoTotal, commissionBase };
+  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller]);
 
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);
     const rate = currentUser.commissionPercentage ?? 0;
-    const commissionAmount = sellerSales * (rate / 100);
+    const commissionBase = receiptsMonthForSeller(sid);
+    const commissionAmount = commissionBase * (rate / 100);
     const sid = currentUser.id;
 
     if (selectedSellerId === sid && sellerDetail) {
@@ -253,7 +286,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         {sellers.map((seller) => {
           const sellerSales = salesTotalForSeller(orders, seller.id);
           const commissionRate = seller.commissionPercentage || 0;
-          const commissionAmount = sellerSales * (commissionRate / 100);
+          const commissionBase = receiptsMonthForSeller(seller.id);
+          const commissionAmount = commissionBase * (commissionRate / 100);
           const nCli = customersForSeller(seller.id).length;
           const nOrd = ordersForSeller(seller.id).length;
 
@@ -371,6 +405,7 @@ type DetailShape = {
   sales: number;
   rate: number;
   commission: number;
+  commissionBase: number;
   saldoTotal: number;
 };
 
@@ -393,7 +428,7 @@ function SellerDetailView({
   commissionEditable: boolean;
   onUpdateCommission: (userId: string, value: string) => void | Promise<void>;
 }) {
-  const { custs, ords, sales, rate, commission, saldoTotal } = detail;
+  const { custs, ords, sales, rate, commission, commissionBase, saldoTotal } = detail;
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
 
@@ -511,7 +546,7 @@ function SellerDetailView({
             <TrendingUp size={12} /> Comisión est.
           </div>
           <p className="text-xl font-black text-indigo-200 tabular-nums">{fmtMoney(commission)}</p>
-          <p className="text-[10px] text-slate-500 mt-1">{rate}% sobre ventas</p>
+          <p className="text-[10px] text-slate-500 mt-1">{rate}% sobre recibos del mes ({fmtMoney(commissionBase)})</p>
         </div>
       </div>
 
