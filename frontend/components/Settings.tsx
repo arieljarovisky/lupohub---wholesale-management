@@ -2029,50 +2029,56 @@ const Settings: React.FC<SettingsProps> = ({
                         </button>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="text-[11px] text-slate-400">
-                        Desde
+                    <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet size={14} className="text-cyan-400" />
+                        <p className="text-cyan-200 text-xs font-black uppercase tracking-wide">Reporte de Ventas Tienda Nube</p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="text-[11px] text-slate-400">
+                          Desde
+                          <input
+                            type="date"
+                            value={tnSalesFrom}
+                            onChange={(e) => setTnSalesFrom(e.target.value)}
+                            className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] text-slate-400">
+                          Hasta
+                          <input
+                            type="date"
+                            value={tnSalesTo}
+                            onChange={(e) => setTnSalesTo(e.target.value)}
+                            className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleExportTnSalesReport}
+                          disabled={tnSalesReportLoading}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Descargar reporte de ventas de Tienda Nube por período"
+                        >
+                          {tnSalesReportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                          DESCARGAR REPORTE TN
+                        </button>
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block">
+                          Productos a incluir (opcional: SKU, ID o parte del nombre; separados por coma)
+                        </label>
                         <input
-                          type="date"
-                          value={tnSalesFrom}
-                          onChange={(e) => setTnSalesFrom(e.target.value)}
-                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                          type="text"
+                          value={tnSalesProducts}
+                          onChange={(e) => setTnSalesProducts(e.target.value)}
+                          placeholder="Ej: BOXER123, 987654321, media negra"
+                          className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-xs"
                         />
-                      </label>
-                      <label className="text-[11px] text-slate-400">
-                        Hasta
-                        <input
-                          type="date"
-                          value={tnSalesTo}
-                          onChange={(e) => setTnSalesTo(e.target.value)}
-                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleExportTnSalesReport}
-                        disabled={tnSalesReportLoading}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                        title="Descargar reporte de ventas de Tienda Nube por período"
-                      >
-                        {tnSalesReportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                        REPORTE VENTAS TN
-                      </button>
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-slate-400 block">
-                        Productos a incluir (opcional: SKU, ID o parte del nombre; separados por coma)
-                      </label>
-                      <input
-                        type="text"
-                        value={tnSalesProducts}
-                        onChange={(e) => setTnSalesProducts(e.target.value)}
-                        placeholder="Ej: BOXER123, 987654321, media negra"
-                        className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-xs"
-                      />
+                      </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG. Reporte ventas: muestra solo productos, cantidad vendida y precio promedio.
+                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG.
                     </p>
                   </div>
                 )}
@@ -2171,6 +2177,32 @@ const Settings: React.FC<SettingsProps> = ({
                           <RefreshCw size={14} />
                           VINCULAR PRODUCTOS
                         </button>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-yellow-900/50 bg-yellow-950/10 p-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet size={14} className="text-yellow-400" />
+                        <p className="text-yellow-200 text-xs font-black uppercase tracking-wide">Reporte Comercial Mercado Libre</p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="text-[11px] text-slate-400">
+                          Desde
+                          <input
+                            type="date"
+                            value={mlReportFrom}
+                            onChange={(e) => setMlReportFrom(e.target.value)}
+                            className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                          />
+                        </label>
+                        <label className="text-[11px] text-slate-400">
+                          Hasta
+                          <input
+                            type="date"
+                            value={mlReportTo}
+                            onChange={(e) => setMlReportTo(e.target.value)}
+                            className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
+                          />
+                        </label>
                         <button
                           type="button"
                           onClick={handleExportMlPublications}
@@ -2179,29 +2211,9 @@ const Settings: React.FC<SettingsProps> = ({
                           title="Descarga Excel con precio ML, mayorista, FOB y margen aproximado"
                         >
                           {mlPublicationsExportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-                          EXCEL PUBLICACIONES
+                          DESCARGAR REPORTE ML
                         </button>
                       </div>
-                    </div>
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="text-[11px] text-slate-400">
-                        Desde
-                        <input
-                          type="date"
-                          value={mlReportFrom}
-                          onChange={(e) => setMlReportFrom(e.target.value)}
-                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
-                        />
-                      </label>
-                      <label className="text-[11px] text-slate-400">
-                        Hasta
-                        <input
-                          type="date"
-                          value={mlReportTo}
-                          onChange={(e) => setMlReportTo(e.target.value)}
-                          className="mt-1 block bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 text-xs"
-                        />
-                      </label>
                     </div>
                     <p className="text-slate-500 text-xs">
                       <strong>Fuente de verdad:</strong> Tu inventario en LupoHub es la fuente de verdad. Usá <strong>Enviar mi stock a ML</strong> para enviar tu stock a Mercado Libre (y en Inventario podés enviar también a Tienda Nube o a ambas). <strong>Importar desde ML</strong> es opcional, solo si en algún momento querés traer el stock desde ML a LupoHub.

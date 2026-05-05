@@ -751,7 +751,12 @@ export const api = {
   },
 
   /** Excel de saldos pendientes: resumen + una hoja por cliente (opcional rango de fechas). */
-  exportSaldosPendientesPorCliente: async (params?: { sellerId?: string; from?: string; to?: string }): Promise<void> => {
+  exportSaldosPendientesPorCliente: async (params?: {
+    sellerId?: string;
+    from?: string;
+    to?: string;
+    sellerName?: string;
+  }): Promise<void> => {
     const q = new URLSearchParams();
     if (params?.sellerId) q.set('sellerId', params.sellerId);
     if (params?.from) q.set('from', params.from);
@@ -761,9 +766,13 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
+    const sellerLabelSafe = String(params?.sellerName || '')
+      .replace(/[\\/:*?"<>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     const serverFilename =
       getFilenameFromContentDisposition(headers['content-disposition']) ||
-      `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.download = serverFilename;
     document.body.appendChild(a);
     a.click();

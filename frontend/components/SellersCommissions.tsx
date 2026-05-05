@@ -115,6 +115,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       for (const seller of sellers) {
         await api.exportSaldosPendientesPorCliente({
           sellerId: seller.id,
+          sellerName: seller.name,
           from: from || undefined,
           to: to || undefined
         });
@@ -437,6 +438,7 @@ function SellerDetailView({
             api
               .exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
+                sellerName: seller.name,
                 from: exportFrom || undefined,
                 to: exportTo || undefined
               })

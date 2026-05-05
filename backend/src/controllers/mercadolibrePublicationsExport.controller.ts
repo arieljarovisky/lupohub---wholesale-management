@@ -197,7 +197,7 @@ type AggBucket = {
   ml_prices: number[];
   /** Comisión de venta ML (`sale_fee_amount`) por el mismo índice que ml_prices. */
   ml_sale_fees: number[];
-  /** Unidades vendidas en ML en el período (órdenes pagadas, por publicación/variación). */
+  /** Ventas (cantidad de órdenes) en ML en el período, por publicación/variación. */
   ventas_periodo_suma: number;
   variant_ids: Set<string>;
   ml_item_ids: Set<string>;
@@ -375,11 +375,12 @@ async function fetchProductAdsCampaignRows(
 }
 
 /**
- * Suma unidades vendidas por publicación/variación ML en órdenes con estado `paid`
+ * Cuenta ventas (órdenes) por publicación/variación ML en órdenes con estado `paid`
  * creadas en el rango [dateFromYmd, dateToYmd] (inclusive, horario -03:00 como en el resto del backend).
+ * Cada orden cuenta 1 por item/variación, aunque quantity sea mayor a 1.
  * Clave: `normalizeMercadoLibreItemId(itemId)|variationId` (variationId vacío si la publicación no tiene variaciones).
  */
-async function fetchMercadoLibreSoldUnitsInDateRange(
+async function fetchMercadoLibreSalesCountInDateRange(
   accessToken: string,
   sellerUserId: string,
   dateFromYmd: string,
@@ -408,14 +409,16 @@ async function fetchMercadoLibreSoldUnitsInDateRange(
     }
     const results = Array.isArray(res.data?.results) ? res.data.results : [];
     for (const order of results) {
+      const seenInOrder = new Set<string>();
       for (const line of order.order_items || []) {
         const iid = normalizeMercadoLibreItemId(line?.item?.id);
         if (!iid) continue;
         const rawVid = line?.item?.variation_id;
         const vid = rawVid != null && String(rawVid).trim() !== '' ? String(rawVid).trim() : '';
-        const qty = Math.max(0, Math.floor(Number(line.quantity) || 0));
         const k = `${iid}|${vid}`;
-        map.set(k, (map.get(k) || 0) + qty);
+        if (seenInOrder.has(k)) continue;
+        seenInOrder.add(k);
+        map.set(k, (map.get(k) || 0) + 1);
       }
     }
     if (results.length < limit) break;
@@ -603,7 +606,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       dateToStr
     );
 
-    const soldUnitsByItemVariation = await fetchMercadoLibreSoldUnitsInDateRange(
+    const salesCountByItemVariation = await fetchMercadoLibreSalesCountInDateRange(
       mlToken.access_token,
       String(mlToken.user_id),
       salesFromStr,
@@ -719,7 +722,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
             b.ml_sale_fees.push(saleFee);
             const vid = variationId != null && String(variationId).trim() !== '' ? String(variationId).trim() : '';
             const soldKey = `${itemIdNorm}|${vid}`;
-            b.ventas_periodo_suma += soldUnitsByItemVariation.get(soldKey) ?? 0;
+            b.ventas_periodo_suma += salesCountByItemVariation.get(soldKey) ?? 0;
             b.variant_ids.add(hub.variant_id);
             b.ml_item_ids.add(itemIdNorm);
             const pl = (item.permalink || '').toString().trim();
@@ -746,12 +749,12 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
           for (const v of item.variations) {
             const vid = String(v?.id ?? '').trim();
             const soldKey = `${itemIdNorm}|${vid}`;
-            ventasPeriodo += soldUnitsByItemVariation.get(soldKey) ?? 0;
+            ventasPeriodo += salesCountByItemVariation.get(soldKey) ?? 0;
             sumPrice += Number(v?.price ?? item.price ?? 0) || 0;
           }
           precioActual = sumPrice > 0 ? sumPrice / item.variations.length : precioActual;
         } else {
-          ventasPeriodo = soldUnitsByItemVariation.get(`${itemIdNorm}|`) ?? 0;
+          ventasPeriodo = salesCountByItemVariation.get(`${itemIdNorm}|`) ?? 0;
         }
         const inversionItem = costByItemId.get(itemIdNorm) || 0;
         const comisionUnidad = await fetchListingSaleFeeAmount(
@@ -854,7 +857,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       'Link Mercado Libre',
       fobHeader,
       'Precio Mercado Libre (ARS, prom.)',
-      `Ventas ${salesFromStr} a ${salesToStr} (unid., órdenes pagadas ML)`,
+      `Ventas ${salesFromStr} a ${salesToStr} (cant. de órdenes pagadas ML)`,
       'Comisión venta ML estimada (ARS, prom.)',
       `Inversión campaña activa (ARS, Product Ads ${dateFromStr}–${dateToStr})`,
       'Margen por unidad (ARS)',
@@ -864,7 +867,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       `Solo productos del catálogo con código de artículo (SKU) cargado; publicaciones sin código o sin vínculo con el inventario no se listan. Hasta ${ML_SYNC_MAX_ITEMS} publicaciones ML del vendedor. Código: referencia interna. FOB: lista ` +
       (fobListName ? `"${fobListName}"` : 'con "fob" en el nombre') +
       (fobListIdEnv ? ' (LUPOHUB_FOB_PRICE_LIST_ID).' : '.') +
-      ` Ventas: unidades en órdenes pagadas entre ${salesFromStr} y ${salesToStr}. Comisión venta: API listing_prices (sale_fee_amount). Margen por unidad = precio ML (prom.) − comisión ML (prom.) − FOB. Ganancia del período = (margen por unidad × ventas del período) − inversión Product Ads. Si falta FOB, margen y ganancia quedan vacíos.`;
+      ` Ventas: cantidad de órdenes pagadas entre ${salesFromStr} y ${salesToStr}. Comisión venta: API listing_prices (sale_fee_amount). Margen por unidad = precio ML (prom.) − comisión ML (prom.) − FOB. Ganancia del período = (margen por unidad × ventas del período) − inversión Product Ads. Si falta FOB, margen y ganancia quedan vacíos.`;
     ws.addRow([noteText, '', '', '', '', '', '', '', '']);
     ws.mergeCells(2, 1, 2, 9);
     const note = ws.getRow(2).getCell(1);
@@ -930,7 +933,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       { header: 'Estado', key: 'estado', width: 14 },
       { header: 'Link', key: 'link', width: 52 },
       { header: 'Precio actual', key: 'precio_actual', width: 16 },
-      { header: 'Ventas unid. período', key: 'ventas_unid_periodo', width: 18 },
+      { header: 'Ventas (órdenes) período', key: 'ventas_unid_periodo', width: 22 },
       { header: 'Facturación período', key: 'facturacion_periodo', width: 18 },
       { header: 'Comisión unid. estimada', key: 'comision_unidad', width: 20 },
       { header: 'Comisión total estimada', key: 'comision_total', width: 20 },
@@ -992,7 +995,7 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
     wsResumen.getCell('A1').font = { bold: true, size: 13 };
     wsResumen.addRow(['Período del reporte', `${dateFromStr} a ${dateToStr}`]);
     wsResumen.addRow(['Publicaciones consideradas', publicationRows.length]);
-    wsResumen.addRow(['Ventas unidades (publicaciones)', totalVentasUnidPub]);
+    wsResumen.addRow(['Ventas (cantidad de órdenes, publicaciones)', totalVentasUnidPub]);
     wsResumen.addRow(['Facturación estimada (publicaciones)', totalFacturacionPub]);
     wsResumen.addRow(['Inversión Ads detectada (publicaciones)', totalInversionPub]);
     wsResumen.addRow(['Resultado estimado (publicaciones)', totalResultadoPub]);
