@@ -56,6 +56,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [commissionRangeLoading, setCommissionRangeLoading] = useState(false);
   const [massExporting, setMassExporting] = useState(false);
   const [massExportModalOpen, setMassExportModalOpen] = useState(false);
+  const [massExportMode, setMassExportMode] = useState<'saldos' | 'commissionDetail'>('saldos');
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
   const [massExportError, setMassExportError] = useState<string>('');
@@ -160,6 +161,74 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           from: from || undefined,
           to: to || undefined
         });
+      }
+      setMassExportModalOpen(false);
+    } finally {
+      setMassExporting(false);
+    }
+  };
+
+  const downloadCommissionDetailCsvForSeller = (
+    seller: User,
+    from: string,
+    to: string,
+    rows: Payment[]
+  ) => {
+    const customerToSeller = new Map<string, string>();
+    for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
+    const rate = Number(seller.commissionPercentage || 0);
+    const details = rows
+      .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === seller.id)
+      .map((p) => {
+        const amount = Number(p.amount) || 0;
+        return {
+          date: p.date || '',
+          customerName: p.customerBusinessName || p.customerId || '',
+          receiptNumber: p.receiptNumber || '',
+          amount,
+          commissionAmount: Math.round(amount * rate) / 100
+        };
+      })
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+
+    const csvRows = [
+      ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'],
+      ...details.map((r) => [
+        r.date,
+        r.customerName,
+        r.receiptNumber,
+        String(r.amount.toFixed(2)),
+        String(r.commissionAmount.toFixed(2))
+      ])
+    ];
+    const csv = csvRows
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `detalle_comision_${seller.name}_${from || 'desde'}_${to || 'hasta'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const runMassCommissionDetailExport = async () => {
+    const from = massExportFrom.trim();
+    const to = massExportTo.trim();
+    const validationError = validateMassExportDates(from, to);
+    if (validationError) {
+      setMassExportError(validationError);
+      return;
+    }
+    setMassExportError('');
+    setMassExporting(true);
+    try {
+      const rows = await api.getPayments({ desde: from || undefined, hasta: to || undefined });
+      for (const seller of sellers) {
+        downloadCommissionDetailCsvForSeller(seller, from, to, rows || []);
       }
       setMassExportModalOpen(false);
     } finally {
@@ -337,6 +406,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         <button
           type="button"
           onClick={() => {
+            setMassExportMode('saldos');
             setMassExportError('');
             setMassExportModalOpen(true);
           }}
@@ -346,6 +416,20 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         >
           {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           {massExporting ? 'Exportando por vendedor…' : 'Descargar Excel por vendedor'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMassExportMode('commissionDetail');
+            setMassExportError('');
+            setMassExportModalOpen(true);
+          }}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition disabled:opacity-60"
+          title="Descargar detalle de comisiones por cada vendedor (solicita fechas)"
+          disabled={massExporting}
+        >
+          {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          {massExporting ? 'Exportando detalle…' : 'Descargar detalle comisiones por vendedor'}
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -408,7 +492,11 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="px-5 py-4 border-b border-slate-700">
               <h3 className="text-white font-black text-lg">Descarga masiva por vendedor</h3>
-              <p className="text-slate-400 text-sm mt-1">Elegí rango de fechas para exportar un Excel por cada vendedor.</p>
+              <p className="text-slate-400 text-sm mt-1">
+                {massExportMode === 'saldos'
+                  ? 'Elegí rango de fechas para exportar un Excel por cada vendedor.'
+                  : 'Elegí rango de fechas para exportar un detalle de comisiones por cada vendedor.'}
+              </p>
             </div>
 
             <div className="px-5 py-4 space-y-4">
@@ -450,7 +538,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
               </button>
               <button
                 type="button"
-                onClick={runMassExport}
+                onClick={massExportMode === 'saldos' ? runMassExport : runMassCommissionDetailExport}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
                 disabled={massExporting}
               >
