@@ -124,6 +124,9 @@ const MercadoLibreOrders: React.FC = () => {
     return value.toLocaleString('es-AR', { minimumFractionDigits: 2 });
   };
 
+  const totalUnitsForOrder = (order: MercadoLibreOrder): number =>
+    (order.items || []).reduce((acc, item) => acc + Math.max(0, Number(item.quantity) || 0), 0);
+
   const filteredOrders = orders.filter(order => {
     if (!searchTerm) return true;
     const search = searchTerm.toLowerCase();
@@ -606,7 +609,12 @@ const MercadoLibreOrders: React.FC = () => {
                     {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <p className="text-sm font-bold text-white">{order.items.length} producto{order.items.length !== 1 ? 's' : ''}</p>
+                        <p className="text-sm font-bold text-white">
+                          {totalUnitsForOrder(order)} unidad{totalUnitsForOrder(order) !== 1 ? 'es' : ''}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {order.items.length} línea{order.items.length !== 1 ? 's' : ''} de producto
+                        </p>
                         <p className="text-xs text-slate-500">{isGrouped ? `Compra con ${order.orderIds!.length} órdenes ML` : `#${order.id}`}</p>
                       </div>
                       <ChevronDown 
