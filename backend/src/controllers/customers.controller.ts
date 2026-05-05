@@ -2197,7 +2197,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       for (const m of movs) {
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
-      const saldoTarget = hasDateRange ? running : Number(saldoUnificadoByCustomer.get(c.id) ?? running) || 0;
+      const saldoTarget = Number(saldoUnificadoByCustomer.get(c.id) ?? running) || 0;
       const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
 
       wsSummary.addRow({
@@ -2253,11 +2253,11 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       // (por ejemplo por cuenta importada), agregamos una línea de ajuste
       // para que la hoja del cliente cierre con el mismo saldo que la vista.
       const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
-      if (!hasDateRange && Math.abs(delta) > 0.01) {
+      if (Math.abs(delta) > 0.01) {
         ws.addRow({
           fecha: null,
           tipo: 'AJUSTE',
-          comprobante: 'Saldo unificado cartera',
+          comprobante: hasDateRange ? 'Saldo historico (ajuste fuera de rango)' : 'Saldo unificado cartera',
           pedido: '',
           debe: delta > 0 ? delta : 0,
           haber: delta < 0 ? Math.abs(delta) : 0,
