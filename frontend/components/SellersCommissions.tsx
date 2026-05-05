@@ -45,6 +45,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
   const [massExporting, setMassExporting] = useState(false);
+  const [massExportFrom, setMassExportFrom] = useState<string>('');
+  const [massExportTo, setMassExportTo] = useState<string>('');
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
 
@@ -205,17 +207,43 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           onClick={async () => {
             try {
               setMassExporting(true);
-              await api.exportSaldosPendientesPorCliente();
+              const fromInput = window.prompt('Fecha desde (YYYY-MM-DD):', massExportFrom || '');
+              if (fromInput == null) return;
+              const toInput = window.prompt('Fecha hasta (YYYY-MM-DD):', massExportTo || '');
+              if (toInput == null) return;
+
+              const from = fromInput.trim();
+              const to = toInput.trim();
+              const isYmd = (v: string) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v);
+              if (!isYmd(from) || !isYmd(to)) {
+                window.alert('Formato de fecha inválido. Usá YYYY-MM-DD.');
+                return;
+              }
+              if (from && to && from > to) {
+                window.alert('Rango inválido: "desde" no puede ser mayor que "hasta".');
+                return;
+              }
+
+              setMassExportFrom(from);
+              setMassExportTo(to);
+
+              for (const seller of sellers) {
+                await api.exportSaldosPendientesPorCliente({
+                  sellerId: seller.id,
+                  from: from || undefined,
+                  to: to || undefined
+                });
+              }
             } finally {
               setMassExporting(false);
             }
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
-          title="Descargar saldos pendientes de todos los vendedores en un solo Excel"
+          title="Descargar un Excel por cada vendedor (solicita fechas)"
           disabled={massExporting}
         >
           {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          {massExporting ? 'Exportando masivo…' : 'Descarga masiva saldos'}
+          {massExporting ? 'Exportando por vendedor…' : 'Descargar Excel por vendedor'}
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
