@@ -45,8 +45,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
   const [massExporting, setMassExporting] = useState(false);
+  const [massExportModalOpen, setMassExportModalOpen] = useState(false);
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
+  const [massExportError, setMassExportError] = useState<string>('');
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
 
@@ -92,6 +94,36 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   };
 
   const selectedSeller = selectedSellerId ? users.find((u) => u.id === selectedSellerId) : null;
+  const validateMassExportDates = (from: string, to: string): string => {
+    const isYmd = (v: string) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (!isYmd(from) || !isYmd(to)) return 'Formato inválido. Usá YYYY-MM-DD.';
+    if (from && to && from > to) return '"Desde" no puede ser mayor que "Hasta".';
+    return '';
+  };
+
+  const runMassExport = async () => {
+    const from = massExportFrom.trim();
+    const to = massExportTo.trim();
+    const validationError = validateMassExportDates(from, to);
+    if (validationError) {
+      setMassExportError(validationError);
+      return;
+    }
+    setMassExportError('');
+    setMassExporting(true);
+    try {
+      for (const seller of sellers) {
+        await api.exportSaldosPendientesPorCliente({
+          sellerId: seller.id,
+          from: from || undefined,
+          to: to || undefined
+        });
+      }
+      setMassExportModalOpen(false);
+    } finally {
+      setMassExporting(false);
+    }
+  };
 
   const sellerDetail = useMemo(() => {
     if (!selectedSellerId) return null;
@@ -204,39 +236,9 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         </p>
         <button
           type="button"
-          onClick={async () => {
-            try {
-              setMassExporting(true);
-              const fromInput = window.prompt('Fecha desde (YYYY-MM-DD):', massExportFrom || '');
-              if (fromInput == null) return;
-              const toInput = window.prompt('Fecha hasta (YYYY-MM-DD):', massExportTo || '');
-              if (toInput == null) return;
-
-              const from = fromInput.trim();
-              const to = toInput.trim();
-              const isYmd = (v: string) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v);
-              if (!isYmd(from) || !isYmd(to)) {
-                window.alert('Formato de fecha inválido. Usá YYYY-MM-DD.');
-                return;
-              }
-              if (from && to && from > to) {
-                window.alert('Rango inválido: "desde" no puede ser mayor que "hasta".');
-                return;
-              }
-
-              setMassExportFrom(from);
-              setMassExportTo(to);
-
-              for (const seller of sellers) {
-                await api.exportSaldosPendientesPorCliente({
-                  sellerId: seller.id,
-                  from: from || undefined,
-                  to: to || undefined
-                });
-              }
-            } finally {
-              setMassExporting(false);
-            }
+          onClick={() => {
+            setMassExportError('');
+            setMassExportModalOpen(true);
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
           title="Descargar un Excel por cada vendedor (solicita fechas)"
@@ -299,6 +301,65 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           );
         })}
       </div>
+
+      {massExportModalOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/65 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="px-5 py-4 border-b border-slate-700">
+              <h3 className="text-white font-black text-lg">Descarga masiva por vendedor</h3>
+              <p className="text-slate-400 text-sm mt-1">Elegí rango de fechas para exportar un Excel por cada vendedor.</p>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Desde</label>
+                <input
+                  type="date"
+                  value={massExportFrom}
+                  onChange={(e) => setMassExportFrom(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Hasta</label>
+                <input
+                  type="date"
+                  value={massExportTo}
+                  onChange={(e) => setMassExportTo(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {massExportError ? <p className="text-rose-300 text-sm">{massExportError}</p> : null}
+            </div>
+
+            <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (massExporting) return;
+                  setMassExportModalOpen(false);
+                  setMassExportError('');
+                }}
+                className="px-3 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800 text-sm font-semibold transition"
+                disabled={massExporting}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={runMassExport}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
+                disabled={massExporting}
+              >
+                {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                {massExporting ? 'Exportando…' : 'Descargar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
