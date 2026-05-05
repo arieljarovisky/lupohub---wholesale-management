@@ -3968,17 +3968,27 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
         return mapped;
       });
     } else {
-      let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
-      if (status) url += `&order.status=${status}`;
-      if (date_from) url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
-      if (date_to) url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
-      const ordersRes = await axios.get(url, {
-        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-      });
-      const raw = ordersRes.data.results || [];
-      const grouped = groupMlOrdersByPurchase(raw);
+      const allRaw: any[] = [];
+      const fetchLimit = 50;
+      let fetchOffset = 0;
+      while (fetchOffset <= 5000) {
+        let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${fetchOffset}&limit=${fetchLimit}&sort=date_desc`;
+        if (status) url += `&order.status=${status}`;
+        if (date_from) url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
+        if (date_to) url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
+        const ordersRes = await axios.get(url, {
+          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+        });
+        const batch = ordersRes.data.results || [];
+        if (!batch.length) break;
+        allRaw.push(...batch);
+        if (batch.length < fetchLimit) break;
+        fetchOffset += fetchLimit;
+      }
+
+      const grouped = groupMlOrdersByPurchase(allRaw);
       total = grouped.length;
-      orders = grouped.map((o: any) => {
+      orders = grouped.slice(offsetNum, offsetNum + limitNum).map((o: any) => {
         const mapped = mapOrder(o);
         if (o.order_ids && o.order_ids.length > 1) {
           (mapped as any).orderIds = o.order_ids;
