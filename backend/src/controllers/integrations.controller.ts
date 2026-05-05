@@ -3855,6 +3855,36 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       };
     };
 
+    const groupMlOrdersByPurchase = (rows: any[]): any[] => {
+      const groupKey = (o: any) => {
+        const packId = String(o?.pack_id ?? '').trim();
+        if (packId) return `pack:${packId}`;
+        const buyerId = String(o?.buyer?.id ?? '').trim();
+        const minute = String(o?.date_created || '').slice(0, 16);
+        return `fallback:${buyerId}:${minute}`;
+      };
+      const groups = new Map<string, any[]>();
+      for (const o of rows || []) {
+        const key = groupKey(o);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(o);
+      }
+      return Array.from(groups.values()).map((group) => {
+        const first = group[0];
+        const orderIds = group.map((o: any) => o.id);
+        const allItems = group.flatMap((o: any) => o.order_items || []);
+        const totalAmount = group.reduce((acc: number, o: any) => acc + (Number(o?.total_amount) || 0), 0);
+        const merged = {
+          ...first,
+          total_amount: totalAmount,
+          order_ids: orderIds,
+          order_items: allItems
+        };
+        if (first?._shipment_status) merged._shipment_status = first._shipment_status;
+        return merged;
+      });
+    };
+
     let orders: any[];
     let total: number;
 
@@ -3927,28 +3957,7 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
 
       ordersPorEnviar.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
 
-      // Agrupar misma compra: mismo comprador + misma fecha/hora (al minuto) = una sola fila
-      const groupKey = (o: any) => {
-        const buyerId = o.buyer?.id ?? '';
-        const dateStr = (o.date_created || '').toString();
-        const toMinute = dateStr.slice(0, 16);
-        return `${buyerId}-${toMinute}`;
-      };
-      const groups = new Map<string, any[]>();
-      for (const o of ordersPorEnviar) {
-        const key = groupKey(o);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(o);
-      }
-
-      const groupedOrders = Array.from(groups.values()).map((group) => {
-        const first = group[0];
-        const orderIds = group.map((o: any) => o.id);
-        const allItems = group.flatMap((o: any) => o.order_items || []);
-        const merged = { ...first, order_ids: orderIds, order_items: allItems };
-        merged._shipment_status = first._shipment_status;
-        return merged;
-      });
+      const groupedOrders = groupMlOrdersByPurchase(ordersPorEnviar);
 
       total = groupedOrders.length;
       orders = groupedOrders.slice(offsetNum, offsetNum + limitNum).map((o: any) => {
@@ -3967,8 +3976,15 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
         headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
       });
       const raw = ordersRes.data.results || [];
-      total = ordersRes.data.paging?.total ?? raw.length;
-      orders = raw.map(mapOrder);
+      const grouped = groupMlOrdersByPurchase(raw);
+      total = grouped.length;
+      orders = grouped.map((o: any) => {
+        const mapped = mapOrder(o);
+        if (o.order_ids && o.order_ids.length > 1) {
+          (mapped as any).orderIds = o.order_ids;
+        }
+        return mapped;
+      });
     }
 
     // Marcar si las órdenes ML del response ya están facturadas.
