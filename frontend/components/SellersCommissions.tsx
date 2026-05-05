@@ -15,7 +15,7 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
-import { Customer, Order, Role, User } from '../types';
+import { Customer, Order, Payment, Role, User } from '../types';
 import { api } from '../services/api';
 
 interface SellersCommissionsProps {
@@ -50,6 +50,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [carteraByCustomer, setCarteraByCustomer] = useState<Record<string, number>>({});
   const [saldosLoading, setSaldosLoading] = useState(false);
   const [receiptsMonthBySeller, setReceiptsMonthBySeller] = useState<Record<string, number>>({});
+  const [receiptRowsInRange, setReceiptRowsInRange] = useState<Payment[]>([]);
   const [commissionFrom, setCommissionFrom] = useState<string>(monthStartYmd);
   const [commissionTo, setCommissionTo] = useState<string>(todayYmd);
   const [commissionRangeLoading, setCommissionRangeLoading] = useState(false);
@@ -85,6 +86,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     api
       .getPayments({ desde: from, hasta: to })
       .then((rows) => {
+        setReceiptRowsInRange(Array.isArray(rows) ? rows : []);
         const bySeller: Record<string, number> = {};
         for (const s of sellers) bySeller[s.id] = 0;
         const customerToSeller = new Map<string, string>();
@@ -98,7 +100,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         }
         setReceiptsMonthBySeller(bySeller);
       })
-      .catch(() => setReceiptsMonthBySeller({}))
+      .catch(() => {
+        setReceiptsMonthBySeller({});
+        setReceiptRowsInRange([]);
+      })
       .finally(() => setCommissionRangeLoading(false));
   }, [customers, sellers]);
 
@@ -179,21 +184,36 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const commissionBase = receiptsMonthForSeller(sid);
     const commission = commissionBase * (rate / 100);
     const saldoTotal = totalSaldoCarteraForSeller(sid);
-    return { custs, ords, sales, rate, commission, saldoTotal, commissionBase };
-  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller]);
+    const customerToSeller = new Map<string, string>();
+    for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
+    const commissionDetails = receiptRowsInRange
+      .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === sid)
+      .map((p) => ({
+        id: p.id,
+        date: p.date,
+        customerName: p.customerBusinessName || p.customerId,
+        receiptNumber: p.receiptNumber,
+        amount: Number(p.amount) || 0,
+        commissionAmount: Math.round(((Number(p.amount) || 0) * rate) * 100) / 10000
+      }))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    return { custs, ords, sales, rate, commission, saldoTotal, commissionBase, commissionDetails };
+  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller, receiptRowsInRange]);
 
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);
     const rate = currentUser.commissionPercentage ?? 0;
+    const sid = currentUser.id;
     const commissionBase = receiptsMonthForSeller(sid);
     const commissionAmount = commissionBase * (rate / 100);
-    const sid = currentUser.id;
 
     if (selectedSellerId === sid && sellerDetail) {
       return (
         <SellerDetailView
           seller={currentUser}
           detail={sellerDetail}
+          commissionFrom={commissionFrom}
+          commissionTo={commissionTo}
           saldosLoading={saldosLoading}
           unifiedSaldoForCustomer={unifiedSaldoForCustomer}
           onBack={() => setSelectedSellerId(null)}
@@ -256,6 +276,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       <SellerDetailView
         seller={selectedSeller}
         detail={sellerDetail}
+        commissionFrom={commissionFrom}
+        commissionTo={commissionTo}
         saldosLoading={saldosLoading}
         unifiedSaldoForCustomer={unifiedSaldoForCustomer}
         onBack={() => setSelectedSellerId(null)}
@@ -451,11 +473,21 @@ type DetailShape = {
   commission: number;
   commissionBase: number;
   saldoTotal: number;
+  commissionDetails: Array<{
+    id: string;
+    date: string;
+    customerName: string;
+    receiptNumber: string;
+    amount: number;
+    commissionAmount: number;
+  }>;
 };
 
 function SellerDetailView({
   seller,
   detail,
+  commissionFrom,
+  commissionTo,
   saldosLoading,
   unifiedSaldoForCustomer,
   onBack,
@@ -465,6 +497,8 @@ function SellerDetailView({
 }: {
   seller: User;
   detail: DetailShape;
+  commissionFrom: string;
+  commissionTo: string;
   saldosLoading: boolean;
   unifiedSaldoForCustomer: (customerId: string) => number;
   onBack: () => void;
@@ -472,9 +506,33 @@ function SellerDetailView({
   commissionEditable: boolean;
   onUpdateCommission: (userId: string, value: string) => void | Promise<void>;
 }) {
-  const { custs, ords, sales, rate, commission, commissionBase, saldoTotal } = detail;
+  const { custs, ords, sales, rate, commission, commissionBase, saldoTotal, commissionDetails } = detail;
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
+  const downloadCommissionDetailCsv = () => {
+    const rows = [
+      ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'],
+      ...commissionDetails.map((r) => [
+        r.date || '',
+        r.customerName || '',
+        r.receiptNumber || '',
+        String(r.amount.toFixed(2)),
+        String(r.commissionAmount.toFixed(2))
+      ])
+    ];
+    const csv = rows
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `detalle_comision_${seller.name}_${commissionFrom || 'desde'}_${commissionTo || 'hasta'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
@@ -591,6 +649,36 @@ function SellerDetailView({
           </div>
           <p className="text-xl font-black text-indigo-200 tabular-nums">{fmtMoney(commission)}</p>
           <p className="text-[10px] text-slate-500 mt-1">{rate}% sobre recibos del mes ({fmtMoney(commissionBase)})</p>
+        </div>
+      </div>
+
+      <div className="bg-slate-800/60 rounded-2xl border border-slate-700 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-2">
+          <h3 className="font-bold text-white text-sm">
+            Detalle comisión ({commissionFrom || '...'} a {commissionTo || '...'})
+          </h3>
+          <button
+            type="button"
+            onClick={downloadCommissionDetailCsv}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-xs font-semibold transition"
+          >
+            <Download size={14} /> Descargar detalle
+          </button>
+        </div>
+        <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-800">
+          {commissionDetails.length === 0 ? (
+            <p className="p-6 text-sm text-slate-500">No hay recibos en el rango seleccionado para este vendedor.</p>
+          ) : (
+            commissionDetails.map((r) => (
+              <div key={r.id} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-sm">
+                <div className="col-span-2 text-slate-400">{r.date}</div>
+                <div className="col-span-4 text-white truncate">{r.customerName}</div>
+                <div className="col-span-2 text-slate-300 truncate">{r.receiptNumber}</div>
+                <div className="col-span-2 text-right text-emerald-300 tabular-nums">{fmtMoney(r.amount)}</div>
+                <div className="col-span-2 text-right text-indigo-300 tabular-nums">{fmtMoney(r.commissionAmount)}</div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
