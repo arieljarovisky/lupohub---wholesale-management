@@ -2551,12 +2551,57 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     style: 'thin' as const,
     color: { argb: 'FF94A3B8' }
   };
+  const borderSoft = {
+    style: 'thin' as const,
+    color: { argb: 'FFE2E8F0' }
+  };
+
+  const sellerSummary = new Map<
+    string,
+    {
+      vendedor: string;
+      zonaPrincipal: string;
+      clientes: number;
+      pedidos: number;
+      importada: number;
+      recibos: number;
+      saldo: number;
+      movimientos: number;
+    }
+  >();
+  for (const r of mergedList) {
+    const vendedorLabel =
+      (r.account_seller_label != null && String(r.account_seller_label).trim() !== ''
+        ? String(r.account_seller_label).trim()
+        : '') ||
+      (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '') ||
+      'Sin vendedor';
+    const zona = r.account_zone != null ? String(r.account_zone).trim() : '';
+    const key = `${vendedorLabel}|${zona}`;
+    const prev = sellerSummary.get(key) || {
+      vendedor: vendedorLabel,
+      zonaPrincipal: zona || 'Sin zona',
+      clientes: 0,
+      pedidos: 0,
+      importada: 0,
+      recibos: 0,
+      saldo: 0,
+      movimientos: 0
+    };
+    prev.clientes += 1;
+    prev.pedidos += Number(r.totalCargosPendiente) || 0;
+    prev.importada += Number(r.multimediaSaldo) || 0;
+    prev.recibos += Number(r.totalPagos) || 0;
+    prev.saldo += Number(r.saldoPendiente) || 0;
+    prev.movimientos += (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
+    sellerSummary.set(key, prev);
+  }
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'LupoHub';
   workbook.created = new Date();
   const ws = workbook.addWorksheet('Resumen', {
-    views: [{ state: 'frozen', ySplit: 1 }],
+    views: [{ state: 'frozen', ySplit: 2 }],
     properties: { defaultRowHeight: 19 }
   });
 
@@ -2571,6 +2616,26 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     { key: 'saldo', width: 16 },
     { key: 'movs', width: 13 }
   ];
+
+  const reportDate = new Date().toISOString().slice(0, 10);
+  const infoText = `Saldos pendientes por cliente y vendedor | Clientes: ${mergedList.length} | Fecha: ${reportDate}`;
+  ws.addRow([infoText, '', '', '', '', '', '', '', '']);
+  ws.mergeCells(1, 1, 1, 9);
+  const infoCell = ws.getCell('A1');
+  infoCell.font = { bold: true, color: { argb: 'FF334155' }, size: 11, name: 'Calibri' };
+  infoCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+  infoCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFEFF6FF' }
+  };
+  infoCell.border = {
+    top: borderSoft,
+    left: borderSoft,
+    right: borderSoft,
+    bottom: borderSoft
+  };
+  ws.getRow(1).height = 22;
 
   const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Pedidos', 'Cuenta importada', 'Recibos sistema', 'Saldo final', 'Movimientos'];
   const headerRow = ws.addRow(headerTitles);
@@ -2595,7 +2660,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     };
   });
 
-  let rowNum = 2;
+  let rowNum = 3;
   for (const r of mergedList) {
     const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
     const legacyTrim = r.legacy_code != null ? String(r.legacy_code).trim() : '';
@@ -2695,8 +2760,87 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
 
   if (mergedList.length > 0) {
     ws.autoFilter = {
-      from: { row: 1, column: 1 },
+      from: { row: 2, column: 1 },
       to: { row: mergedList.length + 2, column: 9 }
+    };
+  }
+
+  const wsSeller = workbook.addWorksheet('Resumen por vendedor', {
+    views: [{ state: 'frozen', ySplit: 2 }],
+    properties: { defaultRowHeight: 19 }
+  });
+  wsSeller.columns = [
+    { key: 'vendedor', width: 28 },
+    { key: 'zona', width: 18 },
+    { key: 'clientes', width: 12 },
+    { key: 'pedidos', width: 16 },
+    { key: 'importada', width: 18 },
+    { key: 'recibos', width: 16 },
+    { key: 'saldo', width: 16 },
+    { key: 'movimientos', width: 14 }
+  ];
+  wsSeller.addRow([`Resumen agrupado por vendedor | Fecha: ${reportDate}`, '', '', '', '', '', '', '']);
+  wsSeller.mergeCells(1, 1, 1, 8);
+  wsSeller.getCell('A1').font = { bold: true, color: { argb: 'FF334155' }, size: 11, name: 'Calibri' };
+  wsSeller.getCell('A1').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFEFF6FF' }
+  };
+  wsSeller.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+  wsSeller.getRow(1).height = 22;
+
+  const sellerHeader = wsSeller.addRow([
+    'Vendedor habitual',
+    'Zona',
+    'Clientes',
+    'Pedidos',
+    'Cuenta importada',
+    'Recibos sistema',
+    'Saldo final',
+    'Movimientos'
+  ]);
+  sellerHeader.height = 24;
+  sellerHeader.eachCell((cell, colNumber) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+    cell.alignment = { vertical: 'middle', horizontal: colNumber >= 3 ? 'right' : 'left', wrapText: true };
+    cell.border = {
+      top: borderThin,
+      left: borderThin,
+      bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+      right: borderThin
+    };
+  });
+
+  const sellerRows = [...sellerSummary.values()].sort((a, b) => b.saldo - a.saldo || a.vendedor.localeCompare(b.vendedor, 'es'));
+  let sellerRowNum = 3;
+  for (const s of sellerRows) {
+    const row = wsSeller.addRow([
+      s.vendedor,
+      s.zonaPrincipal,
+      s.clientes,
+      Math.round(s.pedidos * 100) / 100,
+      Math.round(s.importada * 100) / 100,
+      Math.round(s.recibos * 100) / 100,
+      Math.round(s.saldo * 100) / 100,
+      s.movimientos
+    ]);
+    const zebra = sellerRowNum % 2 === 0;
+    row.eachCell((cell, colNumber) => {
+      cell.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+      if (zebra) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      cell.border = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
+      cell.alignment = { vertical: 'middle', horizontal: colNumber >= 3 ? 'right' : 'left' };
+      if ([4, 5, 6, 7].includes(colNumber)) cell.numFmt = '#,##0.00';
+      if ([3, 8].includes(colNumber)) cell.numFmt = '0';
+    });
+    sellerRowNum++;
+  }
+  if (sellerRows.length > 0) {
+    wsSeller.autoFilter = {
+      from: { row: 2, column: 1 },
+      to: { row: sellerRows.length + 2, column: 8 }
     };
   }
 
