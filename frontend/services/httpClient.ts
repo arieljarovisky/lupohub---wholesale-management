@@ -135,6 +135,18 @@ export const getBlob = async (path: string, timeoutMs = 60000): Promise<Blob> =>
   return response.data;
 };
 
+/** GET que devuelve Blob + headers (para respetar filename del backend). */
+export const getBlobResponse = async (
+  path: string,
+  timeoutMs = 60000
+): Promise<{ blob: Blob; headers: Record<string, string | undefined> }> => {
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
+  const headers: Record<string, string> = {};
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const response = await axios.get(url, { responseType: 'blob', headers, timeout: timeoutMs });
+  return { blob: response.data, headers: response.headers as Record<string, string | undefined> };
+};
+
 /** POST que devuelve Blob (para descargar archivos con body + auth). */
 export const postBlob = async (path: string, body?: any, timeoutMs = 120000): Promise<Blob> => {
   const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
@@ -149,4 +161,4 @@ export const postBlob = async (path: string, body?: any, timeoutMs = 120000): Pr
 
 export const getBaseUrl = () => baseUrl;
 
-export default { request, requestFormData, getBlob, postBlob, setBaseUrl, setAuthToken };
+export default { request, requestFormData, getBlob, getBlobResponse, postBlob, setBaseUrl, setAuthToken };

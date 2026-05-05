@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer, Transporte, UserTask } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request, requestFormData, getBlob, getBaseUrl, postBlob } from './httpClient';
+import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -10,6 +10,21 @@ const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorM
     console.warn(`API Connection Failed (${errorMessage}). Switching to offline/demo mode.`, error);
     return fallback;
   }
+};
+
+const getFilenameFromContentDisposition = (headerValue?: string): string => {
+  const raw = String(headerValue || '').trim();
+  if (!raw) return '';
+  const utf8Match = raw.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]).trim();
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+  const plainMatch = raw.match(/filename\s*=\s*"([^"]+)"/i) || raw.match(/filename\s*=\s*([^;]+)/i);
+  return plainMatch?.[1]?.trim() || '';
 };
 
 export const api = {
@@ -742,11 +757,14 @@ export const api = {
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
     const qs = q.toString() ? `?${q.toString()}` : '';
-    const blob = await getBlob(`/customers/saldos-pendientes/export-por-cliente${qs}`, 120000);
+    const { blob, headers } = await getBlobResponse(`/customers/saldos-pendientes/export-por-cliente${qs}`, 120000);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const serverFilename =
+      getFilenameFromContentDisposition(headers['content-disposition']) ||
+      `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = serverFilename;
     document.body.appendChild(a);
     a.click();
     a.remove();
