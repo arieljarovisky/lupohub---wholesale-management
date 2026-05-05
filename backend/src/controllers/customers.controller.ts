@@ -2271,7 +2271,20 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const datePart = new Date().toISOString().slice(0, 10);
+    const sellerNameFromFilter =
+      sellerIdFilter && customers.length > 0
+        ? String(customers.find((x) => String(x.seller_id || '') === sellerIdFilter)?.seller_name || '').trim()
+        : '';
+    const sellerLabelRaw =
+      (user.role === 'SELLER' ? String(user.name || '').trim() : '') ||
+      sellerNameFromFilter ||
+      (sellerIdFilter ? String(sellerIdFilter).trim() : 'todos');
+    const sellerLabelSafe = sellerLabelRaw
+      .replace(/[\\/:*?"<>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const filename = `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
