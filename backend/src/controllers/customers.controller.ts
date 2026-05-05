@@ -2222,6 +2222,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       ws.getColumn('E').numFmt = '#,##0.00';
       ws.getColumn('F').numFmt = '#,##0.00';
       ws.getColumn('G').numFmt = '#,##0.00';
+      for (const col of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
+        ws.getColumn(col).alignment = { horizontal: 'left', vertical: 'middle' };
+      }
 
       let saldo = 0;
       for (const m of movs) {
@@ -2257,7 +2260,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         ws.addRow({
           fecha: null,
           tipo: 'AJUSTE',
-          comprobante: hasDateRange ? 'Saldo historico (ajuste fuera de rango)' : 'Saldo unificado cartera',
+          comprobante: 'SALDO',
           pedido: '',
           debe: delta > 0 ? delta : 0,
           haber: delta < 0 ? Math.abs(delta) : 0,
