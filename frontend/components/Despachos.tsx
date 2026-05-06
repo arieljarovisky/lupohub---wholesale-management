@@ -272,6 +272,11 @@ const Despachos: React.FC = () => {
     setSavingProduct(true);
     try {
       const producto = productosSinDespacho.find(p => p.id === selectedProductId);
+      const maxDisponible = Number(producto?.cantidad_disponible ?? producto?.stock_total ?? 0);
+      if (cantidadNum > maxDisponible) {
+        showToast('info', `La cantidad supera lo disponible para este artículo (${maxDisponible}).`);
+        return;
+      }
       const res = await api.addDespachoItem(selectedDespacho.id, {
         product_id: selectedProductId,
         variant_id: null,
@@ -360,7 +365,9 @@ const Despachos: React.FC = () => {
               setAsignarTodosForm({ numero_despacho: '', fecha_despacho: new Date().toISOString().split('T')[0], pais_origen: 'Brasil' });
               try {
                 const list = await api.getProductosSinDespacho();
-                setProductosSinDespachoCount(Array.isArray(list) ? list.length : 0);
+                setProductosSinDespachoCount(
+                  Array.isArray(list) ? list.filter((p: any) => Number(p?.cantidad_disponible || 0) > 0).length : 0
+                );
               } catch {
                 setProductosSinDespachoCount(null);
               }
@@ -888,9 +895,15 @@ const Despachos: React.FC = () => {
                   </div>
                 ) : filteredProductos.length > 0 ? (
                   filteredProductos.slice(0, 50).map(p => (
+                    (() => {
+                      const disponible = Number(p.cantidad_disponible ?? p.stock_total ?? 0);
+                      const disabled = disponible <= 0;
+                      return (
                     <label
                       key={p.id}
-                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                      } ${
                         selectedProductId === p.id 
                           ? 'bg-indigo-600/20 border border-indigo-500' 
                           : 'bg-slate-800/50 border border-transparent hover:bg-slate-800'
@@ -901,10 +914,11 @@ const Despachos: React.FC = () => {
                         name="product"
                         value={p.id}
                         checked={selectedProductId === p.id}
+                        disabled={disabled}
                         onChange={() => {
                           setSelectedProductId(p.id);
                           if (!addCantidad) {
-                            const suggestedQty = Math.max(1, Number(p.stock_total) || 0);
+                            const suggestedQty = Math.max(1, Number(p.cantidad_disponible ?? p.stock_total) || 0);
                             setAddCantidad(String(suggestedQty));
                           }
                         }}
@@ -914,13 +928,17 @@ const Despachos: React.FC = () => {
                         <p className="text-white text-sm font-medium truncate">{p.name}</p>
                         <p className="text-slate-400 text-xs font-mono">{p.sku}</p>
                       </div>
-                      <span className="text-slate-500 text-xs">Stock: {p.stock_total || 0}</span>
+                      <span className="text-slate-500 text-xs">
+                        {disabled ? 'Sin disponible' : `Disponible: ${disponible}`}
+                      </span>
                     </label>
+                      );
+                    })()
                   ))
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Package className="mx-auto mb-2" size={32} />
-                    <p>No hay productos sin despacho asignado</p>
+                    <p>No hay artículos para mostrar</p>
                   </div>
                 )}
               </div>

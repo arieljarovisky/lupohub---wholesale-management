@@ -2,6 +2,28 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 
+const getStockTotalByProductId = async (productId: string): Promise<number> => {
+  const stockRow = await get(
+    `SELECT COALESCE(SUM(s.stock), 0) AS stock_total
+     FROM product_colors pc
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     LEFT JOIN stocks s ON s.variant_id = pv.id
+     WHERE pc.product_id = ?`,
+    [productId]
+  );
+  return Number((stockRow as any)?.stock_total) || 0;
+};
+
+const getAssignedTotalByProductId = async (productId: string): Promise<number> => {
+  const assignedRow = await get(
+    `SELECT COALESCE(SUM(cantidad), 0) AS total_asignado
+     FROM despacho_items
+     WHERE product_id = ?`,
+    [productId]
+  );
+  return Number((assignedRow as any)?.total_asignado) || 0;
+};
+
 // Obtener todos los despachos
 export const getDespachos = async (req: Request, res: Response) => {
   try {
@@ -228,12 +250,28 @@ export const addDespachoItem = async (req: Request, res: Response) => {
     if (!despacho) {
       return res.status(404).json({ message: 'Despacho no encontrado' });
     }
+    const cantidadNum = Math.floor(Number(cantidad) || 0);
+    if (cantidadNum <= 0) {
+      return res.status(400).json({ message: 'La cantidad debe ser mayor a 0' });
+    }
+    if (!product_id) {
+      return res.status(400).json({ message: 'product_id es requerido' });
+    }
+
+    const stockTotal = await getStockTotalByProductId(product_id);
+    const assignedTotal = await getAssignedTotalByProductId(product_id);
+    const available = Math.max(0, stockTotal - assignedTotal);
+    if (cantidadNum > available) {
+      return res.status(400).json({
+        message: `Cantidad excedida. Disponible para asignar: ${available} unidad(es).`
+      });
+    }
 
     const itemId = uuidv4();
     await execute(`
       INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [itemId, id, product_id || null, variant_id || null, cantidad || 0, costo_unitario || null, descripcion_item || null]);
+    `, [itemId, id, product_id || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
 
     // Actualizar el último despacho del producto
     if (product_id) {
@@ -309,15 +347,14 @@ export const asignarDespachoAProducto = async (req: Request, res: Response) => {
       });
     }
 
-    const stockRow = await get(
-      `SELECT COALESCE(SUM(s.stock), 0) AS stock_total
-       FROM product_colors pc
-       JOIN product_variants pv ON pv.product_color_id = pc.id
-       LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pc.product_id = ?`,
-      [product.id]
-    );
-    const cantidad = Number((stockRow as any)?.stock_total) || 0;
+    const stockTotal = await getStockTotalByProductId(product.id);
+    const assignedTotal = await getAssignedTotalByProductId(product.id);
+    const cantidadDisponible = Math.max(0, stockTotal - assignedTotal);
+    if (cantidadDisponible <= 0) {
+      return res.status(400).json({
+        message: `El producto "${product.name}" (${product.sku}) ya no tiene unidades disponibles para asignar a otro despacho.`
+      });
+    }
 
     const yaEnDespacho = await get(
       `SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`,
@@ -328,7 +365,12 @@ export const asignarDespachoAProducto = async (req: Request, res: Response) => {
       await execute(
         `INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
          VALUES (?, ?, ?, NULL, ?, NULL, ?)`,
-        [itemId, despacho.id, product.id, cantidad, `${product.name} - ${product.sku || ''}`.trim()]
+        [itemId, despacho.id, product.id, cantidadDisponible, `${product.name} - ${product.sku || ''}`.trim()]
+      );
+    } else {
+      await execute(
+        `UPDATE despacho_items SET cantidad = cantidad + ? WHERE id = ?`,
+        [cantidadDisponible, (yaEnDespacho as any).id]
       );
     }
 
@@ -377,13 +419,21 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
         p.id, 
         p.name, 
         p.sku,
-        COALESCE(SUM(s.stock), 0) as stock_total
+        COALESCE(SUM(s.stock), 0) as stock_total,
+        COALESCE(di_total.total_asignado, 0) as total_asignado,
+        GREATEST(COALESCE(SUM(s.stock), 0) - COALESCE(di_total.total_asignado, 0), 0) as cantidad_disponible
       FROM products p
       LEFT JOIN product_colors pc ON pc.product_id = p.id
       LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE p.ultimo_despacho_id IS NULL
-      GROUP BY p.id, p.name, p.sku
+      LEFT JOIN (
+        SELECT product_id, SUM(cantidad) as total_asignado
+        FROM despacho_items
+        WHERE product_id IS NOT NULL
+        GROUP BY product_id
+      ) di_total ON di_total.product_id = p.id
+      GROUP BY p.id, p.name, p.sku, di_total.total_asignado
+      HAVING cantidad_disponible > 0
       ORDER BY p.name
     `);
 
@@ -417,13 +467,19 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
         `SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`,
         [despachoId, p.id]
       );
+      const cantidad = Number((p as any).cantidad_disponible) || 0;
+      if (cantidad <= 0) continue;
       if (!yaEnDespacho) {
         const itemId = uuidv4();
-        const cantidad = Number(p.stock_total) || 0;
         await execute(`
           INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
           VALUES (?, ?, ?, NULL, ?, NULL, ?)
         `, [itemId, despachoId, p.id, cantidad, `${p.name} - ${p.sku || ''}`.trim()]);
+      } else {
+        await execute(
+          `UPDATE despacho_items SET cantidad = cantidad + ? WHERE id = ?`,
+          [cantidad, (yaEnDespacho as any).id]
+        );
       }
       await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
         despachoId,
@@ -455,13 +511,20 @@ export const getProductosSinDespacho = async (req: Request, res: Response) => {
         p.name, 
         p.sku, 
         p.pais_origen,
-        COALESCE(SUM(s.stock), 0) as stock_total
+        COALESCE(SUM(s.stock), 0) as stock_total,
+        COALESCE(di_total.total_asignado, 0) as total_asignado,
+        GREATEST(COALESCE(SUM(s.stock), 0) - COALESCE(di_total.total_asignado, 0), 0) as cantidad_disponible
       FROM products p
       LEFT JOIN product_colors pc ON pc.product_id = p.id
       LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE p.ultimo_despacho_id IS NULL
-      GROUP BY p.id, p.name, p.sku, p.pais_origen
+      LEFT JOIN (
+        SELECT product_id, SUM(cantidad) as total_asignado
+        FROM despacho_items
+        WHERE product_id IS NOT NULL
+        GROUP BY product_id
+      ) di_total ON di_total.product_id = p.id
+      GROUP BY p.id, p.name, p.sku, p.pais_origen, di_total.total_asignado
       ORDER BY p.name
       LIMIT 200
     `);
