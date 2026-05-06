@@ -33,6 +33,16 @@ const estadoConfig: Record<string, { label: string; color: string; bgColor: stri
 
 const paisesComunes = ['Brasil', 'China', 'Estados Unidos', 'Italia', 'España', 'Alemania', 'Colombia', 'Perú', 'Chile', 'Otro'];
 
+const buildVariantDisplaySku = (p: any): string => {
+  const base = String(p?.sku || '').trim();
+  const colorCode = String(p?.color_code || '').trim();
+  const sizeCode = String(p?.size_code || '').trim();
+  if (base && colorCode && sizeCode) return `${base}-${colorCode}-${sizeCode}`;
+  if (base && sizeCode) return `${base}-${sizeCode}`;
+  const variantSku = String(p?.variant_sku || '').trim();
+  return variantSku || base || '-';
+};
+
 const Despachos: React.FC = () => {
   const { showToast, showConfirm } = useNotification();
   const [despachos, setDespachos] = useState<Despacho[]>([]);
@@ -319,10 +329,12 @@ const Despachos: React.FC = () => {
   const filteredProductos = productosSinDespacho.filter(p => {
     if (!productSearchTerm) return true;
     const search = productSearchTerm.toLowerCase();
+    const displaySku = buildVariantDisplaySku(p).toLowerCase();
     return (
       p.name?.toLowerCase().includes(search) ||
       p.sku?.toLowerCase().includes(search) ||
       p.variant_sku?.toLowerCase().includes(search) ||
+      displaySku.includes(search) ||
       p.color_name?.toLowerCase().includes(search) ||
       p.size_code?.toLowerCase().includes(search)
     );
@@ -894,6 +906,7 @@ const Despachos: React.FC = () => {
                 ) : filteredProductos.length > 0 ? (
                   filteredProductos.slice(0, 50).map((p) => {
                     const variantKey = p.variant_id || p.id;
+                    const displaySku = buildVariantDisplaySku(p);
                     return (
                       <label
                         key={variantKey}
@@ -917,7 +930,7 @@ const Despachos: React.FC = () => {
                         <div className="flex-1 min-w-0">
                           <p className="text-white text-sm font-medium truncate">{p.name}</p>
                           <p className="text-slate-400 text-xs font-mono">
-                            {p.variant_sku || p.sku} {p.color_name ? `· ${p.color_name}` : ''} {p.size_code ? `· ${p.size_code}` : ''}
+                            {displaySku} {p.color_name ? `· ${p.color_name}` : ''} {p.size_code ? `· ${p.size_code}` : ''}
                           </p>
                         </div>
                         <span className="text-slate-500 text-xs">Stock actual: {Number(p.stock_total) || 0}</span>

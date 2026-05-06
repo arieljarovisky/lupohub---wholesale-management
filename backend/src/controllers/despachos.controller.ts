@@ -525,6 +525,7 @@ export const getProductosSinDespacho = async (req: Request, res: Response) => {
         p.sku,
         pv.id AS variant_id,
         pv.sku AS variant_sku,
+        c.code AS color_code,
         s2.size_code,
         c.name AS color_name,
         p.pais_origen,
