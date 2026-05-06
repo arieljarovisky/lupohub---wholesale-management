@@ -329,12 +329,18 @@ const Despachos: React.FC = () => {
   const filteredProductos = productosSinDespacho.filter(p => {
     if (!productSearchTerm) return true;
     const search = productSearchTerm.toLowerCase();
+    const compact = (v: any) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const searchCompact = compact(productSearchTerm);
     const displaySku = buildVariantDisplaySku(p).toLowerCase();
+    const displaySkuCompact = compact(displaySku);
     return (
       p.name?.toLowerCase().includes(search) ||
       p.sku?.toLowerCase().includes(search) ||
       p.variant_sku?.toLowerCase().includes(search) ||
       displaySku.includes(search) ||
+      displaySkuCompact.includes(searchCompact) ||
+      compact(p.sku).includes(searchCompact) ||
+      compact(p.variant_sku).includes(searchCompact) ||
       p.color_name?.toLowerCase().includes(search) ||
       p.size_code?.toLowerCase().includes(search)
     );

@@ -518,6 +518,18 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
 // Obtener productos sin despacho asignado
 export const getProductosSinDespacho = async (req: Request, res: Response) => {
   try {
+    const searchRaw = String((req.query as any)?.search || '').trim();
+    const search = `%${searchRaw}%`;
+    const whereSearch = searchRaw
+      ? `WHERE (
+          p.name LIKE ? OR
+          p.sku LIKE ? OR
+          pv.sku LIKE ? OR
+          c.name LIKE ? OR
+          s2.size_code LIKE ?
+        )`
+      : '';
+    const params = searchRaw ? [search, search, search, search, search] : [];
     const productos = await query(`
       SELECT 
         p.id AS product_id,
@@ -536,9 +548,9 @@ export const getProductosSinDespacho = async (req: Request, res: Response) => {
       LEFT JOIN colors c ON c.id = pc.color_id
       LEFT JOIN sizes s2 ON s2.id = pv.size_id
       LEFT JOIN stocks s ON s.variant_id = pv.id
+      ${whereSearch}
       ORDER BY p.name, c.name, s2.size_code
-      LIMIT 1000
-    `);
+    `, params);
 
     res.json(productos);
   } catch (error: any) {
