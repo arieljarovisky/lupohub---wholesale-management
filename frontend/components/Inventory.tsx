@@ -4228,14 +4228,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!articleProductId && articleVariantIds.length === 0) return;
+                      const variantIds = Array.from(
+                        new Set(
+                          (bulkLinkVariants || [])
+                            .map((v) => String(v?.variantId || '').trim())
+                            .filter(Boolean)
+                        )
+                      );
+                      if (!bulkLinkProductId && variantIds.length === 0) return;
                       openArticleStockHistory({
-                        productId: articleProductId,
-                        variantIds: articleVariantIds,
-                        title: displayName
+                        productId: bulkLinkProductId || undefined,
+                        variantIds,
+                        title: bulkLinkGroupKey || 'Artículo'
                       });
                     }}
-                    disabled={!articleProductId && articleVariantIds.length === 0}
+                    disabled={!bulkLinkProductId && (bulkLinkVariants || []).length === 0}
                     className="px-3 py-2.5 min-h-[44px] inline-flex items-center justify-center gap-2 bg-slate-700 hover:bg-violet-600 hover:text-white rounded-lg text-slate-200 text-sm font-semibold transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Ver historial de stock del artículo"
                   >
