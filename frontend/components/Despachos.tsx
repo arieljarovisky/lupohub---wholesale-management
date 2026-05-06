@@ -258,22 +258,36 @@ const Despachos: React.FC = () => {
       showToast('info', 'Seleccioná un producto');
       return;
     }
+    const cantidadNum = Number(addCantidad);
+    if (!Number.isFinite(cantidadNum) || cantidadNum <= 0) {
+      showToast('info', 'Ingresá una cantidad mayor a 0');
+      return;
+    }
+    const costoNum = addCosto === '' ? null : Number(addCosto);
+    if (costoNum != null && (!Number.isFinite(costoNum) || costoNum < 0)) {
+      showToast('info', 'El costo unitario no es válido');
+      return;
+    }
 
     setSavingProduct(true);
     try {
       const producto = productosSinDespacho.find(p => p.id === selectedProductId);
-      await api.addDespachoItem(selectedDespacho.id, {
+      const res = await api.addDespachoItem(selectedDespacho.id, {
         product_id: selectedProductId,
         variant_id: null,
-        cantidad: parseInt(addCantidad) || 0,
-        costo_unitario: addCosto ? parseFloat(addCosto) : null,
+        cantidad: Math.floor(cantidadNum),
+        costo_unitario: costoNum,
         descripcion_item: producto ? `${producto.name} - ${producto.sku}` : ''
       });
+      if (!res?.id) {
+        throw new Error(res?.message || 'No se pudo agregar el producto al despacho');
+      }
 
       // Recargar detalle
       const detail = await api.getDespachoById(selectedDespacho.id);
       setSelectedDespacho(detail);
       setShowAddProductModal(false);
+      showToast('success', 'Producto agregado al despacho');
       fetchDespachos();
     } catch (error: any) {
       showToast('error', error.message || 'No se pudo agregar');
@@ -887,7 +901,13 @@ const Despachos: React.FC = () => {
                         name="product"
                         value={p.id}
                         checked={selectedProductId === p.id}
-                        onChange={() => setSelectedProductId(p.id)}
+                        onChange={() => {
+                          setSelectedProductId(p.id);
+                          if (!addCantidad) {
+                            const suggestedQty = Math.max(1, Number(p.stock_total) || 0);
+                            setAddCantidad(String(suggestedQty));
+                          }
+                        }}
                         className="accent-indigo-500"
                       />
                       <div className="flex-1 min-w-0">
@@ -940,7 +960,7 @@ const Despachos: React.FC = () => {
               </button>
               <button
                 onClick={handleAddProductToDespacho}
-                disabled={savingProduct || !selectedProductId}
+                disabled={savingProduct || !selectedProductId || !Number.isFinite(Number(addCantidad)) || Number(addCantidad) <= 0}
                 className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white font-bold flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {savingProduct ? (
