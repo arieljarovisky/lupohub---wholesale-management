@@ -254,28 +254,41 @@ export const addDespachoItem = async (req: Request, res: Response) => {
     if (cantidadNum <= 0) {
       return res.status(400).json({ message: 'La cantidad debe ser mayor a 0' });
     }
-    if (!product_id) {
-      return res.status(400).json({ message: 'product_id es requerido' });
+    if (!variant_id) {
+      return res.status(400).json({ message: 'variant_id es requerido' });
     }
 
-    const stockTotal = await getStockTotalByProductId(product_id);
-    const assignedTotal = await getAssignedTotalByProductId(product_id);
-    const available = Math.max(0, stockTotal - assignedTotal);
-    if (cantidadNum > available) {
-      return res.status(400).json({
-        message: `Cantidad excedida. Disponible para asignar: ${available} unidad(es).`
-      });
+    const variantRow = await get(
+      `SELECT pv.id AS variant_id, pc.product_id AS product_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       WHERE pv.id = ?
+       LIMIT 1`,
+      [variant_id]
+    );
+    if (!variantRow?.variant_id || !variantRow?.product_id) {
+      return res.status(404).json({ message: 'Variante no encontrada' });
     }
+    const resolvedProductId = product_id || variantRow.product_id;
 
     const itemId = uuidv4();
     await execute(`
       INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [itemId, id, product_id || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
+    `, [itemId, id, resolvedProductId || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
+
+    // Al cargar mercadería al despacho, sumar al stock de la variante
+    const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variant_id]);
+    const currentStock = Number(stockRow?.stock || 0);
+    await execute(
+      `INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE stock = ?`,
+      [variant_id, currentStock + cantidadNum, currentStock + cantidadNum]
+    );
 
     // Actualizar el último despacho del producto
-    if (product_id) {
-      await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, product_id]);
+    if (resolvedProductId) {
+      await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, resolvedProductId]);
     }
 
     res.status(201).json({ 
@@ -507,26 +520,23 @@ export const getProductosSinDespacho = async (req: Request, res: Response) => {
   try {
     const productos = await query(`
       SELECT 
-        p.id, 
+        p.id AS product_id,
         p.name, 
-        p.sku, 
+        p.sku,
+        pv.id AS variant_id,
+        pv.sku AS variant_sku,
+        s2.size_code,
+        c.name AS color_name,
         p.pais_origen,
-        COALESCE(SUM(s.stock), 0) as stock_total,
-        COALESCE(di_total.total_asignado, 0) as total_asignado,
-        GREATEST(COALESCE(SUM(s.stock), 0) - COALESCE(di_total.total_asignado, 0), 0) as cantidad_disponible
+        COALESCE(s.stock, 0) as stock_total
       FROM products p
-      LEFT JOIN product_colors pc ON pc.product_id = p.id
-      LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_colors pc ON pc.product_id = p.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN sizes s2 ON s2.id = pv.size_id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      LEFT JOIN (
-        SELECT product_id, SUM(cantidad) as total_asignado
-        FROM despacho_items
-        WHERE product_id IS NOT NULL
-        GROUP BY product_id
-      ) di_total ON di_total.product_id = p.id
-      GROUP BY p.id, p.name, p.sku, p.pais_origen, di_total.total_asignado
-      ORDER BY p.name
-      LIMIT 200
+      ORDER BY p.name, c.name, s2.size_code
+      LIMIT 1000
     `);
 
     res.json(productos);

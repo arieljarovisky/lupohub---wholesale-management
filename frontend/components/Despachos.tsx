@@ -240,7 +240,7 @@ const Despachos: React.FC = () => {
     setShowAddProductModal(true);
     setLoadingProductos(true);
     setSelectedProductId('');
-    setAddCantidad('');
+    setAddCantidad('0');
     setAddCosto('');
     setProductSearchTerm('');
     try {
@@ -271,18 +271,15 @@ const Despachos: React.FC = () => {
 
     setSavingProduct(true);
     try {
-      const producto = productosSinDespacho.find(p => p.id === selectedProductId);
-      const maxDisponible = Number(producto?.cantidad_disponible ?? producto?.stock_total ?? 0);
-      if (cantidadNum > maxDisponible) {
-        showToast('info', `La cantidad supera lo disponible para este artículo (${maxDisponible}).`);
-        return;
-      }
+      const producto = productosSinDespacho.find((p) => (p.variant_id || p.id) === selectedProductId);
       const res = await api.addDespachoItem(selectedDespacho.id, {
-        product_id: selectedProductId,
-        variant_id: null,
+        product_id: producto?.product_id || null,
+        variant_id: producto?.variant_id || selectedProductId,
         cantidad: Math.floor(cantidadNum),
         costo_unitario: costoNum,
-        descripcion_item: producto ? `${producto.name} - ${producto.sku}` : ''
+        descripcion_item: producto
+          ? `${producto.name} - ${producto.variant_sku || producto.sku || ''} ${producto.color_name ? `(${producto.color_name}` : ''}${producto.size_code ? ` ${producto.size_code}` : ''}${producto.color_name ? ')' : ''}`.trim()
+          : ''
       });
       if (!res?.id) {
         throw new Error(res?.message || 'No se pudo agregar el producto al despacho');
@@ -324,7 +321,10 @@ const Despachos: React.FC = () => {
     const search = productSearchTerm.toLowerCase();
     return (
       p.name?.toLowerCase().includes(search) ||
-      p.sku?.toLowerCase().includes(search)
+      p.sku?.toLowerCase().includes(search) ||
+      p.variant_sku?.toLowerCase().includes(search) ||
+      p.color_name?.toLowerCase().includes(search) ||
+      p.size_code?.toLowerCase().includes(search)
     );
   });
 
@@ -365,9 +365,7 @@ const Despachos: React.FC = () => {
               setAsignarTodosForm({ numero_despacho: '', fecha_despacho: new Date().toISOString().split('T')[0], pais_origen: 'Brasil' });
               try {
                 const list = await api.getProductosSinDespacho();
-                setProductosSinDespachoCount(
-                  Array.isArray(list) ? list.filter((p: any) => Number(p?.cantidad_disponible || 0) > 0).length : 0
-                );
+                setProductosSinDespachoCount(Array.isArray(list) ? list.length : 0);
               } catch {
                 setProductosSinDespachoCount(null);
               }
@@ -894,47 +892,38 @@ const Despachos: React.FC = () => {
                     <Loader2 className="animate-spin text-indigo-400" size={24} />
                   </div>
                 ) : filteredProductos.length > 0 ? (
-                  filteredProductos.slice(0, 50).map(p => (
-                    (() => {
-                      const disponible = Number(p.cantidad_disponible ?? p.stock_total ?? 0);
-                      const disabled = disponible <= 0;
-                      return (
-                    <label
-                      key={p.id}
-                      className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
-                        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                      } ${
-                        selectedProductId === p.id 
-                          ? 'bg-indigo-600/20 border border-indigo-500' 
-                          : 'bg-slate-800/50 border border-transparent hover:bg-slate-800'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="product"
-                        value={p.id}
-                        checked={selectedProductId === p.id}
-                        disabled={disabled}
-                        onChange={() => {
-                          setSelectedProductId(p.id);
-                          if (!addCantidad) {
-                            const suggestedQty = Math.max(1, Number(p.cantidad_disponible ?? p.stock_total) || 0);
-                            setAddCantidad(String(suggestedQty));
-                          }
-                        }}
-                        className="accent-indigo-500"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">{p.name}</p>
-                        <p className="text-slate-400 text-xs font-mono">{p.sku}</p>
-                      </div>
-                      <span className="text-slate-500 text-xs">
-                        {disabled ? 'Sin disponible' : `Disponible: ${disponible}`}
-                      </span>
-                    </label>
-                      );
-                    })()
-                  ))
+                  filteredProductos.slice(0, 50).map((p) => {
+                    const variantKey = p.variant_id || p.id;
+                    return (
+                      <label
+                        key={variantKey}
+                        className={`flex items-center gap-3 p-3 rounded-xl transition-colors cursor-pointer ${
+                          selectedProductId === variantKey
+                            ? 'bg-indigo-600/20 border border-indigo-500'
+                            : 'bg-slate-800/50 border border-transparent hover:bg-slate-800'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="product"
+                          value={variantKey}
+                          checked={selectedProductId === variantKey}
+                          onChange={() => {
+                            setSelectedProductId(variantKey);
+                            setAddCantidad('0');
+                          }}
+                          className="accent-indigo-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-medium truncate">{p.name}</p>
+                          <p className="text-slate-400 text-xs font-mono">
+                            {p.variant_sku || p.sku} {p.color_name ? `· ${p.color_name}` : ''} {p.size_code ? `· ${p.size_code}` : ''}
+                          </p>
+                        </div>
+                        <span className="text-slate-500 text-xs">Stock actual: {Number(p.stock_total) || 0}</span>
+                      </label>
+                    );
+                  })
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Package className="mx-auto mb-2" size={32} />

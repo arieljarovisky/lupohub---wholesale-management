@@ -28,7 +28,25 @@ async function allocateOldestDespachosForVariant(variantId: string, requestedQty
   const productId = await getProductIdForVariant(variantId);
   if (!productId) return [{ despachoId: null, quantity: qty }];
 
-  const rows = await query(
+  const variantRows = await query(
+    `SELECT
+       di.despacho_id AS despachoId,
+       COALESCE(di.cantidad, 0) AS totalIngresado,
+       COALESCE(used.totalAsignado, 0) AS totalAsignado
+     FROM despacho_items di
+     JOIN despachos d ON d.id = di.despacho_id
+     LEFT JOIN (
+       SELECT oi.despacho_id, oi.variant_id, SUM(oi.quantity) AS totalAsignado
+       FROM order_items oi
+       WHERE oi.despacho_id IS NOT NULL
+       GROUP BY oi.despacho_id, oi.variant_id
+     ) used ON used.despacho_id = di.despacho_id AND used.variant_id = di.variant_id
+     WHERE di.variant_id = ?
+     ORDER BY d.fecha_despacho ASC, d.created_at ASC, di.created_at ASC`,
+    [variantId]
+  ) as Array<{ despachoId: string; totalIngresado: number; totalAsignado: number }>;
+
+  const rows = variantRows.length > 0 ? variantRows : await query(
     `SELECT
        di.despacho_id AS despachoId,
        COALESCE(di.cantidad, 0) AS totalIngresado,
@@ -43,7 +61,7 @@ async function allocateOldestDespachosForVariant(variantId: string, requestedQty
        WHERE oi.despacho_id IS NOT NULL
        GROUP BY oi.despacho_id, pc.product_id
      ) used ON used.despacho_id = di.despacho_id AND used.product_id = di.product_id
-     WHERE di.product_id = ?
+     WHERE di.product_id = ? AND di.variant_id IS NULL
      ORDER BY d.fecha_despacho ASC, d.created_at ASC, di.created_at ASC`,
     [productId]
   ) as Array<{ despachoId: string; totalIngresado: number; totalAsignado: number }>;
