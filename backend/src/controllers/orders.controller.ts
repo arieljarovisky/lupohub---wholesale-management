@@ -10,6 +10,60 @@ import {
 } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
+async function getProductIdForVariant(variantId: string): Promise<string | null> {
+  const row = await get(
+    `SELECT pc.product_id AS product_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?
+     LIMIT 1`,
+    [variantId]
+  );
+  return (row?.product_id as string) || null;
+}
+
+async function allocateOldestDespachosForVariant(variantId: string, requestedQty: number): Promise<Array<{ despachoId: string | null; quantity: number }>> {
+  const qty = Math.max(0, Math.floor(Number(requestedQty) || 0));
+  if (qty <= 0) return [];
+  const productId = await getProductIdForVariant(variantId);
+  if (!productId) return [{ despachoId: null, quantity: qty }];
+
+  const rows = await query(
+    `SELECT
+       di.despacho_id AS despachoId,
+       COALESCE(di.cantidad, 0) AS totalIngresado,
+       COALESCE(used.totalAsignado, 0) AS totalAsignado
+     FROM despacho_items di
+     JOIN despachos d ON d.id = di.despacho_id
+     LEFT JOIN (
+       SELECT oi.despacho_id, pc.product_id, SUM(oi.quantity) AS totalAsignado
+       FROM order_items oi
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       WHERE oi.despacho_id IS NOT NULL
+       GROUP BY oi.despacho_id, pc.product_id
+     ) used ON used.despacho_id = di.despacho_id AND used.product_id = di.product_id
+     WHERE di.product_id = ?
+     ORDER BY d.fecha_despacho ASC, d.created_at ASC, di.created_at ASC`,
+    [productId]
+  ) as Array<{ despachoId: string; totalIngresado: number; totalAsignado: number }>;
+
+  const out: Array<{ despachoId: string | null; quantity: number }> = [];
+  let remaining = qty;
+  for (const r of rows) {
+    if (remaining <= 0) break;
+    const available = Math.max(0, Number(r.totalIngresado || 0) - Number(r.totalAsignado || 0));
+    if (available <= 0) continue;
+    const take = Math.min(remaining, available);
+    out.push({ despachoId: r.despachoId, quantity: take });
+    remaining -= take;
+  }
+  if (remaining > 0) {
+    out.push({ despachoId: null, quantity: remaining });
+  }
+  return out;
+}
+
 async function resolveDespachoIdForItem(item: any, variantId?: string): Promise<string | null> {
   const raw = item?.despachoId ?? item?.despacho_id;
   if (raw != null && raw !== '') {
@@ -262,6 +316,7 @@ export const createOrder = async (req: any, res: any) => {
   const orderId = newOrder.id || uuidv4();
 
   try {
+    const despachoWarnings: string[] = [];
     const toSqlDate = (d: string) => {
       try {
         const dt = new Date(d);
@@ -304,11 +359,24 @@ export const createOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-      const despachoId = await resolveDespachoIdForItem(item, variantId);
-      await execute(
-        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, item.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, despachoId]
-      );
+      const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
+      const allocations = explicitDespachoId
+        ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
+        : await allocateOldestDespachosForVariant(variantId, item.quantity);
+      const unassignedQty = allocations
+        .filter((a) => !a.despachoId)
+        .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+      if (unassignedQty > 0) {
+        const itemLabel = item?.sku || item?.productName || variantId;
+        despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
+      }
+      for (const alloc of allocations) {
+        if (!alloc.quantity || alloc.quantity <= 0) continue;
+        await execute(
+          `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuidv4(), orderId, variantId, alloc.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, alloc.despachoId]
+        );
+      }
     }
 
     // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
@@ -322,7 +390,7 @@ export const createOrder = async (req: any, res: any) => {
        WHERE o.id = ?`,
       [orderId]
     );
-    if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus });
+    if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus, despachoWarnings });
     const items = await query(`
       SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -369,7 +437,8 @@ export const createOrder = async (req: any, res: any) => {
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
       items: itemsMapped,
       paymentStatus: mapPaymentStatus(created),
-      noStockImpact: !!created.no_stock_impact
+      noStockImpact: !!created.no_stock_impact,
+      despachoWarnings
     };
     res.status(201).json(orderResponse);
   } catch (error) {
@@ -462,6 +531,7 @@ export const updateOrder = async (req: any, res: any) => {
     return res.status(400).json({ message: "Datos de pedido inválidos" });
   }
   try {
+    const despachoWarnings: string[] = [];
     const toSqlDate = (d: string) => {
       try {
         const dt = new Date(d);
@@ -500,11 +570,27 @@ export const updateOrder = async (req: any, res: any) => {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-      const despachoId = await resolveDespachoIdForItem(item, variantId);
-      await execute(
-        "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [uuidv4(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]
-      );
+      const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
+      const allocations = explicitDespachoId
+        ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
+        : await allocateOldestDespachosForVariant(variantId, item.quantity);
+      const unassignedQty = allocations
+        .filter((a) => !a.despachoId)
+        .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+      if (unassignedQty > 0) {
+        const itemLabel = item?.sku || item?.productName || variantId;
+        despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
+      }
+      let pickedRemaining = Math.max(0, Math.floor(Number(item.picked) || 0));
+      for (const alloc of allocations) {
+        if (!alloc.quantity || alloc.quantity <= 0) continue;
+        const pickedForLine = Math.min(pickedRemaining, alloc.quantity);
+        pickedRemaining -= pickedForLine;
+        await execute(
+          "INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [uuidv4(), id, variantId, alloc.quantity, pickedForLine, item.priceAtMoment, sellAsPack, alloc.despachoId]
+        );
+      }
     }
     const created = await get(
       `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
@@ -515,7 +601,7 @@ export const updateOrder = async (req: any, res: any) => {
        WHERE o.id = ?`,
       [id]
     );
-    if (!created) return res.json({ ...updated, id });
+    if (!created) return res.json({ ...updated, id, despachoWarnings });
     const itemsRows = await query(`
       SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -562,7 +648,8 @@ export const updateOrder = async (req: any, res: any) => {
       dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
       items: itemsMapped,
       paymentStatus: mapPaymentStatus(created),
-      noStockImpact: !!created.no_stock_impact
+      noStockImpact: !!created.no_stock_impact,
+      despachoWarnings
     });
   } catch (error) {
     console.error(error);

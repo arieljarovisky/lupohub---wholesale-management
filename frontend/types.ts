@@ -194,6 +194,8 @@ export interface Order {
   noStockImpact?: boolean;
   /** Si el backend lo envía: hubo movimiento PEDIDO_MAYORISTA en historial (stock ya descontado de verdad). */
   mayoristaStockApplied?: boolean;
+  /** Avisos al guardar: líneas que quedaron (total o parcial) sin despacho. */
+  despachoWarnings?: string[];
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

@@ -433,6 +433,10 @@ const App: React.FC = () => {
       setEditingOrder(null);
       editingOrderIdRef.current = null;
       setCurrentView('orders');
+      if (Array.isArray((savedOrder as any)?.despachoWarnings) && (savedOrder as any).despachoWarnings.length > 0) {
+        const warnings = (savedOrder as any).despachoWarnings as string[];
+        showToast('warning', warnings.slice(0, 2).join(' ') + (warnings.length > 2 ? ' ...' : ''));
+      }
       try {
         localStorage.removeItem('lupo_order_template_draft');
       } catch {
