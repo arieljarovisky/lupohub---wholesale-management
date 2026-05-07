@@ -404,6 +404,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           o.total AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit,
           i.cae,
           i.cae_fch_vto AS cae_fch_vto,
           i.created_at
@@ -425,6 +426,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           cn.amount_credited AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
           cn.created_at
@@ -447,6 +449,7 @@ export const exportBilling = async (req: Request, res: Response) => {
       'numero_hasta',
       'pedido_id',
       'cliente',
+      'cuit',
       'importe',
       'cae',
       'cae_fch_vto'
@@ -463,6 +466,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         r.numero_hasta,
         r.order_id,
         `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
+        `"${String(r.customer_cuit ?? '').replace(/"/g, '""')}"`,
         Number(r.importe) || 0,
         r.cae,
         r.cae_fch_vto || ''
@@ -492,7 +496,8 @@ export const exportBilling = async (req: Request, res: Response) => {
           e.line_date,
           e.numero,
           e.importe,
-          c.business_name AS customer_business_name
+          c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit
         FROM customer_multimedia_entries e
         JOIN customers c ON c.id = e.customer_id
         WHERE ${importedWhere.join(' AND ')}
@@ -530,6 +535,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           `"${numero.replace(/"/g, '""')}"`,
           '',
           `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
+          `"${String(r.customer_cuit ?? '').replace(/"/g, '""')}"`,
           importe,
           '',
           ''
