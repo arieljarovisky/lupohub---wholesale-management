@@ -1834,11 +1834,12 @@ export const api = {
 
   // ============ FACTURACIÓN (Facturas + Notas de crédito) ============
 
-  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
+  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
     if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.province) queryParams.append('province', params.province);
     if (params?.tipo) queryParams.append('tipo', params.tipo);
     const qs = queryParams.toString();
     return handleRequest(async () => {
@@ -1846,11 +1847,12 @@ export const api = {
     }, [], 'getBilling');
   },
 
-  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
+  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
     if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.province) queryParams.append('province', params.province);
     if (params?.tipo) queryParams.append('tipo', params.tipo);
     const qs = queryParams.toString();
     const blob = await getBlob(`/billing/export${qs ? '?' + qs : ''}`);
@@ -1864,12 +1866,13 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string }): Promise<void> => {
+  exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string; province?: string }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
     if (params?.month) queryParams.append('month', params.month);
     if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.province) queryParams.append('province', params.province);
     const qs = queryParams.toString();
     const blob = await getBlob(`/billing/export-retper${qs ? '?' + qs : ''}`);
     const url = URL.createObjectURL(blob);
@@ -1900,13 +1903,14 @@ export const api = {
 
   // ============ PAGOS (recibos) ============
 
-  getPayments: async (params?: { customerId?: string; invoiceId?: string; orderId?: string; desde?: string; hasta?: string }): Promise<import('../types').Payment[]> => {
+  getPayments: async (params?: { customerId?: string; invoiceId?: string; orderId?: string; desde?: string; hasta?: string; province?: string }): Promise<import('../types').Payment[]> => {
     const queryParams = new URLSearchParams();
     if (params?.customerId) queryParams.append('customerId', params.customerId);
     if (params?.invoiceId) queryParams.append('invoiceId', params.invoiceId);
     if (params?.orderId) queryParams.append('orderId', params.orderId);
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.province) queryParams.append('province', params.province);
     const qs = queryParams.toString();
     return await request<any[]>(`/payments${qs ? '?' + qs : ''}`, 'GET') as any;
   },

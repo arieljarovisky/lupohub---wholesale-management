@@ -74,7 +74,7 @@ export const listPayments = async (req: any, res: Response) => {
 
     const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
     const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
-    const { customerId, invoiceId, orderId, desde, hasta } = req.query as any;
+    const { customerId, invoiceId, orderId, desde, hasta, province } = req.query as any;
     const where: string[] = [];
     const params: any[] = [];
     if (customerId) { where.push('p.customer_id = ?'); params.push(customerId); }
@@ -95,6 +95,10 @@ export const listPayments = async (req: any, res: Response) => {
     if (orderId) { where.push('p.order_id = ?'); params.push(orderId); }
     if (desde) { where.push('p.date >= ?'); params.push(desde); }
     if (hasta) { where.push('p.date <= ?'); params.push(hasta); }
+    if (province && String(province).trim()) {
+      where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+      params.push(`%${String(province).trim().toLowerCase()}%`);
+    }
 
     // Para SELLER: solo pagos de clientes asignados a ese vendedor
     if (user.role === 'SELLER') {

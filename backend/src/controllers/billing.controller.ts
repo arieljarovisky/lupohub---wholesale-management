@@ -85,10 +85,11 @@ async function ensureAgipPadronTable(): Promise<void> {
 /** Lista unificada de facturas y notas de crédito, con filtros opcionales. */
 export const listBilling = async (req: Request, res: Response) => {
   try {
-    const { desde, hasta, customerId, tipo } = req.query as {
+    const { desde, hasta, customerId, province, tipo } = req.query as {
       desde?: string;
       hasta?: string;
       customerId?: string;
+      province?: string;
       tipo?: 'FACTURA' | 'NC';
     };
 
@@ -106,6 +107,10 @@ export const listBilling = async (req: Request, res: Response) => {
     if (customerId) {
       whereParts.push('b.customer_id = ?');
       params.push(customerId);
+    }
+    if (province && String(province).trim()) {
+      whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
+      params.push(`%${String(province).trim().toLowerCase()}%`);
     }
     if (tipo === 'FACTURA' || tipo === 'NC') {
       whereParts.push('b.tipo = ?');
@@ -194,6 +199,10 @@ export const listBilling = async (req: Request, res: Response) => {
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
       if (customerId) { importedWhere.push('e.customer_id = ?'); importedParams.push(customerId); }
+      if (province && String(province).trim()) {
+        importedWhere.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+        importedParams.push(`%${String(province).trim().toLowerCase()}%`);
+      }
       if (authUser?.role === 'SELLER') {
         importedWhere.push('c.seller_id = ?');
         importedParams.push(authUser.id);
@@ -291,10 +300,11 @@ export const listBilling = async (req: Request, res: Response) => {
 export const exportBilling = async (req: Request, res: Response) => {
   try {
     // Reutilizar listBilling internamente sería ideal, pero aquí rearmamos consulta para evitar doble serialización
-    const { desde, hasta, customerId, tipo } = req.query as {
+    const { desde, hasta, customerId, province, tipo } = req.query as {
       desde?: string;
       hasta?: string;
       customerId?: string;
+      province?: string;
       tipo?: 'FACTURA' | 'NC';
     };
 
@@ -312,6 +322,10 @@ export const exportBilling = async (req: Request, res: Response) => {
     if (customerId) {
       whereParts.push('b.customer_id = ?');
       params.push(customerId);
+    }
+    if (province && String(province).trim()) {
+      whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
+      params.push(`%${String(province).trim().toLowerCase()}%`);
     }
     if (tipo === 'FACTURA' || tipo === 'NC') {
       whereParts.push('b.tipo = ?');
@@ -413,6 +427,10 @@ export const exportBilling = async (req: Request, res: Response) => {
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
       if (customerId) { importedWhere.push('e.customer_id = ?'); importedParams.push(customerId); }
+      if (province && String(province).trim()) {
+        importedWhere.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+        importedParams.push(`%${String(province).trim().toLowerCase()}%`);
+      }
       if (authUser?.role === 'SELLER') {
         importedWhere.push('c.seller_id = ?');
         importedParams.push(authUser.id);
@@ -486,7 +504,13 @@ export const exportBilling = async (req: Request, res: Response) => {
 /** Exporta TXT "RetPer_YYYYMM.txt" con layout fijo compatible con estudio (AGIP). */
 export const exportRetPerTxt = async (req: Request, res: Response) => {
   try {
-    const { desde, hasta, customerId, month } = req.query as { desde?: string; hasta?: string; customerId?: string; month?: string };
+    const { desde, hasta, customerId, province, month } = req.query as {
+      desde?: string;
+      hasta?: string;
+      customerId?: string;
+      province?: string;
+      month?: string;
+    };
     const monthMatch = String(month || '').match(/^(\d{4})-(\d{2})$/);
     let fromDate = desde;
     let toDate = hasta;
@@ -510,6 +534,10 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     if (customerId) {
       where.push('o.customer_id = ?');
       params.push(customerId);
+    }
+    if (province && String(province).trim()) {
+      where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+      params.push(`%${String(province).trim().toLowerCase()}%`);
     }
     // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período.
     // Filtrar por ciudad textual deja afuera clientes válidos si el dato no está normalizado.
@@ -603,6 +631,12 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         ' '.repeat(11)
       ].join('');
     });
+
+    if (!lines.length) {
+      return res.status(400).json({
+        message: 'No hay registros para exportar en el período seleccionado. Verificá rango de fechas, cliente y padrón AGIP importado.'
+      });
+    }
 
     const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;

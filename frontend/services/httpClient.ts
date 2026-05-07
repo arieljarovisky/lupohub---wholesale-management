@@ -131,8 +131,29 @@ export const getBlob = async (path: string, timeoutMs = 60000): Promise<Blob> =>
   const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
   const headers: Record<string, string> = {};
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const response = await axios.get(url, { responseType: 'blob', headers, timeout: timeoutMs });
-  return response.data;
+  try {
+    const response = await axios.get(url, { responseType: 'blob', headers, timeout: timeoutMs });
+    return response.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err)) {
+      const blob = err.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const raw = await blob.text();
+          const parsed = raw ? JSON.parse(raw) : null;
+          const msg =
+            (typeof parsed?.message === 'string' && parsed.message) ||
+            (typeof parsed?.error === 'string' && parsed.error) ||
+            '';
+          if (msg) throw new Error(msg);
+        } catch {
+          // ignore parse errors and use fallback message
+        }
+      }
+      throw new Error(err.message || 'Error descargando archivo');
+    }
+    throw err;
+  }
 };
 
 /** GET que devuelve Blob + headers (para respetar filename del backend). */

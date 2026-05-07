@@ -31,6 +31,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [desde, setDesde] = useState<string>('');
   const [hasta, setHasta] = useState<string>('');
   const [customerId, setCustomerId] = useState<string>('ALL');
+  const [province, setProvince] = useState<string>('ALL');
   const [tipo, setTipo] = useState<'ALL' | 'FACTURA' | 'NC'>('ALL');
 
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -91,6 +92,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         desde: desde || undefined,
         hasta: hasta || undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined,
+        province: province !== 'ALL' ? province : undefined,
         tipo: tipo === 'ALL' ? undefined : tipo
       });
       setItems(data);
@@ -107,6 +109,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         desde: desde || undefined,
         hasta: hasta || undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined,
+        province: province !== 'ALL' ? province : undefined,
       });
       setPayments(Array.isArray(rows) ? (rows as any) : []);
     } catch (err: any) {
@@ -127,6 +130,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         desde: desde || undefined,
         hasta: hasta || undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined,
+        province: province !== 'ALL' ? province : undefined,
         tipo: tipo === 'ALL' ? undefined : tipo
       });
       showToast('success', 'Descarga iniciada');
@@ -148,6 +152,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     try {
       await api.exportRetPerTxt({
         month: retPerMonth || undefined,
+        province: province !== 'ALL' ? province : undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined
       });
       showToast('success', 'TXT Ret/Per descargado');
@@ -399,6 +404,24 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const filteredCount = items.length;
+  const customerCityById = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const c of customers) out.set(String(c.id), (c.city || '').toString());
+    return out;
+  }, [customers]);
+  const provinceOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) {
+      const city = (c.city || '').toString().trim();
+      if (city) set.add(city);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [customers]);
+  const customersFilteredByProvince = useMemo(() => {
+    if (province === 'ALL') return customers;
+    const p = province.toLowerCase();
+    return customers.filter((c) => (c.city || '').toString().toLowerCase().includes(p));
+  }, [customers, province]);
   const normalizeDateKey = (v: any): string => {
     if (!v) return '';
     if (typeof v === 'string') {
@@ -417,19 +440,27 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       if (desde && dateKey && dateKey < desde) return false;
       if (hasta && dateKey && dateKey > hasta) return false;
       if (customerId !== 'ALL' && String(it.customerId || '') !== customerId) return false;
+      if (province !== 'ALL') {
+        const city = customerCityById.get(String(it.customerId || '')) || '';
+        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+      }
       if (tipo !== 'ALL' && String(it.tipo || '') !== tipo) return false;
       return true;
     });
-  }, [items, desde, hasta, customerId, tipo]);
+  }, [items, desde, hasta, customerId, province, tipo, customerCityById]);
   const filteredPayments = useMemo(() => {
     return payments.filter((p: any) => {
       const dateKey = normalizeDateKey(p.date);
       if (desde && dateKey && dateKey < desde) return false;
       if (hasta && dateKey && dateKey > hasta) return false;
       if (customerId !== 'ALL' && String(p.customerId || '') !== customerId) return false;
+      if (province !== 'ALL') {
+        const city = customerCityById.get(String(p.customerId || '')) || '';
+        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+      }
       return true;
     });
-  }, [payments, desde, hasta, customerId]);
+  }, [payments, desde, hasta, customerId, province, customerCityById]);
 
   const filteredCountDisplay = filteredBillingItems.length;
   const pagedItems = useMemo(() => {
@@ -446,11 +477,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
   useEffect(() => {
     setBillingPage(1);
-  }, [filteredBillingItems.length, desde, hasta, customerId, tipo]);
+  }, [filteredBillingItems.length, desde, hasta, customerId, province, tipo]);
 
   useEffect(() => {
     setPaymentsPage(1);
-  }, [filteredPayments.length, desde, hasta, customerId]);
+  }, [filteredPayments.length, desde, hasta, customerId, province]);
+
+  useEffect(() => {
+    if (customerId === 'ALL') return;
+    if (!customersFilteredByProvince.some((c) => c.id === customerId)) {
+      setCustomerId('ALL');
+    }
+  }, [customerId, customersFilteredByProvince]);
 
   useEffect(() => {
     if (billingPage > billingTotalPages) setBillingPage(billingTotalPages);
@@ -572,7 +610,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
         <div className="space-y-1">
           <label className="text-[11px] font-black text-slate-500 uppercase">Desde</label>
           <input
@@ -599,8 +637,21 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
           >
             <option value="ALL">Todos</option>
-            {customers.map(c => (
+            {customersFilteredByProvince.map(c => (
               <option key={c.id} value={c.id}>{c.businessName || c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[11px] font-black text-slate-500 uppercase">Provincia (en ciudad)</label>
+          <select
+            value={province}
+            onChange={e => setProvince(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
+          >
+            <option value="ALL">Todas</option>
+            {provinceOptions.map((p) => (
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
         </div>
@@ -846,7 +897,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
                   >
                     <option value="ALL">Seleccionar…</option>
-                    {customers.map((c) => (
+                    {customersFilteredByProvince.map((c) => (
                       <option key={c.id} value={c.id}>{c.businessName || c.name}</option>
                     ))}
                   </select>
