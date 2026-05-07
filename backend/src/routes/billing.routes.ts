@@ -5,13 +5,22 @@ import multer from 'multer';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
+const uploadAgipPadronFile = (req: any, res: any, next: any) => {
+  upload.single('file')(req, res, (err: any) => {
+    if (!err) return next();
+    if (err?.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: 'El archivo supera el tamaño máximo permitido (80MB).' });
+    }
+    return res.status(400).json({ message: err?.message || 'Error subiendo archivo de padrón AGIP.' });
+  });
+};
 
 router.use(authMiddleware, billingAccessMiddleware);
 
 router.get('/', listBilling);
 router.get('/export', exportBilling);
 router.get('/export-retper', exportRetPerTxt);
-router.post('/agip-padron/import', upload.single('file'), importAgipPadron);
+router.post('/agip-padron/import', uploadAgipPadronFile, importAgipPadron);
 
 export default router;
 

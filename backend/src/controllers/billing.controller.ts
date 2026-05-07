@@ -616,6 +616,9 @@ export const importAgipPadron = async (req: Request, res: Response) => {
       }
       rows = parsed;
     }
+    if ((!rows || rows.length === 0) && !file?.buffer) {
+      return res.status(400).json({ message: 'Falta el archivo del padrón (campo file).' });
+    }
     if (!/^\d{6}$/.test(period)) {
       return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
     }
@@ -657,7 +660,10 @@ export const importAgipPadron = async (req: Request, res: Response) => {
     res.json({ message: 'Padrón AGIP importado', period, imported: entries.length });
   } catch (error: any) {
     console.error('importAgipPadron:', error);
-    res.status(500).json({ message: 'Error importando padrón AGIP' });
+    const detail = String(error?.sqlMessage || error?.message || '').trim();
+    res.status(500).json({
+      message: detail ? `Error importando padrón AGIP: ${detail}` : 'Error importando padrón AGIP'
+    });
   }
 };
 
