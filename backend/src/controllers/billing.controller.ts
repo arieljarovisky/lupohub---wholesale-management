@@ -1070,7 +1070,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FACTURA' AS tipo,
-          DATE(i.created_at) AS fecha,
+          o.date AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1085,7 +1085,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
-        WHERE DATE(i.created_at) >= ? AND DATE(i.created_at) <= ?
+        WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
 
@@ -1093,7 +1093,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
 
         SELECT
           'NC' AS tipo,
-          DATE(cn.created_at) AS fecha,
+          o.date AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1108,7 +1108,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
-        WHERE DATE(cn.created_at) >= ? AND DATE(cn.created_at) <= ?
+        WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
       ) x
