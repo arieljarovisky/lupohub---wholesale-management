@@ -579,7 +579,9 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const filename = `RetPer_${monthTag}.txt`;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(lines.join('\n'));
+    // AGIP e-Arciba exige fin de archivo con última línea vacía.
+    // Enviamos CRLF + CRLF para compatibilidad con Windows.
+    res.send(`${lines.join('\r\n')}\r\n\r\n`);
   } catch (error: any) {
     console.error('exportRetPerTxt:', error);
     res.status(500).json({ message: 'Error exportando TXT Ret/Per' });
