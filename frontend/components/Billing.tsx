@@ -32,6 +32,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+  const [importingAgipPadron, setImportingAgipPadron] = useState(false);
   const [billingPage, setBillingPage] = useState(1);
   const [paymentsPage, setPaymentsPage] = useState(1);
 
@@ -55,6 +56,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return Number.isFinite(n) ? n : NaN;
   };
   const paymentsExcelInputRef = useRef<HTMLInputElement | null>(null);
+  const agipPadronInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
@@ -136,6 +138,19 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
+  const handleExportRetPerTxt = async () => {
+    try {
+      await api.exportRetPerTxt({
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        customerId: customerId !== 'ALL' ? customerId : undefined
+      });
+      showToast('success', 'TXT Ret/Per descargado');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando TXT Ret/Per');
+    }
+  };
+
   const handleImportPaymentsExcel = async (filesList: FileList | null) => {
     const files = filesList ? Array.from(filesList) : [];
     if (files.length === 0) return;
@@ -150,6 +165,37 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     } finally {
       setImportingPaymentsExcel(false);
       if (paymentsExcelInputRef.current) paymentsExcelInputRef.current.value = '';
+    }
+  };
+
+  const handleImportAgipPadronTxt = async (file: File | null) => {
+    if (!file) return;
+    setImportingAgipPadron(true);
+    try {
+      const text = await file.text();
+      const periodMatch = file.name.match(/(\d{6})/);
+      const period = periodMatch?.[1] || (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+      const byCuit = new Map<string, number>();
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const cols = line.split(';');
+        if (cols.length < 9) continue;
+        const cuit = String(cols[3] || '').replace(/\D/g, '').slice(0, 11);
+        if (cuit.length !== 11) continue;
+        const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
+        const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
+        const ali = Math.max(a1, a2);
+        byCuit.set(cuit, ali);
+      }
+      const rows = Array.from(byCuit.entries()).map(([cuit, alicuota]) => ({ cuit, alicuota }));
+      const res = await api.importAgipPadron({ period, rows });
+      showToast('success', `${res.message}: ${res.imported} CUIT(s) (${res.period}).`);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando padrón AGIP');
+    } finally {
+      setImportingAgipPadron(false);
+      if (agipPadronInputRef.current) agipPadronInputRef.current.value = '';
     }
   };
 
@@ -417,6 +463,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             <FileSpreadsheet size={16} /> Saldos pendientes (detalle)
           </button>
+          <button
+            type="button"
+            onClick={handleExportRetPerTxt}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-700 text-white text-sm font-bold shadow-lg shadow-amber-900/40 hover:bg-amber-600"
+            title="Exportar TXT de retenciones/percepciones (layout RetPer)"
+          >
+            <FileSpreadsheet size={16} /> Exportar TXT IIBB (RetPer)
+          </button>
           <input
             ref={paymentsExcelInputRef}
             type="file"
@@ -433,6 +487,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             {importingPaymentsExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
             Importar pagos (Excel)
+          </button>
+          <input
+            ref={agipPadronInputRef}
+            type="file"
+            accept=".txt"
+            className="hidden"
+            onChange={(e) => { void handleImportAgipPadronTxt(e.target.files?.[0] || null); }}
+          />
+          <button
+            type="button"
+            disabled={importingAgipPadron}
+            onClick={() => agipPadronInputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-700 text-white text-sm font-bold shadow-lg shadow-fuchsia-900/40 hover:bg-fuchsia-600 disabled:opacity-50"
+            title="Importar padrón AGIP (ARDJU*.txt)"
+          >
+            {importingAgipPadron ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            Importar padrón AGIP (TXT)
           </button>
         </div>
       </div>

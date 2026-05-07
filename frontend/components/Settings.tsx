@@ -793,7 +793,7 @@ const Settings: React.FC<SettingsProps> = ({
       setPriceListsLoading(true);
       api.getPriceLists().then(list => { setPriceLists(list); setPriceListsLoading(false); }).catch(() => setPriceListsLoading(false));
     }
-    if (activeTab === 'transportes') {
+    if (activeTab === 'transportes' || activeTab === 'facturacion') {
       const r = getRemitente();
       setRemitenteBusinessName(r.businessName ?? '');
       setRemitenteAddress(r.address ?? '');
@@ -2690,6 +2690,67 @@ const Settings: React.FC<SettingsProps> = ({
 
       {(role === Role.ADMIN || role === Role.WAREHOUSE) && activeTab === 'facturacion' && (
         <div className="space-y-6">
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              <FileText size={20} className="text-amber-400" />
+              Datos fiscales del remitente
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">Estos datos se usan en factura/remito. También podés editarlos desde Transportes.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Razón social</label>
+                <input
+                  type="text"
+                  value={remitenteBusinessName}
+                  onChange={(e) => setRemitenteBusinessName(e.target.value)}
+                  placeholder="Tu empresa o nombre"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">CUIT</label>
+                <input
+                  type="text"
+                  value={remitenteCuit}
+                  onChange={(e) => setRemitenteCuit(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  placeholder="20-12345678-9"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white font-mono placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Ingresos Brutos</label>
+                <input
+                  type="text"
+                  value={remitenteIngresosBrutos}
+                  onChange={(e) => setRemitenteIngresosBrutos(e.target.value)}
+                  placeholder="N° de Ingresos Brutos"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                saveRemitente({
+                  businessName: remitenteBusinessName.trim(),
+                  address: remitenteAddress.trim() || undefined,
+                  city: remitenteCity.trim() || undefined,
+                  cuit: remitenteCuit.trim() || undefined,
+                  ingresosBrutos: remitenteIngresosBrutos.trim() || undefined,
+                  inicioActividad: remitenteInicioActividad.trim() || undefined,
+                  email: remitenteEmail.trim() || undefined,
+                  phone: remitentePhone.trim() || undefined,
+                  logoUrl: remitenteLogoUrl.trim() || undefined,
+                  caiRemito: remitenteCaiRemito.trim() || undefined,
+                  caiRemitoVencimiento: remitenteCaiVencimiento.trim() || undefined
+                });
+                showToast('success', 'Datos fiscales guardados.');
+              }}
+              className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2"
+            >
+              <Save size={16} /> Guardar datos fiscales
+            </button>
+          </div>
           <div className="bg-slate-800 rounded-3xl border border-slate-700 p-6 shadow-xl">
             <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
               <DollarSign size={20} className="text-emerald-400" />
