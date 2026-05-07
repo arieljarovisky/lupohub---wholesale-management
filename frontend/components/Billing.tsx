@@ -181,7 +181,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       })();
       const periodFallback = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
       const period = periodFromFilename || periodFallback;
-      const CHUNK_LINES = 5000;
+      const CHUNK_LINES = 1000;
       const CHARS_PER_READ = 2 * 1024 * 1024; // 2MB por lectura para no cargar todo el TXT en memoria
       const shouldUseChunkImport = file.size > 70 * 1024 * 1024;
 

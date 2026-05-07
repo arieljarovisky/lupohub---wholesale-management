@@ -625,15 +625,19 @@ export const importAgipPadronChunk = async (req: Request, res: Response) => {
     }
     const entries = Array.from(byCuit.entries());
     if (!entries.length) return res.json({ message: 'Chunk sin CUIT válidos', period, imported: 0 });
-    const placeholders = entries.map(() => `(UUID(), ?, ?, ?)`).join(', ');
-    const params: any[] = [];
-    for (const [cuit, alicuota] of entries) params.push(period, cuit, alicuota);
-    await execute(
-      `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
-       VALUES ${placeholders}
-       ON DUPLICATE KEY UPDATE alicuota = VALUES(alicuota)`,
-      params
-    );
+    const DB_BATCH = 500;
+    for (let i = 0; i < entries.length; i += DB_BATCH) {
+      const slice = entries.slice(i, i + DB_BATCH);
+      const placeholders = slice.map(() => `(UUID(), ?, ?, ?)`).join(', ');
+      const params: any[] = [];
+      for (const [cuit, alicuota] of slice) params.push(period, cuit, alicuota);
+      await execute(
+        `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+         VALUES ${placeholders}
+         ON DUPLICATE KEY UPDATE alicuota = VALUES(alicuota)`,
+        params
+      );
+    }
     return res.json({ message: 'Chunk importado', period, imported: entries.length });
   } catch (error: any) {
     console.error('importAgipPadronChunk:', error);
