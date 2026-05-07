@@ -1,6 +1,6 @@
 import { Product, Order, OrderStatus, User, Customer, Transporte, UserTask } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
-import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob } from './httpClient';
+import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob, postFormDataBlob } from './httpClient';
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -1880,6 +1880,22 @@ export const api = {
     a.href = url;
     const monthTag = (params?.month || params?.hasta || params?.desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 7).replace('-', '');
     a.download = `RetPer_${monthTag}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Exporta facturas del mes para los clientes listados en un Excel. */
+  exportBillingByCustomersFile: async (file: File, params: { month: string }): Promise<void> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('month', params.month);
+    const blob = await postFormDataBlob('/billing/export-by-customers-file', form, 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `facturas_${params.month.replace('-', '')}_clientes_archivo.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

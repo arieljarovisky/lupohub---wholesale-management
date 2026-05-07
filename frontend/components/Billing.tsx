@@ -38,6 +38,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
+  const [exportingByCustomerFile, setExportingByCustomerFile] = useState(false);
   const [importingAgipPadron, setImportingAgipPadron] = useState(false);
   const [billingPage, setBillingPage] = useState(1);
   const [paymentsPage, setPaymentsPage] = useState(1);
@@ -63,6 +64,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return Number.isFinite(n) ? n : NaN;
   };
   const paymentsExcelInputRef = useRef<HTMLInputElement | null>(null);
+  const billingCustomersFileInputRef = useRef<HTMLInputElement | null>(null);
   const agipPadronInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -158,6 +160,25 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       showToast('success', 'TXT Ret/Per descargado');
     } catch (err: any) {
       showToast('error', err?.message || 'Error exportando TXT Ret/Per');
+    }
+  };
+
+  const handleExportBillingFromCustomersFile = async (file: File | null) => {
+    if (!file) return;
+    const month = (retPerMonth || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      showToast('error', 'Mes inválido. Usá formato YYYY-MM (ej. 2026-04).');
+      return;
+    }
+    setExportingByCustomerFile(true);
+    try {
+      await api.exportBillingByCustomersFile(file, { month });
+      showToast('success', `Facturas exportadas para ${month} de clientes del archivo.`);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando facturas por archivo de clientes');
+    } finally {
+      setExportingByCustomerFile(false);
+      if (billingCustomersFileInputRef.current) billingCustomersFileInputRef.current.value = '';
     }
   };
 
@@ -572,6 +593,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             title="Exportar TXT de retenciones/percepciones (layout RetPer)"
           >
             <FileSpreadsheet size={16} /> Exportar TXT IIBB (RetPer)
+          </button>
+          <input
+            ref={billingCustomersFileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => { void handleExportBillingFromCustomersFile(e.target.files?.[0] || null); }}
+          />
+          <button
+            type="button"
+            disabled={exportingByCustomerFile}
+            onClick={() => billingCustomersFileInputRef.current?.click()}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-700 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-600 disabled:opacity-50"
+            title="Subí un Excel de clientes y exportá facturas del Mes RetPer"
+          >
+            {exportingByCustomerFile ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            Facturas por archivo de clientes
           </button>
           <input
             ref={paymentsExcelInputRef}

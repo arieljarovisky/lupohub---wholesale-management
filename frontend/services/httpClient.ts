@@ -180,6 +180,15 @@ export const postBlob = async (path: string, body?: any, timeoutMs = 120000): Pr
   return response.data;
 };
 
+/** POST con FormData que devuelve Blob (descargas con archivo de entrada). */
+export const postFormDataBlob = async (path: string, formData: FormData, timeoutMs = 120000): Promise<Blob> => {
+  const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
+  const headers: Record<string, string> = { 'Accept': '*/*' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const response = await axios.post(url, formData, { responseType: 'blob', headers, timeout: timeoutMs });
+  return response.data;
+};
+
 export const getBaseUrl = () => baseUrl;
 
-export default { request, requestFormData, getBlob, getBlobResponse, postBlob, setBaseUrl, setAuthToken };
+export default { request, requestFormData, getBlob, getBlobResponse, postBlob, postFormDataBlob, setBaseUrl, setAuthToken };

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { query, execute } from '../database/db';
+import * as XLSX from 'xlsx';
 
 function parseMoney(value: any): number {
   if (value == null) return 0;
@@ -790,6 +791,167 @@ export const importAgipPadron = async (req: Request, res: Response) => {
     res.status(500).json({
       message: detail ? `Error importando padrón AGIP: ${detail}` : 'Error importando padrón AGIP'
     });
+  }
+};
+
+/** Exporta facturas (solo FACTURA) de un mes para clientes listados en un Excel. */
+export const exportBillingByCustomersFile = async (req: Request, res: Response) => {
+  try {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      return res.status(400).json({ message: 'Falta archivo (campo "file").' });
+    }
+    const month = String(req.body?.month || req.query?.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ message: 'month inválido (usar YYYY-MM).' });
+    }
+
+    const m = month.match(/^(\d{4})-(\d{2})$/)!;
+    const yy = Number(m[1]);
+    const mm = Number(m[2]);
+    const lastDay = new Date(yy, mm, 0).getDate();
+    const fromDate = `${m[1]}-${m[2]}-01`;
+    const toDate = `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}`;
+
+    const wb = XLSX.read(file.buffer, { type: 'buffer' });
+    const cuitSet = new Set<string>();
+    const nameSet = new Set<string>();
+    const norm = (s: any) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      if (!ws) continue;
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+      for (const row of rows) {
+        const entries = Object.entries(row || {});
+        let captured = false;
+        for (const [k, v] of entries) {
+          const key = norm(k);
+          const val = String(v ?? '').trim();
+          if (!val) continue;
+          if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
+            const d = onlyDigits(val);
+            if (d.length === 11) {
+              cuitSet.add(d);
+              captured = true;
+            }
+          }
+          if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
+            if (val.length >= 3) {
+              nameSet.add(norm(val));
+              captured = true;
+            }
+          }
+        }
+        if (!captured) {
+          // fallback: si no hay headers claros, tomar celdas como posibles nombres/cuit
+          for (const v of Object.values(row || {})) {
+            const val = String(v ?? '').trim();
+            if (!val) continue;
+            const d = onlyDigits(val);
+            if (d.length === 11) cuitSet.add(d);
+            else if (val.length >= 3) nameSet.add(norm(val));
+          }
+        }
+      }
+    }
+
+    if (cuitSet.size === 0 && nameSet.size === 0) {
+      return res.status(400).json({ message: 'No se encontraron CUIT o nombres de clientes en el Excel.' });
+    }
+
+    const customerIds = new Set<string>();
+    if (cuitSet.size > 0) {
+      const cuits = Array.from(cuitSet);
+      const rowsByCuit = await query(
+        `SELECT id
+         FROM customers
+         WHERE REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') IN (${cuits.map(() => '?').join(',')})`,
+        cuits
+      ) as any[];
+      for (const r of rowsByCuit) customerIds.add(String(r.id));
+    }
+    if (nameSet.size > 0) {
+      const names = Array.from(nameSet);
+      const rowsByName = await query(
+        `SELECT id
+         FROM customers
+         WHERE LOWER(TRIM(COALESCE(business_name, ''))) IN (${names.map(() => '?').join(',')})
+            OR LOWER(TRIM(COALESCE(name, ''))) IN (${names.map(() => '?').join(',')})`,
+        [...names, ...names]
+      ) as any[];
+      for (const r of rowsByName) customerIds.add(String(r.id));
+    }
+
+    const ids = Array.from(customerIds);
+    if (ids.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron clientes del Excel en la base.' });
+    }
+
+    const authUser = (req as any).user;
+    const params: any[] = [fromDate, toDate, ...ids];
+    let sellerSql = '';
+    if (authUser?.role === 'SELLER') {
+      sellerSql = ' AND c.seller_id = ? ';
+      params.push(authUser.id);
+    }
+
+    const rows = await query(
+      `
+      SELECT
+        o.date AS fecha,
+        c.business_name AS cliente,
+        c.name AS cliente_contacto,
+        c.cuit,
+        i.cbte_tipo,
+        i.punto_venta,
+        i.cbte_desde,
+        i.cbte_hasta,
+        o.total AS importe,
+        o.id AS order_id,
+        i.cae,
+        i.cae_fch_vto
+      FROM invoices i
+      JOIN orders o ON o.id = i.order_id
+      JOIN customers c ON c.id = o.customer_id
+      WHERE o.date >= ? AND o.date <= ?
+        AND o.customer_id IN (${ids.map(() => '?').join(',')})
+        ${sellerSql}
+      ORDER BY o.date ASC, c.business_name ASC, i.punto_venta ASC, i.cbte_desde ASC
+      `,
+      params
+    ) as any[];
+
+    if (!rows.length) {
+      return res.status(400).json({ message: `No hay facturas para ${month} de los clientes del archivo.` });
+    }
+
+    const data = rows.map((r: any) => ({
+      Fecha: normalizeDate(r.fecha),
+      Cliente: r.cliente || r.cliente_contacto || '',
+      CUIT: r.cuit || '',
+      TipoCbte: r.cbte_tipo,
+      PuntoVta: r.punto_venta,
+      NumeroDesde: r.cbte_desde,
+      NumeroHasta: r.cbte_hasta,
+      Importe: Number(r.importe || 0),
+      PedidoId: r.order_id,
+      CAE: r.cae || '',
+      CAEVto: r.cae_fch_vto || ''
+    }));
+
+    const outWb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(outWb, ws, 'Facturas');
+    const buffer = XLSX.write(outWb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `facturas_${month.replace('-', '')}_clientes_archivo.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (error: any) {
+    console.error('exportBillingByCustomersFile:', error);
+    return res.status(500).json({ message: 'Error exportando facturas por archivo de clientes' });
   }
 };
 
