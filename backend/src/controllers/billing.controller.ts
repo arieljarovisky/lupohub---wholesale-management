@@ -841,28 +841,40 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const cuitSet = new Set<string>();
     const nameSet = new Set<string>();
     const norm = (s: any) => normalizeNameForMatch(s);
+    const sourceRows: Array<{ sheet: string; row: number; rawName: string; rawCuit: string; nameNorm: string; cuitNorm: string }> = [];
 
     for (const sheetName of wb.SheetNames) {
       const ws = wb.Sheets[sheetName];
       if (!ws) continue;
       const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-      for (const row of rows) {
+      for (let idx = 0; idx < rows.length; idx++) {
+        const row = rows[idx];
         const entries = Object.entries(row || {});
         let captured = false;
+        let rowName = '';
+        let rowCuit = '';
         for (const [k, v] of entries) {
           const key = norm(k);
           const val = String(v ?? '').trim();
           if (!val) continue;
-          for (const cuit of extractCuitCandidates(val)) cuitSet.add(cuit);
+          const extracted = extractCuitCandidates(val);
+          for (const cuit of extracted) {
+            cuitSet.add(cuit);
+            if (!rowCuit) rowCuit = cuit;
+          }
           if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
             const d = onlyDigits(val);
-            if (d.length === 11) cuitSet.add(d);
+            if (d.length === 11) {
+              cuitSet.add(d);
+              if (!rowCuit) rowCuit = d;
+            }
             captured = true;
           }
           if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
             const n = norm(val);
             if (n.length >= 3) {
               nameSet.add(n);
+              if (!rowName) rowName = val;
               captured = true;
             }
           }
@@ -872,11 +884,46 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           for (const v of Object.values(row || {})) {
             const val = String(v ?? '').trim();
             if (!val) continue;
-            for (const cuit of extractCuitCandidates(val)) cuitSet.add(cuit);
+            const extracted = extractCuitCandidates(val);
+            for (const cuit of extracted) {
+              cuitSet.add(cuit);
+              if (!rowCuit) rowCuit = cuit;
+            }
             const d = onlyDigits(val);
-            if (d.length === 11) cuitSet.add(d);
+            if (d.length === 11) {
+              cuitSet.add(d);
+              if (!rowCuit) rowCuit = d;
+            }
             const n = norm(val);
-            if (n.length >= 4) nameSet.add(n);
+            if (n.length >= 4) {
+              nameSet.add(n);
+              if (!rowName) rowName = val;
+            }
+          }
+        }
+        if (rowName || rowCuit) {
+          sourceRows.push({
+            sheet: sheetName,
+            row: idx + 2,
+            rawName: rowName,
+            rawCuit: rowCuit,
+            nameNorm: norm(rowName),
+            cuitNorm: onlyDigits(rowCuit).slice(0, 11)
+          });
+        } else {
+          // último fallback: fila completa como texto
+          const joined = Object.values(row || {}).map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
+          const n = norm(joined);
+          const d = onlyDigits(joined).slice(0, 11);
+          if (n || d) {
+            sourceRows.push({
+              sheet: sheetName,
+              row: idx + 2,
+              rawName: joined,
+              rawCuit: d,
+              nameNorm: n,
+              cuitNorm: d
+            });
           }
         }
       }
@@ -887,15 +934,21 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     }
 
     const customerIds = new Set<string>();
+    const matchedCuits = new Set<string>();
+    const matchedNames = new Set<string>();
     if (cuitSet.size > 0) {
       const cuits = Array.from(cuitSet);
       const rowsByCuit = await query(
-        `SELECT id
+        `SELECT id,
+                REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') AS cuit_norm
          FROM customers
          WHERE REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') IN (${cuits.map(() => '?').join(',')})`,
         cuits
       ) as any[];
-      for (const r of rowsByCuit) customerIds.add(String(r.id));
+      for (const r of rowsByCuit) {
+        customerIds.add(String(r.id));
+        if (r.cuit_norm) matchedCuits.add(String(r.cuit_norm));
+      }
     }
     if (nameSet.size > 0) {
       const names = Array.from(nameSet).filter((n) => n.length >= 4);
@@ -903,8 +956,11 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       for (const r of customersRows) {
         const bn = norm(r.business_name);
         const cn = norm(r.name);
-        const matched = names.some((n) => (bn && (bn.includes(n) || n.includes(bn))) || (cn && (cn.includes(n) || n.includes(cn))));
-        if (matched) customerIds.add(String(r.id));
+        const matchedName = names.find((n) => (bn && (bn.includes(n) || n.includes(bn))) || (cn && (cn.includes(n) || n.includes(cn))));
+        if (matchedName) {
+          customerIds.add(String(r.id));
+          matchedNames.add(matchedName);
+        }
       }
     }
 
@@ -1009,6 +1065,28 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const outWb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(outWb, ws, 'Comprobantes');
+
+    // Hoja de control: filas del archivo que no pudieron vincularse a ningún cliente
+    const notFound = sourceRows
+      .filter((r) => {
+        const hasCuit = !!r.cuitNorm;
+        const hasName = !!r.nameNorm;
+        if (!hasCuit && !hasName) return false;
+        if (hasCuit && matchedCuits.has(r.cuitNorm)) return false;
+        if (hasName && matchedNames.has(r.nameNorm)) return false;
+        return true;
+      })
+      .map((r) => ({
+        Hoja: r.sheet,
+        Fila: r.row,
+        ClienteArchivo: r.rawName || '',
+        CUITArchivo: r.rawCuit || '',
+        Estado: 'No encontrado en base'
+      }));
+    if (notFound.length > 0) {
+      const wsNo = XLSX.utils.json_to_sheet(notFound);
+      XLSX.utils.book_append_sheet(outWb, wsNo, 'No encontrados');
+    }
     const buffer = XLSX.write(outWb, { type: 'buffer', bookType: 'xlsx' });
 
     const filename = `comprobantes_${month.replace('-', '')}_clientes_archivo.xlsx`;
