@@ -486,16 +486,26 @@ export const exportBilling = async (req: Request, res: Response) => {
 /** Exporta TXT "RetPer_YYYYMM.txt" con layout fijo compatible con estudio (AGIP). */
 export const exportRetPerTxt = async (req: Request, res: Response) => {
   try {
-    const { desde, hasta, customerId } = req.query as { desde?: string; hasta?: string; customerId?: string };
+    const { desde, hasta, customerId, month } = req.query as { desde?: string; hasta?: string; customerId?: string; month?: string };
+    const monthMatch = String(month || '').match(/^(\d{4})-(\d{2})$/);
+    let fromDate = desde;
+    let toDate = hasta;
+    if (monthMatch) {
+      const yy = Number(monthMatch[1]);
+      const mm = Number(monthMatch[2]);
+      const lastDay = new Date(yy, mm, 0).getDate();
+      fromDate = `${monthMatch[1]}-${monthMatch[2]}-01`;
+      toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
+    }
     const where: string[] = [];
     const params: any[] = [];
-    if (desde) {
+    if (fromDate) {
       where.push('o.date >= ?');
-      params.push(desde);
+      params.push(fromDate);
     }
-    if (hasta) {
+    if (toDate) {
       where.push('o.date <= ?');
-      params.push(hasta);
+      params.push(toDate);
     }
     if (customerId) {
       where.push('o.customer_id = ?');
@@ -515,7 +525,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     await ensureAgipPadronTable();
-    const period = String((hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
+    const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
 
     const rows = await query(
       `
@@ -597,7 +607,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       ].join('');
     });
 
-    const monthTag = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+    const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;
     // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
     res.setHeader('Content-Type', 'text/plain; charset=us-ascii');

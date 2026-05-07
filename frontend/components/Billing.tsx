@@ -20,6 +20,11 @@ interface BillingProps {
 
 const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [] }) => {
   const { showToast } = useNotification();
+  const defaultRetPerMonth = (() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
   const [activeView, setActiveView] = useState<'billing' | 'payments'>('billing');
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,6 +40,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [importingAgipPadron, setImportingAgipPadron] = useState(false);
   const [billingPage, setBillingPage] = useState(1);
   const [paymentsPage, setPaymentsPage] = useState(1);
+  const [retPerMonth, setRetPerMonth] = useState<string>(defaultRetPerMonth);
 
   const parseMoneyInput = (raw: string): number => {
     const s = String(raw ?? '').trim().replace(/\s/g, '').replace(/\$/g, '');
@@ -141,8 +147,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const handleExportRetPerTxt = async () => {
     try {
       await api.exportRetPerTxt({
-        desde: desde || undefined,
-        hasta: hasta || undefined,
+        month: retPerMonth || undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined
       });
       showToast('success', 'TXT Ret/Per descargado');
@@ -179,7 +184,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         if (yyyymm) return `${yyyymm[1]}${yyyymm[2]}`;
         return '';
       })();
-      const periodFallback = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+      const periodFallback = (retPerMonth || hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 7).replace('-', '');
       const period = periodFromFilename || periodFallback;
       const CHUNK_LINES = 1000;
       const CHARS_PER_READ = 2 * 1024 * 1024; // 2MB por lectura para no cargar todo el TXT en memoria
@@ -567,7 +572,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
         <div className="space-y-1">
           <label className="text-[11px] font-black text-slate-500 uppercase">Desde</label>
           <input
@@ -611,6 +616,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <option value="FACTURA">Facturas</option>
             <option value="NC">Notas de crédito</option>
           </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer</label>
+          <input
+            type="month"
+            value={retPerMonth}
+            onChange={e => setRetPerMonth(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
+          />
         </div>
       </div>
 

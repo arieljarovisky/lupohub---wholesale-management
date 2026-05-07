@@ -1864,17 +1864,18 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  exportRetPerTxt: async (params?: { desde?: string; hasta?: string; customerId?: string }): Promise<void> => {
+  exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.month) queryParams.append('month', params.month);
     if (params?.customerId) queryParams.append('customerId', params.customerId);
     const qs = queryParams.toString();
     const blob = await getBlob(`/billing/export-retper${qs ? '?' + qs : ''}`);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const monthTag = (params?.hasta || params?.desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+    const monthTag = (params?.month || params?.hasta || params?.desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 7).replace('-', '');
     a.download = `RetPer_${monthTag}.txt`;
     document.body.appendChild(a);
     a.click();
