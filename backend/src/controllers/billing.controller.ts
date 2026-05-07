@@ -564,6 +564,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       return [
         '2029', // tipo/agente (fijo por layout legacy)
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
+        '01', // campo fijo requerido por layout AGIP entre fecha y tipo/comprobante
         comprobante,
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         importe,
