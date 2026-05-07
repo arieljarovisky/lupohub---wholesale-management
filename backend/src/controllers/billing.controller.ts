@@ -565,7 +565,6 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         tipoComp,
         pv,
-        pv,
         nro,
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         importe,
