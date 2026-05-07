@@ -50,6 +50,9 @@ function formatAmountFixed(amount: number, intLen = 13): string {
   const [ints, decs] = n.toFixed(2).split('.');
   return `${ints.padStart(intLen, '0')},${decs}`;
 }
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
 
 function onlyDigits(v: any): string {
   return String(v || '').replace(/\D/g, '');
@@ -558,7 +561,12 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       const alicuota = Math.max(0, Number(r.alicuota || 0));
       const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
       const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
-      const retPerc = Math.abs(Number(r.importe) || 0) * (alicuota / 100);
+      const total = Math.abs(Number(r.importe) || 0);
+      const divisor = 1 + 0.21 + (alicuota / 100);
+      const neto = divisor > 0 ? round2(total / divisor) : 0;
+      const iva = round2(neto * 0.21);
+      const otros = round2(total - neto - iva);
+      const retPerc = round2(neto * (alicuota / 100));
 
       // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
       return [
@@ -573,9 +581,9 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         cuit,
         '4000000000001', // condición por defecto legacy
         razon,
-        formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.3, 13), // base presunta
-        formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.05, 13), // ajuste presunto
-        formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.24, 13), // neto presunto
+        formatAmountFixed(otros, 13), // otros conceptos (ajusta para que total = neto + iva + otros)
+        formatAmountFixed(iva, 13),   // IVA 21%
+        formatAmountFixed(neto, 13),  // monto sujeto
         `3301${aliInt},${aliDec}`, // formato observado válido: 3301xx,xx
         formatAmountFixed(retPerc, 13), // ret/perc calculada
         formatAmountFixed(retPerc, 13),
