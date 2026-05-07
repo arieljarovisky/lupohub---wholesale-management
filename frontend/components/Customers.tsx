@@ -201,6 +201,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [multimediaImporting, setMultimediaImporting] = useState(false);
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
   const [wholesaleMetricsExporting, setWholesaleMetricsExporting] = useState(false);
+  const [exportingCustomersWithLocation, setExportingCustomersWithLocation] = useState(false);
   const [showExportSheetsModal, setShowExportSheetsModal] = useState(false);
   const [exportSheetSelectedIds, setExportSheetSelectedIds] = useState<string[]>([]);
   const [exportingSheets, setExportingSheets] = useState(false);
@@ -1785,6 +1786,25 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               onChange={handleAssignSellersFromResumen}
             />
           )}
+          <button
+            type="button"
+            onClick={async () => {
+              setExportingCustomersWithLocation(true);
+              try {
+                await api.exportCustomersIndividuals();
+                showToast('success', 'Excel de clientes con ubicación descargado (incluye ciudad y dirección).');
+              } catch (err: any) {
+                showToast('error', err?.message || 'Error al exportar clientes con ubicación.');
+              }
+              setExportingCustomersWithLocation(false);
+            }}
+            disabled={exportingCustomersWithLocation}
+            className="bg-emerald-900/40 text-emerald-100 px-3 py-2.5 rounded-lg hover:bg-emerald-900/55 border border-emerald-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
+            title="Excel de clientes (1 fila por cliente) con ciudad y dirección"
+          >
+            {exportingCustomersWithLocation ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+            <span className="leading-tight break-words">{exportingCustomersWithLocation ? 'Exportando…' : 'Exportar clientes con ubicación'}</span>
+          </button>
           {canViewSaldos && (
             <button
               type="button"
