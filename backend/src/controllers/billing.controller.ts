@@ -511,12 +511,9 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       where.push('o.customer_id = ?');
       params.push(customerId);
     }
-    // Ret/Per AGIP: aplicar solo a clientes de CABA.
-    where.push(`(
-      UPPER(COALESCE(c.city, '')) LIKE '%CABA%'
-      OR UPPER(COALESCE(c.city, '')) LIKE '%CAPITAL FEDERAL%'
-      OR UPPER(COALESCE(c.city, '')) LIKE '%CIUDAD AUTONOMA DE BUENOS AIRES%'
-    )`);
+    // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período.
+    // Filtrar por ciudad textual deja afuera clientes válidos si el dato no está normalizado.
+    where.push('ap.cuit IS NOT NULL');
     const authUser = (req as any).user;
     if (authUser?.role === 'SELLER') {
       where.push('c.seller_id = ?');
