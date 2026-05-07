@@ -450,6 +450,7 @@ export const exportBilling = async (req: Request, res: Response) => {
       'pedido_id',
       'cliente',
       'cuit',
+      'origen',
       'importe',
       'cae',
       'cae_fch_vto'
@@ -467,6 +468,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         r.order_id,
         `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
         `"${String(r.customer_cuit ?? '').replace(/"/g, '""')}"`,
+        '"Sistema (AFIP)"',
         Number(r.importe) || 0,
         r.cae,
         r.cae_fch_vto || ''
@@ -536,6 +538,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           '',
           `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
           `"${String(r.customer_cuit ?? '').replace(/"/g, '""')}"`,
+          '"Tango / Multimedias"',
           importe,
           '',
           ''
@@ -1072,7 +1075,8 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         x.importe,
         x.order_id,
         x.cae,
-        x.cae_fch_vto
+        x.cae_fch_vto,
+        x.customer_id
       FROM (
         SELECT
           'FACTURA' AS tipo,
@@ -1087,7 +1091,8 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           o.total AS importe,
           o.id AS order_id,
           i.cae,
-          i.cae_fch_vto
+          i.cae_fch_vto,
+          c.id AS customer_id
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -1110,7 +1115,8 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           cn.amount_credited AS importe,
           cn.order_id AS order_id,
           cn.cae,
-          cn.cae_fch_vto
+          cn.cae_fch_vto,
+          c.id AS customer_id
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -1123,11 +1129,85 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       [...params, ...params]
     ) as any[];
 
+    const mmParams: any[] = [...ids, fromDate, toDate];
+    if (authUser?.role === 'SELLER') {
+      mmParams.push(authUser.id);
+    }
+    const mmRows = (await query(
+      `
+      SELECT
+        e.id AS mm_id,
+        e.customer_id,
+        e.line_date,
+        e.numero,
+        e.importe,
+        c.business_name AS cliente,
+        c.name AS cliente_contacto,
+        c.cuit
+      FROM customer_multimedia_entries e
+      JOIN customers c ON c.id = e.customer_id
+      WHERE e.customer_id IN (${ids.map(() => '?').join(',')})
+        AND e.line_date >= ? AND e.line_date <= ?
+        AND UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
+        ${sellerSql}
+      `,
+      mmParams
+    )) as any[];
+
+    const dedupeKeyAfip = (r: any) =>
+      [
+        normalizeDate(r.fecha),
+        String(r.cbte_desde ?? '').trim().toUpperCase(),
+        Number(r.importe || 0).toFixed(2),
+        String(r.customer_id || '')
+      ].join('|');
+
+    const seenKeys = new Set<string>();
+    for (const r of rows) {
+      seenKeys.add(dedupeKeyAfip(r));
+    }
+
+    for (const m of mmRows) {
+      const fechaN = normalizeDate(m.line_date);
+      const num = String(m.numero || '').trim().toUpperCase();
+      const imp = parseMoney(m.importe).toFixed(2);
+      const key = [fechaN, num, imp, String(m.customer_id || '')].join('|');
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      rows.push({
+        tipo: 'FACTURA',
+        fecha: m.line_date,
+        cliente: m.cliente,
+        cliente_contacto: m.cliente_contacto,
+        cuit: m.cuit,
+        cbte_tipo: null,
+        punto_venta: null,
+        cbte_desde: m.numero,
+        cbte_hasta: m.numero,
+        importe: m.importe,
+        order_id: `MM-${m.mm_id}`,
+        cae: '',
+        cae_fch_vto: '',
+        customer_id: m.customer_id,
+        origenExport: 'Tango / Multimedias'
+      });
+    }
+
+    rows.sort((a: any, b: any) => {
+      const da = new Date(normalizeDate(a.fecha)).getTime() || 0;
+      const db = new Date(normalizeDate(b.fecha)).getTime() || 0;
+      if (da !== db) return da - db;
+      const ca = String(a.cliente || '').localeCompare(String(b.cliente || ''));
+      if (ca !== 0) return ca;
+      return String(a.order_id || '').localeCompare(String(b.order_id || ''));
+    });
+
     if (!rows.length) {
       return res.status(400).json({ message: `No hay comprobantes para ${month} de los clientes del archivo.` });
     }
 
     const data = rows.map((r: any) => ({
+      Origen: r.origenExport || 'Sistema (AFIP)',
       Tipo: r.tipo,
       Fecha: normalizeDate(r.fecha),
       Cliente: r.cliente || r.cliente_contacto || '',
