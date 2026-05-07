@@ -56,7 +56,12 @@ function onlyDigits(v: any): string {
 }
 
 function txt(v: any, len: number): string {
-  return String(v || '').slice(0, len).padEnd(len, ' ');
+  const ascii = String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .toUpperCase();
+  return ascii.slice(0, len).padEnd(len, ' ');
 }
 
 async function ensureAgipPadronTable(): Promise<void> {
@@ -581,7 +586,8 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
 
     const monthTag = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
+    res.setHeader('Content-Type', 'text/plain; charset=us-ascii');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     // Compatibilidad e-Arciba: CRLF entre registros y un único salto final, sin línea vacía extra.
     res.send(`${lines.join('\r\n')}\r\n`);
