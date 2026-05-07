@@ -794,7 +794,7 @@ export const importAgipPadron = async (req: Request, res: Response) => {
   }
 };
 
-/** Exporta facturas (solo FACTURA) de un mes para clientes listados en un Excel. */
+/** Exporta comprobantes (facturas + NC) de un mes para clientes listados en un Excel. */
 export const exportBillingByCustomersFile = async (req: Request, res: Response) => {
   try {
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -899,34 +899,75 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const rows = await query(
       `
       SELECT
-        o.date AS fecha,
-        c.business_name AS cliente,
-        c.name AS cliente_contacto,
-        c.cuit,
-        i.cbte_tipo,
-        i.punto_venta,
-        i.cbte_desde,
-        i.cbte_hasta,
-        o.total AS importe,
-        o.id AS order_id,
-        i.cae,
-        i.cae_fch_vto
-      FROM invoices i
-      JOIN orders o ON o.id = i.order_id
-      JOIN customers c ON c.id = o.customer_id
-      WHERE o.date >= ? AND o.date <= ?
-        AND o.customer_id IN (${ids.map(() => '?').join(',')})
-        ${sellerSql}
-      ORDER BY o.date ASC, c.business_name ASC, i.punto_venta ASC, i.cbte_desde ASC
+        x.tipo,
+        x.fecha,
+        x.cliente,
+        x.cliente_contacto,
+        x.cuit,
+        x.cbte_tipo,
+        x.punto_venta,
+        x.cbte_desde,
+        x.cbte_hasta,
+        x.importe,
+        x.order_id,
+        x.cae,
+        x.cae_fch_vto
+      FROM (
+        SELECT
+          'FACTURA' AS tipo,
+          o.date AS fecha,
+          c.business_name AS cliente,
+          c.name AS cliente_contacto,
+          c.cuit,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde,
+          i.cbte_hasta,
+          o.total AS importe,
+          o.id AS order_id,
+          i.cae,
+          i.cae_fch_vto
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?
+          AND o.customer_id IN (${ids.map(() => '?').join(',')})
+          ${sellerSql}
+
+        UNION ALL
+
+        SELECT
+          'NC' AS tipo,
+          o.date AS fecha,
+          c.business_name AS cliente,
+          c.name AS cliente_contacto,
+          c.cuit,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde,
+          cn.cbte_hasta,
+          cn.amount_credited AS importe,
+          cn.order_id AS order_id,
+          cn.cae,
+          cn.cae_fch_vto
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?
+          AND o.customer_id IN (${ids.map(() => '?').join(',')})
+          ${sellerSql}
+      ) x
+      ORDER BY x.fecha ASC, x.cliente ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
-      params
+      [...params, ...params]
     ) as any[];
 
     if (!rows.length) {
-      return res.status(400).json({ message: `No hay facturas para ${month} de los clientes del archivo.` });
+      return res.status(400).json({ message: `No hay comprobantes para ${month} de los clientes del archivo.` });
     }
 
     const data = rows.map((r: any) => ({
+      Tipo: r.tipo,
       Fecha: normalizeDate(r.fecha),
       Cliente: r.cliente || r.cliente_contacto || '',
       CUIT: r.cuit || '',
@@ -942,16 +983,16 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
 
     const outWb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(outWb, ws, 'Facturas');
+    XLSX.utils.book_append_sheet(outWb, ws, 'Comprobantes');
     const buffer = XLSX.write(outWb, { type: 'buffer', bookType: 'xlsx' });
 
-    const filename = `facturas_${month.replace('-', '')}_clientes_archivo.xlsx`;
+    const filename = `comprobantes_${month.replace('-', '')}_clientes_archivo.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buffer);
   } catch (error: any) {
     console.error('exportBillingByCustomersFile:', error);
-    return res.status(500).json({ message: 'Error exportando facturas por archivo de clientes' });
+    return res.status(500).json({ message: 'Error exportando comprobantes por archivo de clientes' });
   }
 };
 
