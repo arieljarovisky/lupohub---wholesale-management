@@ -548,9 +548,10 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       .filter((r) => onlyDigits(r.cuit).length === 11)
       .map((r) => {
       const fecha = ddmmyyyy(r.fecha);
-      const tipoComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? '01A' : '01B';
+      const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
       const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
       const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
+      const comprobante = `${letraComp}${pv}${nro}`;
       const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
       const cuit = onlyDigits(r.cuit).slice(0, 11);
       const razon = txt(r.razon_social, 30);
@@ -563,9 +564,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       return [
         '2029', // tipo/agente (fijo por layout legacy)
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-        tipoComp,
-        pv,
-        nro,
+        comprobante,
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         importe,
         ' '.repeat(16),
