@@ -78,6 +78,13 @@ function normalizeNameForMatch(v: any): string {
     .trim();
 }
 
+function tokensForNameMatch(v: string): string[] {
+  return normalizeNameForMatch(v)
+    .split(' ')
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3);
+}
+
 function extractCuitCandidates(raw: any): string[] {
   const s = String(raw ?? '');
   const compact = s.replace(/[\s.\-_/]/g, '');
@@ -962,16 +969,28 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     if (nameSet.size > 0) {
       const names = Array.from(nameSet).filter((n) => n.length >= 4);
       const customersRows = await query(`SELECT id, business_name, name FROM customers`) as any[];
-      for (const r of customersRows) {
+      const customerPrepared = customersRows.map((r: any) => {
         const bn = norm(r.business_name);
         const cn = norm(r.name);
-        const matchedName = names.find((n) => (bn && (bn.includes(n) || n.includes(bn))) || (cn && (cn.includes(n) || n.includes(cn))));
-        if (matchedName) {
-          customerIds.add(String(r.id));
-          matchedNames.add(matchedName);
-          const arr = foundByName.get(matchedName) || [];
-          arr.push(`${String(r.id)} | ${String(r.business_name || r.name || '')}`);
-          foundByName.set(matchedName, arr);
+        const all = `${bn} ${cn}`.trim();
+        const tokenSet = new Set(tokensForNameMatch(all));
+        return { r, bn, cn, all, tokenSet };
+      });
+
+      for (const n of names) {
+        const nTokens = tokensForNameMatch(n);
+        const nStrongTokens = nTokens.filter((t) => t.length >= 5);
+        for (const c of customerPrepared) {
+          const byContain =
+            (c.bn && (c.bn.includes(n) || n.includes(c.bn))) ||
+            (c.cn && (c.cn.includes(n) || n.includes(c.cn)));
+          const byToken = nStrongTokens.some((t) => c.tokenSet.has(t));
+          if (!byContain && !byToken) continue;
+          customerIds.add(String(c.r.id));
+          matchedNames.add(n);
+          const arr = foundByName.get(n) || [];
+          arr.push(`${String(c.r.id)} | ${String(c.r.business_name || c.r.name || '')}`);
+          foundByName.set(n, arr);
         }
       }
     }
