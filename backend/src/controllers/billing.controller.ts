@@ -1083,10 +1083,27 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         CUITArchivo: r.rawCuit || '',
         Estado: 'No encontrado en base'
       }));
-    if (notFound.length > 0) {
-      const wsNo = XLSX.utils.json_to_sheet(notFound);
-      XLSX.utils.book_append_sheet(outWb, wsNo, 'No encontrados');
-    }
+    const notFoundRows = notFound.length > 0
+      ? notFound
+      : [{
+          Hoja: '-',
+          Fila: '-',
+          ClienteArchivo: '',
+          CUITArchivo: '',
+          Estado: 'Sin registros no encontrados para este archivo'
+        }];
+    const wsNo = XLSX.utils.json_to_sheet(notFoundRows);
+    // Bloque resumen arriba para que sea auditable
+    XLSX.utils.sheet_add_json(
+      wsNo,
+      [{
+        TotalFilasDetectadasArchivo: sourceRows.length,
+        TotalClientesVinculados: ids.length,
+        TotalNoEncontrados: notFound.length
+      }],
+      { origin: 'G1' }
+    );
+    XLSX.utils.book_append_sheet(outWb, wsNo, 'No encontrados');
     const buffer = XLSX.write(outWb, { type: 'buffer', bookType: 'xlsx' });
 
     const filename = `comprobantes_${month.replace('-', '')}_clientes_archivo.xlsx`;
