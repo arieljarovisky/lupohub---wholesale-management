@@ -1882,8 +1882,11 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  importAgipPadron: async (payload: { period: string; rows: Array<{ cuit: string; alicuota: number }> }): Promise<{ message: string; period: string; imported: number }> => {
-    return await request('/billing/agip-padron/import', 'POST', payload, undefined, 180000);
+  importAgipPadron: async (payload: { file: File; period?: string }): Promise<{ message: string; period: string; imported: number }> => {
+    const formData = new FormData();
+    formData.append('file', payload.file);
+    if (payload.period) formData.append('period', payload.period);
+    return await requestFormData('/billing/agip-padron/import', formData, 180000);
   },
 
   // ============ PAGOS (recibos) ============

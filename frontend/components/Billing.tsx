@@ -172,24 +172,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     if (!file) return;
     setImportingAgipPadron(true);
     try {
-      const text = await file.text();
-      const periodMatch = file.name.match(/(\d{6})/);
-      const period = periodMatch?.[1] || (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
-      const byCuit = new Map<string, number>();
-      for (const rawLine of text.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        const cols = line.split(';');
-        if (cols.length < 9) continue;
-        const cuit = String(cols[3] || '').replace(/\D/g, '').slice(0, 11);
-        if (cuit.length !== 11) continue;
-        const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
-        const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
-        const ali = Math.max(a1, a2);
-        byCuit.set(cuit, ali);
-      }
-      const rows = Array.from(byCuit.entries()).map(([cuit, alicuota]) => ({ cuit, alicuota }));
-      const res = await api.importAgipPadron({ period, rows });
+      const periodFromFilename = (() => {
+        const mMyyyy = file.name.match(/(\d{2})(\d{4})(?!\d)/); // ARDJU...052026.txt => 202605
+        if (mMyyyy) return `${mMyyyy[2]}${mMyyyy[1]}`;
+        const yyyymm = file.name.match(/(20\d{2})(0[1-9]|1[0-2])(?!\d)/);
+        if (yyyymm) return `${yyyymm[1]}${yyyymm[2]}`;
+        return '';
+      })();
+      const periodFallback = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+      const res = await api.importAgipPadron({ file, period: periodFromFilename || periodFallback });
       showToast('success', `${res.message}: ${res.imported} CUIT(s) (${res.period}).`);
     } catch (err: any) {
       showToast('error', err?.message || 'Error importando padrón AGIP');

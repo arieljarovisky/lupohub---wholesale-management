@@ -589,8 +589,33 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
 /** Importa padrón AGIP resumido (CUIT + alícuota) para un período YYYYMM. */
 export const importAgipPadron = async (req: Request, res: Response) => {
   try {
-    const period = String(req.body?.period || '').trim();
-    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const parsePeriodFromFilename = (nameRaw: string): string => {
+      const name = String(nameRaw || '');
+      const mMyyyy = name.match(/(\d{2})(\d{4})(?!\d)/); // ej: ...052026.txt
+      if (mMyyyy) return `${mMyyyy[2]}${mMyyyy[1]}`;
+      const yyyymm = name.match(/(20\d{2})(0[1-9]|1[0-2])(?!\d)/);
+      if (yyyymm) return `${yyyymm[1]}${yyyymm[2]}`;
+      return '';
+    };
+    const file = (req as any).file as { buffer?: Buffer; originalname?: string } | undefined;
+    const period = String(req.body?.period || parsePeriodFromFilename(file?.originalname || '')).trim();
+    let rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if ((!rows || rows.length === 0) && file?.buffer) {
+      const content = file.buffer.toString('utf8');
+      const parsed: Array<{ cuit: string; alicuota: number }> = [];
+      for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const cols = line.split(';');
+        if (cols.length < 9) continue;
+        const cuit = onlyDigits(cols[3]).slice(0, 11);
+        if (cuit.length !== 11) continue;
+        const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
+        const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
+        parsed.push({ cuit, alicuota: Math.max(a1, a2) });
+      }
+      rows = parsed;
+    }
     if (!/^\d{6}$/.test(period)) {
       return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
     }
