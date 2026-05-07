@@ -595,20 +595,41 @@ export const importAgipPadron = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
     }
     await ensureAgipPadronTable();
-    await execute(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
-    let imported = 0;
+    // Deduplicar por CUIT (última alícuota recibida para ese CUIT)
+    const byCuit = new Map<string, number>();
     for (const r of rows) {
       const cuit = onlyDigits(r?.cuit).slice(0, 11);
       const alicuota = Number(String(r?.alicuota || '0').replace(',', '.')) || 0;
       if (cuit.length !== 11) continue;
-      await execute(
-        `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
-         VALUES (UUID(), ?, ?, ?)`,
-        [period, cuit, alicuota]
-      );
-      imported += 1;
+      byCuit.set(cuit, alicuota);
     }
-    res.json({ message: 'Padrón AGIP importado', period, imported });
+
+    const entries = Array.from(byCuit.entries());
+    await execute('START TRANSACTION');
+    try {
+      await execute(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+
+      const CHUNK = 1000;
+      for (let i = 0; i < entries.length; i += CHUNK) {
+        const slice = entries.slice(i, i + CHUNK);
+        const placeholders = slice.map(() => `(UUID(), ?, ?, ?)`).join(', ');
+        const params: any[] = [];
+        for (const [cuit, alicuota] of slice) {
+          params.push(period, cuit, alicuota);
+        }
+        await execute(
+          `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+           VALUES ${placeholders}`,
+          params
+        );
+      }
+
+      await execute('COMMIT');
+    } catch (e) {
+      await execute('ROLLBACK');
+      throw e;
+    }
+    res.json({ message: 'Padrón AGIP importado', period, imported: entries.length });
   } catch (error: any) {
     console.error('importAgipPadron:', error);
     res.status(500).json({ message: 'Error importando padrón AGIP' });

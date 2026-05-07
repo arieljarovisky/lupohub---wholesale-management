@@ -1883,7 +1883,7 @@ export const api = {
   },
 
   importAgipPadron: async (payload: { period: string; rows: Array<{ cuit: string; alicuota: number }> }): Promise<{ message: string; period: string; imported: number }> => {
-    return await request('/billing/agip-padron/import', 'POST', payload);
+    return await request('/billing/agip-padron/import', 'POST', payload, undefined, 180000);
   },
 
   // ============ PAGOS (recibos) ============
