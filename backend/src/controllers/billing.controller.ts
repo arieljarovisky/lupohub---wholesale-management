@@ -68,6 +68,30 @@ function txt(v: any, len: number): string {
   return ascii.slice(0, len).padEnd(len, ' ');
 }
 
+function normalizeNameForMatch(v: any): string {
+  return String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractCuitCandidates(raw: any): string[] {
+  const s = String(raw ?? '');
+  const compact = s.replace(/[\s.\-_/]/g, '');
+  const out = new Set<string>();
+  const mCompact = compact.match(/\d{11}/g) || [];
+  for (const m of mCompact) out.add(m);
+  const mWithSep = s.match(/\d{2}[-\s]?\d{8}[-\s]?\d/g) || [];
+  for (const m of mWithSep) {
+    const d = onlyDigits(m);
+    if (d.length === 11) out.add(d);
+  }
+  return Array.from(out);
+}
+
 async function ensureAgipPadronTable(): Promise<void> {
   await execute(`
     CREATE TABLE IF NOT EXISTS agip_padron_alicuotas (
@@ -816,7 +840,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const wb = XLSX.read(file.buffer, { type: 'buffer' });
     const cuitSet = new Set<string>();
     const nameSet = new Set<string>();
-    const norm = (s: any) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const norm = (s: any) => normalizeNameForMatch(s);
 
     for (const sheetName of wb.SheetNames) {
       const ws = wb.Sheets[sheetName];
@@ -829,16 +853,16 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           const key = norm(k);
           const val = String(v ?? '').trim();
           if (!val) continue;
+          for (const cuit of extractCuitCandidates(val)) cuitSet.add(cuit);
           if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
             const d = onlyDigits(val);
-            if (d.length === 11) {
-              cuitSet.add(d);
-              captured = true;
-            }
+            if (d.length === 11) cuitSet.add(d);
+            captured = true;
           }
           if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
-            if (val.length >= 3) {
-              nameSet.add(norm(val));
+            const n = norm(val);
+            if (n.length >= 3) {
+              nameSet.add(n);
               captured = true;
             }
           }
@@ -848,9 +872,11 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           for (const v of Object.values(row || {})) {
             const val = String(v ?? '').trim();
             if (!val) continue;
+            for (const cuit of extractCuitCandidates(val)) cuitSet.add(cuit);
             const d = onlyDigits(val);
             if (d.length === 11) cuitSet.add(d);
-            else if (val.length >= 3) nameSet.add(norm(val));
+            const n = norm(val);
+            if (n.length >= 4) nameSet.add(n);
           }
         }
       }
@@ -872,15 +898,14 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       for (const r of rowsByCuit) customerIds.add(String(r.id));
     }
     if (nameSet.size > 0) {
-      const names = Array.from(nameSet);
-      const rowsByName = await query(
-        `SELECT id
-         FROM customers
-         WHERE LOWER(TRIM(COALESCE(business_name, ''))) IN (${names.map(() => '?').join(',')})
-            OR LOWER(TRIM(COALESCE(name, ''))) IN (${names.map(() => '?').join(',')})`,
-        [...names, ...names]
-      ) as any[];
-      for (const r of rowsByName) customerIds.add(String(r.id));
+      const names = Array.from(nameSet).filter((n) => n.length >= 4);
+      const customersRows = await query(`SELECT id, business_name, name FROM customers`) as any[];
+      for (const r of customersRows) {
+        const bn = norm(r.business_name);
+        const cn = norm(r.name);
+        const matched = names.some((n) => (bn && (bn.includes(n) || n.includes(bn))) || (cn && (cn.includes(n) || n.includes(cn))));
+        if (matched) customerIds.add(String(r.id));
+      }
     }
 
     const ids = Array.from(customerIds);
@@ -915,7 +940,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FACTURA' AS tipo,
-          o.date AS fecha,
+          DATE(i.created_at) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -930,7 +955,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
-        WHERE o.date >= ? AND o.date <= ?
+        WHERE DATE(i.created_at) >= ? AND DATE(i.created_at) <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
 
@@ -938,7 +963,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
 
         SELECT
           'NC' AS tipo,
-          o.date AS fecha,
+          DATE(cn.created_at) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -953,7 +978,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
-        WHERE o.date >= ? AND o.date <= ?
+        WHERE DATE(cn.created_at) >= ? AND DATE(cn.created_at) <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
       ) x
