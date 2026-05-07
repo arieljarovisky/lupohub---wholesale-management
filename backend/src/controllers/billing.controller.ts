@@ -539,16 +539,18 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       [period, ...params, period, ...params]
     ) as any[];
 
-    const lines = rows.map((r) => {
+    const lines = rows
+      .filter((r) => onlyDigits(r.cuit).length === 11)
+      .map((r) => {
       const fecha = ddmmyyyy(r.fecha);
       const tipoComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? '01A' : '01B';
       const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
-      const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
+      const nro = String(Number(r.cbte_desde) || 0).padStart(11, '0');
       const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
-      const cuit = onlyDigits(r.cuit).padStart(11, '0').slice(0, 11);
-      const razon = txt(r.razon_social, 30);
+      const cuit = onlyDigits(r.cuit).slice(0, 11);
+      const razon = txt(r.razon_social, 27);
       const alicuota = Math.max(0, Number(r.alicuota || 0));
-      const aliStr = `${String(Math.floor(alicuota)).padStart(2, '0')},${String(Math.round((alicuota % 1) * 100)).padStart(2, '0')}`;
+      const aliDecimals = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
       const retPerc = Math.abs(Number(r.importe) || 0) * (alicuota / 100);
 
       // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
@@ -557,7 +559,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         tipoComp,
         pv,
-        nro,
+        `${pv}${nro}`,
         `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
         importe,
         ' '.repeat(16),
@@ -568,7 +570,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.3, 13), // base presunta
         formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.05, 13), // ajuste presunto
         formatAmountFixed(Math.abs(Number(r.importe) || 0) * 0.24, 13), // neto presunto
-        `3301${aliStr}`, // régimen default + alícuota por CUIT en padrón
+        `,3301,${aliDecimals}`, // formato e-Arciba: ,RRRR,##
         formatAmountFixed(retPerc, 13), // ret/perc calculada
         formatAmountFixed(retPerc, 13),
         ' '.repeat(11)
