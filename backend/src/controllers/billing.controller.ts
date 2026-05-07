@@ -936,10 +936,13 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const customerIds = new Set<string>();
     const matchedCuits = new Set<string>();
     const matchedNames = new Set<string>();
+    const foundByCuit = new Map<string, string[]>();
+    const foundByName = new Map<string, string[]>();
     if (cuitSet.size > 0) {
       const cuits = Array.from(cuitSet);
       const rowsByCuit = await query(
         `SELECT id,
+                COALESCE(business_name, name, '') AS customer_name,
                 REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') AS cuit_norm
          FROM customers
          WHERE REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') IN (${cuits.map(() => '?').join(',')})`,
@@ -948,6 +951,12 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       for (const r of rowsByCuit) {
         customerIds.add(String(r.id));
         if (r.cuit_norm) matchedCuits.add(String(r.cuit_norm));
+        const key = String(r.cuit_norm || '');
+        if (key) {
+          const arr = foundByCuit.get(key) || [];
+          arr.push(`${String(r.id)} | ${String(r.customer_name || '')}`);
+          foundByCuit.set(key, arr);
+        }
       }
     }
     if (nameSet.size > 0) {
@@ -960,6 +969,9 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         if (matchedName) {
           customerIds.add(String(r.id));
           matchedNames.add(matchedName);
+          const arr = foundByName.get(matchedName) || [];
+          arr.push(`${String(r.id)} | ${String(r.business_name || r.name || '')}`);
+          foundByName.set(matchedName, arr);
         }
       }
     }
@@ -1065,6 +1077,35 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const outWb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(outWb, ws, 'Comprobantes');
+
+    // Hoja de auditoría: cómo matcheó cada fila del archivo
+    const encontrados = sourceRows
+      .map((r) => {
+        const cuitMatches = r.cuitNorm ? (foundByCuit.get(r.cuitNorm) || []) : [];
+        const nameMatches = r.nameNorm ? (foundByName.get(r.nameNorm) || []) : [];
+        const criterion = cuitMatches.length > 0 ? 'CUIT' : (nameMatches.length > 0 ? 'NOMBRE' : 'NO');
+        const dbMatched = cuitMatches.length > 0 ? cuitMatches : nameMatches;
+        return {
+          Hoja: r.sheet,
+          Fila: r.row,
+          ClienteArchivo: r.rawName || '',
+          CUITArchivo: r.rawCuit || '',
+          CriterioMatch: criterion,
+          CoincidenciasDB: dbMatched.join(' || ') || ''
+        };
+      })
+      .filter((r) => r.CriterioMatch !== 'NO');
+    const wsFound = XLSX.utils.json_to_sheet(
+      encontrados.length > 0
+        ? encontrados
+        : [{ Hoja: '-', Fila: '-', ClienteArchivo: '', CUITArchivo: '', CriterioMatch: 'SIN COINCIDENCIAS', CoincidenciasDB: '' }]
+    );
+    XLSX.utils.sheet_add_json(
+      wsFound,
+      [{ TotalEncontrados: encontrados.length }],
+      { origin: 'H1' }
+    );
+    XLSX.utils.book_append_sheet(outWb, wsFound, 'Encontrados');
 
     // Hoja de control: filas del archivo que no pudieron vincularse a ningún cliente
     const notFound = sourceRows
