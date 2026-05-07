@@ -1886,16 +1886,22 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  /** Exporta facturas del mes para los clientes listados en un Excel. */
-  exportBillingByCustomersFile: async (file: File, params: { month: string }): Promise<void> => {
+  /** Exporta facturas + NC del mes para clientes en Excel y/o lista pegada de CUIT (`cuitsList`). */
+  exportBillingByCustomersFile: async (params: {
+    month: string;
+    file?: File | null;
+    cuitsList?: string;
+  }): Promise<void> => {
     const form = new FormData();
-    form.append('file', file);
     form.append('month', params.month);
+    if (params.file) form.append('file', params.file);
+    const list = String(params.cuitsList ?? '').trim();
+    if (list) form.append('cuitsList', list);
     const blob = await postFormDataBlob('/billing/export-by-customers-file', form, 180000);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `facturas_${params.month.replace('-', '')}_clientes_archivo.xlsx`;
+    a.download = `comprobantes_${params.month.replace('-', '')}_clientes.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

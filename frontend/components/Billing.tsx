@@ -75,6 +75,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payNotes, setPayNotes] = useState<string>('');
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
+  const [billingExportCuitsText, setBillingExportCuitsText] = useState('');
 
   useEffect(() => {
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
@@ -164,18 +165,26 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const handleExportBillingFromCustomersFile = async (file: File | null) => {
-    if (!file) return;
     const month = (retPerMonth || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) {
-      showToast('error', 'Mes inválido. Usá formato YYYY-MM (ej. 2026-04).');
+      showToast('error', 'Mes inválido. Usá Mes RetPer en formato YYYY-MM (ej. 2026-04).');
+      return;
+    }
+    const cuitsList = billingExportCuitsText.trim();
+    if (!file && !cuitsList) {
+      showToast('error', 'Pegá CUIT en la lista de abajo o elegí un archivo Excel.');
       return;
     }
     setExportingByCustomerFile(true);
     try {
-      await api.exportBillingByCustomersFile(file, { month });
-      showToast('success', `Facturas exportadas para ${month} de clientes del archivo.`);
+      await api.exportBillingByCustomersFile({
+        month,
+        file: file ?? undefined,
+        cuitsList: cuitsList || undefined
+      });
+      showToast('success', `Comprobantes exportados para ${month} (facturas + NC).`);
     } catch (err: any) {
-      showToast('error', err?.message || 'Error exportando facturas por archivo de clientes');
+      showToast('error', err?.message || 'Error exportando comprobantes por clientes');
     } finally {
       setExportingByCustomerFile(false);
       if (billingCustomersFileInputRef.current) billingCustomersFileInputRef.current.value = '';
@@ -599,17 +608,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             type="file"
             accept=".xlsx,.xls"
             className="hidden"
-            onChange={(e) => { void handleExportBillingFromCustomersFile(e.target.files?.[0] || null); }}
+            onChange={(e) => { void handleExportBillingFromCustomersFile(e.target.files?.[0] ?? null); }}
           />
           <button
             type="button"
             disabled={exportingByCustomerFile}
             onClick={() => billingCustomersFileInputRef.current?.click()}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-700 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-600 disabled:opacity-50"
-            title="Subí un Excel de clientes y exportá facturas del Mes RetPer"
+            title="Subí un Excel de clientes y/o usá la lista de CUIT; mes según Mes RetPer"
           >
             {exportingByCustomerFile ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
-            Facturas por archivo de clientes
+            Comprobantes por Excel / lista
           </button>
           <input
             ref={paymentsExcelInputRef}
@@ -647,6 +656,36 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           </button>
         </div>
       </div>
+
+      {activeView === 'billing' && (
+        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide">
+            Lista de CUIT (export del Mes RetPer: facturas + NC)
+          </label>
+          <textarea
+            value={billingExportCuitsText}
+            onChange={(e) => setBillingExportCuitsText(e.target.value)}
+            placeholder={'30717547515\n30528992656\n…'}
+            rows={5}
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 font-mono placeholder:text-slate-600 resize-y min-h-[120px]"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-500 max-w-3xl">
+              Un CUIT por línea; también podés elegir Excel arriba y combinar. Duplicados se deduplican. Si falta un dígito (ej. 10 caracteres), revisá la hoja{' '}
+              <span className="font-mono text-slate-400">CUIT invalidos</span> del archivo descargado.
+            </p>
+            <button
+              type="button"
+              disabled={exportingByCustomerFile || !billingExportCuitsText.trim()}
+              onClick={() => void handleExportBillingFromCustomersFile(null)}
+              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-bold border border-teal-600 hover:bg-teal-600 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {exportingByCustomerFile ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+              Exportar solo por lista
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
         <div className="space-y-1">

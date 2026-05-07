@@ -85,6 +85,23 @@ function tokensForNameMatch(v: string): string[] {
     .filter((t) => t.length >= 3);
 }
 
+/** Lista pegada: un CUIT por línea o separados por coma/punto y coma/tab. Ignora encabezado "CUIT". */
+function parseCuitsFromText(raw: string): { valid: string[]; invalid: string[] } {
+  const tokens = raw
+    .split(/[\r\n,;\t]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const validSet = new Set<string>();
+  const invalid: string[] = [];
+  for (const t of tokens) {
+    if (/^cuit$/i.test(t)) continue;
+    const d = onlyDigits(t);
+    if (d.length === 11) validSet.add(d);
+    else if (d.length > 0) invalid.push(t);
+  }
+  return { valid: Array.from(validSet), invalid };
+}
+
 function extractCuitCandidates(raw: any): string[] {
   const s = String(raw ?? '');
   const compact = s.replace(/[\s.\-_/]/g, '');
@@ -825,14 +842,16 @@ export const importAgipPadron = async (req: Request, res: Response) => {
   }
 };
 
-/** Exporta comprobantes (facturas + NC) de un mes para clientes listados en un Excel. */
+/** Exporta comprobantes (facturas + NC) de un mes para clientes en Excel y/o lista pegada de CUIT (campo `cuitsList`). */
 export const exportBillingByCustomersFile = async (req: Request, res: Response) => {
   try {
     const file = (req as any).file as Express.Multer.File | undefined;
-    if (!file) {
-      return res.status(400).json({ message: 'Falta archivo (campo "file").' });
-    }
     const month = String(req.body?.month || req.query?.month || '').trim();
+    const cuitsListRaw = String(req.body?.cuitsList || '').trim();
+
+    if (!file && !cuitsListRaw) {
+      return res.status(400).json({ message: 'Enviá un archivo Excel (campo file) y/o una lista de CUIT (campo cuitsList).' });
+    }
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return res.status(400).json({ message: 'month inválido (usar YYYY-MM).' });
     }
@@ -844,51 +863,44 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
     const fromDate = `${m[1]}-${m[2]}-01`;
     const toDate = `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}`;
 
-    const wb = XLSX.read(file.buffer, { type: 'buffer' });
     const cuitSet = new Set<string>();
     const nameSet = new Set<string>();
     const norm = (s: any) => normalizeNameForMatch(s);
     const sourceRows: Array<{ sheet: string; row: number; rawName: string; rawCuit: string; nameNorm: string; cuitNorm: string }> = [];
+    let invalidPasteCuits: string[] = [];
 
-    for (const sheetName of wb.SheetNames) {
-      const ws = wb.Sheets[sheetName];
-      if (!ws) continue;
-      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
-      for (let idx = 0; idx < rows.length; idx++) {
-        const row = rows[idx];
-        const entries = Object.entries(row || {});
-        let captured = false;
-        let rowName = '';
-        let rowCuit = '';
-        for (const [k, v] of entries) {
-          const key = norm(k);
-          const val = String(v ?? '').trim();
-          if (!val) continue;
-          const extracted = extractCuitCandidates(val);
-          for (const cuit of extracted) {
-            cuitSet.add(cuit);
-            if (!rowCuit) rowCuit = cuit;
-          }
-          if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
-            const d = onlyDigits(val);
-            if (d.length === 11) {
-              cuitSet.add(d);
-              if (!rowCuit) rowCuit = d;
-            }
-            captured = true;
-          }
-          if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
-            const n = norm(val);
-            if (n.length >= 3) {
-              nameSet.add(n);
-              if (!rowName) rowName = val;
-              captured = true;
-            }
-          }
-        }
-        if (!captured) {
-          // fallback: si no hay headers claros, tomar celdas como posibles nombres/cuit
-          for (const v of Object.values(row || {})) {
+    if (cuitsListRaw) {
+      const parsed = parseCuitsFromText(cuitsListRaw);
+      invalidPasteCuits = parsed.invalid;
+      let rowNum = 2;
+      for (const c of parsed.valid) {
+        cuitSet.add(c);
+        sourceRows.push({
+          sheet: 'Lista CUIT',
+          row: rowNum++,
+          rawName: '',
+          rawCuit: c,
+          nameNorm: '',
+          cuitNorm: c
+        });
+      }
+    }
+
+    if (file) {
+      const wb = XLSX.read(file.buffer, { type: 'buffer' });
+
+      for (const sheetName of wb.SheetNames) {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) continue;
+        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+        for (let idx = 0; idx < rows.length; idx++) {
+          const row = rows[idx];
+          const entries = Object.entries(row || {});
+          let captured = false;
+          let rowName = '';
+          let rowCuit = '';
+          for (const [k, v] of entries) {
+            const key = norm(k);
             const val = String(v ?? '').trim();
             if (!val) continue;
             const extracted = extractCuitCandidates(val);
@@ -896,48 +908,79 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
               cuitSet.add(cuit);
               if (!rowCuit) rowCuit = cuit;
             }
-            const d = onlyDigits(val);
-            if (d.length === 11) {
-              cuitSet.add(d);
-              if (!rowCuit) rowCuit = d;
+            if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
+              const d = onlyDigits(val);
+              if (d.length === 11) {
+                cuitSet.add(d);
+                if (!rowCuit) rowCuit = d;
+              }
+              captured = true;
             }
-            const n = norm(val);
-            if (n.length >= 4) {
-              nameSet.add(n);
-              if (!rowName) rowName = val;
+            if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
+              const n = norm(val);
+              if (n.length >= 3) {
+                nameSet.add(n);
+                if (!rowName) rowName = val;
+                captured = true;
+              }
             }
           }
-        }
-        if (rowName || rowCuit) {
-          sourceRows.push({
-            sheet: sheetName,
-            row: idx + 2,
-            rawName: rowName,
-            rawCuit: rowCuit,
-            nameNorm: norm(rowName),
-            cuitNorm: onlyDigits(rowCuit).slice(0, 11)
-          });
-        } else {
-          // último fallback: fila completa como texto
-          const joined = Object.values(row || {}).map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
-          const n = norm(joined);
-          const d = onlyDigits(joined).slice(0, 11);
-          if (n || d) {
+          if (!captured) {
+            // fallback: si no hay headers claros, tomar celdas como posibles nombres/cuit
+            for (const v of Object.values(row || {})) {
+              const val = String(v ?? '').trim();
+              if (!val) continue;
+              const extracted = extractCuitCandidates(val);
+              for (const cuit of extracted) {
+                cuitSet.add(cuit);
+                if (!rowCuit) rowCuit = cuit;
+              }
+              const d = onlyDigits(val);
+              if (d.length === 11) {
+                cuitSet.add(d);
+                if (!rowCuit) rowCuit = d;
+              }
+              const n = norm(val);
+              if (n.length >= 4) {
+                nameSet.add(n);
+                if (!rowName) rowName = val;
+              }
+            }
+          }
+          if (rowName || rowCuit) {
             sourceRows.push({
               sheet: sheetName,
               row: idx + 2,
-              rawName: joined,
-              rawCuit: d,
-              nameNorm: n,
-              cuitNorm: d
+              rawName: rowName,
+              rawCuit: rowCuit,
+              nameNorm: norm(rowName),
+              cuitNorm: onlyDigits(rowCuit).slice(0, 11)
             });
+          } else {
+            // último fallback: fila completa como texto
+            const joined = Object.values(row || {}).map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
+            const n = norm(joined);
+            const d = onlyDigits(joined).slice(0, 11);
+            if (n || d) {
+              sourceRows.push({
+                sheet: sheetName,
+                row: idx + 2,
+                rawName: joined,
+                rawCuit: d,
+                nameNorm: n,
+                cuitNorm: d
+              });
+            }
           }
         }
       }
     }
 
     if (cuitSet.size === 0 && nameSet.size === 0) {
-      return res.status(400).json({ message: 'No se encontraron CUIT o nombres de clientes en el Excel.' });
+      return res.status(400).json({
+        message:
+          'No se encontraron CUIT válidos (11 dígitos) ni nombres de clientes en el archivo ni en la lista pegada.'
+      });
     }
 
     const customerIds = new Set<string>();
@@ -1125,6 +1168,18 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       { origin: 'H1' }
     );
     XLSX.utils.book_append_sheet(outWb, wsFound, 'Encontrados');
+
+    if (invalidPasteCuits.length > 0) {
+      const wsInv = XLSX.utils.json_to_sheet(
+        invalidPasteCuits.map((v) => {
+          const d = onlyDigits(v);
+          const motivo =
+            d.length === 0 ? 'Sin dígitos' : `Tiene ${d.length} dígitos (se esperan 11)`;
+          return { ValorIngresado: v, Motivo: motivo };
+        })
+      );
+      XLSX.utils.book_append_sheet(outWb, wsInv, 'CUIT invalidos');
+    }
 
     // Hoja de control: filas del archivo que no pudieron vincularse a ningún cliente
     const notFound = sourceRows

@@ -183,10 +183,31 @@ export const postBlob = async (path: string, body?: any, timeoutMs = 120000): Pr
 /** POST con FormData que devuelve Blob (descargas con archivo de entrada). */
 export const postFormDataBlob = async (path: string, formData: FormData, timeoutMs = 120000): Promise<Blob> => {
   const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
-  const headers: Record<string, string> = { 'Accept': '*/*' };
+  const headers: Record<string, string> = { Accept: '*/*' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const response = await axios.post(url, formData, { responseType: 'blob', headers, timeout: timeoutMs });
-  return response.data;
+  try {
+    const response = await axios.post(url, formData, { responseType: 'blob', headers, timeout: timeoutMs });
+    return response.data;
+  } catch (err: any) {
+    if (axios.isAxiosError(err)) {
+      const blob = err.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const raw = await blob.text();
+          const parsed = raw ? JSON.parse(raw) : null;
+          const msg =
+            (typeof parsed?.message === 'string' && parsed.message) ||
+            (typeof parsed?.error === 'string' && parsed.error) ||
+            '';
+          if (msg) throw new Error(msg);
+        } catch {
+          // ignorar parse y usar mensaje genérico
+        }
+      }
+      throw new Error(err.message || 'Error descargando archivo');
+    }
+    throw err;
+  }
 };
 
 export const getBaseUrl = () => baseUrl;
