@@ -180,8 +180,76 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         return '';
       })();
       const periodFallback = (hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
-      const res = await api.importAgipPadron({ file, period: periodFromFilename || periodFallback });
-      showToast('success', `${res.message}: ${res.imported} CUIT(s) (${res.period}).`);
+      const period = periodFromFilename || periodFallback;
+      const CHUNK_LINES = 5000;
+      const CHARS_PER_READ = 2 * 1024 * 1024; // 2MB por lectura para no cargar todo el TXT en memoria
+      const shouldUseChunkImport = file.size > 70 * 1024 * 1024;
+
+      const importInChunks = async () => {
+        await api.importAgipPadronStart(period);
+        let offset = 0;
+        let carry = '';
+        let batch: Array<{ cuit: string; alicuota: number }> = [];
+        let importedTotal = 0;
+
+        const flushBatch = async () => {
+          if (batch.length === 0) return;
+          const resChunk = await api.importAgipPadronChunk({ period, rows: batch });
+          importedTotal += Number(resChunk.imported || 0);
+          batch = [];
+        };
+
+        while (offset < file.size) {
+          const text = await file.slice(offset, offset + CHARS_PER_READ).text();
+          offset += CHARS_PER_READ;
+          const merged = carry + text;
+          const lines = merged.split(/\r?\n/);
+          carry = lines.pop() || '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            const cols = line.split(';');
+            if (cols.length < 9) continue;
+            const cuit = String(cols[3] || '').replace(/\D/g, '').slice(0, 11);
+            if (cuit.length !== 11) continue;
+            const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
+            const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
+            batch.push({ cuit, alicuota: Math.max(a1, a2) });
+            if (batch.length >= CHUNK_LINES) await flushBatch();
+          }
+        }
+
+        const tail = carry.trim();
+        if (tail) {
+          const cols = tail.split(';');
+          if (cols.length >= 9) {
+            const cuit = String(cols[3] || '').replace(/\D/g, '').slice(0, 11);
+            if (cuit.length === 11) {
+              const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
+              const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
+              batch.push({ cuit, alicuota: Math.max(a1, a2) });
+            }
+          }
+        }
+        await flushBatch();
+        showToast('success', `Padrón AGIP importado: ${importedTotal} CUIT(s) (${period}).`);
+      };
+
+      if (shouldUseChunkImport) {
+        await importInChunks();
+      } else {
+        try {
+          const res = await api.importAgipPadron({ file, period });
+          showToast('success', `${res.message}: ${res.imported} CUIT(s) (${res.period}).`);
+        } catch (uploadErr: any) {
+          if (String(uploadErr?.message || '').includes('413')) {
+            await importInChunks();
+          } else {
+            throw uploadErr;
+          }
+        }
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Error importando padrón AGIP');
     } finally {

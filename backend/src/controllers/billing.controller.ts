@@ -587,6 +587,63 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
 };
 
 /** Importa padrón AGIP resumido (CUIT + alícuota) para un período YYYYMM. */
+export const importAgipPadronStart = async (req: Request, res: Response) => {
+  try {
+    const period = String(req.body?.period || '').trim();
+    if (!/^\d{6}$/.test(period)) {
+      return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
+    }
+    await ensureAgipPadronTable();
+    await execute(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+    return res.json({ message: 'Importación inicializada', period });
+  } catch (error: any) {
+    console.error('importAgipPadronStart:', error);
+    const detail = String(error?.sqlMessage || error?.message || '').trim();
+    return res.status(500).json({
+      message: detail ? `Error inicializando importación AGIP: ${detail}` : 'Error inicializando importación AGIP'
+    });
+  }
+};
+
+export const importAgipPadronChunk = async (req: Request, res: Response) => {
+  try {
+    const period = String(req.body?.period || '').trim();
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!/^\d{6}$/.test(period)) {
+      return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
+    }
+    if (!rows.length) {
+      return res.json({ message: 'Chunk vacío', period, imported: 0 });
+    }
+    await ensureAgipPadronTable();
+    const byCuit = new Map<string, number>();
+    for (const r of rows) {
+      const cuit = onlyDigits(r?.cuit).slice(0, 11);
+      const alicuota = Number(String(r?.alicuota || '0').replace(',', '.')) || 0;
+      if (cuit.length !== 11) continue;
+      byCuit.set(cuit, alicuota);
+    }
+    const entries = Array.from(byCuit.entries());
+    if (!entries.length) return res.json({ message: 'Chunk sin CUIT válidos', period, imported: 0 });
+    const placeholders = entries.map(() => `(UUID(), ?, ?, ?)`).join(', ');
+    const params: any[] = [];
+    for (const [cuit, alicuota] of entries) params.push(period, cuit, alicuota);
+    await execute(
+      `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+       VALUES ${placeholders}
+       ON DUPLICATE KEY UPDATE alicuota = VALUES(alicuota)`,
+      params
+    );
+    return res.json({ message: 'Chunk importado', period, imported: entries.length });
+  } catch (error: any) {
+    console.error('importAgipPadronChunk:', error);
+    const detail = String(error?.sqlMessage || error?.message || '').trim();
+    return res.status(500).json({
+      message: detail ? `Error importando chunk AGIP: ${detail}` : 'Error importando chunk AGIP'
+    });
+  }
+};
+
 export const importAgipPadron = async (req: Request, res: Response) => {
   try {
     const parsePeriodFromFilename = (nameRaw: string): string => {
