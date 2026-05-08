@@ -128,6 +128,8 @@ export interface Customer {
   shouldRetainIibb?: boolean;
   /** Período AGIP (YYYYMM) usado para la validación de retención. */
   agipPadronPeriod?: string;
+  /** Alícuota IIBB del padrón AGIP para el período evaluado. */
+  iibbAlicuota?: number;
 }
 
 export interface OrderItem {

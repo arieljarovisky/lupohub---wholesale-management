@@ -793,7 +793,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60">
                     <td className="px-3 py-2">{formatDate(item.fecha)}</td>
                     <td className="px-3 py-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                      <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                         {formatTipo(item)}
                       </span>
                     </td>

@@ -854,7 +854,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     title={selectedCustomer.agipPadronPeriod ? `Padrón AGIP ${selectedCustomer.agipPadronPeriod}` : 'Sin padrón AGIP'}
                   >
                     <AlertTriangle size={12} />
-                    {selectedCustomer.shouldRetainIibb ? 'Retener IIBB: Sí' : 'Retener IIBB: No'}
+                    {selectedCustomer.shouldRetainIibb
+                      ? `Retener IIBB: Sí (${Number(selectedCustomer.iibbAlicuota || 0).toFixed(2)}%)`
+                      : 'Retener IIBB: No'}
                   </span>
                   {selectedCustomer.transportes && selectedCustomer.transportes.length > 0 && (
                     <>
@@ -2106,7 +2108,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   title={customer.agipPadronPeriod ? `Padrón AGIP ${customer.agipPadronPeriod}` : 'Sin padrón AGIP'}
                 >
                   <AlertTriangle size={11} />
-                  <span>{customer.shouldRetainIibb ? 'Retener IIBB: Sí' : 'Retener IIBB: No'}</span>
+                  <span>
+                    {customer.shouldRetainIibb
+                      ? `Retener IIBB: Sí (${Number(customer.iibbAlicuota || 0).toFixed(2)}%)`
+                      : 'Retener IIBB: No'}
+                  </span>
                 </div>
                 
                 <div className="space-y-2 text-xs border-t border-slate-800 pt-3 mt-2">

@@ -27,6 +27,7 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     accountSellerLabel: row.account_seller_label ?? undefined,
     shouldRetainIibb: Number(row.should_retain_iibb || 0) === 1,
     agipPadronPeriod: row.agip_padron_period ?? undefined,
+    iibbAlicuota: row.iibb_alicuota != null ? Number(row.iibb_alicuota) : undefined,
     transportes: transportes ?? []
   };
 }
@@ -48,10 +49,12 @@ export const getCustomers = async (req: Request, res: Response) => {
            WHEN apc.cuit IS NULL THEN 0
            ELSE 1
          END AS should_retain_iibb,
-         apm.period_yyyymm AS agip_padron_period`
+         apm.period_yyyymm AS agip_padron_period,
+         apc.alicuota AS iibb_alicuota`
       : `,
          0 AS should_retain_iibb,
-         NULL AS agip_padron_period`;
+         NULL AS agip_padron_period,
+         NULL AS iibb_alicuota`;
     const agipJoin = agipExists
       ? `
        LEFT JOIN (

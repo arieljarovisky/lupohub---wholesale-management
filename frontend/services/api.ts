@@ -641,7 +641,8 @@ export const api = {
         accountZone: r.accountZone ?? r.account_zone ?? undefined,
         accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
         shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
-        agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined
+        agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
+        iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined)
       })) as Customer[];
     }, [], 'getCustomers');
   },
