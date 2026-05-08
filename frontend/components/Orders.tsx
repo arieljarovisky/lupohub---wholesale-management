@@ -543,6 +543,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!orderToEmitFactura) return;
     const cbteTipo = getCbteTipoFromEmitSelection(orderToEmitFactura);
     const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
+    const netPreview = orderNetoFromItems(orderToEmitFactura);
+    const agipAlicuotaPreview = (custEmit?.shouldRetainIibb && Number(custEmit?.iibbAlicuota || 0) > 0)
+      ? Number(custEmit?.iibbAlicuota || 0)
+      : 0;
+    const agipRetPerPreview = Math.round(netPreview * (agipAlicuotaPreview / 100) * 100) / 100;
     const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
     const manual: ManualFacturaFields = {
       ...(manualFacturaDataByOrder[orderToEmitFactura.id] || {}),
@@ -575,8 +580,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         cbteDesde: 0,
         cbteHasta: 0,
         createdAt: orderToEmitFactura.date,
-        agipAlicuota: 0,
-        agipRetPer: 0,
+        agipAlicuota: agipAlicuotaPreview,
+        agipRetPer: agipRetPerPreview,
       } as any
     };
     const html = injectPreviewBanner(buildFacturaHtml(previewOrder, manual));
