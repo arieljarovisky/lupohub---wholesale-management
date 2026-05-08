@@ -163,7 +163,7 @@ export const getOrders = async (req: any, res: any) => {
     const ordersParams = user?.role === 'SELLER' ? [user.id] : [];
 
     let ordersRow = await query(
-      `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name,
+      `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
               cu.name AS created_by_name, cu.role AS created_by_role,
               su.name AS seller_name
        FROM orders o
@@ -260,6 +260,23 @@ export const getOrders = async (req: any, res: any) => {
         agipAlicuota: Number(inv.agip_alicuota || 0),
         agipRetPer: Number(inv.agip_ret_per || 0)
       };
+    }
+    // Fallback para facturas antiguas sin retención guardada:
+    // recalcular con padrón AGIP del período del pedido para no perder la línea en impresión.
+    for (const o of ordersRow as any[]) {
+      const inv = invoiceByOrderId[o.id];
+      if (!inv) continue;
+      const hasStoredAgip = Number(inv.agipAlicuota || 0) > 0 || Number(inv.agipRetPer || 0) > 0;
+      if (hasStoredAgip) continue;
+      const calc = await getAgipRetentionForOrder({
+        orderDate: String(o.date || ''),
+        customerCuit: o.customer_cuit,
+        netAmount: Number(o.total || 0),
+      });
+      if (calc) {
+        inv.agipAlicuota = Number(calc.alicuota || 0);
+        inv.agipRetPer = Number(calc.amount || 0);
+      }
     }
 
     let creditNotesCountByOrderId: Record<string, number> = {};
