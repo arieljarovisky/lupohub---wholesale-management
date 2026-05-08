@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Megaphone, Sparkles, LayoutGrid, Radio, Percent } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent } from 'lucide-react';
 import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES, DAMIAN_TASKS_BANNER_EMAIL, DAMIAN_TASKS_BANNER_UNTIL_MS, ARIEL_TASKS_OWNER_EMAIL } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte, UserTask } from './types';
 import { api } from './services/api';
@@ -118,10 +118,6 @@ const App: React.FC = () => {
     bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
-    mercadolibre_canal_difusion: [Role.ADMIN, Role.WAREHOUSE],
-    mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE],
-    mercadolibre_brand_ads: [Role.ADMIN, Role.WAREHOUSE],
-    mercadolibre_display_ads: [Role.ADMIN, Role.WAREHOUSE],
     stock_history: [Role.ADMIN, Role.WAREHOUSE],
     despachos: [Role.ADMIN],
     customers: [Role.ADMIN, Role.SELLER],
@@ -241,7 +237,7 @@ const App: React.FC = () => {
   }, [currentView]);
 
   useEffect(() => {
-    if (baseView === 'mercadolibre_marketing') setCurrentView('mercadolibre_canal_difusion');
+    if (baseView === 'mercadolibre_marketing') setCurrentView('mercadolibre_orders');
   }, [baseView]);
 
   useEffect(() => {
@@ -807,10 +803,6 @@ const App: React.FC = () => {
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
-      { id: 'mercadolibre_canal_difusion', label: 'Canal de difusión', icon: Radio, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
-      { id: 'mercadolibre_product_ads', label: 'Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
-      { id: 'mercadolibre_brand_ads', label: 'Brand Ads', icon: Sparkles, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
-      { id: 'mercadolibre_display_ads', label: 'Display Ads', icon: LayoutGrid, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
     ]},
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
