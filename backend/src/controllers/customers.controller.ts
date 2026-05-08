@@ -2204,8 +2204,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       for (const m of movs) {
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
-      const saldoTarget = Number(saldoUnificadoByCustomer.get(c.id) ?? running) || 0;
-      const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
+      // Saldo final estrictamente por histórico del sistema (sin ajuste externo).
+      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
 
       wsSummary.addRow({
         cliente: c.customer_name,
@@ -2244,9 +2244,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       });
 
       let saldo = 0;
+      let totalDebeMovs = 0;
+      let totalHaberMovs = 0;
       for (const m of movs) {
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
+        totalDebeMovs = Math.round((totalDebeMovs + debe) * 100) / 100;
+        totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
         saldo = Math.round((saldo + debe - haber) * 100) / 100;
         const tipoLabel =
           m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
@@ -2269,20 +2273,17 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         });
       }
 
-      // Si el saldo unificado no coincide con el detalle de movimientos
-      // (por ejemplo por cuenta importada), agregamos una línea de ajuste
-      // para que la hoja del cliente cierre con el mismo saldo que la vista.
-      const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
-      if (Math.abs(delta) > 0.01) {
-        wsDetalle.addRow({
-          fecha: null,
-          tipo: 'AJUSTE',
-          comprobante: 'SALDO',
-          pedido: '',
-          debe: delta > 0 ? delta : 0,
-          haber: delta < 0 ? Math.abs(delta) : 0,
-          saldo: saldoPendiente
-        });
+      // Bloque de conciliación para mostrar cómo se llega al saldo final.
+      wsDetalle.addRow(['RESUMEN DE CONCILIACION', '', '', '', '', '', '']);
+      wsDetalle.addRow(['Total debe (movimientos)', '', '', '', totalDebeMovs, '', '']);
+      wsDetalle.addRow(['Total haber (movimientos)', '', '', '', '', totalHaberMovs, '']);
+      wsDetalle.addRow(['Saldo por movimientos (debe - haber)', '', '', '', '', '', saldo]);
+      wsDetalle.addRow(['Saldo final', '', '', '', '', '', saldoPendiente]);
+      for (let r = wsDetalle.rowCount - 4; r <= wsDetalle.rowCount; r += 1) {
+        wsDetalle.mergeCells(r, 1, r, 4);
+        const row = wsDetalle.getRow(r);
+        row.getCell(1).font = { bold: true };
+        row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
       }
 
       wsDetalle.addRow(['', '', '', '', '', '', '']);

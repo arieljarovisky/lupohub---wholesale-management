@@ -597,9 +597,8 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
       params.push(`%${String(province).trim().toLowerCase()}%`);
     }
-    // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período.
-    // Filtrar por ciudad textual deja afuera clientes válidos si el dato no está normalizado.
-    where.push('ap.cuit IS NOT NULL');
+    // Ret/Per AGIP: aplicar solo a CUIT con padrón AGIP (del período o último disponible).
+    where.push('(ap.cuit IS NOT NULL OR ap_last.cuit IS NOT NULL)');
     const authUser = (req as any).user;
     if (authUser?.role === 'SELLER') {
       where.push('c.seller_id = ?');
@@ -620,11 +619,17 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         o.total AS importe,
         c.cuit,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(ap.alicuota, ap_last.alicuota, 0) AS alicuota
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      LEFT JOIN agip_padron_alicuotas ap_last ON ap_last.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        AND ap_last.period_yyyymm = (
+          SELECT MAX(ap2.period_yyyymm)
+          FROM agip_padron_alicuotas ap2
+          WHERE ap2.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        )
       ${whereSql}
       UNION ALL
       SELECT
@@ -635,11 +640,17 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         cn.amount_credited AS importe,
         c.cuit,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(ap.alicuota, ap_last.alicuota, 0) AS alicuota
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      LEFT JOIN agip_padron_alicuotas ap_last ON ap_last.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        AND ap_last.period_yyyymm = (
+          SELECT MAX(ap2.period_yyyymm)
+          FROM agip_padron_alicuotas ap2
+          WHERE ap2.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        )
       ${whereSql}
       ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
       `,
