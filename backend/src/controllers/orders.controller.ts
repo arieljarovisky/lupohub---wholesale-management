@@ -128,6 +128,29 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
+async function getAgipRetentionForOrder(args: {
+  orderDate: string;
+  customerCuit?: string | null;
+  netAmount: number;
+}): Promise<{ alicuota: number; amount: number } | null> {
+  const cuit = String(args.customerCuit || '').replace(/\D/g, '').slice(0, 11);
+  if (cuit.length !== 11) return null;
+  const period = String(args.orderDate || '').slice(0, 7).replace('-', '');
+  if (!/^\d{6}$/.test(period)) return null;
+  const row = await get(
+    `SELECT alicuota
+     FROM agip_padron_alicuotas
+     WHERE period_yyyymm = ? AND cuit = ?
+     LIMIT 1`,
+    [period, cuit]
+  );
+  const alicuota = Number((row as any)?.alicuota || 0);
+  if (!(alicuota > 0)) return null;
+  const net = Math.max(0, Number(args.netAmount) || 0);
+  const amount = Math.round(net * (alicuota / 100) * 100) / 100;
+  return { alicuota, amount };
+}
+
 export const getOrders = async (req: any, res: any) => {
   try {
     const user = req.user;
@@ -812,10 +835,22 @@ export const getOrderInvoice = async (req: any, res: any) => {
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
     const inv = await get(
-      'SELECT id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at FROM invoices WHERE order_id = ?',
+      `SELECT i.id, i.order_id, i.cae, i.cae_fch_vto, i.punto_venta, i.cbte_tipo, i.cbte_desde, i.cbte_hasta, i.created_at,
+              o.total AS order_total, o.date AS order_date, c.cuit AS customer_cuit
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE i.order_id = ?`,
       [id]
     );
     if (!inv) return res.status(404).json({ message: 'Este pedido no tiene factura emitida' });
+    const netFromItems = await getOrderNetFromLineItems(id);
+    const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
+    const agip = await getAgipRetentionForOrder({
+      orderDate: String(inv.order_date || inv.created_at || ''),
+      customerCuit: inv.customer_cuit,
+      netAmount
+    });
     res.json({
       id: inv.id,
       orderId: inv.order_id,
@@ -825,7 +860,9 @@ export const getOrderInvoice = async (req: any, res: any) => {
       cbteTipo: inv.cbte_tipo,
       cbteDesde: inv.cbte_desde,
       cbteHasta: inv.cbte_hasta,
-      createdAt: inv.created_at
+      createdAt: inv.created_at,
+      agipAlicuota: agip?.alicuota ?? 0,
+      agipRetPer: agip?.amount ?? 0
     });
   } catch (error) {
     console.error(error);
@@ -882,6 +919,11 @@ export const emitirFactura = async (req: any, res: any) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [invoiceId, id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta]
     );
+    const agip = await getAgipRetentionForOrder({
+      orderDate: String(orderRow.date || ''),
+      customerCuit: customerRow.cuit,
+      netAmount: totalForAfip
+    });
     res.status(201).json({
       id: invoiceId,
       orderId: id,
@@ -890,7 +932,9 @@ export const emitirFactura = async (req: any, res: any) => {
       puntoVta: result.puntoVta,
       cbteTipo: result.cbteTipo,
       cbteDesde: result.cbteDesde,
-      cbteHasta: result.cbteHasta
+      cbteHasta: result.cbteHasta,
+      agipAlicuota: agip?.alicuota ?? 0,
+      agipRetPer: agip?.amount ?? 0
     });
   } catch (error: any) {
     console.error('emitirFactura:', error);

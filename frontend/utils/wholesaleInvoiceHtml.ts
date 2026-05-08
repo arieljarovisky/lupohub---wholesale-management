@@ -139,6 +139,8 @@ export function buildWholesaleFacturaHtml(params: {
   const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
   const total = Math.round((netoGravado + iva21) * 100) / 100;
   const subtotalBruto = netoGravado;
+  const agipAlicuota = Number((inv as any).agipAlicuota || 0);
+  const agipRetPer = Number((inv as any).agipRetPer || 0);
 
   const rows = items
     .map((i) => {
@@ -365,6 +367,7 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
               <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoGravado)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+              ${agipRetPer > 0 ? `<div class="r"><span>Retención IIBB AGIP (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
               <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
             </div>
           </div>
