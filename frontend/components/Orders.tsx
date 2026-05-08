@@ -1158,7 +1158,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               setEmitiendoFacturaId(order.id);
                               api.emitirFactura(order.id, { noStockImpact: true })
                                 .then((res) => {
-                                  onFacturaEmitida?.(order.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo });
+                                  onFacturaEmitida?.(order.id, {
+                                    cae: res.cae,
+                                    caeFchVto: res.caeFchVto,
+                                    cbteDesde: res.cbteDesde,
+                                    cbteHasta: res.cbteHasta,
+                                    cbteTipo: res.cbteTipo,
+                                    puntoVta: res.puntoVta,
+                                    agipAlicuota: Number((res as any).agipAlicuota || 0),
+                                    agipRetPer: Number((res as any).agipRetPer || 0)
+                                  });
                                   showToast('success', `Factura ${tipoFactura} emitida sin impactar stock. CAE ${res.cae}`);
                                 })
                                 .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
@@ -1510,7 +1519,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   }));
                   api.emitirFactura(orderToEmitFactura.id, cbteTipo != null ? { cbteTipo } : undefined)
                     .then((res) => {
-                      onFacturaEmitida?.(orderToEmitFactura.id, { cae: res.cae, caeFchVto: res.caeFchVto, cbteDesde: res.cbteDesde, cbteHasta: res.cbteHasta, cbteTipo: res.cbteTipo, puntoVta: res.puntoVta } as any);
+                      onFacturaEmitida?.(orderToEmitFactura.id, {
+                        cae: res.cae,
+                        caeFchVto: res.caeFchVto,
+                        cbteDesde: res.cbteDesde,
+                        cbteHasta: res.cbteHasta,
+                        cbteTipo: res.cbteTipo,
+                        puntoVta: res.puntoVta,
+                        agipAlicuota: Number((res as any).agipAlicuota || 0),
+                        agipRetPer: Number((res as any).agipRetPer || 0)
+                      } as any);
                       showToast('success', `Factura emitida. CAE ${res.cae}`);
                       setShowEmitirFacturaModal(false);
                       setOrderToEmitFactura(null);

@@ -164,6 +164,9 @@ export interface OrderInvoice {
   cbteTipo: number;
   /** Fecha de emisión del comprobante (ISO); se usa para mostrar en la factura. */
   createdAt?: string;
+  /** Retención/percepción AGIP guardada al emitir (si aplica). */
+  agipAlicuota?: number;
+  agipRetPer?: number;
 }
 
 export interface Order {
