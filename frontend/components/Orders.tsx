@@ -514,7 +514,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       : localRemitente;
   };
 
-  const buildFacturaHtml = (order: Order, manual?: { remitoNumber?: string; transportNumber?: string; saleCondition?: string }) => {
+  const buildFacturaHtml = (order: Order, manual?: ManualFacturaFields) => {
     const customer = customers.find((c) => c.id === order.customerId);
     return buildWholesaleFacturaHtml({
       order,
@@ -523,6 +523,72 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       remitente: mergedRemitenteForFactura() as any,
       manual,
     });
+  };
+
+  const injectPreviewBanner = (html: string) => {
+    if (!html) return html;
+    return html.replace(
+      '<body>',
+      '<body><div style="position:sticky;top:0;z-index:9999;background:#7f1d1d;color:#fff;padding:10px 14px;font:700 12px Arial,Helvetica,sans-serif;letter-spacing:.03em;text-transform:uppercase;text-align:center;">Vista previa sin validez fiscal - aun no emitida en AFIP</div>'
+    );
+  };
+
+  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 => {
+    if (emitirFacturaTipo === 'A') return 1;
+    if (emitirFacturaTipo === 'B') return 6;
+    return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
+  };
+
+  const openFacturaPreviewBeforeEmit = () => {
+    if (!orderToEmitFactura) return;
+    const cbteTipo = getCbteTipoFromEmitSelection(orderToEmitFactura);
+    const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
+    const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
+    const manual: ManualFacturaFields = {
+      ...(manualFacturaDataByOrder[orderToEmitFactura.id] || {}),
+      saleCondition: emitirFacturaSaleCondition,
+    };
+    if (emitirFacturaTransporteId) {
+      const t = optsEmit.find((o) => o.id === emitirFacturaTransporteId);
+      if (t) {
+        manual.transporteId = t.id;
+        manual.transporteName = t.name;
+        manual.transporteAddress = t.address;
+      }
+    } else {
+      delete manual.transporteId;
+      delete manual.transporteName;
+      delete manual.transporteAddress;
+    }
+    setManualFacturaDataByOrder((prev) => ({
+      ...prev,
+      [orderToEmitFactura.id]: manual
+    }));
+
+    const previewOrder: Order = {
+      ...orderToEmitFactura,
+      invoice: {
+        cae: '',
+        caeFchVto: '',
+        puntoVta: 0,
+        cbteTipo,
+        cbteDesde: 0,
+        cbteHasta: 0,
+        createdAt: orderToEmitFactura.date,
+        agipAlicuota: 0,
+        agipRetPer: 0,
+      } as any
+    };
+    const html = injectPreviewBanner(buildFacturaHtml(previewOrder, manual));
+    if (!html) {
+      showToast('error', 'No se pudo generar la vista previa');
+      return;
+    }
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
   };
 
   const buildCreditNoteHtml = (order: Order, nc: CreditNote) => {
@@ -1404,6 +1470,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50"
               >
                 Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={openFacturaPreviewBeforeEmit}
+                disabled={!!emitiendoFacturaId}
+                className="px-5 py-2.5 rounded-xl font-bold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-2 transition disabled:opacity-50"
+              >
+                <FileText size={18} />
+                Vista previa
               </button>
               <button
                 type="button"
