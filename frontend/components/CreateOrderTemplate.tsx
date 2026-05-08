@@ -91,6 +91,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const isCustomerLocked = role === Role.CUSTOMER;
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const draftRestoredRef = useRef(false);
+  const applyCustomerPriceList = useCallback((customerId: string) => {
+    const customer = customers.find((c) => c.id === customerId);
+    onPriceListChange?.(customer?.priceListId ?? null);
+  }, [customers, onPriceListChange]);
 
   const isEditing = !!initialOrder;
   const sizeColumns = useMemo(() => {
@@ -130,11 +134,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if (draft.orderDate) setOrderDate(draft.orderDate);
       if (Array.isArray(draft.rows) && draft.rows.length > 0) setRows(draft.rows);
       const validCustomerId = draft.selectedCustomerId && customers.some(c => c.id === draft.selectedCustomerId);
-      if (validCustomerId) setSelectedCustomerId(draft.selectedCustomerId!);
+      if (validCustomerId) {
+        setSelectedCustomerId(draft.selectedCustomerId!);
+        applyCustomerPriceList(draft.selectedCustomerId!);
+      }
     } catch {
       localStorage.removeItem(DRAFT_KEY);
     }
-  }, [customers, isEditing]);
+  }, [customers, isEditing, applyCustomerPriceList]);
 
   const filteredCustomers = useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
@@ -190,6 +197,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   useEffect(() => {
     if (!initialOrder) return;
     setSelectedCustomerId(initialOrder.customerId);
+    applyCustomerPriceList(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
     const productById = new Map(products.map((p) => [p.id, p]));
@@ -252,12 +260,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
-  }, [initialOrder, products]);
+  }, [initialOrder, products, applyCustomerPriceList]);
 
   useEffect(() => {
-    if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
-    if (isCustomerLocked && customers.length === 1) setSelectedCustomerId(customers[0].id);
-  }, [customers, selectedCustomerId, isCustomerLocked]);
+    if (customers.length === 1 && !selectedCustomerId) {
+      setSelectedCustomerId(customers[0].id);
+      applyCustomerPriceList(customers[0].id);
+      return;
+    }
+    if (isCustomerLocked && customers.length === 1) {
+      setSelectedCustomerId(customers[0].id);
+      applyCustomerPriceList(customers[0].id);
+    }
+  }, [customers, selectedCustomerId, isCustomerLocked, applyCustomerPriceList]);
 
   useEffect(() => {
     api.getSizes().then(list => {
@@ -772,7 +787,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                     <li
                       key={c.id}
                       className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
-                      onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id); setClientFilter(''); setClientDropdownOpen(false); }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSelectedCustomerId(c.id);
+                        applyCustomerPriceList(c.id);
+                        setClientFilter('');
+                        setClientDropdownOpen(false);
+                      }}
                     >
                       {c.businessName || c.name || 'Cliente'}
                     </li>
