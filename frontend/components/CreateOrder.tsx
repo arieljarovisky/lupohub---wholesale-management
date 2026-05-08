@@ -122,10 +122,22 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   }, [products, selectedPriceListId]);
 
   const isCustomerLocked = role === Role.CUSTOMER;
+  const applyCustomerPriceList = React.useCallback((customerId: string) => {
+    const customer = customers.find((c) => c.id === customerId);
+    onPriceListChange?.(customer?.priceListId ?? null);
+  }, [customers, onPriceListChange]);
+
   useEffect(() => {
-    if (customers.length === 1 && !selectedCustomerId) setSelectedCustomerId(customers[0].id);
-    if (isCustomerLocked && customers.length === 1) setSelectedCustomerId(customers[0].id);
-  }, [customers, selectedCustomerId, isCustomerLocked]);
+    if (customers.length === 1 && !selectedCustomerId) {
+      setSelectedCustomerId(customers[0].id);
+      applyCustomerPriceList(customers[0].id);
+      return;
+    }
+    if (isCustomerLocked && customers.length === 1) {
+      setSelectedCustomerId(customers[0].id);
+      applyCustomerPriceList(customers[0].id);
+    }
+  }, [customers, selectedCustomerId, isCustomerLocked, applyCustomerPriceList]);
 
   const filteredCustomers = React.useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
@@ -450,7 +462,13 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
                       <li
                         key={c.id}
                         className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
-                        onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id); setClientFilter(''); setClientDropdownOpen(false); }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedCustomerId(c.id);
+                          applyCustomerPriceList(c.id);
+                          setClientFilter('');
+                          setClientDropdownOpen(false);
+                        }}
                       >
                         {c.businessName || c.name || 'Cliente'}
                       </li>
