@@ -836,6 +836,7 @@ export const getOrderInvoice = async (req: any, res: any) => {
   try {
     const inv = await get(
       `SELECT i.id, i.order_id, i.cae, i.cae_fch_vto, i.punto_venta, i.cbte_tipo, i.cbte_desde, i.cbte_hasta, i.created_at,
+              i.agip_alicuota, i.agip_ret_per,
               o.total AS order_total, o.date AS order_date, c.cuit AS customer_cuit
        FROM invoices i
        JOIN orders o ON o.id = i.order_id
@@ -844,13 +845,18 @@ export const getOrderInvoice = async (req: any, res: any) => {
       [id]
     );
     if (!inv) return res.status(404).json({ message: 'Este pedido no tiene factura emitida' });
-    const netFromItems = await getOrderNetFromLineItems(id);
-    const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
-    const agip = await getAgipRetentionForOrder({
-      orderDate: String(inv.order_date || inv.created_at || ''),
-      customerCuit: inv.customer_cuit,
-      netAmount
-    });
+    const hasStoredAgip = Number(inv.agip_alicuota || 0) > 0 || Number(inv.agip_ret_per || 0) > 0;
+    let agip = { alicuota: Number(inv.agip_alicuota || 0), amount: Number(inv.agip_ret_per || 0) };
+    if (!hasStoredAgip) {
+      const netFromItems = await getOrderNetFromLineItems(id);
+      const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
+      const calc = await getAgipRetentionForOrder({
+        orderDate: String(inv.order_date || inv.created_at || ''),
+        customerCuit: inv.customer_cuit,
+        netAmount
+      });
+      agip = { alicuota: calc?.alicuota ?? 0, amount: calc?.amount ?? 0 };
+    }
     res.json({
       id: inv.id,
       orderId: inv.order_id,
@@ -861,8 +867,8 @@ export const getOrderInvoice = async (req: any, res: any) => {
       cbteDesde: inv.cbte_desde,
       cbteHasta: inv.cbte_hasta,
       createdAt: inv.created_at,
-      agipAlicuota: agip?.alicuota ?? 0,
-      agipRetPer: agip?.amount ?? 0
+      agipAlicuota: agip.alicuota,
+      agipRetPer: agip.amount
     });
   } catch (error) {
     console.error(error);
@@ -914,16 +920,27 @@ export const emitirFactura = async (req: any, res: any) => {
 
     const { v4: uuidv4 } = await import('uuid');
     const invoiceId = uuidv4();
-    await execute(
-      `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [invoiceId, id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta]
-    );
     const agip = await getAgipRetentionForOrder({
       orderDate: String(orderRow.date || ''),
       customerCuit: customerRow.cuit,
       netAmount: totalForAfip
     });
+    await execute(
+      `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceId,
+        id,
+        result.cae,
+        result.caeFchVto || null,
+        result.puntoVta,
+        result.cbteTipo,
+        result.cbteDesde,
+        result.cbteHasta,
+        agip?.alicuota ?? 0,
+        agip?.amount ?? 0
+      ]
+    );
     res.status(201).json({
       id: invoiceId,
       orderId: id,

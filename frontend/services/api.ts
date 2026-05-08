@@ -639,7 +639,9 @@ export const api = {
         priceListId: r.priceListId ?? r.price_list_id ?? undefined,
         legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
         accountZone: r.accountZone ?? r.account_zone ?? undefined,
-        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined
+        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
+        shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
+        agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined
       })) as Customer[];
     }, [], 'getCustomers');
   },

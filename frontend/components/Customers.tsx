@@ -844,6 +844,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       <span>IVA: {selectedCustomer.condicionIva}</span>
                     </>
                   )}
+                  <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border ${
+                      selectedCustomer.shouldRetainIibb
+                        ? 'bg-amber-900/30 text-amber-300 border-amber-700/60'
+                        : 'bg-emerald-900/20 text-emerald-300 border-emerald-700/50'
+                    }`}
+                    title={selectedCustomer.agipPadronPeriod ? `Padrón AGIP ${selectedCustomer.agipPadronPeriod}` : 'Sin padrón AGIP'}
+                  >
+                    <AlertTriangle size={12} />
+                    {selectedCustomer.shouldRetainIibb ? 'Retener IIBB: Sí' : 'Retener IIBB: No'}
+                  </span>
                   {selectedCustomer.transportes && selectedCustomer.transportes.length > 0 && (
                     <>
                       <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
@@ -2085,6 +2097,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <span>Vendedor: {getSellerName(customer.sellerId) || customer.sellerId.slice(0, 6)}</span>
                   </div>
                 )}
+                <div
+                  className={`mb-2 inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] ${
+                    customer.shouldRetainIibb
+                      ? 'bg-amber-900/30 text-amber-300 border-amber-700/60'
+                      : 'bg-emerald-900/20 text-emerald-300 border-emerald-700/50'
+                  }`}
+                  title={customer.agipPadronPeriod ? `Padrón AGIP ${customer.agipPadronPeriod}` : 'Sin padrón AGIP'}
+                >
+                  <AlertTriangle size={11} />
+                  <span>{customer.shouldRetainIibb ? 'Retener IIBB: Sí' : 'Retener IIBB: No'}</span>
+                </div>
                 
                 <div className="space-y-2 text-xs border-t border-slate-800 pt-3 mt-2">
                   <div className="flex items-center text-slate-500 truncate">

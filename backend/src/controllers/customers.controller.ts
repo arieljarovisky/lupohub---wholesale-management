@@ -25,6 +25,8 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     legacyCode: row.legacy_code ?? undefined,
     accountZone: row.account_zone ?? undefined,
     accountSellerLabel: row.account_seller_label ?? undefined,
+    shouldRetainIibb: Number(row.should_retain_iibb || 0) === 1,
+    agipPadronPeriod: row.agip_padron_period ?? undefined,
     transportes: transportes ?? []
   };
 }
@@ -35,10 +37,38 @@ export const getCustomers = async (req: Request, res: Response) => {
     const authUser = (req as any).user;
     const sellerFilter = authUser?.role === 'SELLER' ? ' WHERE seller_id = ?' : '';
     const params = authUser?.role === 'SELLER' ? [authUser.id] : [];
+    const agipTable = await get(
+      `SELECT COUNT(*) AS cnt FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'agip_padron_alicuotas'`
+    );
+    const agipExists = Number((agipTable as any)?.cnt || 0) > 0;
+    const agipSelect = agipExists
+      ? `,
+         CASE
+           WHEN apc.cuit IS NULL THEN 0
+           ELSE 1
+         END AS should_retain_iibb,
+         apm.period_yyyymm AS agip_padron_period`
+      : `,
+         0 AS should_retain_iibb,
+         NULL AS agip_padron_period`;
+    const agipJoin = agipExists
+      ? `
+       LEFT JOIN (
+         SELECT MAX(period_yyyymm) AS period_yyyymm
+         FROM agip_padron_alicuotas
+       ) apm ON 1=1
+       LEFT JOIN agip_padron_alicuotas apc
+         ON apc.period_yyyymm = apm.period_yyyymm
+        AND apc.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '')`
+      : '';
     const rows = await query(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
-              legacy_code, account_zone, account_seller_label
-       FROM customers${sellerFilter} ORDER BY business_name ASC, name ASC`,
+      `SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
+              c.legacy_code, c.account_zone, c.account_seller_label
+              ${agipSelect}
+       FROM customers c
+       ${agipJoin}
+       ${sellerFilter} ORDER BY c.business_name ASC, c.name ASC`,
       params
     );
     const customers = (rows || []).map((r: any) => toCustomer(r));

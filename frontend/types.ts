@@ -124,6 +124,10 @@ export interface Customer {
   accountZone?: string;
   /** Vendedor habitual en historial (ej. "27 - Colombo") */
   accountSellerLabel?: string;
+  /** Si el CUIT figura en padrón AGIP del último período importado. */
+  shouldRetainIibb?: boolean;
+  /** Período AGIP (YYYYMM) usado para la validación de retención. */
+  agipPadronPeriod?: string;
 }
 
 export interface OrderItem {
