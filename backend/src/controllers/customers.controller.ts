@@ -1716,9 +1716,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
     const ncDateFilter = `${from ? ' AND DATE(cn.created_at) >= ?' : ''}${to ? ' AND DATE(cn.created_at) <= ?' : ''}`;
+    const externalNcDateFilter = `${from ? ' AND DATE(ecn.created_at) >= ?' : ''}${to ? ' AND DATE(ecn.created_at) <= ?' : ''}`;
     const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
     const movementParams: any[] = [];
+    if (from) movementParams.push(from);
+    if (to) movementParams.push(to);
     if (from) movementParams.push(from);
     if (to) movementParams.push(to);
     if (from) movementParams.push(from);
@@ -1796,6 +1799,37 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${ncDateFilter}
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          ecn.created_at AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN ecn.cbte_tipo = 3 THEN 'NC A '
+              WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(ecn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          ecn.external_order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(ecn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        JOIN customers c
+          ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
+             REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
+          ${externalNcDateFilter}
 
         UNION ALL
 
