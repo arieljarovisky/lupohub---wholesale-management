@@ -1587,8 +1587,9 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         JOIN customers c ON c.id = e.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
           OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
           OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
         )
 
@@ -1916,14 +1917,15 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           u.name AS seller_name,
           e.line_date AS fecha,
           CASE
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            THEN 'NOTA_CREDITO_IMPORTADA'
             WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
             THEN 'FACTURA_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            THEN 'NOTA_CREDITO_IMPORTADA'
             WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             THEN 'RECIBO_IMPORTADO'
             ELSE 'MOV_IMPORTADO'
@@ -1935,6 +1937,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           NULL AS order_id,
           CASE
             WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            ) THEN 0
+            WHEN (
               UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
@@ -1943,8 +1951,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           END AS debe,
           CASE
             WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
               OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
@@ -1958,7 +1967,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ${importedDateFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
           AND (
-            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
