@@ -8,10 +8,22 @@ import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import { parseSellersExcel } from '../utils/sellersImportUtils';
 
-/** Exporta la lista de precios a Excel en el formato esperado por la importación (Código, Precio). */
-function exportPriceListExcel(items: { sku?: string; price: number; productId: string }[], listName: string) {
-  const rows = items.map(i => ({ Código: i.sku || i.productId, Precio: i.price }));
-  const ws = XLSX.utils.json_to_sheet(rows);
+/**
+ * Exporta la lista de precios a Excel.
+ * Columnas: Código, Descripción, Precio.
+ * El parser de importación detecta por cabecera, así que agregar Descripción no rompe el reimport.
+ */
+function exportPriceListExcel(
+  items: { sku?: string; name?: string; price: number; productId: string }[],
+  listName: string
+) {
+  const rows = items.map(i => ({
+    Código: i.sku || i.productId,
+    Descripción: i.name || '',
+    Precio: i.price
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows, { header: ['Código', 'Descripción', 'Precio'] });
+  ws['!cols'] = [{ wch: 18 }, { wch: 50 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Precios');
   const safeName = (listName || 'lista-precios').replace(/[^\w\s-]/g, '').trim().slice(0, 30) || 'lista-precios';
@@ -31,8 +43,9 @@ function downloadSellersImportTemplate() {
 }
 
 function downloadPriceListTemplate(products: { sku: string; name?: string }[]) {
-  const rows = products.map(p => ({ Código: p.sku, Precio: '' }));
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const rows = products.map(p => ({ Código: p.sku, Descripción: p.name || '', Precio: '' }));
+  const ws = XLSX.utils.json_to_sheet(rows, { header: ['Código', 'Descripción', 'Precio'] });
+  ws['!cols'] = [{ wch: 18 }, { wch: 50 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Precios');
   XLSX.writeFile(wb, 'plantilla-lista-precios-todos-articulos.xlsx');
@@ -1328,6 +1341,25 @@ const Settings: React.FC<SettingsProps> = ({
                       {pl.description && <p className="text-xs text-slate-500 mt-0.5">{pl.description}</p>}
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const items = await api.getPriceListItems(pl.id);
+                            if (!items?.length) {
+                              showToast('error', 'La lista no tiene precios cargados todavía');
+                              return;
+                            }
+                            exportPriceListExcel(items, pl.name);
+                            showToast('success', `Lista "${pl.name}" descargada`);
+                          } catch (err: any) {
+                            showToast('error', err?.message || 'Error descargando la lista');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-700/30 hover:bg-emerald-700/50 border border-emerald-700/60 rounded-lg text-emerald-300 hover:text-white text-xs font-bold flex items-center gap-1"
+                        title="Descargar Excel con Código + Descripción + Precio"
+                      >
+                        <Download size={14} /> Descargar
+                      </button>
                       <button
                         onClick={async () => {
                           setEditingPriceList(pl);
