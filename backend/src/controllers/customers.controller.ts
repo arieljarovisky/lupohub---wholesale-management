@@ -2189,6 +2189,40 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             )
           )`;
 
+    /**
+     * Patrones permisivos para detectar NC importadas de Tango.
+     * Tango exporta el "Tipo" tal cual: NC, NCA, NCB, NCC, NCE, N/C, N/CR, CRE, CRED, NOTA CRED, etc.
+     * Si usamos un IN rígido, esas NC se pierden. Detectamos por prefijo y por keywords en detalle/numero.
+     */
+    const isNcImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N/C%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N.C%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CRE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRED%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRÉD%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRED%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉD%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+      OR UPPER(COALESCE(e.numero, '')) LIKE 'NC %'
+      OR UPPER(COALESCE(e.numero, '')) LIKE 'N/C%'
+    )`;
+    const isFacturaImportada = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'F/A%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('COMP', 'COMPROBANTE')
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+    )`;
+    const isReciboImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('PAGO', 'COBRO', 'INGRESO', 'R/C')
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%RECIBO%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%PAGO%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%COBRO%'
+    )`;
+
     const branchImportado = `
         SELECT
           c.id AS customer_id,
@@ -2197,17 +2231,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           u.name AS seller_name,
           e.line_date AS fecha,
           CASE
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            THEN 'NOTA_CREDITO_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            THEN 'FACTURA_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            THEN 'RECIBO_IMPORTADO'
+            WHEN ${isNcImportado} THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN ${isFacturaImportada} THEN 'FACTURA_IMPORTADA'
+            WHEN ${isReciboImportado} THEN 'RECIBO_IMPORTADO'
             ELSE 'MOV_IMPORTADO'
           END AS tipo,
           TRIM(CONCAT(
@@ -2216,27 +2242,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           )) AS comprobante,
           NULL AS order_id,
           CASE
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            ) THEN 0
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isNcImportado} THEN 0
+            WHEN ${isFacturaImportada} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
             ELSE 0
           END AS debe,
           CASE
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-              OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isNcImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isReciboImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
             ELSE 0
           END AS haber
         FROM customer_multimedia_entries e
@@ -2246,13 +2258,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           AND ABS(COALESCE(e.importe, 0)) > 0.001
           ${importedDateFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
-          AND (
-            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-          )${dedupeReciboPagos}`;
+          AND (${isNcImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
 
     /**
      * Cada rama aporta los placeholders from/to (si los hay) en este orden.
