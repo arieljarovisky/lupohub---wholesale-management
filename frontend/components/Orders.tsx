@@ -323,20 +323,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const sku = localSkuOf(i);
           const desc = (i.productName ?? '').toString().trim() || '—';
           const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-          const despStr = despacho != null && String(despacho).trim() ? String(despacho).trim() : '';
+          const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
           const codePrint = normalizeSkuForPrint(sku);
-          const sub =
-            codePrint || despStr
-              ? `<div class="rem-desc-sub">${[codePrint ? `Cód.: ${esc(codePrint)}` : '', despStr ? `Despacho: ${esc(despStr)}` : ''].filter(Boolean).join(' · ')}</div>`
-              : '';
+          const unit = Number(i.priceAtMoment ?? 0);
+          const importe = Math.round(qty * unit * 100) / 100;
           return `<tr>
-        <td class="ri-qty">${qty.toLocaleString('es-AR')}</td>
-        <td class="ri-desc"><div class="rem-desc-main">${esc(desc)}</div>${sub}</td>
+        <td class="ri-c">${qty.toLocaleString('es-AR')}</td>
+        <td class="ri-c ri-code">${esc(codePrint) || '—'}</td>
+        <td class="ri-desc">${esc(desc)}</td>
+        <td class="ri-c">${esc(despachoCell)}</td>
+        <td class="ri-r">$${formatMoneyAr(unit)}</td>
+        <td class="ri-r">$${formatMoneyAr(importe)}</td>
       </tr>`;
         })
         .join('');
 
-    const itemsPerPage = 22;
+    const itemsPerPage = 16;
     const pages: OrderItem[][] = [];
     for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
     if (pages.length === 0) pages.push([]);
@@ -362,8 +364,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clienteNro = (customer?.legacyCode || '').toString().trim();
     const webEmpresa = ((remitente as any).website || '').toString().trim();
     const ivaEmisorTxt = ((remitente as any).condicionIva || 'I.V.A. RESPONSABLE INSCRIPTO').toString();
-    const marcaAgua = esc((razonEmpresa || 'LUPO').trim().split(/\s+/)[0] || 'LUPO');
-
     const caiRemitoTrim = remitente.caiRemito?.trim();
     const caiVencimientoStr = remitente.caiRemitoVencimiento
       ? (() => { const d = new Date(remitente.caiRemitoVencimiento! + 'T12:00:00'); return isNaN(d.getTime()) ? remitente.caiRemitoVencimiento : formatDateShort(remitente.caiRemitoVencimiento); })()
@@ -379,6 +379,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
            <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />
          </div>`
       : `<span class="inv-logo-placeholder">${logoPlaceholder}</span>`;
+
+    /** Marca de agua: logo LUPO (misma URL que el encabezado); si no hay logo, texto LUPO. */
+    const wmLogoSrc = esc(logoUrlRemito);
+    const watermarkBlock = logoUrlRemito
+      ? `<img class="r-wm-img" src="${wmLogoSrc}" alt="" referrerpolicy="no-referrer" />`
+      : `<div class="r-wm-text" aria-hidden="true">LUPO</div>`;
 
     const pagesHtml = pages.map((pageItems, idx) => {
       const remitoNumber = pages.length > 1
@@ -445,15 +451,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             </div>
           </div>
           <div class="r-items-outer">
-            <div class="r-wm" aria-hidden="true">${marcaAgua}</div>
+            ${watermarkBlock}
             <table class="r-items">
               <thead>
                 <tr>
-                  <th class="r-th-qty">CANTIDAD</th>
-                  <th class="r-th-desc">DESCRIPCION</th>
+                  <th class="ri-c" style="width:52px;">CANT.</th>
+                  <th class="ri-c ri-code" style="width:100px;">CÓDIGO</th>
+                  <th>DESCRIPCIÓN</th>
+                  <th class="ri-c" style="width:118px;">Nº DESPACHO</th>
+                  <th class="ri-r" style="width:84px;">P. UNITARIO</th>
+                  <th class="ri-r" style="width:88px;">IMPORTE</th>
                 </tr>
               </thead>
-              <tbody>${pageRows || `<tr><td class="ri-qty">&nbsp;</td><td class="ri-desc">&nbsp;</td></tr>`}</tbody>
+              <tbody>${pageRows || '<tr><td class="ri-c" colspan="6">&nbsp;</td></tr>'}</tbody>
             </table>
             <div class="r-items-ley">La mercadería viaja por cuenta y cargo del cliente</div>
           </div>
@@ -537,7 +547,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .r-c3t { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
       .r-c3v { font-size: 10px; line-height: 1.35; word-break: break-word; }
       .r-items-outer { position: relative; border-bottom: 2px solid #000; min-height: 120mm; }
-      .r-wm {
+      .r-wm-text {
         position: absolute;
         left: 50%;
         top: 48%;
@@ -550,14 +560,28 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         z-index: 0;
         white-space: nowrap;
       }
+      .r-wm-img {
+        position: absolute;
+        left: 50%;
+        top: 48%;
+        transform: translate(-50%, -50%) rotate(-14deg);
+        max-width: 260px;
+        max-height: 180px;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        opacity: 0.07;
+        pointer-events: none;
+        z-index: 0;
+        filter: grayscale(100%);
+      }
       table.r-items { position: relative; z-index: 1; width: 100%; border-collapse: collapse; font-size: 10px; }
-      table.r-items thead th { border: 1px solid #000; padding: 6px 8px; font-weight: 700; text-align: left; background: #fff; }
-      .r-th-qty { width: 72px; text-align: center !important; }
-      table.r-items tbody td { border: 1px solid #000; padding: 5px 8px; vertical-align: top; }
-      .ri-qty { text-align: center; width: 72px; font-weight: 600; }
-      .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; }
-      .rem-desc-main { font-weight: 600; }
-      .rem-desc-sub { font-size: 9px; color: #333; margin-top: 2px; font-weight: 400; }
+      table.r-items thead th { border: 1px solid #000; padding: 6px 6px; font-weight: 700; text-align: left; background: #fff; }
+      table.r-items tbody td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; }
+      .ri-c { text-align: center; }
+      .ri-r { text-align: right; }
+      .ri-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
+      .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
       .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
       .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
