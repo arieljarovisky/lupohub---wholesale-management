@@ -30,6 +30,7 @@ function labelTipoSaldoExporter(m: { tipo?: string | null; comprobante?: string 
 
   if (tipo === 'NOTA_CREDITO') return 'NOTA DE CREDITO';
   if (tipo === 'NOTA_CREDITO_IMPORTADA') return 'NOTA DE CREDITO (import.)';
+  if (tipo === 'NOTA_DEBITO_IMPORTADA') return 'NOTA DE DEBITO (import.)';
 
   if (comprobanteIndicaNotaCredito(comp)) {
     if (
@@ -2191,14 +2192,16 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
     /**
      * Patrones permisivos para detectar NC importadas de Tango.
-     * Tango exporta el "Tipo" tal cual: NC, NCA, NCB, NCC, NCE, N/C, N/CR, CRE, CRED, NOTA CRED, etc.
-     * Si usamos un IN rígido, esas NC se pierden. Detectamos por prefijo y por keywords en detalle/numero.
+     * Tango exporta el "Tipo" tal cual: NC, NCA, NCB, NCC, NCE, N/C, N/CR, CRE, CRED, NOTA CRED,
+     * y en muchas instalaciones aparece como CDE (Crédito) o CRÉ. Detectamos por prefijo.
      */
     const isNcImportado = `(
       UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NC%'
       OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N/C%'
       OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N.C%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CDE%'
       OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CRE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CRÉ%'
       OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRED%'
       OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRÉD%'
       OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRED%'
@@ -2206,6 +2209,21 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
       OR UPPER(COALESCE(e.numero, '')) LIKE 'NC %'
       OR UPPER(COALESCE(e.numero, '')) LIKE 'N/C%'
+    )`;
+    /**
+     * Notas de débito. Las dejamos identificadas para que sumen al saldo (DEBE)
+     * en lugar de quedar como MOV_IMPORTADO con 0.
+     */
+    const isNdImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'ND%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N/D%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DEB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DBE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DÉB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%DEB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%DÉB%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%DEB%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%DÉB%'
     )`;
     const isFacturaImportada = `(
       UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
@@ -2232,6 +2250,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           e.line_date AS fecha,
           CASE
             WHEN ${isNcImportado} THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN ${isNdImportado} THEN 'NOTA_DEBITO_IMPORTADA'
             WHEN ${isFacturaImportada} THEN 'FACTURA_IMPORTADA'
             WHEN ${isReciboImportado} THEN 'RECIBO_IMPORTADO'
             ELSE 'MOV_IMPORTADO'
@@ -2244,6 +2263,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           CASE
             WHEN ${isNcImportado} THEN 0
             WHEN ${isFacturaImportada} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isNdImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
             ELSE 0
           END AS debe,
           CASE
@@ -2258,7 +2278,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           AND ABS(COALESCE(e.importe, 0)) > 0.001
           ${importedDateFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
-          AND (${isNcImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
+          AND (${isNcImportado} OR ${isNdImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
 
     /**
      * Cada rama aporta los placeholders from/to (si los hay) en este orden.
@@ -2314,6 +2334,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         | 'FACTURA'
         | 'NOTA_CREDITO'
         | 'NOTA_CREDITO_IMPORTADA'
+        | 'NOTA_DEBITO_IMPORTADA'
         | 'RECIBO'
         | 'FACTURA_IMPORTADA'
         | 'RECIBO_IMPORTADO'
