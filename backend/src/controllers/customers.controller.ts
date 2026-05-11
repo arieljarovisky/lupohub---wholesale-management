@@ -5,6 +5,51 @@ import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 
+/** Detecta NC por leyenda en el comprobante (import Tango, texto libre en recibo, etc.). */
+function comprobanteIndicaNotaCredito(comp: string | null | undefined): boolean {
+  const u = String(comp ?? '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (!u) return false;
+  if (u.includes('NOTA DE CREDITO')) return true;
+  if (u.includes('N/C') || u.includes('N / C')) return true;
+  // Comprobantes tipo AFIP: "NC A 00002-00001234", "NC B0002..."
+  if (/^NC\s+[ABCM](\s|\d|-)/.test(u) || /\bNC\s+[ABCM]\s*\d/.test(u)) return true;
+  return false;
+}
+
+/**
+ * Texto de columna "Tipo" en exports de saldos (Detalle clientes / Detalle).
+ * Prioriza tipo explícito; si el comprobante describe una NC pero el tipo vino como RECIBO/FACTURA, corrige la etiqueta.
+ */
+function labelTipoSaldoExporter(m: { tipo?: string | null; comprobante?: string | null }): string {
+  const tipo = String(m.tipo ?? '').trim();
+  const comp = String(m.comprobante ?? '');
+
+  if (tipo === 'NOTA_CREDITO') return 'NOTA DE CREDITO';
+  if (tipo === 'NOTA_CREDITO_IMPORTADA') return 'NOTA DE CREDITO (import.)';
+
+  if (comprobanteIndicaNotaCredito(comp)) {
+    if (
+      tipo === 'RECIBO_IMPORTADO' ||
+      tipo === 'FACTURA_IMPORTADA' ||
+      tipo === 'MOV_IMPORTADO'
+    ) {
+      return 'NOTA DE CREDITO (import.)';
+    }
+    if (tipo === 'RECIBO' || tipo === 'FACTURA') {
+      return 'NOTA DE CREDITO';
+    }
+  }
+
+  if (tipo === 'FACTURA_IMPORTADA') return 'FACTURA';
+  if (tipo === 'RECIBO_IMPORTADO') return 'RECIBO';
+  if (tipo === 'MOV_IMPORTADO') return 'MOV.';
+  return tipo;
+}
+
 function toCustomer(row: any, transportes?: { id: string; name: string; address?: string }[]) {
   return {
     id: row.id,
@@ -1681,21 +1726,21 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         const haber = Number(m.haber || 0);
         running = Math.round((running + debe - haber) * 100) / 100;
 
-        if (m.tipo === 'FACTURA') totalFacturas += debe;
+        if (m.tipo === 'FACTURA' || m.tipo === 'FACTURA_IMPORTADA') totalFacturas += debe;
         else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') totalNc += haber;
-        else totalRecibos += haber;
+        else if (
+          comprobanteIndicaNotaCredito(String(m.comprobante ?? '')) &&
+          Number(m.haber || 0) > 0.001 &&
+          Number(m.debe || 0) <= 0.001
+        ) {
+          totalNc += haber;
+        } else totalRecibos += haber;
 
-        const tipoDetalle =
-          m.tipo === 'NOTA_CREDITO'
-            ? 'NOTA DE CREDITO'
-            : m.tipo === 'NOTA_CREDITO_IMPORTADA'
-              ? 'NOTA DE CREDITO (import.)'
-              : m.tipo;
         wsDetail.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
           fecha: m.fecha ? new Date(m.fecha) : null,
-          tipo: tipoDetalle,
+          tipo: labelTipoSaldoExporter(m),
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
           debe,
@@ -2353,21 +2398,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         totalDebeMovs = Math.round((totalDebeMovs + debe) * 100) / 100;
         totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
         saldo = Math.round((saldo + debe - haber) * 100) / 100;
-        const tipoLabel =
-          m.tipo === 'NOTA_CREDITO'
-            ? 'NOTA DE CREDITO'
-            : m.tipo === 'NOTA_CREDITO_IMPORTADA'
-              ? 'NOTA DE CREDITO (import.)'
-              : m.tipo === 'FACTURA_IMPORTADA'
-                ? 'FACTURA'
-                : m.tipo === 'RECIBO_IMPORTADO'
-                  ? 'RECIBO'
-                  : m.tipo === 'MOV_IMPORTADO'
-                    ? 'MOV.'
-                    : m.tipo;
         wsDetalle.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
-          tipo: tipoLabel,
+          tipo: labelTipoSaldoExporter(m),
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
           debe,
