@@ -375,27 +375,32 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const pageRows = rowsFor(pageItems);
 
       return `<section class="sheet ${idx > 0 ? 'page-break' : ''}">
+        <div class="original">ORIGINAL</div>
         <div class="topbar">
-          <div class="logo">${logoBlockRemito}</div>
-          <div class="codebox codebox-remito">
-            <div class="code">REMITO<br>R</div>
-            <div class="num num-remito">${remitoNumber || '—'}</div>
-            <div style="margin-top:6px;" class="muted">Fecha: ${formatDateShort(order.date)}</div>
-          </div>
-        </div>
-        <div class="hr"></div>
-        <div class="grid2">
-          <div>
-            <div><strong>${razonEmpresa}</strong></div>
+          <div class="head-left">
+            <div class="logo">${logoBlockRemito}</div>
+            <div class="issuer-title">${razonEmpresa}</div>
             ${empresaDir ? `<div>${empresaDir}</div>` : ''}
             ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
-            ${ingresosBrutosEmpresa ? `<div>Ingresos Brutos: ${ingresosBrutosEmpresa}</div>` : ''}
-            ${inicioActividadEmpresa ? `<div>Inicio de actividad: ${inicioActividadEmpresa}</div>` : ''}
-            ${emailEmpresa ? `<div>E-mail: ${emailEmpresa}</div>` : ''}
-            ${telEmpresa ? `<div>Tel: ${telEmpresa}</div>` : ''}
+            ${ingresosBrutosEmpresa ? `<div><strong>Ingresos Brutos:</strong> ${ingresosBrutosEmpresa}</div>` : ''}
+            ${inicioActividadEmpresa ? `<div><strong>Inicio de actividad:</strong> ${inicioActividadEmpresa}</div>` : ''}
+            ${emailEmpresa ? `<div><strong>E-mail:</strong> ${emailEmpresa}</div>` : ''}
+            ${telEmpresa ? `<div><strong>Tel:</strong> ${telEmpresa}</div>` : ''}
           </div>
-          <div>
-            ${cuitEmpresa ? `<div class="line"><div class="k">C.U.I.T.:</div><div class="v">${cuitEmpresa}</div></div>` : ''}
+          <div class="head-right">
+            <div class="fact-row">
+              <div class="letter-box">
+                <div class="l">R</div>
+                <div class="mini">REMITO</div>
+              </div>
+              <div>
+                <div class="fact-title remito-title">REMITO</div>
+                <div class="fact-meta">
+                  <div><strong>N° Remito:</strong> ${remitoNumber || '—'}</div>
+                  <div><strong>Fecha:</strong> ${formatDateShort(order.date)}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="boxrow">
@@ -411,8 +416,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             ${(numBultos != null && !isNaN(numBultos)) ? `<div><strong>Bultos:</strong> ${numBultos}</div>` : ''}
           </div>
         </div>
-        ${descripcionTrim ? `<div class="desc-box"><strong>Descripción:</strong> ${descripcionTrim}</div>` : ''}
-        <table>
+        ${descripcionTrim ? `<div class="desc-box"><strong>Descripción del envío:</strong> ${descripcionTrim}</div>` : ''}
+        <table class="items-table">
           <thead>
             <tr>
               <th class="col-c" style="width: 52px;">CANT.</th>
@@ -445,34 +450,37 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; display: flex; flex-direction: column; }
       .page-break { page-break-before: always; }
-      .topbar { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: start; margin-bottom: 6px; }
-      .logo { min-height: 42px; display: flex; align-items: center; }
-      .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
-      .codebox { border: 1px solid #111; padding: 6px 8px; text-align: center; }
-      .codebox .code { font-weight: 700; letter-spacing: 0.08em; }
-      .codebox .num { margin-top: 6px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
-      .codebox-remito { align-self: start; justify-self: end; }
-      .num-remito { font-size: 14px; letter-spacing: 0.02em; }
-      .hr { border-top: 1px solid #111; margin: 6px 0 10px; }
-      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-      .block { padding: 6px 8px; border: 1px solid #111; min-height: 58px; }
-      .muted { color: #333; }
-      .line { display: flex; gap: 8px; }
-      .line .k { width: 78px; color: #333; }
-      .line .v { flex: 1; }
-      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 10px; margin-top: 8px; }
-      .boxrow .block { min-height: 46px; }
-      .desc-box { margin-top: 8px; border: 1px solid #111; padding: 6px 8px; white-space: pre-line; }
-      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-      thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
-      tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+      .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
+      .topbar { display: grid; grid-template-columns: 1fr 1.2fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
+      .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
+      .head-right { padding: 8px 10px; display: flex; align-items: center; justify-content: flex-end; }
+      .logo { min-height: 42px; display: flex; align-items: center; margin-bottom: 4px; }
+      .logo img { max-height: 48px; max-width: 200px; object-fit: contain; }
+      .issuer-title { font-size: 12px; font-weight: 700; margin: 2px 0 6px; }
+      .head-left > div { margin-bottom: 3px; line-height: 1.35; }
+      .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; width: 100%; max-width: 320px; }
+      .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
+      .letter-box .l { font-size: 40px; line-height: 1; font-weight: 700; }
+      .letter-box .mini { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; margin-top: 4px; }
+      .fact-title { font-size: 32px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 2px; }
+      .remito-title { font-size: 28px; }
+      .fact-meta { margin-top: 10px; font-size: 12px; }
+      .fact-meta div { margin-bottom: 4px; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; border: 1px solid #111; border-top: 0; }
+      .block { padding: 8px 10px; border-right: 1px solid #111; min-height: 58px; }
+      .boxrow .block:last-child { border-right: none; }
+      .block > div { margin-bottom: 4px; line-height: 1.35; }
+      .desc-box { border: 1px solid #111; border-top: 0; padding: 8px 10px; white-space: pre-line; line-height: 1.4; }
+      table.items-table { width: 100%; border-collapse: collapse; margin-top: 0; border: 1px solid #111; border-top: 0; }
+      table.items-table thead th { border: 1px solid #111; padding: 6px 6px; text-align: left; background: #f3f4f6; font-weight: 700; font-size: 10px; }
+      table.items-table tbody td { border: 1px solid #111; padding: 5px 6px; vertical-align: top; }
       .col-c { text-align: center; }
       .col-r { text-align: right; }
       .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
-      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; align-items: start; }
       .totals { border: 1px solid #111; }
-      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; gap: 12px; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
       .footer { margin-top: 12px; font-size: 10px; }
       .no-print { margin: 14px auto 18px; width: 210mm; padding: 0 10mm; display: flex; gap: 10px; }
