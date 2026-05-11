@@ -14,6 +14,7 @@ import {
   getCarteraTotals,
   exportSaldosPendientesCsv,
   exportSaldosPendientesDetalleXlsx,
+  exportSaldosMovimientosSistemaXlsx,
   exportSaldosPendientesByCustomerSheetsXlsx,
   exportSaldosPendientesMultimediasXlsx,
   clearDispatchedPendingsForCustomer,
@@ -35,6 +36,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/saldos-pendientes/export-multimedias', authMiddleware as any, exportSaldosPendientesMultimediasXlsx as any);
 router.get('/saldos-pendientes/export-detalle', authMiddleware as any, exportSaldosPendientesDetalleXlsx as any);
+router.get('/saldos-pendientes/export-sistema', authMiddleware as any, exportSaldosMovimientosSistemaXlsx as any);
 router.get('/saldos-pendientes/export-por-cliente', authMiddleware as any, exportSaldosPendientesByCustomerSheetsXlsx as any);
 router.get('/saldos-pendientes/export', authMiddleware as any, exportSaldosPendientesCsv as any);
 router.get('/export-individuales', authMiddleware as any, exportCustomersIndividualXlsx as any);

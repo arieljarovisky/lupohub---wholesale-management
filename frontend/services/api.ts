@@ -753,6 +753,19 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Excel solo con lo cargado en LupoHub: facturas AFIP, NC y recibos (sin import Multimedia ni externos). */
+  exportSaldosMovimientosSistema: async (): Promise<void> => {
+    const blob = await getBlob('/customers/saldos-pendientes/export-sistema', 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `movimientos_sistema_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Excel de saldos pendientes: resumen + una hoja por cliente (opcional rango de fechas). */
   exportSaldosPendientesPorCliente: async (params?: {
     sellerId?: string;

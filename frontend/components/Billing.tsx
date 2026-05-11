@@ -39,6 +39,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
   const [exportingByCustomerFile, setExportingByCustomerFile] = useState(false);
+  const [exportingMovimientosSistema, setExportingMovimientosSistema] = useState(false);
   const [importingAgipPadron, setImportingAgipPadron] = useState(false);
   const [billingPage, setBillingPage] = useState(1);
   const [paymentsPage, setPaymentsPage] = useState(1);
@@ -148,6 +149,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       showToast('success', 'Descarga iniciada');
     } catch (err: any) {
       showToast('error', err?.message || 'Error exportando saldos pendientes detallados');
+    }
+  };
+
+  const handleExportMovimientosSistema = async () => {
+    setExportingMovimientosSistema(true);
+    try {
+      await api.exportSaldosMovimientosSistema();
+      showToast('success', 'Excel del sistema descargado (facturas, NC y recibos)');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando movimientos del sistema');
+    } finally {
+      setExportingMovimientosSistema(false);
     }
   };
 
@@ -594,6 +607,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-700 text-white text-sm font-bold shadow-lg shadow-cyan-900/40 hover:bg-cyan-600"
           >
             <FileSpreadsheet size={16} /> Saldos pendientes (detalle)
+          </button>
+          <button
+            type="button"
+            onClick={() => { void handleExportMovimientosSistema(); }}
+            disabled={exportingMovimientosSistema}
+            title="Solo facturas AFIP, notas de crédito y recibos cargados en la app. Sin cuenta importada ni comprobantes externos."
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-600 text-white text-sm font-bold shadow-lg shadow-slate-900/40 hover:bg-slate-500 disabled:opacity-50"
+          >
+            {exportingMovimientosSistema ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+            Solo sistema (Excel)
           </button>
           <button
             type="button"

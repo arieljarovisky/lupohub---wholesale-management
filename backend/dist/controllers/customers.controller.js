@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesByCustomerSheetsXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
+exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesByCustomerSheetsXlsx = exports.exportSaldosMovimientosSistemaXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
@@ -1729,6 +1729,210 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
     }
 });
 exports.exportSaldosPendientesDetalleXlsx = exportSaldosPendientesDetalleXlsx;
+/**
+ * Excel con movimientos cargados solo en LupoHub: facturas AFIP, notas de crédito y recibos.
+ * Excluye importaciones Multimedia/Tango y comprobantes externos por CUIT.
+ */
+const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    const user = req.user;
+    if (!user || !roleCanViewSaldos(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
+    }
+    try {
+        const sellerWhere = user.role === 'SELLER' ? 'WHERE c.seller_id = ?' : '';
+        const sellerParams = user.role === 'SELLER' ? [user.id] : [];
+        const movements = yield (0, db_1.query)(`
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(i.created_at, o.date) AS fecha,
+          'FACTURA' AS tipo,
+          CONCAT(
+            CASE
+              WHEN i.cbte_tipo = 1 THEN 'A '
+              WHEN i.cbte_tipo = 6 THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          o.id AS order_id,
+          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          0 AS haber
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN cn.cbte_tipo = 3 THEN 'NC A '
+              WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          cn.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          p.date AS fecha,
+          'RECIBO' AS tipo,
+          p.receipt_number AS comprobante,
+          p.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(p.amount, 0), 2) AS haber
+        FROM payments p
+        JOIN customers c ON c.id = p.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+      ) m
+      ${user.role === 'SELLER' ? 'WHERE m.seller_id = ?' : ''}
+      ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
+      `, sellerParams);
+        const customers = yield (0, db_1.query)(`SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
+       FROM customers c
+       LEFT JOIN users u ON u.id = c.seller_id
+       ${sellerWhere}
+       ORDER BY customer_name ASC`, sellerParams);
+        const workbook = new exceljs_1.default.Workbook();
+        workbook.creator = 'LupoHub';
+        workbook.created = new Date();
+        const wsSummary = workbook.addWorksheet('Resumen');
+        wsSummary.columns = [
+            { header: 'Cliente', key: 'cliente', width: 40 },
+            { header: 'Vendedor', key: 'vendedor', width: 28 },
+            { header: 'Total Facturas', key: 'facturas', width: 16 },
+            { header: 'Total NC', key: 'nc', width: 14 },
+            { header: 'Total Recibos', key: 'recibos', width: 16 },
+            { header: 'Saldo Pendiente', key: 'saldo', width: 18 }
+        ];
+        const wsDetail = workbook.addWorksheet('Detalle');
+        wsDetail.columns = [
+            { header: 'Cliente', key: 'cliente', width: 40 },
+            { header: 'Vendedor', key: 'vendedor', width: 28 },
+            { header: 'Fecha', key: 'fecha', width: 14 },
+            { header: 'Tipo', key: 'tipo', width: 22 },
+            { header: 'Comprobante', key: 'comprobante', width: 24 },
+            { header: 'Pedido', key: 'pedido', width: 16 },
+            { header: 'Debe', key: 'debe', width: 14 },
+            { header: 'Haber', key: 'haber', width: 14 },
+            { header: 'Saldo Cliente', key: 'saldo', width: 16 }
+        ];
+        const byCustomer = new Map();
+        for (const m of movements) {
+            if (!byCustomer.has(m.customer_id))
+                byCustomer.set(m.customer_id, []);
+            byCustomer.get(m.customer_id).push(m);
+        }
+        for (const c of customers) {
+            const movs = byCustomer.get(c.id) || [];
+            let totalFacturas = 0;
+            let totalNc = 0;
+            let totalRecibos = 0;
+            let running = 0;
+            for (const m of movs) {
+                const debe = Number(m.debe || 0);
+                const haber = Number(m.haber || 0);
+                running = Math.round((running + debe - haber) * 100) / 100;
+                if (m.tipo === 'FACTURA')
+                    totalFacturas += debe;
+                else if (m.tipo === 'NOTA_CREDITO')
+                    totalNc += haber;
+                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
+                    Number(m.haber || 0) > 0.001 &&
+                    Number(m.debe || 0) <= 0.001) {
+                    totalNc += haber;
+                }
+                else
+                    totalRecibos += haber;
+                wsDetail.addRow({
+                    cliente: c.customer_name,
+                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                    fecha: m.fecha ? new Date(m.fecha) : null,
+                    tipo: labelTipoSaldoExporter(m),
+                    comprobante: m.comprobante,
+                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
+                    debe,
+                    haber,
+                    saldo: running
+                });
+            }
+            const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
+            if (saldoPendiente > 0.01) {
+                wsSummary.addRow({
+                    cliente: c.customer_name,
+                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
+                    facturas: totalFacturas,
+                    nc: totalNc,
+                    recibos: totalRecibos,
+                    saldo: saldoPendiente
+                });
+            }
+        }
+        const moneyColsSummary = ['C', 'D', 'E', 'F'];
+        for (const col of moneyColsSummary)
+            wsSummary.getColumn(col).numFmt = '#,##0.00';
+        wsSummary.getRow(1).font = { bold: true };
+        wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
+        wsDetail.getColumn('C').numFmt = 'dd/mm/yyyy';
+        wsDetail.getColumn('G').numFmt = '#,##0.00';
+        wsDetail.getColumn('H').numFmt = '#,##0.00';
+        wsDetail.getColumn('I').numFmt = '#,##0.00';
+        wsDetail.getRow(1).font = { bold: true };
+        wsDetail.views = [{ state: 'frozen', ySplit: 1 }];
+        const out = yield workbook.xlsx.writeBuffer();
+        const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
+        const filename = `movimientos_sistema_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buf);
+    }
+    catch (error) {
+        console.error('exportSaldosMovimientosSistemaXlsx:', error);
+        return res.status(500).json({ message: 'Error exportando movimientos del sistema' });
+    }
+});
+exports.exportSaldosMovimientosSistemaXlsx = exportSaldosMovimientosSistemaXlsx;
 /**
  * Exporta saldos pendientes en Excel con una hoja por cliente.
  * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
