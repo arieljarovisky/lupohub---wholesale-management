@@ -772,14 +772,20 @@ export const api = {
     from?: string;
     to?: string;
     sellerName?: string;
-    /** historial: facturas/NC/recibos + importados y externos (default). sistema: solo tablas LupoHub. */
-    source?: 'historial' | 'sistema';
+    /**
+     * historial: facturas/NC/recibos del sistema + importados Multimedia + externos por CUIT (default).
+     * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos).
+     * tango: solo importados Multimedia (Tango), sin dedupe contra payments.
+     */
+    source?: 'historial' | 'sistema' | 'tango';
   }): Promise<void> => {
     const q = new URLSearchParams();
     if (params?.sellerId) q.set('sellerId', params.sellerId);
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
-    if (params?.source === 'sistema') q.set('source', 'sistema');
+    if (params?.source === 'sistema' || params?.source === 'tango') {
+      q.set('source', params.source);
+    }
     const qs = q.toString() ? `?${q.toString()}` : '';
     const { blob, headers } = await getBlobResponse(`/customers/saldos-pendientes/export-por-cliente${qs}`, 120000);
     const url = URL.createObjectURL(blob);

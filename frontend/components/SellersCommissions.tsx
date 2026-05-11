@@ -72,7 +72,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
   const [massExportError, setMassExportError] = useState<string>('');
-  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema'>('historial');
+  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('historial');
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
 
@@ -630,6 +630,16 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                     />
                     Solo cargado en LupoHub (facturas, NC y recibos AFIP)
                   </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="massExportSaldosSource"
+                      className="accent-amber-500"
+                      checked={massExportSaldosSource === 'tango'}
+                      onChange={() => setMassExportSaldosSource('tango')}
+                    />
+                    Solo importado de Tango (Multimedia)
+                  </label>
                 </div>
               ) : null}
 
@@ -713,7 +723,7 @@ function SellerDetailView({
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
   const [commissionExporting, setCommissionExporting] = useState(false);
-  const [exportSaldosLoading, setExportSaldosLoading] = useState<'idle' | 'historial' | 'sistema'>('idle');
+  const [exportSaldosLoading, setExportSaldosLoading] = useState<'idle' | 'historial' | 'sistema' | 'tango'>('idle');
   const downloadCommissionDetailExcel = async () => {
     setCommissionExporting(true);
     try {
@@ -807,6 +817,31 @@ function SellerDetailView({
         >
           {exportSaldosLoading === 'sistema' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Excel por cliente · solo sistema
+        </button>
+        <button
+          type="button"
+          disabled={exportSaldosLoading !== 'idle'}
+          onClick={async () => {
+            setExportSaldosLoading('tango');
+            try {
+              await api.exportSaldosPendientesPorCliente({
+                sellerId: seller.id,
+                sellerName: seller.name,
+                from: exportFrom || undefined,
+                to: exportTo || undefined,
+                source: 'tango'
+              });
+            } catch {
+              window.alert('No se pudo exportar lo de Tango. Probá de nuevo o revisá la conexión.');
+            } finally {
+              setExportSaldosLoading('idle');
+            }
+          }}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-700/60 text-amber-300 hover:text-white hover:bg-amber-700/20 text-sm font-semibold transition disabled:opacity-50"
+          title="Solo movimientos importados de Tango (Multimedia): facturas, NC y recibos importados"
+        >
+          {exportSaldosLoading === 'tango' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          Excel por cliente · solo Tango
         </button>
         <button
           type="button"

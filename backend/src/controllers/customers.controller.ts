@@ -2038,7 +2038,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           : '';
 
     const source = String(req.query.source || '').trim().toLowerCase();
-    const sistemaOnly = source === 'sistema' || source === 'solo-sistema';
+    const mode: 'historial' | 'sistema' | 'tango' =
+      source === 'tango'
+        ? 'tango'
+        : source === 'sistema' || source === 'solo-sistema'
+          ? 'sistema'
+          : 'historial';
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
@@ -2051,28 +2056,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
     const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
-    const dateBranchCount = sistemaOnly ? 3 : 5;
-    const movementParams: any[] = [];
-    for (let b = 0; b < dateBranchCount; b += 1) {
-      if (from) movementParams.push(from);
-      if (to) movementParams.push(to);
-    }
-    if (sellerIdFilter) movementParams.push(sellerIdFilter);
 
-    const movements = await query(
-      `
-      SELECT
-        m.customer_id,
-        m.customer_name,
-        m.seller_id,
-        m.seller_name,
-        m.fecha,
-        m.tipo,
-        m.comprobante,
-        m.order_id,
-        m.debe,
-        m.haber
-      FROM (
+    const branchFacturaSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2097,10 +2082,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${invoiceDateFilter}
+        WHERE 1=1 ${invoiceDateFilter}`;
 
-        UNION ALL
-
+    const branchNcSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2127,14 +2111,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${ncDateFilter}
+        WHERE 1=1 ${ncDateFilter}`;
 
-        ${
-          sistemaOnly
-            ? ''
-            : `
-        UNION ALL
-
+    const branchNcExterna = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2163,12 +2142,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
              REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
-          ${externalNcDateFilter}
+          ${externalNcDateFilter}`;
 
-        `
-        }
-        UNION ALL
-
+    const branchReciboSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2183,14 +2159,37 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${receiptDateFilter}
+        WHERE 1=1 ${receiptDateFilter}`;
 
-        ${
-          sistemaOnly
-            ? ''
-            : `
-        UNION ALL
+    /**
+     * Rama de importados Multimedia (Tango). En modo `tango` no se deduplican recibos
+     * contra `payments` porque por definición el export es solo lo importado.
+     */
+    const dedupeReciboPagos =
+      mode === 'tango'
+        ? ''
+        : `
+          AND NOT (
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            AND TRIM(COALESCE(e.numero, '')) <> ''
+            AND EXISTS (
+              SELECT 1
+              FROM payments p
+              WHERE p.customer_id = e.customer_id
+                AND DATE(p.date) = DATE(e.line_date)
+                AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+                AND UPPER(
+                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                ) = CASE
+                  WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+                  ELSE UPPER(
+                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+                  )
+                END
+            )
+          )`;
 
+    const branchImportado = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2253,28 +2252,47 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-          )
-          AND NOT (
-            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            AND TRIM(COALESCE(e.numero, '')) <> ''
-            AND EXISTS (
-              SELECT 1
-              FROM payments p
-              WHERE p.customer_id = e.customer_id
-                AND DATE(p.date) = DATE(e.line_date)
-                AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
-                AND UPPER(
-                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                ) = CASE
-                  WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                  ELSE UPPER(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                  )
-                END
-            )
-          )
-        `
-        }
+          )${dedupeReciboPagos}`;
+
+    /**
+     * Cada rama aporta los placeholders from/to (si los hay) en este orden.
+     * Mantener este array sincronizado con `branchesByMode` define `movementParams`.
+     */
+    const branchesByMode: Record<typeof mode, string[]> = {
+      historial: [
+        branchFacturaSistema,
+        branchNcSistema,
+        branchNcExterna,
+        branchReciboSistema,
+        branchImportado
+      ],
+      sistema: [branchFacturaSistema, branchNcSistema, branchReciboSistema],
+      tango: [branchImportado]
+    };
+    const branches = branchesByMode[mode];
+
+    const movementParams: any[] = [];
+    for (let b = 0; b < branches.length; b += 1) {
+      if (from) movementParams.push(from);
+      if (to) movementParams.push(to);
+    }
+    if (sellerIdFilter) movementParams.push(sellerIdFilter);
+
+    const movements = await query(
+      `
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        ${branches.join('\n        UNION ALL\n')}
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -2678,7 +2696,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       .replace(/[\\/:*?"<>|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const modoLabel = sistemaOnly ? 'sistema' : 'historial';
+    const modoLabel = mode;
     const filename = `saldos ${modoLabel} - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
