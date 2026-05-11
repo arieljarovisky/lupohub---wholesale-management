@@ -2030,7 +2030,6 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const requestedSellerId = String(req.query.sellerId || '').trim();
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
-    const hasDateRange = Boolean(from || to);
     const sellerIdFilter =
       user.role === 'SELLER'
         ? user.id
@@ -2038,29 +2037,26 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ? requestedSellerId
           : '';
 
+    const source = String(req.query.source || '').trim().toLowerCase();
+    const sistemaOnly = source === 'sistema' || source === 'solo-sistema';
+
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
     /**
-     * Filtrar NC por la misma “fecha de hecho” que la factura (factura emitida / pedido),
-     * no por la fecha de emisión de la NC: si la NC sale en otro mes, sigue apareciendo
-     * cuando el rango incluye la factura o el pedido. Si no hay fila invoice, se usa fecha del pedido.
+     * NC del sistema: rango por fecha de emisión de la NC o, en su defecto, factura/pedido
+     * (evita que queden fuera del export cuando el rango no coincide con la fecha de la factura).
      */
-    const ncDateFilter = `${from ? ' AND DATE(COALESCE(inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(inv.created_at, o.date)) <= ?' : ''}`;
+    const ncDateFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
     const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
     const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
+    const dateBranchCount = sistemaOnly ? 3 : 5;
     const movementParams: any[] = [];
-    if (from) movementParams.push(from);
-    if (to) movementParams.push(to);
-    if (from) movementParams.push(from);
-    if (to) movementParams.push(to);
-    if (from) movementParams.push(from);
-    if (to) movementParams.push(to);
-    if (from) movementParams.push(from);
-    if (to) movementParams.push(to);
-    if (from) movementParams.push(from);
-    if (to) movementParams.push(to);
+    for (let b = 0; b < dateBranchCount; b += 1) {
+      if (from) movementParams.push(from);
+      if (to) movementParams.push(to);
+    }
     if (sellerIdFilter) movementParams.push(sellerIdFilter);
 
     const movements = await query(
@@ -2133,6 +2129,10 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${ncDateFilter}
 
+        ${
+          sistemaOnly
+            ? ''
+            : `
         UNION ALL
 
         SELECT
@@ -2165,6 +2165,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
           ${externalNcDateFilter}
 
+        `
+        }
         UNION ALL
 
         SELECT
@@ -2183,6 +2185,10 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${receiptDateFilter}
 
+        ${
+          sistemaOnly
+            ? ''
+            : `
         UNION ALL
 
         SELECT
@@ -2267,6 +2273,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
                 END
             )
           )
+        `
+        }
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -2670,7 +2678,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       .replace(/[\\/:*?"<>|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const filename = `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
+    const modoLabel = sistemaOnly ? 'sistema' : 'historial';
+    const filename = `saldos ${modoLabel} - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
