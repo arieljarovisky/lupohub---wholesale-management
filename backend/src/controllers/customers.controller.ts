@@ -1517,12 +1517,13 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          cn.created_at AS fecha,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
           'NOTA_CREDITO' AS tipo,
           CONCAT(
             CASE
               WHEN cn.cbte_tipo = 3 THEN 'NC A '
               WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
               ELSE 'NC '
             END,
             LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
@@ -1534,6 +1535,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
+        JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
 
@@ -1544,20 +1546,29 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          e.line_date AS fecha,
-          'NOTA_CREDITO_IMPORTADA' AS tipo,
-          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
-          NULL AS order_id,
+          COALESCE(ecn.created_at, ei.created_at) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN ecn.cbte_tipo = 3 THEN 'NC A '
+              WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              WHEN ecn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(ecn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          ecn.external_order_id AS order_id,
           0 AS debe,
-          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
-        FROM customer_multimedia_entries e
-        JOIN customers c ON c.id = e.customer_id
+          ROUND(COALESCE(ecn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        JOIN customers c
+          ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
+             REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-        )
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
 
         UNION ALL
 
@@ -1670,7 +1681,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         running = Math.round((running + debe - haber) * 100) / 100;
 
         if (m.tipo === 'FACTURA') totalFacturas += debe;
-        else if (m.tipo === 'NOTA_CREDITO') totalNc += haber;
+        else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') totalNc += haber;
         else totalRecibos += haber;
 
         wsDetail.addRow({
@@ -1748,8 +1759,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
-    const ncDateFilter = `${from ? ' AND DATE(cn.created_at) >= ?' : ''}${to ? ' AND DATE(cn.created_at) <= ?' : ''}`;
-    const externalNcDateFilter = `${from ? ' AND DATE(ecn.created_at) >= ?' : ''}${to ? ' AND DATE(ecn.created_at) <= ?' : ''}`;
+    /** Misma lógica que facturas: si la NC se emitió otro mes, no pierde el movimiento al filtrar por el período del pedido/factura. */
+    const ncDateFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
+    const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
     const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
     const movementParams: any[] = [];
@@ -1812,12 +1824,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          cn.created_at AS fecha,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
           'NOTA_CREDITO' AS tipo,
           CONCAT(
             CASE
               WHEN cn.cbte_tipo = 3 THEN 'NC A '
               WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
               ELSE 'NC '
             END,
             LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
@@ -1829,6 +1842,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
+        JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${ncDateFilter}
@@ -1840,12 +1854,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          ecn.created_at AS fecha,
+          COALESCE(ecn.created_at, ei.created_at) AS fecha,
           'NOTA_CREDITO' AS tipo,
           CONCAT(
             CASE
               WHEN ecn.cbte_tipo = 3 THEN 'NC A '
               WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              WHEN ecn.cbte_tipo = 13 THEN 'NC C '
               ELSE 'NC '
             END,
             LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
