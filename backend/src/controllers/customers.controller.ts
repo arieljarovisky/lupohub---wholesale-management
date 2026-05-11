@@ -1535,7 +1535,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
-        JOIN invoices inv ON inv.id = cn.invoice_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
 
@@ -1684,11 +1684,17 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') totalNc += haber;
         else totalRecibos += haber;
 
+        const tipoDetalle =
+          m.tipo === 'NOTA_CREDITO'
+            ? 'NOTA DE CREDITO'
+            : m.tipo === 'NOTA_CREDITO_IMPORTADA'
+              ? 'NOTA DE CREDITO (import.)'
+              : m.tipo;
         wsDetail.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
           fecha: m.fecha ? new Date(m.fecha) : null,
-          tipo: (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') ? 'NC' : m.tipo,
+          tipo: tipoDetalle,
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
           debe,
@@ -1759,8 +1765,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
-    /** Misma lógica que facturas: si la NC se emitió otro mes, no pierde el movimiento al filtrar por el período del pedido/factura. */
-    const ncDateFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
+    /**
+     * Filtrar NC por la misma “fecha de hecho” que la factura (factura emitida / pedido),
+     * no por la fecha de emisión de la NC: si la NC sale en otro mes, sigue apareciendo
+     * cuando el rango incluye la factura o el pedido. Si no hay fila invoice, se usa fecha del pedido.
+     */
+    const ncDateFilter = `${from ? ' AND DATE(COALESCE(inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(inv.created_at, o.date)) <= ?' : ''}`;
     const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
     const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
@@ -1842,7 +1852,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
-        JOIN invoices inv ON inv.id = cn.invoice_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${ncDateFilter}
@@ -2258,7 +2268,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const wsDetalle = workbook.addWorksheet('Detalle clientes');
     wsDetalle.columns = [
       { header: 'Fecha', key: 'fecha', width: 14 },
-      { header: 'Tipo', key: 'tipo', width: 14 },
+      { header: 'Tipo', key: 'tipo', width: 22 },
       { header: 'Comprobante', key: 'comprobante', width: 36 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
@@ -2335,15 +2345,17 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
         saldo = Math.round((saldo + debe - haber) * 100) / 100;
         const tipoLabel =
-          m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
-            ? 'NC'
-            : m.tipo === 'FACTURA_IMPORTADA'
-              ? 'FACTURA'
-              : m.tipo === 'RECIBO_IMPORTADO'
-                ? 'RECIBO'
-                : m.tipo === 'MOV_IMPORTADO'
-                  ? 'MOV.'
-                  : m.tipo;
+          m.tipo === 'NOTA_CREDITO'
+            ? 'NOTA DE CREDITO'
+            : m.tipo === 'NOTA_CREDITO_IMPORTADA'
+              ? 'NOTA DE CREDITO (import.)'
+              : m.tipo === 'FACTURA_IMPORTADA'
+                ? 'FACTURA'
+                : m.tipo === 'RECIBO_IMPORTADO'
+                  ? 'RECIBO'
+                  : m.tipo === 'MOV_IMPORTADO'
+                    ? 'MOV.'
+                    : m.tipo;
         wsDetalle.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
           tipo: tipoLabel,

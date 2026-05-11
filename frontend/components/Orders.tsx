@@ -290,6 +290,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const year = x.getFullYear();
       return `${String(day).padStart(2,'0')} ${month} ${year}`;
     };
+    const formatDateDMY = (d: string) => {
+      const x = new Date(d);
+      if (isNaN(x.getTime())) return d;
+      return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
+    };
+    const esc = (v: unknown) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
     const transportNumber = transporteName.trim()
       ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
@@ -305,44 +316,36 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       return (localProduct?.sku ?? i.sku ?? '').toString().trim();
     };
 
-    const rowsFor = (slice: OrderItem[]) => slice.map(i => {
-      const qty = Number(i.quantity || 0);
-      const unit = Number(i.priceAtMoment ?? 0);
-      const importe = Math.round(qty * unit * 100) / 100;
-      const sku = localSkuOf(i);
-      const desc = (i.productName ?? '').toString().trim() || '—';
-      const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
-      const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const codePrint = normalizeSkuForPrint(sku);
-      return `<tr>
-        <td class="col-c">${qty.toLocaleString('es-AR')}</td>
-        <td class="col-c col-code">${codePrint || '—'}</td>
-        <td class="col-desc">${desc}</td>
-        <td class="col-c">${despachoCell}</td>
-        <td class="col-r">$${formatMoneyAr(unit)}</td>
-        <td class="col-r">$${formatMoneyAr(importe)}</td>
+    const rowsFor = (slice: OrderItem[]) =>
+      slice
+        .map((i) => {
+          const qty = Number(i.quantity || 0);
+          const sku = localSkuOf(i);
+          const desc = (i.productName ?? '').toString().trim() || '—';
+          const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
+          const despStr = despacho != null && String(despacho).trim() ? String(despacho).trim() : '';
+          const codePrint = normalizeSkuForPrint(sku);
+          const sub =
+            codePrint || despStr
+              ? `<div class="rem-desc-sub">${[codePrint ? `Cód.: ${esc(codePrint)}` : '', despStr ? `Despacho: ${esc(despStr)}` : ''].filter(Boolean).join(' · ')}</div>`
+              : '';
+          return `<tr>
+        <td class="ri-qty">${qty.toLocaleString('es-AR')}</td>
+        <td class="ri-desc"><div class="rem-desc-main">${esc(desc)}</div>${sub}</td>
       </tr>`;
-    }).join('');
+        })
+        .join('');
 
-    const itemsPerPage = 18;
+    const itemsPerPage = 22;
     const pages: OrderItem[][] = [];
     for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
     if (pages.length === 0) pages.push([]);
 
-    const netFromLines = orderNetoFromItems(order);
-    const neto =
-      netFromLines > 0
-        ? netFromLines
-        : Math.round(
-            (order.total != null && order.total > 0 ? order.total : items.reduce((s, i) => s + i.quantity * (i.priceAtMoment ?? 0), 0)) * 100
-          ) / 100;
-    const iva21 = Math.round(neto * 0.21 * 100) / 100;
-    const total = Math.round((neto + iva21) * 100) / 100;
-    const subtotalBruto = neto;
-
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
     const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+    const clienteDomicilio = (customer?.address || '').toString().trim();
+    const clienteLocalidad = (customer?.city || '').toString().trim();
     const razonEmpresa = (remitente.businessName || '—').toString();
     const cuitEmpresa = ((remitente as any).cuit || '').toString();
     const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '901-2113373').toString();
@@ -350,13 +353,23 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const emailEmpresa = ((remitente as any).email || '').toString();
     const telEmpresa = ((remitente as any).phone || '').toString();
     const cuitCliente = (customer?.cuit || '').toString();
+    const inv = order.invoice;
+    const facturaNroStr =
+      inv && (inv.cbteDesde != null || inv.cbteHasta != null)
+        ? `${String(inv.puntoVta ?? 0).padStart(4, '0')} - ${String(inv.cbteDesde ?? inv.cbteHasta ?? 0).padStart(8, '0')}`
+        : '';
+    const condIvaCliente = (customer?.condicionIva || '').toString().trim() || '—';
+    const clienteNro = (customer?.legacyCode || '').toString().trim();
+    const webEmpresa = ((remitente as any).website || '').toString().trim();
+    const ivaEmisorTxt = ((remitente as any).condicionIva || 'I.V.A. RESPONSABLE INSCRIPTO').toString();
+    const marcaAgua = esc((razonEmpresa || 'LUPO').trim().split(/\s+/)[0] || 'LUPO');
 
     const caiRemitoTrim = remitente.caiRemito?.trim();
     const caiVencimientoStr = remitente.caiRemitoVencimiento
       ? (() => { const d = new Date(remitente.caiRemitoVencimiento! + 'T12:00:00'); return isNaN(d.getTime()) ? remitente.caiRemitoVencimiento : formatDateShort(remitente.caiRemitoVencimiento); })()
       : '';
     const caiFooterHtml = caiRemitoTrim
-      ? `<div><strong>C.A.I.:</strong> ${caiRemitoTrim}${caiVencimientoStr ? ` &nbsp; <strong>Vto. C.A.I.:</strong> ${caiVencimientoStr}` : ''}</div>`
+      ? `<div class="r-cai"><strong>C.A.I.:</strong> ${esc(caiRemitoTrim)}${caiVencimientoStr ? ` &nbsp; <strong>Fecha Vto.:</strong> ${esc(caiVencimientoStr)}` : ''}</div>`
       : '';
 
     const logoUrlRemito = (remitente.logoUrl && remitente.logoUrl.trim()) ? remitente.logoUrl.trim() : '';
@@ -373,116 +386,188 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         : remitoBaseNumber;
       const isLast = idx === pages.length - 1;
       const pageRows = rowsFor(pageItems);
+      const nroRemitoEsc = esc(remitoNumber || '—');
+      const fechaDMY = esc(formatDateDMY(order.date));
+      const hojaLine =
+        pages.length > 1
+          ? `<div class="r-hoja">${idx > 0 ? 'Continúa — ' : ''}Hoja ${idx + 1} / ${pages.length}</div>`
+          : '';
+      const transporteFirma = [transportNumber ? esc(transportNumber) : '', numBultos != null && !isNaN(numBultos) ? `Bultos: ${numBultos}` : '']
+        .filter(Boolean)
+        .join('<br/>');
+      const caiBlock = isLast ? (caiFooterHtml || `<div class="r-cai r-cai-muted">Comprobante no válido como factura — Documento no fiscal</div>`) : '';
 
       return `<section class="sheet ${idx > 0 ? 'page-break' : ''}">
-        <div class="original">ORIGINAL</div>
-        <div class="topbar">
-          <div class="head-left">
-            <div class="logo">${logoBlockRemito}</div>
-            <div class="issuer-title">${razonEmpresa}</div>
-            ${empresaDir ? `<div>${empresaDir}</div>` : ''}
-            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
-            ${ingresosBrutosEmpresa ? `<div><strong>Ingresos Brutos:</strong> ${ingresosBrutosEmpresa}</div>` : ''}
-            ${inicioActividadEmpresa ? `<div><strong>Inicio de actividad:</strong> ${inicioActividadEmpresa}</div>` : ''}
-            ${emailEmpresa ? `<div><strong>E-mail:</strong> ${emailEmpresa}</div>` : ''}
-            ${telEmpresa ? `<div><strong>Tel:</strong> ${telEmpresa}</div>` : ''}
-          </div>
-          <div class="head-right">
-            <div class="fact-row">
-              <div class="letter-box">
-                <div class="l">R</div>
-                <div class="mini">REMITO</div>
-              </div>
-              <div>
-                <div class="fact-title remito-title">REMITO</div>
-                <div class="fact-meta">
-                  <div><strong>N° Remito:</strong> ${remitoNumber || '—'}</div>
-                  <div><strong>Fecha:</strong> ${formatDateShort(order.date)}</div>
-                </div>
-              </div>
+        <div class="side-talon">ORIGINAL Blanco - DUPLICADO Color</div>
+        <div class="remito-doc">
+          ${hojaLine}
+          <div class="r-head3">
+            <div class="r-h-izq">
+              <div class="r-logo">${logoBlockRemito}</div>
+              <div class="r-razon">${esc(razonEmpresa)}</div>
+              ${empresaDir ? `<div class="r-line-sm">${esc(empresaDir)}</div>` : ''}
+              ${telEmpresa ? `<div class="r-line-sm">Tel.: ${esc(telEmpresa)}</div>` : ''}
+              ${emailEmpresa ? `<div class="r-line-sm">${esc(emailEmpresa)}</div>` : ''}
+              ${webEmpresa ? `<div class="r-line-sm">${esc(webEmpresa)}</div>` : ''}
+              <div class="r-iva-line">${esc(ivaEmisorTxt)}</div>
+            </div>
+            <div class="r-h-mid">
+              <div class="r-caja-r">R</div>
+              <div class="r-cod91">CODIGO Nº 91</div>
+            </div>
+            <div class="r-h-der">
+              <div class="r-doc-title">REMITO</div>
+              <div class="r-doc-nro">Nº ${nroRemitoEsc}</div>
+              <div class="r-doc-fecha">FECHA: ${fechaDMY}</div>
+              ${cuitEmpresa ? `<div class="r-doc-tax"><span class="r-dlbl">C.U.I.T.</span> ${esc(cuitEmpresa)}</div>` : ''}
+              ${ingresosBrutosEmpresa ? `<div class="r-doc-tax"><span class="r-dlbl">Ing. Brutos</span> ${esc(ingresosBrutosEmpresa)}</div>` : ''}
+              ${inicioActividadEmpresa ? `<div class="r-doc-tax"><span class="r-dlbl">Inicio actividades</span> ${esc(inicioActividadEmpresa)}</div>` : ''}
             </div>
           </div>
+          <div class="r-cli">
+            <div class="r-cli-up">
+              <div class="r-cli-left">
+                <div class="r-row"><span class="r-k">Señores:</span> ${esc(clienteNombre)}</div>
+                <div class="r-row"><span class="r-k">Domicilio:</span> ${clienteDomicilio ? esc(clienteDomicilio) : '—'}</div>
+                <div class="r-row"><span class="r-k">Localidad:</span> ${clienteLocalidad ? esc(clienteLocalidad) : '—'}</div>
+                <div class="r-row"><span class="r-k">IVA Responsable:</span> ${esc(condIvaCliente)}</div>
+              </div>
+              <div class="r-cli-right">
+                <div class="r-row"><span class="r-k">Factura Nº:</span> ${facturaNroStr ? esc(facturaNroStr) : '—'}</div>
+                <div class="r-row"><span class="r-k">C.U.I.T.:</span> ${cuitCliente ? esc(cuitCliente) : '—'}</div>
+              </div>
+            </div>
+            ${descripcionTrim ? `<div class="r-cli-obs"><span class="r-k">Observaciones:</span> ${descripcionTrim}</div>` : ''}
+            <div class="r-cli-low">
+              <div class="r-c3"><div class="r-c3t">CLIENTE Nº</div><div class="r-c3v">${clienteNro ? esc(clienteNro) : '—'}</div></div>
+              <div class="r-c3"><div class="r-c3t">Condiciones de Venta</div><div class="r-c3v">${esc(saleCondition)}</div></div>
+              <div class="r-c3"><div class="r-c3t">Despachar por</div><div class="r-c3v">${transportNumber ? esc(transportNumber) : '—'}</div></div>
+            </div>
+          </div>
+          <div class="r-items-outer">
+            <div class="r-wm" aria-hidden="true">${marcaAgua}</div>
+            <table class="r-items">
+              <thead>
+                <tr>
+                  <th class="r-th-qty">CANTIDAD</th>
+                  <th class="r-th-desc">DESCRIPCION</th>
+                </tr>
+              </thead>
+              <tbody>${pageRows || `<tr><td class="ri-qty">&nbsp;</td><td class="ri-desc">&nbsp;</td></tr>`}</tbody>
+            </table>
+            <div class="r-items-ley">La mercadería viaja por cuenta y cargo del cliente</div>
+          </div>
+          ${
+            isLast
+              ? `<div class="r-firma-row">
+              <div class="r-firma-cell"><div class="r-firma-t">TRANSPORTE:</div><div class="r-firma-b">${transporteFirma || '&nbsp;'}</div></div>
+              <div class="r-firma-cell"><div class="r-firma-t">RECIBI CONFORME:</div><div class="r-firma-b r-firma-sign">&nbsp;</div></div>
+            </div>
+            ${caiBlock}
+            <div class="r-micro">Pedido interno #${esc(order.id)}${clienteDir ? ` · ${esc(clienteDir)}` : ''}</div>`
+              : ''
+          }
         </div>
-        <div class="boxrow">
-          <div class="block">
-            <div><strong>Sr./es:</strong> ${clienteNombre}</div>
-            ${clienteDir ? `<div>${clienteDir}</div>` : ''}
-            ${cuitCliente ? `<div>C.U.I.T.: ${cuitCliente}</div>` : ''}
-          </div>
-          <div class="block">
-            ${transportNumber ? `<div><strong>N° Transporte:</strong> ${transportNumber}</div>` : ''}
-            <div><strong>N° Remito:</strong> ${remitoNumber || '—'}</div>
-            ${saleCondition ? `<div><strong>Condición de venta:</strong> ${saleCondition}</div>` : ''}
-            ${(numBultos != null && !isNaN(numBultos)) ? `<div><strong>Bultos:</strong> ${numBultos}</div>` : ''}
-          </div>
-        </div>
-        ${descripcionTrim ? `<div class="desc-box"><strong>Descripción del envío:</strong> ${descripcionTrim}</div>` : ''}
-        <table class="items-table">
-          <thead>
-            <tr>
-              <th class="col-c" style="width: 52px;">CANT.</th>
-              <th class="col-c" style="width: 110px;">CÓDIGO</th>
-              <th>DESCRIPCIÓN</th>
-              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
-              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
-              <th class="col-r" style="width: 92px;">IMPORTE</th>
-            </tr>
-          </thead>
-          <tbody>${pageRows}</tbody>
-        </table>
-        ${isLast ? `<div class="summary">
-          <div></div>
-          <div class="totals">
-            <div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
-            <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
-            <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(neto)}</span></div>
-            <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
-            <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
-          </div>
-        </div>` : ''}
-        ${caiFooterHtml ? `<div class="footer">${caiFooterHtml}</div>` : ''}
       </section>`;
     }).join('');
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
-      @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
+      @page { size: A4; margin: 10mm 10mm 12mm 14mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; display: flex; flex-direction: column; }
+      body { margin: 0; padding: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      .sheet { position: relative; width: 210mm; min-height: 297mm; padding: 8mm 8mm 10mm 11mm; margin: 0 auto; }
       .page-break { page-break-before: always; }
-      .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
-      .topbar { display: grid; grid-template-columns: 1fr 1.2fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
-      .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
-      .head-right { padding: 8px 10px; display: flex; align-items: center; justify-content: flex-end; }
-      .logo { min-height: 42px; display: flex; align-items: center; margin-bottom: 4px; }
-      .logo img { max-height: 48px; max-width: 200px; object-fit: contain; }
-      .issuer-title { font-size: 12px; font-weight: 700; margin: 2px 0 6px; }
-      .head-left > div { margin-bottom: 3px; line-height: 1.35; }
-      .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; width: 100%; max-width: 320px; }
-      .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
-      .letter-box .l { font-size: 40px; line-height: 1; font-weight: 700; }
-      .letter-box .mini { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; margin-top: 4px; }
-      .fact-title { font-size: 32px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 2px; }
-      .remito-title { font-size: 28px; }
-      .fact-meta { margin-top: 10px; font-size: 12px; }
-      .fact-meta div { margin-bottom: 4px; }
-      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; border: 1px solid #111; border-top: 0; }
-      .block { padding: 8px 10px; border-right: 1px solid #111; min-height: 58px; }
-      .boxrow .block:last-child { border-right: none; }
-      .block > div { margin-bottom: 4px; line-height: 1.35; }
-      .desc-box { border: 1px solid #111; border-top: 0; padding: 8px 10px; white-space: pre-line; line-height: 1.4; }
-      table.items-table { width: 100%; border-collapse: collapse; margin-top: 0; border: 1px solid #111; border-top: 0; }
-      table.items-table thead th { border: 1px solid #111; padding: 6px 6px; text-align: left; background: #f3f4f6; font-weight: 700; font-size: 10px; }
-      table.items-table tbody td { border: 1px solid #111; padding: 5px 6px; vertical-align: top; }
-      .col-c { text-align: center; }
-      .col-r { text-align: right; }
-      .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
-      .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
-      .summary { display: grid; grid-template-columns: 1fr 220px; gap: 10px; margin-top: 10px; align-items: start; }
-      .totals { border: 1px solid #111; }
-      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; gap: 12px; }
-      .totals .r:last-child { border-bottom: none; font-weight: 700; }
-      .footer { margin-top: 12px; font-size: 10px; }
+      .side-talon {
+        position: absolute;
+        left: 1mm;
+        top: 22mm;
+        bottom: 22mm;
+        width: 7mm;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        text-orientation: mixed;
+        font-size: 7px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: #222;
+      }
+      .remito-doc { border: 2px solid #000; margin-left: 5mm; min-height: calc(297mm - 18mm); }
+      .r-hoja { text-align: right; font-size: 9px; font-weight: 700; padding: 4px 8px; border-bottom: 1px solid #000; background: #fafafa; }
+      .r-head3 { display: grid; grid-template-columns: 1.35fr 92px 1fr; border-bottom: 2px solid #000; min-height: 118px; }
+      .r-h-izq { padding: 8px 10px 8px 8px; border-right: 2px solid #000; }
+      .r-h-mid { border-right: 2px solid #000; padding: 8px 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+      .r-h-der { padding: 8px 10px; }
+      .r-logo { margin-bottom: 4px; }
+      .r-logo img { max-height: 52px; max-width: 200px; object-fit: contain; display: block; }
+      .inv-logo-placeholder { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; }
+      .r-razon { font-size: 12px; font-weight: 700; margin-bottom: 4px; line-height: 1.2; }
+      .r-line-sm { font-size: 10px; line-height: 1.35; margin-bottom: 2px; }
+      .r-iva-line { font-size: 10px; font-weight: 700; margin-top: 6px; }
+      .r-caja-r {
+        width: 56px;
+        height: 56px;
+        border: 2px solid #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 38px;
+        font-weight: 800;
+        line-height: 1;
+      }
+      .r-cod91 { font-size: 8px; font-weight: 700; margin-top: 6px; text-align: center; letter-spacing: 0.02em; }
+      .r-doc-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; margin-bottom: 4px; }
+      .r-doc-nro { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+      .r-doc-fecha { font-size: 11px; font-weight: 700; margin-bottom: 8px; }
+      .r-doc-tax { font-size: 10px; line-height: 1.45; margin-bottom: 2px; }
+      .r-dlbl { font-weight: 700; display: inline-block; min-width: 108px; }
+      .r-cli { border-bottom: 2px solid #000; }
+      .r-cli-up { display: grid; grid-template-columns: 1.2fr 0.85fr; border-bottom: 1px solid #000; }
+      .r-cli-left { padding: 8px 10px; border-right: 1px solid #000; }
+      .r-cli-right { padding: 8px 10px; }
+      .r-row { font-size: 10px; line-height: 1.45; margin-bottom: 4px; }
+      .r-row:last-child { margin-bottom: 0; }
+      .r-k { font-weight: 700; display: inline-block; min-width: 112px; }
+      .r-cli-obs { padding: 6px 10px; font-size: 10px; border-bottom: 1px solid #000; line-height: 1.4; }
+      .r-cli-low { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+      .r-c3 { border-right: 1px solid #000; padding: 6px 8px; min-height: 44px; }
+      .r-c3:last-child { border-right: none; }
+      .r-c3t { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
+      .r-c3v { font-size: 10px; line-height: 1.35; word-break: break-word; }
+      .r-items-outer { position: relative; border-bottom: 2px solid #000; min-height: 120mm; }
+      .r-wm {
+        position: absolute;
+        left: 50%;
+        top: 48%;
+        transform: translate(-50%, -50%) rotate(-18deg);
+        font-size: 88px;
+        font-weight: 800;
+        color: #000;
+        opacity: 0.06;
+        pointer-events: none;
+        z-index: 0;
+        white-space: nowrap;
+      }
+      table.r-items { position: relative; z-index: 1; width: 100%; border-collapse: collapse; font-size: 10px; }
+      table.r-items thead th { border: 1px solid #000; padding: 6px 8px; font-weight: 700; text-align: left; background: #fff; }
+      .r-th-qty { width: 72px; text-align: center !important; }
+      table.r-items tbody td { border: 1px solid #000; padding: 5px 8px; vertical-align: top; }
+      .ri-qty { text-align: center; width: 72px; font-weight: 600; }
+      .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; }
+      .rem-desc-main { font-weight: 600; }
+      .rem-desc-sub { font-size: 9px; color: #333; margin-top: 2px; font-weight: 400; }
+      .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
+      .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
+      .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
+      .r-firma-cell:last-child { border-right: none; }
+      .r-firma-t { font-size: 10px; font-weight: 800; margin-bottom: 6px; }
+      .r-firma-b { font-size: 10px; line-height: 1.35; min-height: 36px; }
+      .r-firma-sign { border-bottom: 1px solid #000; margin-top: 8px; max-width: 85%; }
+      .r-cai { padding: 6px 10px 4px; font-size: 9px; line-height: 1.4; border-bottom: 1px solid #000; }
+      .r-cai-muted { color: #444; }
+      .r-micro { padding: 4px 8px 8px; font-size: 8px; color: #555; text-align: right; }
       .no-print { margin: 14px auto 18px; width: 210mm; padding: 0 10mm; display: flex; gap: 10px; }
       @media print { .no-print { display: none !important; } .sheet { margin: 0 auto; } }
     </style></head><body>
