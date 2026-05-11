@@ -12,6 +12,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDespachoStats = exports.getProductosSinDespacho = exports.asignarDespachoATodos = exports.asignarDespachoAProducto = exports.removeDespachoItem = exports.addDespachoItem = exports.deleteDespacho = exports.updateDespacho = exports.createDespacho = exports.getDespachoById = exports.getDespachos = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
+const getStockTotalByProductId = (productId) => __awaiter(void 0, void 0, void 0, function* () {
+    const stockRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(s.stock), 0) AS stock_total
+     FROM product_colors pc
+     JOIN product_variants pv ON pv.product_color_id = pc.id
+     LEFT JOIN stocks s ON s.variant_id = pv.id
+     WHERE pc.product_id = ?`, [productId]);
+    return Number(stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock_total) || 0;
+});
+const getAssignedTotalByProductId = (productId) => __awaiter(void 0, void 0, void 0, function* () {
+    const assignedRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(cantidad), 0) AS total_asignado
+     FROM despacho_items
+     WHERE product_id = ?`, [productId]);
+    return Number(assignedRow === null || assignedRow === void 0 ? void 0 : assignedRow.total_asignado) || 0;
+});
 // Obtener todos los despachos
 const getDespachos = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -191,14 +205,35 @@ const addDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (!despacho) {
             return res.status(404).json({ message: 'Despacho no encontrado' });
         }
+        const cantidadNum = Math.floor(Number(cantidad) || 0);
+        if (cantidadNum <= 0) {
+            return res.status(400).json({ message: 'La cantidad debe ser mayor a 0' });
+        }
+        if (!variant_id) {
+            return res.status(400).json({ message: 'variant_id es requerido' });
+        }
+        const variantRow = yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id AS product_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       WHERE pv.id = ?
+       LIMIT 1`, [variant_id]);
+        if (!(variantRow === null || variantRow === void 0 ? void 0 : variantRow.variant_id) || !(variantRow === null || variantRow === void 0 ? void 0 : variantRow.product_id)) {
+            return res.status(404).json({ message: 'Variante no encontrada' });
+        }
+        const resolvedProductId = product_id || variantRow.product_id;
         const itemId = (0, uuid_1.v4)();
         yield (0, db_1.execute)(`
       INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [itemId, id, product_id || null, variant_id || null, cantidad || 0, costo_unitario || null, descripcion_item || null]);
+    `, [itemId, id, resolvedProductId || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
+        // Al cargar mercadería al despacho, sumar al stock de la variante
+        const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variant_id]);
+        const currentStock = Number((stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) || 0);
+        yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE stock = ?`, [variant_id, currentStock + cantidadNum, currentStock + cantidadNum]);
         // Actualizar el último despacho del producto
-        if (product_id) {
-            yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, product_id]);
+        if (resolvedProductId) {
+            yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, resolvedProductId]);
         }
         res.status(201).json({
             message: 'Item agregado al despacho',
@@ -267,17 +302,22 @@ const asignarDespachoAProducto = (req, res) => __awaiter(void 0, void 0, void 0,
                 message: `No se encontró un producto con código "${String(sku).trim()}". Probá con el SKU del modelo (ej. QE5546).`
             });
         }
-        const stockRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(s.stock), 0) AS stock_total
-       FROM product_colors pc
-       JOIN product_variants pv ON pv.product_color_id = pc.id
-       LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pc.product_id = ?`, [product.id]);
-        const cantidad = Number(stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock_total) || 0;
+        const stockTotal = yield getStockTotalByProductId(product.id);
+        const assignedTotal = yield getAssignedTotalByProductId(product.id);
+        const cantidadDisponible = Math.max(0, stockTotal - assignedTotal);
+        if (cantidadDisponible <= 0) {
+            return res.status(400).json({
+                message: `El producto "${product.name}" (${product.sku}) ya no tiene unidades disponibles para asignar a otro despacho.`
+            });
+        }
         const yaEnDespacho = yield (0, db_1.get)(`SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`, [despacho.id, product.id]);
         if (!yaEnDespacho) {
             const itemId = (0, uuid_1.v4)();
             yield (0, db_1.execute)(`INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
-         VALUES (?, ?, ?, NULL, ?, NULL, ?)`, [itemId, despacho.id, product.id, cantidad, `${product.name} - ${product.sku || ''}`.trim()]);
+         VALUES (?, ?, ?, NULL, ?, NULL, ?)`, [itemId, despacho.id, product.id, cantidadDisponible, `${product.name} - ${product.sku || ''}`.trim()]);
+        }
+        else {
+            yield (0, db_1.execute)(`UPDATE despacho_items SET cantidad = cantidad + ? WHERE id = ?`, [cantidadDisponible, yaEnDespacho.id]);
         }
         const pais = despacho.pais_origen && String(despacho.pais_origen).trim()
             ? despacho.pais_origen
@@ -314,13 +354,21 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
         p.id, 
         p.name, 
         p.sku,
-        COALESCE(SUM(s.stock), 0) as stock_total
+        COALESCE(SUM(s.stock), 0) as stock_total,
+        COALESCE(di_total.total_asignado, 0) as total_asignado,
+        GREATEST(COALESCE(SUM(s.stock), 0) - COALESCE(di_total.total_asignado, 0), 0) as cantidad_disponible
       FROM products p
       LEFT JOIN product_colors pc ON pc.product_id = p.id
       LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE p.ultimo_despacho_id IS NULL
-      GROUP BY p.id, p.name, p.sku
+      LEFT JOIN (
+        SELECT product_id, SUM(cantidad) as total_asignado
+        FROM despacho_items
+        WHERE product_id IS NOT NULL
+        GROUP BY product_id
+      ) di_total ON di_total.product_id = p.id
+      GROUP BY p.id, p.name, p.sku, di_total.total_asignado
+      HAVING cantidad_disponible > 0
       ORDER BY p.name
     `);
         if (productos.length === 0) {
@@ -346,13 +394,18 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const paisParaProductos = ((despachoExistente === null || despachoExistente === void 0 ? void 0 : despachoExistente.pais_origen) && String(despachoExistente.pais_origen).trim()) || pais_origen;
         for (const p of productos) {
             const yaEnDespacho = yield (0, db_1.get)(`SELECT id FROM despacho_items WHERE despacho_id = ? AND product_id = ? LIMIT 1`, [despachoId, p.id]);
+            const cantidad = Number(p.cantidad_disponible) || 0;
+            if (cantidad <= 0)
+                continue;
             if (!yaEnDespacho) {
                 const itemId = (0, uuid_1.v4)();
-                const cantidad = Number(p.stock_total) || 0;
                 yield (0, db_1.execute)(`
           INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
           VALUES (?, ?, ?, NULL, ?, NULL, ?)
         `, [itemId, despachoId, p.id, cantidad, `${p.name} - ${p.sku || ''}`.trim()]);
+            }
+            else {
+                yield (0, db_1.execute)(`UPDATE despacho_items SET cantidad = cantidad + ? WHERE id = ?`, [cantidad, yaEnDespacho.id]);
             }
             yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
                 despachoId,
@@ -377,23 +430,41 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
 exports.asignarDespachoATodos = asignarDespachoATodos;
 // Obtener productos sin despacho asignado
 const getProductosSinDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
+        const searchRaw = String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.search) || '').trim();
+        const search = `%${searchRaw}%`;
+        const whereSearch = searchRaw
+            ? `WHERE (
+          p.name LIKE ? OR
+          p.sku LIKE ? OR
+          pv.sku LIKE ? OR
+          c.name LIKE ? OR
+          s2.size_code LIKE ?
+        )`
+            : '';
+        const params = searchRaw ? [search, search, search, search, search] : [];
         const productos = yield (0, db_1.query)(`
       SELECT 
-        p.id, 
+        p.id AS product_id,
         p.name, 
-        p.sku, 
+        p.sku,
+        pv.id AS variant_id,
+        pv.sku AS variant_sku,
+        c.code AS color_code,
+        s2.size_code,
+        c.name AS color_name,
         p.pais_origen,
-        COALESCE(SUM(s.stock), 0) as stock_total
+        COALESCE(s.stock, 0) as stock_total
       FROM products p
-      LEFT JOIN product_colors pc ON pc.product_id = p.id
-      LEFT JOIN product_variants pv ON pv.product_color_id = pc.id
+      JOIN product_colors pc ON pc.product_id = p.id
+      JOIN product_variants pv ON pv.product_color_id = pc.id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN sizes s2 ON s2.id = pv.size_id
       LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE p.ultimo_despacho_id IS NULL
-      GROUP BY p.id, p.name, p.sku, p.pais_origen
-      ORDER BY p.name
-      LIMIT 200
-    `);
+      ${whereSearch}
+      ORDER BY p.name, c.name, s2.size_code
+    `, params);
         res.json(productos);
     }
     catch (error) {

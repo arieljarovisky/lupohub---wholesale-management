@@ -51,8 +51,56 @@ const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
+/** Detecta NC por leyenda en el comprobante (import Tango, texto libre en recibo, etc.). */
+function comprobanteIndicaNotaCredito(comp) {
+    const u = String(comp !== null && comp !== void 0 ? comp : '')
+        .trim()
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    if (!u)
+        return false;
+    if (u.includes('NOTA DE CREDITO'))
+        return true;
+    if (u.includes('N/C') || u.includes('N / C'))
+        return true;
+    // Comprobantes tipo AFIP: "NC A 00002-00001234", "NC B0002..."
+    if (/^NC\s+[ABCM](\s|\d|-)/.test(u) || /\bNC\s+[ABCM]\s*\d/.test(u))
+        return true;
+    return false;
+}
+/**
+ * Texto de columna "Tipo" en exports de saldos (Detalle clientes / Detalle).
+ * Prioriza tipo explícito; si el comprobante describe una NC pero el tipo vino como RECIBO/FACTURA, corrige la etiqueta.
+ */
+function labelTipoSaldoExporter(m) {
+    var _a, _b;
+    const tipo = String((_a = m.tipo) !== null && _a !== void 0 ? _a : '').trim();
+    const comp = String((_b = m.comprobante) !== null && _b !== void 0 ? _b : '');
+    if (tipo === 'NOTA_CREDITO')
+        return 'NOTA DE CREDITO';
+    if (tipo === 'NOTA_CREDITO_IMPORTADA')
+        return 'NOTA DE CREDITO (import.)';
+    if (comprobanteIndicaNotaCredito(comp)) {
+        if (tipo === 'RECIBO_IMPORTADO' ||
+            tipo === 'FACTURA_IMPORTADA' ||
+            tipo === 'MOV_IMPORTADO') {
+            return 'NOTA DE CREDITO (import.)';
+        }
+        if (tipo === 'RECIBO' || tipo === 'FACTURA') {
+            return 'NOTA DE CREDITO';
+        }
+    }
+    if (tipo === 'FACTURA_IMPORTADA')
+        return 'FACTURA';
+    if (tipo === 'RECIBO_IMPORTADO')
+        return 'RECIBO';
+    if (tipo === 'MOV_IMPORTADO')
+        return 'MOV.';
+    return tipo;
+}
 function toCustomer(row, transportes) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
     return {
         id: row.id,
         sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : '',
@@ -72,6 +120,9 @@ function toCustomer(row, transportes) {
         legacyCode: (_q = row.legacy_code) !== null && _q !== void 0 ? _q : undefined,
         accountZone: (_r = row.account_zone) !== null && _r !== void 0 ? _r : undefined,
         accountSellerLabel: (_s = row.account_seller_label) !== null && _s !== void 0 ? _s : undefined,
+        shouldRetainIibb: Number(row.should_retain_iibb || 0) === 1,
+        agipPadronPeriod: (_t = row.agip_padron_period) !== null && _t !== void 0 ? _t : undefined,
+        iibbAlicuota: row.iibb_alicuota != null ? Number(row.iibb_alicuota) : undefined,
         transportes: transportes !== null && transportes !== void 0 ? transportes : []
     };
 }
@@ -82,9 +133,37 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const authUser = req.user;
         const sellerFilter = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? ' WHERE seller_id = ?' : '';
         const params = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? [authUser.id] : [];
-        const rows = yield (0, db_1.query)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id,
-              legacy_code, account_zone, account_seller_label
-       FROM customers${sellerFilter} ORDER BY business_name ASC, name ASC`, params);
+        const agipTable = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'agip_padron_alicuotas'`);
+        const agipExists = Number((agipTable === null || agipTable === void 0 ? void 0 : agipTable.cnt) || 0) > 0;
+        const agipSelect = agipExists
+            ? `,
+         CASE
+           WHEN apc.cuit IS NULL THEN 0
+           ELSE 1
+         END AS should_retain_iibb,
+         apm.period_yyyymm AS agip_padron_period,
+         apc.alicuota AS iibb_alicuota`
+            : `,
+         0 AS should_retain_iibb,
+         NULL AS agip_padron_period,
+         NULL AS iibb_alicuota`;
+        const agipJoin = agipExists
+            ? `
+       LEFT JOIN (
+         SELECT MAX(period_yyyymm) AS period_yyyymm
+         FROM agip_padron_alicuotas
+       ) apm ON 1=1
+       LEFT JOIN agip_padron_alicuotas apc
+         ON apc.period_yyyymm = apm.period_yyyymm
+        AND apc.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '')`
+            : '';
+        const rows = yield (0, db_1.query)(`SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
+              c.legacy_code, c.account_zone, c.account_seller_label
+              ${agipSelect}
+       FROM customers c
+       ${agipJoin}
+       ${sellerFilter} ORDER BY c.business_name ASC, c.name ASC`, params);
         const customers = (rows || []).map((r) => toCustomer(r));
         const ids = customers.map((c) => c.id);
         if (ids.length === 0)
@@ -1397,7 +1476,7 @@ exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
  * Hoja 2: detalle de comprobantes y recibos por cliente.
  */
 const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -1450,12 +1529,13 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          cn.created_at AS fecha,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
           'NOTA_CREDITO' AS tipo,
           CONCAT(
             CASE
               WHEN cn.cbte_tipo = 3 THEN 'NC A '
               WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
               ELSE 'NC '
             END,
             LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
@@ -1467,6 +1547,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
 
@@ -1477,20 +1558,29 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          e.line_date AS fecha,
-          'NOTA_CREDITO_IMPORTADA' AS tipo,
-          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
-          NULL AS order_id,
+          COALESCE(ecn.created_at, ei.created_at) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN ecn.cbte_tipo = 3 THEN 'NC A '
+              WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              WHEN ecn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(ecn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          ecn.external_order_id AS order_id,
           0 AS debe,
-          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
-        FROM customer_multimedia_entries e
-        JOIN customers c ON c.id = e.customer_id
+          ROUND(COALESCE(ecn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        JOIN customers c
+          ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
+             REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-        )
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
 
         UNION ALL
 
@@ -1509,8 +1599,9 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
         JOIN customers c ON c.id = e.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
           OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
           OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
         )
 
@@ -1581,17 +1672,22 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                 running = Math.round((running + debe - haber) * 100) / 100;
                 if (m.tipo === 'FACTURA')
                     totalFacturas += debe;
-                else if (m.tipo === 'NOTA_CREDITO')
+                else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA')
                     totalNc += haber;
+                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
+                    Number(m.haber || 0) > 0.001 &&
+                    Number(m.debe || 0) <= 0.001) {
+                    totalNc += haber;
+                }
                 else
                     totalRecibos += haber;
                 wsDetail.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
+                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
-                    tipo: (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') ? 'NC' : m.tipo,
+                    tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_c = m.order_id) !== null && _c !== void 0 ? _c : '',
+                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
                     debe,
                     haber,
                     saldo: running
@@ -1601,7 +1697,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
             if (saldoPendiente > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_e = (_d = c.seller_name) !== null && _d !== void 0 ? _d : c.seller_id) !== null && _e !== void 0 ? _e : '',
+                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
                     facturas: totalFacturas,
                     nc: totalNc,
                     recibos: totalRecibos,
@@ -1638,7 +1734,7 @@ exports.exportSaldosPendientesDetalleXlsx = exportSaldosPendientesDetalleXlsx;
  * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
  */
 const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -1656,10 +1752,20 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
         const sellerParams = sellerIdFilter ? [sellerIdFilter] : [];
         const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
-        const ncDateFilter = `${from ? ' AND DATE(cn.created_at) >= ?' : ''}${to ? ' AND DATE(cn.created_at) <= ?' : ''}`;
+        /**
+         * Filtrar NC por la misma “fecha de hecho” que la factura (factura emitida / pedido),
+         * no por la fecha de emisión de la NC: si la NC sale en otro mes, sigue apareciendo
+         * cuando el rango incluye la factura o el pedido. Si no hay fila invoice, se usa fecha del pedido.
+         */
+        const ncDateFilter = `${from ? ' AND DATE(COALESCE(inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(inv.created_at, o.date)) <= ?' : ''}`;
+        const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
         const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
         const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
         const movementParams = [];
+        if (from)
+            movementParams.push(from);
+        if (to)
+            movementParams.push(to);
         if (from)
             movementParams.push(from);
         if (to)
@@ -1724,12 +1830,13 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
           u.name AS seller_name,
-          cn.created_at AS fecha,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
           'NOTA_CREDITO' AS tipo,
           CONCAT(
             CASE
               WHEN cn.cbte_tipo = 3 THEN 'NC A '
               WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
               ELSE 'NC '
             END,
             LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
@@ -1741,9 +1848,42 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${ncDateFilter}
+
+        UNION ALL
+
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(ecn.created_at, ei.created_at) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN ecn.cbte_tipo = 3 THEN 'NC A '
+              WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              WHEN ecn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(ecn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          ecn.external_order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(ecn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        JOIN customers c
+          ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
+             REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
+          ${externalNcDateFilter}
 
         UNION ALL
 
@@ -1772,14 +1912,15 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           u.name AS seller_name,
           e.line_date AS fecha,
           CASE
+            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            THEN 'NOTA_CREDITO_IMPORTADA'
             WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
             THEN 'FACTURA_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            THEN 'NOTA_CREDITO_IMPORTADA'
             WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             THEN 'RECIBO_IMPORTADO'
             ELSE 'MOV_IMPORTADO'
@@ -1791,6 +1932,12 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           NULL AS order_id,
           CASE
             WHEN (
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+            ) THEN 0
+            WHEN (
               UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
@@ -1799,8 +1946,9 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           END AS debe,
           CASE
             WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO')
+              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
               OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
               OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
@@ -1814,7 +1962,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           ${importedDateFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
           AND (
-            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
             OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
@@ -2068,7 +2216,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         try {
             carteraRows = (yield (0, db_1.query)(carteraSqlWithNc, carteraParamsWithNc));
         }
-        catch (_e) {
+        catch (_g) {
             carteraRows = (yield (0, db_1.query)(carteraSqlSimple, carteraParamsSimple));
         }
         const saldoUnificadoByCustomer = new Map();
@@ -2093,95 +2241,114 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         wsSummary.getRow(1).font = { bold: true };
         wsSummary.views = [{ state: 'frozen', ySplit: 1 }];
         wsSummary.getColumn('C').numFmt = '#,##0.00';
-        const usedSheetNames = new Set(['Resumen']);
-        const uniqueSheetName = (raw, fallback) => {
-            const base = (raw || fallback || 'Cliente')
-                .toString()
-                .replace(/[\\/*?:[\]]/g, '')
-                .trim()
-                .slice(0, 31) || 'Cliente';
-            let name = base;
-            let i = 1;
-            while (usedSheetNames.has(name)) {
-                const suffix = ` (${i})`;
-                name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
-                i++;
-            }
-            usedSheetNames.add(name);
-            return name;
-        };
-        for (const c of customers) {
+        const wsDetalle = workbook.addWorksheet('Detalle clientes');
+        wsDetalle.columns = [
+            { header: 'Fecha', key: 'fecha', width: 14 },
+            { header: 'Tipo', key: 'tipo', width: 22 },
+            { header: 'Comprobante', key: 'comprobante', width: 36 },
+            { header: 'Pedido', key: 'pedido', width: 16 },
+            { header: 'Debe', key: 'debe', width: 14 },
+            { header: 'Haber', key: 'haber', width: 14 },
+            { header: 'Saldo', key: 'saldo', width: 16 }
+        ];
+        wsDetalle.views = [{ state: 'frozen', ySplit: 1 }];
+        wsDetalle.getColumn('A').numFmt = 'dd/mm/yyyy';
+        wsDetalle.getColumn('E').numFmt = '#,##0.00';
+        wsDetalle.getColumn('F').numFmt = '#,##0.00';
+        wsDetalle.getColumn('G').numFmt = '#,##0.00';
+        for (const col of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
+            wsDetalle.getColumn(col).alignment = { horizontal: 'left', vertical: 'middle' };
+        }
+        const customersOrdered = [...customers].sort((a, b) => String(a.seller_name || a.seller_id || '').localeCompare(String(b.seller_name || b.seller_id || ''), 'es') ||
+            String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'es'));
+        let lastSellerGroup = '';
+        for (const c of customersOrdered) {
             const movs = byCustomer.get(c.id) || [];
             let running = 0;
             for (const m of movs) {
                 running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
             }
-            const saldoTarget = hasDateRange ? running : Number((_a = saldoUnificadoByCustomer.get(c.id)) !== null && _a !== void 0 ? _a : running) || 0;
-            const saldoPendiente = Math.round(Math.max(0, saldoTarget) * 100) / 100;
+            // Saldo final estrictamente por histórico del sistema (sin ajuste externo).
+            const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
             wsSummary.addRow({
                 cliente: c.customer_name,
-                vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
                 saldo: saldoPendiente
             });
-            const ws = workbook.addWorksheet(uniqueSheetName(c.customer_name, c.id));
-            ws.columns = [
-                { header: 'Fecha', key: 'fecha', width: 14 },
-                { header: 'Tipo', key: 'tipo', width: 14 },
-                { header: 'Comprobante', key: 'comprobante', width: 24 },
-                { header: 'Pedido', key: 'pedido', width: 16 },
-                { header: 'Debe', key: 'debe', width: 14 },
-                { header: 'Haber', key: 'haber', width: 14 },
-                { header: 'Saldo', key: 'saldo', width: 16 }
-            ];
-            ws.getRow(1).font = { bold: true };
-            ws.views = [{ state: 'frozen', ySplit: 1 }];
-            ws.getColumn('A').numFmt = 'dd/mm/yyyy';
-            ws.getColumn('E').numFmt = '#,##0.00';
-            ws.getColumn('F').numFmt = '#,##0.00';
-            ws.getColumn('G').numFmt = '#,##0.00';
+            // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
+            if (!sellerIdFilter) {
+                const sellerGroup = String(c.seller_name || c.seller_id || 'Sin vendedor');
+                if (sellerGroup !== lastSellerGroup) {
+                    const sellerRow = wsDetalle.addRow([`VENDEDOR: ${sellerGroup}`, '', '', '', '', '', '']);
+                    wsDetalle.mergeCells(sellerRow.number, 1, sellerRow.number, 7);
+                    sellerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                    sellerRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+                    sellerRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+                    wsDetalle.addRow(['', '', '', '', '', '', '']);
+                    lastSellerGroup = sellerGroup;
+                }
+            }
+            const titleRow = wsDetalle.addRow([`CLIENTE: ${c.customer_name}`, `VENDEDOR: ${(_d = (_c = c.seller_name) !== null && _c !== void 0 ? _c : c.seller_id) !== null && _d !== void 0 ? _d : '-'}`, '', '', '', '', `SALDO: ${saldoPendiente.toFixed(2)}`]);
+            wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
+            wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
+            titleRow.font = { bold: true, color: { argb: 'FF0F172A' } };
+            titleRow.eachCell((cell) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+                cell.alignment = { horizontal: 'left', vertical: 'middle' };
+            });
+            const blockHeader = wsDetalle.addRow(['Fecha', 'Tipo', 'Comprobante', 'Pedido', 'Debe', 'Haber', 'Saldo']);
+            blockHeader.font = { bold: true, color: { argb: 'FF1E293B' } };
+            blockHeader.eachCell((cell) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+                cell.alignment = { horizontal: 'left', vertical: 'middle' };
+            });
             let saldo = 0;
+            let totalDebeMovs = 0;
+            let totalHaberMovs = 0;
             for (const m of movs) {
                 const debe = Number(m.debe || 0);
                 const haber = Number(m.haber || 0);
+                totalDebeMovs = Math.round((totalDebeMovs + debe) * 100) / 100;
+                totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
                 saldo = Math.round((saldo + debe - haber) * 100) / 100;
-                const tipoLabel = m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA'
-                    ? 'NC'
-                    : m.tipo === 'FACTURA_IMPORTADA'
-                        ? 'FACTURA'
-                        : m.tipo === 'RECIBO_IMPORTADO'
-                            ? 'RECIBO'
-                            : m.tipo === 'MOV_IMPORTADO'
-                                ? 'MOV.'
-                                : m.tipo;
-                ws.addRow({
+                wsDetalle.addRow({
                     fecha: m.fecha ? new Date(m.fecha) : null,
-                    tipo: tipoLabel,
+                    tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
+                    pedido: (_e = m.order_id) !== null && _e !== void 0 ? _e : '',
                     debe,
                     haber,
                     saldo
                 });
             }
-            // Si el saldo unificado no coincide con el detalle de movimientos
-            // (por ejemplo por cuenta importada), agregamos una línea de ajuste
-            // para que la hoja del cliente cierre con el mismo saldo que la vista.
-            const delta = Math.round((saldoPendiente - saldo) * 100) / 100;
-            if (!hasDateRange && Math.abs(delta) > 0.01) {
-                ws.addRow({
-                    fecha: null,
-                    tipo: 'AJUSTE',
-                    comprobante: 'Saldo unificado cartera',
-                    pedido: '',
-                    debe: delta > 0 ? delta : 0,
-                    haber: delta < 0 ? Math.abs(delta) : 0,
-                    saldo: saldoPendiente
-                });
+            // Bloque de conciliación para mostrar cómo se llega al saldo final.
+            wsDetalle.addRow(['RESUMEN DE CONCILIACION', '', '', '', '', '', '']);
+            wsDetalle.addRow(['Total debe (movimientos)', '', '', '', totalDebeMovs, '', '']);
+            wsDetalle.addRow(['Total haber (movimientos)', '', '', '', '', totalHaberMovs, '']);
+            wsDetalle.addRow(['Saldo por movimientos (debe - haber)', '', '', '', '', '', saldo]);
+            wsDetalle.addRow(['Saldo final', '', '', '', '', '', saldoPendiente]);
+            for (let r = wsDetalle.rowCount - 4; r <= wsDetalle.rowCount; r += 1) {
+                wsDetalle.mergeCells(r, 1, r, 4);
+                const row = wsDetalle.getRow(r);
+                row.getCell(1).font = { bold: true };
+                row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
             }
+            wsDetalle.addRow(['', '', '', '', '', '', '']);
         }
         const out = yield workbook.xlsx.writeBuffer();
         const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
-        const filename = `saldos_pendientes_por_cliente_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        const datePart = new Date().toISOString().slice(0, 10);
+        const sellerNameFromFilter = sellerIdFilter && customers.length > 0
+            ? String(((_f = customers.find((x) => String(x.seller_id || '') === sellerIdFilter)) === null || _f === void 0 ? void 0 : _f.seller_name) || '').trim()
+            : '';
+        const sellerLabelRaw = (user.role === 'SELLER' ? String(user.name || '').trim() : '') ||
+            sellerNameFromFilter ||
+            (sellerIdFilter ? String(sellerIdFilter).trim() : 'todos');
+        const sellerLabelSafe = sellerLabelRaw
+            .replace(/[\\/:*?"<>|]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const filename = `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         return res.send(buf);
@@ -2435,11 +2602,42 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         style: 'thin',
         color: { argb: 'FF94A3B8' }
     };
+    const borderSoft = {
+        style: 'thin',
+        color: { argb: 'FFE2E8F0' }
+    };
+    const sellerSummary = new Map();
+    for (const r of mergedList) {
+        const vendedorLabel = (r.account_seller_label != null && String(r.account_seller_label).trim() !== ''
+            ? String(r.account_seller_label).trim()
+            : '') ||
+            (r.seller_id && r.seller_name ? `${String(r.seller_id).slice(0, 8)} - ${r.seller_name}` : '') ||
+            'Sin vendedor';
+        const zona = r.account_zone != null ? String(r.account_zone).trim() : '';
+        const key = `${vendedorLabel}|${zona}`;
+        const prev = sellerSummary.get(key) || {
+            vendedor: vendedorLabel,
+            zonaPrincipal: zona || 'Sin zona',
+            clientes: 0,
+            pedidos: 0,
+            importada: 0,
+            recibos: 0,
+            saldo: 0,
+            movimientos: 0
+        };
+        prev.clientes += 1;
+        prev.pedidos += Number(r.totalCargosPendiente) || 0;
+        prev.importada += Number(r.multimediaSaldo) || 0;
+        prev.recibos += Number(r.totalPagos) || 0;
+        prev.saldo += Number(r.saldoPendiente) || 0;
+        prev.movimientos += (Number(r.movementCountExcel) || 0) + (Number(r.pedidosPendientes) || 0);
+        sellerSummary.set(key, prev);
+    }
     const workbook = new exceljs_1.default.Workbook();
     workbook.creator = 'LupoHub';
     workbook.created = new Date();
     const ws = workbook.addWorksheet('Resumen', {
-        views: [{ state: 'frozen', ySplit: 1 }],
+        views: [{ state: 'frozen', ySplit: 2 }],
         properties: { defaultRowHeight: 19 }
     });
     ws.columns = [
@@ -2453,6 +2651,25 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         { key: 'saldo', width: 16 },
         { key: 'movs', width: 13 }
     ];
+    const reportDate = new Date().toISOString().slice(0, 10);
+    const infoText = `Saldos pendientes por cliente y vendedor | Clientes: ${mergedList.length} | Fecha: ${reportDate}`;
+    ws.addRow([infoText, '', '', '', '', '', '', '', '']);
+    ws.mergeCells(1, 1, 1, 9);
+    const infoCell = ws.getCell('A1');
+    infoCell.font = { bold: true, color: { argb: 'FF334155' }, size: 11, name: 'Calibri' };
+    infoCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    infoCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFEFF6FF' }
+    };
+    infoCell.border = {
+        top: borderSoft,
+        left: borderSoft,
+        right: borderSoft,
+        bottom: borderSoft
+    };
+    ws.getRow(1).height = 22;
     const headerTitles = ['Código', 'Cliente', 'Vendedor habitual', 'Zona', 'Pedidos', 'Cuenta importada', 'Recibos sistema', 'Saldo final', 'Movimientos'];
     const headerRow = ws.addRow(headerTitles);
     headerRow.height = 26;
@@ -2475,7 +2692,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
             right: borderThin
         };
     });
-    let rowNum = 2;
+    let rowNum = 3;
     for (const r of mergedList) {
         const displayName = String(r.businessName || r.contactName || 'Cliente').trim();
         const legacyTrim = r.legacy_code != null ? String(r.legacy_code).trim() : '';
@@ -2566,8 +2783,87 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     });
     if (mergedList.length > 0) {
         ws.autoFilter = {
-            from: { row: 1, column: 1 },
+            from: { row: 2, column: 1 },
             to: { row: mergedList.length + 2, column: 9 }
+        };
+    }
+    const wsSeller = workbook.addWorksheet('Resumen por vendedor', {
+        views: [{ state: 'frozen', ySplit: 2 }],
+        properties: { defaultRowHeight: 19 }
+    });
+    wsSeller.columns = [
+        { key: 'vendedor', width: 28 },
+        { key: 'zona', width: 18 },
+        { key: 'clientes', width: 12 },
+        { key: 'pedidos', width: 16 },
+        { key: 'importada', width: 18 },
+        { key: 'recibos', width: 16 },
+        { key: 'saldo', width: 16 },
+        { key: 'movimientos', width: 14 }
+    ];
+    wsSeller.addRow([`Resumen agrupado por vendedor | Fecha: ${reportDate}`, '', '', '', '', '', '', '']);
+    wsSeller.mergeCells(1, 1, 1, 8);
+    wsSeller.getCell('A1').font = { bold: true, color: { argb: 'FF334155' }, size: 11, name: 'Calibri' };
+    wsSeller.getCell('A1').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFEFF6FF' }
+    };
+    wsSeller.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    wsSeller.getRow(1).height = 22;
+    const sellerHeader = wsSeller.addRow([
+        'Vendedor habitual',
+        'Zona',
+        'Clientes',
+        'Pedidos',
+        'Cuenta importada',
+        'Recibos sistema',
+        'Saldo final',
+        'Movimientos'
+    ]);
+    sellerHeader.height = 24;
+    sellerHeader.eachCell((cell, colNumber) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+        cell.alignment = { vertical: 'middle', horizontal: colNumber >= 3 ? 'right' : 'left', wrapText: true };
+        cell.border = {
+            top: borderThin,
+            left: borderThin,
+            bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+            right: borderThin
+        };
+    });
+    const sellerRows = [...sellerSummary.values()].sort((a, b) => b.saldo - a.saldo || a.vendedor.localeCompare(b.vendedor, 'es'));
+    let sellerRowNum = 3;
+    for (const s of sellerRows) {
+        const row = wsSeller.addRow([
+            s.vendedor,
+            s.zonaPrincipal,
+            s.clientes,
+            Math.round(s.pedidos * 100) / 100,
+            Math.round(s.importada * 100) / 100,
+            Math.round(s.recibos * 100) / 100,
+            Math.round(s.saldo * 100) / 100,
+            s.movimientos
+        ]);
+        const zebra = sellerRowNum % 2 === 0;
+        row.eachCell((cell, colNumber) => {
+            cell.font = { size: 11, name: 'Calibri', color: { argb: 'FF0F172A' } };
+            if (zebra)
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+            cell.border = { top: borderThin, left: borderThin, bottom: borderThin, right: borderThin };
+            cell.alignment = { vertical: 'middle', horizontal: colNumber >= 3 ? 'right' : 'left' };
+            if ([4, 5, 6, 7].includes(colNumber))
+                cell.numFmt = '#,##0.00';
+            if ([3, 8].includes(colNumber))
+                cell.numFmt = '0';
+        });
+        sellerRowNum++;
+    }
+    if (sellerRows.length > 0) {
+        wsSeller.autoFilter = {
+            from: { row: 2, column: 1 },
+            to: { row: sellerRows.length + 2, column: 8 }
         };
     }
     const out = yield workbook.xlsx.writeBuffer();

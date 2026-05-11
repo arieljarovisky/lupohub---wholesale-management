@@ -50,6 +50,72 @@ const db_1 = require("../database/db");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
+function getProductIdForVariant(variantId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const row = yield (0, db_1.get)(`SELECT pc.product_id AS product_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?
+     LIMIT 1`, [variantId]);
+        return (row === null || row === void 0 ? void 0 : row.product_id) || null;
+    });
+}
+function allocateOldestDespachosForVariant(variantId, requestedQty) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const qty = Math.max(0, Math.floor(Number(requestedQty) || 0));
+        if (qty <= 0)
+            return [];
+        const productId = yield getProductIdForVariant(variantId);
+        if (!productId)
+            return [{ despachoId: null, quantity: qty }];
+        const variantRows = yield (0, db_1.query)(`SELECT
+       di.despacho_id AS despachoId,
+       COALESCE(di.cantidad, 0) AS totalIngresado,
+       COALESCE(used.totalAsignado, 0) AS totalAsignado
+     FROM despacho_items di
+     JOIN despachos d ON d.id = di.despacho_id
+     LEFT JOIN (
+       SELECT oi.despacho_id, oi.variant_id, SUM(oi.quantity) AS totalAsignado
+       FROM order_items oi
+       WHERE oi.despacho_id IS NOT NULL
+       GROUP BY oi.despacho_id, oi.variant_id
+     ) used ON used.despacho_id = di.despacho_id AND used.variant_id = di.variant_id
+     WHERE di.variant_id = ?
+     ORDER BY d.fecha_despacho ASC, d.created_at ASC, di.created_at ASC`, [variantId]);
+        const rows = variantRows.length > 0 ? variantRows : yield (0, db_1.query)(`SELECT
+       di.despacho_id AS despachoId,
+       COALESCE(di.cantidad, 0) AS totalIngresado,
+       COALESCE(used.totalAsignado, 0) AS totalAsignado
+     FROM despacho_items di
+     JOIN despachos d ON d.id = di.despacho_id
+     LEFT JOIN (
+       SELECT oi.despacho_id, pc.product_id, SUM(oi.quantity) AS totalAsignado
+       FROM order_items oi
+       JOIN product_variants pv ON pv.id = oi.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       WHERE oi.despacho_id IS NOT NULL
+       GROUP BY oi.despacho_id, pc.product_id
+     ) used ON used.despacho_id = di.despacho_id AND used.product_id = di.product_id
+     WHERE di.product_id = ? AND di.variant_id IS NULL
+     ORDER BY d.fecha_despacho ASC, d.created_at ASC, di.created_at ASC`, [productId]);
+        const out = [];
+        let remaining = qty;
+        for (const r of rows) {
+            if (remaining <= 0)
+                break;
+            const available = Math.max(0, Number(r.totalIngresado || 0) - Number(r.totalAsignado || 0));
+            if (available <= 0)
+                continue;
+            const take = Math.min(remaining, available);
+            out.push({ despachoId: r.despachoId, quantity: take });
+            remaining -= take;
+        }
+        if (remaining > 0) {
+            out.push({ despachoId: null, quantity: remaining });
+        }
+        return out;
+    });
+}
 function resolveDespachoIdForItem(item, variantId) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
@@ -94,6 +160,26 @@ function getOrderNetFromLineItems(orderId) {
         return Math.round(sum * 100) / 100;
     });
 }
+function getAgipRetentionForOrder(args) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const cuit = String(args.customerCuit || '').replace(/\D/g, '').slice(0, 11);
+        if (cuit.length !== 11)
+            return null;
+        const period = String(args.orderDate || '').slice(0, 7).replace('-', '');
+        if (!/^\d{6}$/.test(period))
+            return null;
+        const row = yield (0, db_1.get)(`SELECT alicuota
+     FROM agip_padron_alicuotas
+     WHERE period_yyyymm = ? AND cuit = ?
+     LIMIT 1`, [period, cuit]);
+        const alicuota = Number((row === null || row === void 0 ? void 0 : row.alicuota) || 0);
+        if (!(alicuota > 0))
+            return null;
+        const net = Math.max(0, Number(args.netAmount) || 0);
+        const amount = Math.round(net * (alicuota / 100) * 100) / 100;
+        return { alicuota, amount };
+    });
+}
 const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
@@ -107,7 +193,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             whereArchived = '';
         const whereUserScope = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? ' AND c.seller_id = ?' : '';
         const ordersParams = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? [user.id] : [];
-        let ordersRow = yield (0, db_1.query)(`SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name,
+        let ordersRow = yield (0, db_1.query)(`SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
               cu.name AS created_by_name, cu.role AS created_by_role,
               su.name AS seller_name
        FROM orders o
@@ -179,7 +265,9 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 });
             }
         }
-        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo, created_at FROM invoices WHERE order_id IN (${placeholders})`, orderIds);
+        const invoicesRows = yield (0, db_1.query)(`SELECT order_id, cae, cae_fch_vto, punto_venta, cbte_desde, cbte_hasta, cbte_tipo, created_at, agip_alicuota, agip_ret_per
+       FROM invoices
+       WHERE order_id IN (${placeholders})`, orderIds);
         const invoiceByOrderId = {};
         for (const inv of invoicesRows) {
             invoiceByOrderId[inv.order_id] = {
@@ -189,8 +277,29 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 cbteDesde: inv.cbte_desde,
                 cbteHasta: inv.cbte_hasta,
                 cbteTipo: inv.cbte_tipo,
-                createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : undefined
+                createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : undefined,
+                agipAlicuota: Number(inv.agip_alicuota || 0),
+                agipRetPer: Number(inv.agip_ret_per || 0)
             };
+        }
+        // Fallback para facturas antiguas sin retención guardada:
+        // recalcular con padrón AGIP del período del pedido para no perder la línea en impresión.
+        for (const o of ordersRow) {
+            const inv = invoiceByOrderId[o.id];
+            if (!inv)
+                continue;
+            const hasStoredAgip = Number(inv.agipAlicuota || 0) > 0 || Number(inv.agipRetPer || 0) > 0;
+            if (hasStoredAgip)
+                continue;
+            const calc = yield getAgipRetentionForOrder({
+                orderDate: String(o.date || ''),
+                customerCuit: o.customer_cuit,
+                netAmount: Number(o.total || 0),
+            });
+            if (calc) {
+                inv.agipAlicuota = Number(calc.alicuota || 0);
+                inv.agipRetPer = Number(calc.amount || 0);
+            }
         }
         let creditNotesCountByOrderId = {};
         let creditNotesTotalByOrderId = {};
@@ -285,6 +394,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
     const orderId = newOrder.id || (0, uuid_1.v4)();
     try {
+        const despachoWarnings = [];
         const toSqlDate = (d) => {
             try {
                 const dt = new Date(d);
@@ -320,8 +430,22 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-            const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, item.quantity, 0, (_c = item.priceAtMoment) !== null && _c !== void 0 ? _c : 0, sellAsPack, despachoId]);
+            const explicitDespachoId = yield resolveDespachoIdForItem(item, variantId);
+            const allocations = explicitDespachoId
+                ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
+                : yield allocateOldestDespachosForVariant(variantId, item.quantity);
+            const unassignedQty = allocations
+                .filter((a) => !a.despachoId)
+                .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+            if (unassignedQty > 0) {
+                const itemLabel = (item === null || item === void 0 ? void 0 : item.sku) || (item === null || item === void 0 ? void 0 : item.productName) || variantId;
+                despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
+            }
+            for (const alloc of allocations) {
+                if (!alloc.quantity || alloc.quantity <= 0)
+                    continue;
+                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_c = item.priceAtMoment) !== null && _c !== void 0 ? _c : 0, sellAsPack, alloc.despachoId]);
+            }
         }
         // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
@@ -331,7 +455,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
        LEFT JOIN users su ON su.id = o.seller_id
        WHERE o.id = ?`, [orderId]);
         if (!created)
-            return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus }));
+            return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus, despachoWarnings }));
         const items = yield (0, db_1.query)(`
       SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -381,7 +505,8 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
-            noStockImpact: !!created.no_stock_impact
+            noStockImpact: !!created.no_stock_impact,
+            despachoWarnings
         };
         res.status(201).json(orderResponse);
     }
@@ -462,6 +587,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         return res.status(400).json({ message: "Datos de pedido inválidos" });
     }
     try {
+        const despachoWarnings = [];
         const toSqlDate = (d) => {
             try {
                 const dt = new Date(d);
@@ -495,8 +621,25 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-            const despachoId = yield resolveDespachoIdForItem(item, variantId);
-            yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, item.quantity, item.picked || 0, item.priceAtMoment, sellAsPack, despachoId]);
+            const explicitDespachoId = yield resolveDespachoIdForItem(item, variantId);
+            const allocations = explicitDespachoId
+                ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
+                : yield allocateOldestDespachosForVariant(variantId, item.quantity);
+            const unassignedQty = allocations
+                .filter((a) => !a.despachoId)
+                .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+            if (unassignedQty > 0) {
+                const itemLabel = (item === null || item === void 0 ? void 0 : item.sku) || (item === null || item === void 0 ? void 0 : item.productName) || variantId;
+                despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
+            }
+            let pickedRemaining = Math.max(0, Math.floor(Number(item.picked) || 0));
+            for (const alloc of allocations) {
+                if (!alloc.quantity || alloc.quantity <= 0)
+                    continue;
+                const pickedForLine = Math.min(pickedRemaining, alloc.quantity);
+                pickedRemaining -= pickedForLine;
+                yield (0, db_1.execute)("INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [(0, uuid_1.v4)(), id, variantId, alloc.quantity, pickedForLine, item.priceAtMoment, sellAsPack, alloc.despachoId]);
+            }
         }
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
               o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
@@ -505,7 +648,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
        LEFT JOIN users su ON su.id = o.seller_id
        WHERE o.id = ?`, [id]);
         if (!created)
-            return res.json(Object.assign(Object.assign({}, updated), { id }));
+            return res.json(Object.assign(Object.assign({}, updated), { id, despachoWarnings }));
         const itemsRows = yield (0, db_1.query)(`
       SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
@@ -555,7 +698,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
-            noStockImpact: !!created.no_stock_impact
+            noStockImpact: !!created.no_stock_impact,
+            despachoWarnings
         });
     }
     catch (error) {
@@ -708,24 +852,44 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.deleteOrder = deleteOrder;
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const inv = yield (0, db_1.get)('SELECT id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at FROM invoices WHERE order_id = ?', [id]);
+        const inv = yield (0, db_1.get)(`SELECT i.id, i.order_id, i.cae, i.cae_fch_vto, i.punto_venta, i.cbte_tipo, i.cbte_desde, i.cbte_hasta, i.created_at,
+              i.agip_alicuota, i.agip_ret_per,
+              o.total AS order_total, o.date AS order_date, c.cuit AS customer_cuit
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE i.order_id = ?`, [id]);
         if (!inv)
             return res.status(404).json({ message: 'Este pedido no tiene factura emitida' });
+        const hasStoredAgip = Number(inv.agip_alicuota || 0) > 0 || Number(inv.agip_ret_per || 0) > 0;
+        let agip = { alicuota: Number(inv.agip_alicuota || 0), amount: Number(inv.agip_ret_per || 0) };
+        if (!hasStoredAgip) {
+            const netFromItems = yield getOrderNetFromLineItems(id);
+            const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
+            const calc = yield getAgipRetentionForOrder({
+                orderDate: String(inv.order_date || inv.created_at || ''),
+                customerCuit: inv.customer_cuit,
+                netAmount
+            });
+            agip = { alicuota: (_a = calc === null || calc === void 0 ? void 0 : calc.alicuota) !== null && _a !== void 0 ? _a : 0, amount: (_b = calc === null || calc === void 0 ? void 0 : calc.amount) !== null && _b !== void 0 ? _b : 0 };
+        }
         res.json({
             id: inv.id,
             orderId: inv.order_id,
             cae: inv.cae,
-            caeFchVto: (_a = inv.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
+            caeFchVto: (_c = inv.cae_fch_vto) !== null && _c !== void 0 ? _c : undefined,
             puntoVta: inv.punto_venta,
             cbteTipo: inv.cbte_tipo,
             cbteDesde: inv.cbte_desde,
             cbteHasta: inv.cbte_hasta,
-            createdAt: inv.created_at
+            createdAt: inv.created_at,
+            agipAlicuota: agip.alicuota,
+            agipRetPer: agip.amount
         });
     }
     catch (error) {
@@ -736,7 +900,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -771,8 +935,24 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }, forceCbteTipo);
         const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
         const invoiceId = uuidv4();
-        yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [invoiceId, id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta]);
+        const agip = yield getAgipRetentionForOrder({
+            orderDate: String(orderRow.date || ''),
+            customerCuit: customerRow.cuit,
+            netAmount: totalForAfip
+        });
+        yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            invoiceId,
+            id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            (_f = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _f !== void 0 ? _f : 0,
+            (_g = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _g !== void 0 ? _g : 0
+        ]);
         res.status(201).json({
             id: invoiceId,
             orderId: id,
@@ -781,7 +961,9 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             puntoVta: result.puntoVta,
             cbteTipo: result.cbteTipo,
             cbteDesde: result.cbteDesde,
-            cbteHasta: result.cbteHasta
+            cbteHasta: result.cbteHasta,
+            agipAlicuota: (_h = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _h !== void 0 ? _h : 0,
+            agipRetPer: (_j = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _j !== void 0 ? _j : 0
         });
     }
     catch (error) {

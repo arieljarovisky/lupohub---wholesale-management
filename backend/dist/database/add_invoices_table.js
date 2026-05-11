@@ -29,6 +29,8 @@ function addInvoicesTable() {
           cbte_tipo INT NOT NULL,
           cbte_desde INT NOT NULL,
           cbte_hasta INT NOT NULL,
+          agip_alicuota DECIMAL(8,2) NOT NULL DEFAULT 0,
+          agip_ret_per DECIMAL(12,2) NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
         )
@@ -37,6 +39,16 @@ function addInvoicesTable() {
             }
             else {
                 console.log('[DB] Tabla invoices ya existe');
+                const cols = [
+                    { name: 'agip_alicuota', sql: `ALTER TABLE invoices ADD COLUMN agip_alicuota DECIMAL(8,2) NOT NULL DEFAULT 0 AFTER cbte_hasta` },
+                    { name: 'agip_ret_per', sql: `ALTER TABLE invoices ADD COLUMN agip_ret_per DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER agip_alicuota` },
+                ];
+                for (const c of cols) {
+                    const col = yield (0, db_1.get)(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'invoices' AND COLUMN_NAME = ?`, [c.name]);
+                    if (!col)
+                        yield (0, db_1.execute)(c.sql);
+                }
             }
         }
         catch (e) {

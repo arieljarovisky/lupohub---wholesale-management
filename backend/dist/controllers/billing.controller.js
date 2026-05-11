@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,8 +42,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportBilling = exports.listBilling = void 0;
+exports.exportBillingByCustomersFile = exports.importAgipPadron = exports.importAgipPadronChunk = exports.importAgipPadronStart = exports.exportRetPerTxt = exports.exportBilling = exports.listBilling = void 0;
 const db_1 = require("../database/db");
+const XLSX = __importStar(require("xlsx"));
 function parseMoney(value) {
     if (value == null)
         return 0;
@@ -48,10 +82,103 @@ function normalizeDate(value) {
         return String(value || '').slice(0, 10);
     return d.toISOString().slice(0, 10);
 }
+function ddmmyyyy(value) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime()))
+        return '01011900';
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = String(d.getFullYear());
+    return `${dd}${mm}${yy}`;
+}
+function formatAmountFixed(amount, intLen = 13) {
+    const n = Math.round((Number(amount) || 0) * 100) / 100;
+    const [ints, decs] = n.toFixed(2).split('.');
+    return `${ints.padStart(intLen, '0')},${decs}`;
+}
+function round2(n) {
+    return Math.round((Number(n) || 0) * 100) / 100;
+}
+function onlyDigits(v) {
+    return String(v || '').replace(/\D/g, '');
+}
+function txt(v, len) {
+    const ascii = String(v || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\x20-\x7E]/g, ' ')
+        .toUpperCase();
+    return ascii.slice(0, len).padEnd(len, ' ');
+}
+function normalizeNameForMatch(v) {
+    return String(v || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function tokensForNameMatch(v) {
+    return normalizeNameForMatch(v)
+        .split(' ')
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 3);
+}
+/** Lista pegada: un CUIT por línea o separados por coma/punto y coma/tab. Ignora encabezado "CUIT". */
+function parseCuitsFromText(raw) {
+    const tokens = raw
+        .split(/[\r\n,;\t]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const validSet = new Set();
+    const invalid = [];
+    for (const t of tokens) {
+        if (/^cuit$/i.test(t))
+            continue;
+        const d = onlyDigits(t);
+        if (d.length === 11)
+            validSet.add(d);
+        else if (d.length > 0)
+            invalid.push(t);
+    }
+    return { valid: Array.from(validSet), invalid };
+}
+function extractCuitCandidates(raw) {
+    const s = String(raw !== null && raw !== void 0 ? raw : '');
+    const compact = s.replace(/[\s.\-_/]/g, '');
+    const out = new Set();
+    const mCompact = compact.match(/\d{11}/g) || [];
+    for (const m of mCompact)
+        out.add(m);
+    const mWithSep = s.match(/\d{2}[-\s]?\d{8}[-\s]?\d/g) || [];
+    for (const m of mWithSep) {
+        const d = onlyDigits(m);
+        if (d.length === 11)
+            out.add(d);
+    }
+    return Array.from(out);
+}
+function ensureAgipPadronTable() {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield (0, db_1.execute)(`
+    CREATE TABLE IF NOT EXISTS agip_padron_alicuotas (
+      id VARCHAR(36) PRIMARY KEY,
+      period_yyyymm VARCHAR(6) NOT NULL,
+      cuit VARCHAR(11) NOT NULL,
+      alicuota DECIMAL(8,2) NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_period_cuit (period_yyyymm, cuit),
+      KEY idx_period (period_yyyymm),
+      KEY idx_cuit (cuit)
+    )
+  `);
+    });
+}
 /** Lista unificada de facturas y notas de crédito, con filtros opcionales. */
 const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { desde, hasta, customerId, tipo } = req.query;
+        const { desde, hasta, customerId, province, tipo } = req.query;
         const whereParts = [];
         const params = [];
         if (desde) {
@@ -65,6 +192,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (customerId) {
             whereParts.push('b.customer_id = ?');
             params.push(customerId);
+        }
+        if (province && String(province).trim()) {
+            whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
+            params.push(`%${String(province).trim().toLowerCase()}%`);
         }
         if (tipo === 'FACTURA' || tipo === 'NC') {
             whereParts.push('b.tipo = ?');
@@ -152,6 +283,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             if (customerId) {
                 importedWhere.push('e.customer_id = ?');
                 importedParams.push(customerId);
+            }
+            if (province && String(province).trim()) {
+                importedWhere.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+                importedParams.push(`%${String(province).trim().toLowerCase()}%`);
             }
             if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
                 importedWhere.push('c.seller_id = ?');
@@ -247,9 +382,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.listBilling = listBilling;
 /** Exporta la lista de facturas y NC en CSV simple. */
 const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
         // Reutilizar listBilling internamente sería ideal, pero aquí rearmamos consulta para evitar doble serialización
-        const { desde, hasta, customerId, tipo } = req.query;
+        const { desde, hasta, customerId, province, tipo } = req.query;
         const whereParts = [];
         const params = [];
         if (desde) {
@@ -263,6 +399,10 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (customerId) {
             whereParts.push('b.customer_id = ?');
             params.push(customerId);
+        }
+        if (province && String(province).trim()) {
+            whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
+            params.push(`%${String(province).trim().toLowerCase()}%`);
         }
         if (tipo === 'FACTURA' || tipo === 'NC') {
             whereParts.push('b.tipo = ?');
@@ -289,6 +429,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           o.total AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit,
           i.cae,
           i.cae_fch_vto AS cae_fch_vto,
           i.created_at
@@ -310,6 +451,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           cn.amount_credited AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
           cn.created_at
@@ -330,6 +472,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             'numero_hasta',
             'pedido_id',
             'cliente',
+            'cuit',
+            'origen',
             'importe',
             'cae',
             'cae_fch_vto'
@@ -345,6 +489,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 r.numero_hasta,
                 r.order_id,
                 `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
+                `"${String((_a = r.customer_cuit) !== null && _a !== void 0 ? _a : '').replace(/"/g, '""')}"`,
+                '"Sistema (AFIP)"',
                 Number(r.importe) || 0,
                 r.cae,
                 r.cae_fch_vto || ''
@@ -360,6 +506,10 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 importedWhere.push('e.customer_id = ?');
                 importedParams.push(customerId);
             }
+            if (province && String(province).trim()) {
+                importedWhere.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+                importedParams.push(`%${String(province).trim().toLowerCase()}%`);
+            }
             if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
                 importedWhere.push('c.seller_id = ?');
                 importedParams.push(authUser.id);
@@ -370,7 +520,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           e.line_date,
           e.numero,
           e.importe,
-          c.business_name AS customer_business_name
+          c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit
         FROM customer_multimedia_entries e
         JOIN customers c ON c.id = e.customer_id
         WHERE ${importedWhere.join(' AND ')}
@@ -408,6 +559,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     `"${numero.replace(/"/g, '""')}"`,
                     '',
                     `"${(r.customer_business_name || '').replace(/"/g, '""')}"`,
+                    `"${String((_b = r.customer_cuit) !== null && _b !== void 0 ? _b : '').replace(/"/g, '""')}"`,
+                    '"Tango / Multimedias"',
                     importe,
                     '',
                     ''
@@ -427,3 +580,727 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.exportBilling = exportBilling;
+/** Exporta TXT "RetPer_YYYYMM.txt" con layout fijo compatible con estudio (AGIP). */
+const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { desde, hasta, customerId, province, month } = req.query;
+        const monthMatch = String(month || '').match(/^(\d{4})-(\d{2})$/);
+        let fromDate = desde;
+        let toDate = hasta;
+        if (monthMatch) {
+            const yy = Number(monthMatch[1]);
+            const mm = Number(monthMatch[2]);
+            const lastDay = new Date(yy, mm, 0).getDate();
+            fromDate = `${monthMatch[1]}-${monthMatch[2]}-01`;
+            toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
+        }
+        const where = [];
+        const params = [];
+        if (fromDate) {
+            where.push('o.date >= ?');
+            params.push(fromDate);
+        }
+        if (toDate) {
+            where.push('o.date <= ?');
+            params.push(toDate);
+        }
+        if (customerId) {
+            where.push('o.customer_id = ?');
+            params.push(customerId);
+        }
+        if (province && String(province).trim()) {
+            where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+            params.push(`%${String(province).trim().toLowerCase()}%`);
+        }
+        // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período seleccionado.
+        where.push('ap.cuit IS NOT NULL');
+        const authUser = req.user;
+        if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
+            where.push('c.seller_id = ?');
+            params.push(authUser.id);
+        }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        yield ensureAgipPadronTable();
+        const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
+        const rows = yield (0, db_1.query)(`
+      SELECT
+        o.date AS fecha,
+        i.cbte_tipo,
+        i.punto_venta,
+        i.cbte_desde,
+        o.total AS importe,
+        c.cuit,
+        COALESCE(c.business_name, c.name, '') AS razon_social,
+        COALESCE(ap.alicuota, 0) AS alicuota
+      FROM invoices i
+      JOIN orders o ON o.id = i.order_id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      ${whereSql}
+      UNION ALL
+      SELECT
+        o.date AS fecha,
+        cn.cbte_tipo,
+        cn.punto_venta,
+        cn.cbte_desde,
+        cn.amount_credited AS importe,
+        c.cuit,
+        COALESCE(c.business_name, c.name, '') AS razon_social,
+        COALESCE(ap.alicuota, 0) AS alicuota
+      FROM credit_notes cn
+      JOIN orders o ON o.id = cn.order_id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      ${whereSql}
+      ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
+      `, [period, ...params, period, ...params]);
+        const lines = rows
+            .filter((r) => onlyDigits(r.cuit).length === 11)
+            .map((r) => {
+            const fecha = ddmmyyyy(r.fecha);
+            const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
+            const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
+            const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
+            const comprobante = `${letraComp}${pv}${nro}`;
+            const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
+            const cuit = onlyDigits(r.cuit).slice(0, 11);
+            const razon = txt(r.razon_social, 30);
+            const alicuota = Math.max(0, Number(r.alicuota || 0));
+            const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
+            const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
+            const total = Math.abs(Number(r.importe) || 0);
+            const divisor = 1 + 0.21 + (alicuota / 100);
+            const neto = divisor > 0 ? round2(total / divisor) : 0;
+            const iva = round2(neto * 0.21);
+            const otros = round2(total - neto - iva);
+            const retPerc = round2(neto * (alicuota / 100));
+            // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
+            return [
+                '2029', // tipo/agente (fijo por layout legacy)
+                `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
+                '01', // campo fijo requerido por layout AGIP entre fecha y tipo/comprobante
+                comprobante,
+                `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
+                importe,
+                ' '.repeat(16),
+                '3',
+                cuit,
+                '4000000000001', // condición por defecto legacy
+                razon,
+                formatAmountFixed(otros, 13), // otros conceptos (ajusta para que total = neto + iva + otros)
+                formatAmountFixed(iva, 13), // IVA 21%
+                formatAmountFixed(neto, 13), // monto sujeto
+                `3301${aliInt},${aliDec}`, // formato observado válido: 3301xx,xx
+                formatAmountFixed(retPerc, 13), // ret/perc calculada
+                formatAmountFixed(retPerc, 13),
+                ' '.repeat(11)
+            ].join('');
+        });
+        if (!lines.length) {
+            return res.status(400).json({
+                message: 'No hay registros para exportar en el período seleccionado. Verificá rango de fechas, cliente y padrón AGIP importado.'
+            });
+        }
+        const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+        const filename = `RetPer_${monthTag}.txt`;
+        // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
+        res.setHeader('Content-Type', 'text/plain; charset=us-ascii');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        // Compatibilidad e-Arciba: CRLF entre registros y un único salto final, sin línea vacía extra.
+        res.send(`${lines.join('\r\n')}\r\n`);
+    }
+    catch (error) {
+        console.error('exportRetPerTxt:', error);
+        res.status(500).json({ message: 'Error exportando TXT Ret/Per' });
+    }
+});
+exports.exportRetPerTxt = exportRetPerTxt;
+/** Importa padrón AGIP resumido (CUIT + alícuota) para un período YYYYMM. */
+const importAgipPadronStart = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
+        if (!/^\d{6}$/.test(period)) {
+            return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
+        }
+        yield ensureAgipPadronTable();
+        yield (0, db_1.execute)(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+        return res.json({ message: 'Importación inicializada', period });
+    }
+    catch (error) {
+        console.error('importAgipPadronStart:', error);
+        const detail = String((error === null || error === void 0 ? void 0 : error.sqlMessage) || (error === null || error === void 0 ? void 0 : error.message) || '').trim();
+        return res.status(500).json({
+            message: detail ? `Error inicializando importación AGIP: ${detail}` : 'Error inicializando importación AGIP'
+        });
+    }
+});
+exports.importAgipPadronStart = importAgipPadronStart;
+const importAgipPadronChunk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
+        const rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
+        if (!/^\d{6}$/.test(period)) {
+            return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
+        }
+        if (!rows.length) {
+            return res.json({ message: 'Chunk vacío', period, imported: 0 });
+        }
+        yield ensureAgipPadronTable();
+        const byCuit = new Map();
+        for (const r of rows) {
+            const cuit = onlyDigits(r === null || r === void 0 ? void 0 : r.cuit).slice(0, 11);
+            const alicuota = Number(String((r === null || r === void 0 ? void 0 : r.alicuota) || '0').replace(',', '.')) || 0;
+            if (cuit.length !== 11)
+                continue;
+            byCuit.set(cuit, alicuota);
+        }
+        const entries = Array.from(byCuit.entries());
+        if (!entries.length)
+            return res.json({ message: 'Chunk sin CUIT válidos', period, imported: 0 });
+        const DB_BATCH = 500;
+        for (let i = 0; i < entries.length; i += DB_BATCH) {
+            const slice = entries.slice(i, i + DB_BATCH);
+            const placeholders = slice.map(() => `(UUID(), ?, ?, ?)`).join(', ');
+            const params = [];
+            for (const [cuit, alicuota] of slice)
+                params.push(period, cuit, alicuota);
+            yield (0, db_1.execute)(`INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+         VALUES ${placeholders}
+         ON DUPLICATE KEY UPDATE alicuota = VALUES(alicuota)`, params);
+        }
+        return res.json({ message: 'Chunk importado', period, imported: entries.length });
+    }
+    catch (error) {
+        console.error('importAgipPadronChunk:', error);
+        const detail = String((error === null || error === void 0 ? void 0 : error.sqlMessage) || (error === null || error === void 0 ? void 0 : error.message) || '').trim();
+        return res.status(500).json({
+            message: detail ? `Error importando chunk AGIP: ${detail}` : 'Error importando chunk AGIP'
+        });
+    }
+});
+exports.importAgipPadronChunk = importAgipPadronChunk;
+const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const parsePeriodFromFilename = (nameRaw) => {
+            const name = String(nameRaw || '');
+            const mMyyyy = name.match(/(\d{2})(\d{4})(?!\d)/); // ej: ...052026.txt
+            if (mMyyyy)
+                return `${mMyyyy[2]}${mMyyyy[1]}`;
+            const yyyymm = name.match(/(20\d{2})(0[1-9]|1[0-2])(?!\d)/);
+            if (yyyymm)
+                return `${yyyymm[1]}${yyyymm[2]}`;
+            return '';
+        };
+        const file = req.file;
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || parsePeriodFromFilename((file === null || file === void 0 ? void 0 : file.originalname) || '')).trim();
+        let rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
+        if ((!rows || rows.length === 0) && (file === null || file === void 0 ? void 0 : file.buffer)) {
+            const content = file.buffer.toString('utf8');
+            const parsed = [];
+            for (const rawLine of content.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line)
+                    continue;
+                const cols = line.split(';');
+                if (cols.length < 9)
+                    continue;
+                const cuit = onlyDigits(cols[3]).slice(0, 11);
+                if (cuit.length !== 11)
+                    continue;
+                const a1 = Number(String(cols[7] || '0').replace(',', '.')) || 0;
+                const a2 = Number(String(cols[8] || '0').replace(',', '.')) || 0;
+                parsed.push({ cuit, alicuota: Math.max(a1, a2) });
+            }
+            rows = parsed;
+        }
+        if ((!rows || rows.length === 0) && !(file === null || file === void 0 ? void 0 : file.buffer)) {
+            return res.status(400).json({ message: 'Falta el archivo del padrón (campo file).' });
+        }
+        if (!/^\d{6}$/.test(period)) {
+            return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
+        }
+        yield ensureAgipPadronTable();
+        // Deduplicar por CUIT (última alícuota recibida para ese CUIT)
+        const byCuit = new Map();
+        for (const r of rows) {
+            const cuit = onlyDigits(r === null || r === void 0 ? void 0 : r.cuit).slice(0, 11);
+            const alicuota = Number(String((r === null || r === void 0 ? void 0 : r.alicuota) || '0').replace(',', '.')) || 0;
+            if (cuit.length !== 11)
+                continue;
+            byCuit.set(cuit, alicuota);
+        }
+        const entries = Array.from(byCuit.entries());
+        yield (0, db_1.execute)('START TRANSACTION');
+        try {
+            yield (0, db_1.execute)(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+            const CHUNK = 1000;
+            for (let i = 0; i < entries.length; i += CHUNK) {
+                const slice = entries.slice(i, i + CHUNK);
+                const placeholders = slice.map(() => `(UUID(), ?, ?, ?)`).join(', ');
+                const params = [];
+                for (const [cuit, alicuota] of slice) {
+                    params.push(period, cuit, alicuota);
+                }
+                yield (0, db_1.execute)(`INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+           VALUES ${placeholders}`, params);
+            }
+            yield (0, db_1.execute)('COMMIT');
+        }
+        catch (e) {
+            yield (0, db_1.execute)('ROLLBACK');
+            throw e;
+        }
+        res.json({ message: 'Padrón AGIP importado', period, imported: entries.length });
+    }
+    catch (error) {
+        console.error('importAgipPadron:', error);
+        const detail = String((error === null || error === void 0 ? void 0 : error.sqlMessage) || (error === null || error === void 0 ? void 0 : error.message) || '').trim();
+        res.status(500).json({
+            message: detail ? `Error importando padrón AGIP: ${detail}` : 'Error importando padrón AGIP'
+        });
+    }
+});
+exports.importAgipPadron = importAgipPadron;
+/** Exporta comprobantes (facturas + NC) de un mes para clientes en Excel y/o lista pegada de CUIT (campo `cuitsList`). */
+const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const file = req.file;
+        const month = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.month) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.month) || '').trim();
+        const cuitsListRaw = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.cuitsList) || '').trim();
+        if (!file && !cuitsListRaw) {
+            return res.status(400).json({ message: 'Enviá un archivo Excel (campo file) y/o una lista de CUIT (campo cuitsList).' });
+        }
+        if (!/^\d{4}-\d{2}$/.test(month)) {
+            return res.status(400).json({ message: 'month inválido (usar YYYY-MM).' });
+        }
+        const m = month.match(/^(\d{4})-(\d{2})$/);
+        const yy = Number(m[1]);
+        const mm = Number(m[2]);
+        const lastDay = new Date(yy, mm, 0).getDate();
+        const fromDate = `${m[1]}-${m[2]}-01`;
+        const toDate = `${m[1]}-${m[2]}-${String(lastDay).padStart(2, '0')}`;
+        const cuitSet = new Set();
+        const nameSet = new Set();
+        const norm = (s) => normalizeNameForMatch(s);
+        const sourceRows = [];
+        let invalidPasteCuits = [];
+        if (cuitsListRaw) {
+            const parsed = parseCuitsFromText(cuitsListRaw);
+            invalidPasteCuits = parsed.invalid;
+            let rowNum = 2;
+            for (const c of parsed.valid) {
+                cuitSet.add(c);
+                sourceRows.push({
+                    sheet: 'Lista CUIT',
+                    row: rowNum++,
+                    rawName: '',
+                    rawCuit: c,
+                    nameNorm: '',
+                    cuitNorm: c
+                });
+            }
+        }
+        if (file) {
+            const wb = XLSX.read(file.buffer, { type: 'buffer' });
+            for (const sheetName of wb.SheetNames) {
+                const ws = wb.Sheets[sheetName];
+                if (!ws)
+                    continue;
+                const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                for (let idx = 0; idx < rows.length; idx++) {
+                    const row = rows[idx];
+                    const entries = Object.entries(row || {});
+                    let captured = false;
+                    let rowName = '';
+                    let rowCuit = '';
+                    for (const [k, v] of entries) {
+                        const key = norm(k);
+                        const val = String(v !== null && v !== void 0 ? v : '').trim();
+                        if (!val)
+                            continue;
+                        const extracted = extractCuitCandidates(val);
+                        for (const cuit of extracted) {
+                            cuitSet.add(cuit);
+                            if (!rowCuit)
+                                rowCuit = cuit;
+                        }
+                        if (key.includes('cuit') || key.includes('cuil') || key.includes('documento')) {
+                            const d = onlyDigits(val);
+                            if (d.length === 11) {
+                                cuitSet.add(d);
+                                if (!rowCuit)
+                                    rowCuit = d;
+                            }
+                            captured = true;
+                        }
+                        if (key.includes('razon') || key.includes('cliente') || key === 'nombre' || key.includes('business')) {
+                            const n = norm(val);
+                            if (n.length >= 3) {
+                                nameSet.add(n);
+                                if (!rowName)
+                                    rowName = val;
+                                captured = true;
+                            }
+                        }
+                    }
+                    if (!captured) {
+                        // fallback: si no hay headers claros, tomar celdas como posibles nombres/cuit
+                        for (const v of Object.values(row || {})) {
+                            const val = String(v !== null && v !== void 0 ? v : '').trim();
+                            if (!val)
+                                continue;
+                            const extracted = extractCuitCandidates(val);
+                            for (const cuit of extracted) {
+                                cuitSet.add(cuit);
+                                if (!rowCuit)
+                                    rowCuit = cuit;
+                            }
+                            const d = onlyDigits(val);
+                            if (d.length === 11) {
+                                cuitSet.add(d);
+                                if (!rowCuit)
+                                    rowCuit = d;
+                            }
+                            const n = norm(val);
+                            if (n.length >= 4) {
+                                nameSet.add(n);
+                                if (!rowName)
+                                    rowName = val;
+                            }
+                        }
+                    }
+                    if (rowName || rowCuit) {
+                        sourceRows.push({
+                            sheet: sheetName,
+                            row: idx + 2,
+                            rawName: rowName,
+                            rawCuit: rowCuit,
+                            nameNorm: norm(rowName),
+                            cuitNorm: onlyDigits(rowCuit).slice(0, 11)
+                        });
+                    }
+                    else {
+                        // último fallback: fila completa como texto
+                        const joined = Object.values(row || {}).map((x) => String(x !== null && x !== void 0 ? x : '').trim()).filter(Boolean).join(' ');
+                        const n = norm(joined);
+                        const d = onlyDigits(joined).slice(0, 11);
+                        if (n || d) {
+                            sourceRows.push({
+                                sheet: sheetName,
+                                row: idx + 2,
+                                rawName: joined,
+                                rawCuit: d,
+                                nameNorm: n,
+                                cuitNorm: d
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if (cuitSet.size === 0 && nameSet.size === 0) {
+            return res.status(400).json({
+                message: 'No se encontraron CUIT válidos (11 dígitos) ni nombres de clientes en el archivo ni en la lista pegada.'
+            });
+        }
+        const customerIds = new Set();
+        const matchedCuits = new Set();
+        const matchedNames = new Set();
+        const foundByCuit = new Map();
+        const foundByName = new Map();
+        if (cuitSet.size > 0) {
+            const cuits = Array.from(cuitSet);
+            const rowsByCuit = yield (0, db_1.query)(`SELECT id,
+                COALESCE(business_name, name, '') AS customer_name,
+                REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') AS cuit_norm
+         FROM customers
+         WHERE REPLACE(REPLACE(REPLACE(COALESCE(cuit,''),'-',''),'.',''),' ','') IN (${cuits.map(() => '?').join(',')})`, cuits);
+            for (const r of rowsByCuit) {
+                customerIds.add(String(r.id));
+                if (r.cuit_norm)
+                    matchedCuits.add(String(r.cuit_norm));
+                const key = String(r.cuit_norm || '');
+                if (key) {
+                    const arr = foundByCuit.get(key) || [];
+                    arr.push(`${String(r.id)} | ${String(r.customer_name || '')}`);
+                    foundByCuit.set(key, arr);
+                }
+            }
+        }
+        if (nameSet.size > 0) {
+            const names = Array.from(nameSet).filter((n) => n.length >= 4);
+            const customersRows = yield (0, db_1.query)(`SELECT id, business_name, name FROM customers`);
+            const customerPrepared = customersRows.map((r) => {
+                const bn = norm(r.business_name);
+                const cn = norm(r.name);
+                const all = `${bn} ${cn}`.trim();
+                const tokenSet = new Set(tokensForNameMatch(all));
+                return { r, bn, cn, all, tokenSet };
+            });
+            for (const n of names) {
+                const nTokens = tokensForNameMatch(n);
+                const nStrongTokens = nTokens.filter((t) => t.length >= 5);
+                for (const c of customerPrepared) {
+                    const byContain = (c.bn && (c.bn.includes(n) || n.includes(c.bn))) ||
+                        (c.cn && (c.cn.includes(n) || n.includes(c.cn)));
+                    const byToken = nStrongTokens.some((t) => c.tokenSet.has(t));
+                    if (!byContain && !byToken)
+                        continue;
+                    customerIds.add(String(c.r.id));
+                    matchedNames.add(n);
+                    const arr = foundByName.get(n) || [];
+                    arr.push(`${String(c.r.id)} | ${String(c.r.business_name || c.r.name || '')}`);
+                    foundByName.set(n, arr);
+                }
+            }
+        }
+        const ids = Array.from(customerIds);
+        if (ids.length === 0) {
+            return res.status(404).json({ message: 'No se encontraron clientes del Excel en la base.' });
+        }
+        const authUser = req.user;
+        const params = [fromDate, toDate, ...ids];
+        let sellerSql = '';
+        if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
+            sellerSql = ' AND c.seller_id = ? ';
+            params.push(authUser.id);
+        }
+        const rows = yield (0, db_1.query)(`
+      SELECT
+        x.tipo,
+        x.fecha,
+        x.cliente,
+        x.cliente_contacto,
+        x.cuit,
+        x.cbte_tipo,
+        x.punto_venta,
+        x.cbte_desde,
+        x.cbte_hasta,
+        x.importe,
+        x.order_id,
+        x.cae,
+        x.cae_fch_vto,
+        x.customer_id
+      FROM (
+        SELECT
+          'FACTURA' AS tipo,
+          o.date AS fecha,
+          c.business_name AS cliente,
+          c.name AS cliente_contacto,
+          c.cuit,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde,
+          i.cbte_hasta,
+          o.total AS importe,
+          o.id AS order_id,
+          i.cae,
+          i.cae_fch_vto,
+          c.id AS customer_id
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?
+          AND o.customer_id IN (${ids.map(() => '?').join(',')})
+          ${sellerSql}
+
+        UNION ALL
+
+        SELECT
+          'NC' AS tipo,
+          o.date AS fecha,
+          c.business_name AS cliente,
+          c.name AS cliente_contacto,
+          c.cuit,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde,
+          cn.cbte_hasta,
+          cn.amount_credited AS importe,
+          cn.order_id AS order_id,
+          cn.cae,
+          cn.cae_fch_vto,
+          c.id AS customer_id
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?
+          AND o.customer_id IN (${ids.map(() => '?').join(',')})
+          ${sellerSql}
+      ) x
+      ORDER BY x.fecha ASC, x.cliente ASC, x.punto_venta ASC, x.cbte_desde ASC
+      `, [...params, ...params]);
+        const mmParams = [...ids, fromDate, toDate];
+        if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
+            mmParams.push(authUser.id);
+        }
+        const mmRows = (yield (0, db_1.query)(`
+      SELECT
+        e.id AS mm_id,
+        e.customer_id,
+        e.line_date,
+        e.numero,
+        e.importe,
+        c.business_name AS cliente,
+        c.name AS cliente_contacto,
+        c.cuit
+      FROM customer_multimedia_entries e
+      JOIN customers c ON c.id = e.customer_id
+      WHERE e.customer_id IN (${ids.map(() => '?').join(',')})
+        AND e.line_date >= ? AND e.line_date <= ?
+        AND UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
+        ${sellerSql}
+      `, mmParams));
+        const dedupeKeyAfip = (r) => {
+            var _a;
+            return [
+                normalizeDate(r.fecha),
+                String((_a = r.cbte_desde) !== null && _a !== void 0 ? _a : '').trim().toUpperCase(),
+                Number(r.importe || 0).toFixed(2),
+                String(r.customer_id || '')
+            ].join('|');
+        };
+        const seenKeys = new Set();
+        for (const r of rows) {
+            seenKeys.add(dedupeKeyAfip(r));
+        }
+        for (const m of mmRows) {
+            const fechaN = normalizeDate(m.line_date);
+            const num = String(m.numero || '').trim().toUpperCase();
+            const imp = parseMoney(m.importe).toFixed(2);
+            const key = [fechaN, num, imp, String(m.customer_id || '')].join('|');
+            if (seenKeys.has(key))
+                continue;
+            seenKeys.add(key);
+            rows.push({
+                tipo: 'FACTURA',
+                fecha: m.line_date,
+                cliente: m.cliente,
+                cliente_contacto: m.cliente_contacto,
+                cuit: m.cuit,
+                cbte_tipo: null,
+                punto_venta: null,
+                cbte_desde: m.numero,
+                cbte_hasta: m.numero,
+                importe: m.importe,
+                order_id: `MM-${m.mm_id}`,
+                cae: '',
+                cae_fch_vto: '',
+                customer_id: m.customer_id,
+                origenExport: 'Tango / Multimedias'
+            });
+        }
+        rows.sort((a, b) => {
+            const da = new Date(normalizeDate(a.fecha)).getTime() || 0;
+            const db = new Date(normalizeDate(b.fecha)).getTime() || 0;
+            if (da !== db)
+                return da - db;
+            const ca = String(a.cliente || '').localeCompare(String(b.cliente || ''));
+            if (ca !== 0)
+                return ca;
+            return String(a.order_id || '').localeCompare(String(b.order_id || ''));
+        });
+        if (!rows.length) {
+            return res.status(400).json({ message: `No hay comprobantes para ${month} de los clientes del archivo.` });
+        }
+        const data = rows.map((r) => ({
+            Origen: r.origenExport || 'Sistema (AFIP)',
+            Tipo: r.tipo,
+            Fecha: normalizeDate(r.fecha),
+            Cliente: r.cliente || r.cliente_contacto || '',
+            CUIT: r.cuit || '',
+            TipoCbte: r.cbte_tipo,
+            PuntoVta: r.punto_venta,
+            NumeroDesde: r.cbte_desde,
+            NumeroHasta: r.cbte_hasta,
+            Importe: Number(r.importe || 0),
+            PedidoId: r.order_id,
+            CAE: r.cae || '',
+            CAEVto: r.cae_fch_vto || ''
+        }));
+        const outWb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(outWb, ws, 'Comprobantes');
+        // Hoja de auditoría: cómo matcheó cada fila del archivo
+        const encontrados = sourceRows
+            .map((r) => {
+            const cuitMatches = r.cuitNorm ? (foundByCuit.get(r.cuitNorm) || []) : [];
+            const nameMatches = r.nameNorm ? (foundByName.get(r.nameNorm) || []) : [];
+            const criterion = cuitMatches.length > 0 ? 'CUIT' : (nameMatches.length > 0 ? 'NOMBRE' : 'NO');
+            const dbMatched = cuitMatches.length > 0 ? cuitMatches : nameMatches;
+            return {
+                Hoja: r.sheet,
+                Fila: r.row,
+                ClienteArchivo: r.rawName || '',
+                CUITArchivo: r.rawCuit || '',
+                CriterioMatch: criterion,
+                CoincidenciasDB: dbMatched.join(' || ') || ''
+            };
+        })
+            .filter((r) => r.CriterioMatch !== 'NO');
+        const wsFound = XLSX.utils.json_to_sheet(encontrados.length > 0
+            ? encontrados
+            : [{ Hoja: '-', Fila: '-', ClienteArchivo: '', CUITArchivo: '', CriterioMatch: 'SIN COINCIDENCIAS', CoincidenciasDB: '' }]);
+        XLSX.utils.sheet_add_json(wsFound, [{ TotalEncontrados: encontrados.length }], { origin: 'H1' });
+        XLSX.utils.book_append_sheet(outWb, wsFound, 'Encontrados');
+        if (invalidPasteCuits.length > 0) {
+            const wsInv = XLSX.utils.json_to_sheet(invalidPasteCuits.map((v) => {
+                const d = onlyDigits(v);
+                const motivo = d.length === 0 ? 'Sin dígitos' : `Tiene ${d.length} dígitos (se esperan 11)`;
+                return { ValorIngresado: v, Motivo: motivo };
+            }));
+            XLSX.utils.book_append_sheet(outWb, wsInv, 'CUIT invalidos');
+        }
+        // Hoja de control: filas del archivo que no pudieron vincularse a ningún cliente
+        const notFound = sourceRows
+            .filter((r) => {
+            const hasCuit = !!r.cuitNorm;
+            const hasName = !!r.nameNorm;
+            if (!hasCuit && !hasName)
+                return false;
+            if (hasCuit && matchedCuits.has(r.cuitNorm))
+                return false;
+            if (hasName && matchedNames.has(r.nameNorm))
+                return false;
+            return true;
+        })
+            .map((r) => ({
+            Hoja: r.sheet,
+            Fila: r.row,
+            ClienteArchivo: r.rawName || '',
+            CUITArchivo: r.rawCuit || '',
+            Estado: 'No encontrado en base'
+        }));
+        const notFoundRows = notFound.length > 0
+            ? notFound
+            : [{
+                    Hoja: '-',
+                    Fila: '-',
+                    ClienteArchivo: '',
+                    CUITArchivo: '',
+                    Estado: 'Sin registros no encontrados para este archivo'
+                }];
+        const wsNo = XLSX.utils.json_to_sheet(notFoundRows);
+        // Bloque resumen arriba para que sea auditable
+        XLSX.utils.sheet_add_json(wsNo, [{
+                TotalFilasDetectadasArchivo: sourceRows.length,
+                TotalClientesVinculados: ids.length,
+                TotalNoEncontrados: notFound.length
+            }], { origin: 'G1' });
+        XLSX.utils.book_append_sheet(outWb, wsNo, 'No encontrados');
+        const buffer = XLSX.write(outWb, { type: 'buffer', bookType: 'xlsx' });
+        const filename = `comprobantes_${month.replace('-', '')}_clientes_archivo.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buffer);
+    }
+    catch (error) {
+        console.error('exportBillingByCustomersFile:', error);
+        return res.status(500).json({ message: 'Error exportando comprobantes por archivo de clientes' });
+    }
+});
+exports.exportBillingByCustomersFile = exportBillingByCustomersFile;

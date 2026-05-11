@@ -1726,7 +1726,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         const haber = Number(m.haber || 0);
         running = Math.round((running + debe - haber) * 100) / 100;
 
-        if (m.tipo === 'FACTURA' || m.tipo === 'FACTURA_IMPORTADA') totalFacturas += debe;
+        if (m.tipo === 'FACTURA') totalFacturas += debe;
         else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA') totalNc += haber;
         else if (
           comprobanteIndicaNotaCredito(String(m.comprobante ?? '')) &&

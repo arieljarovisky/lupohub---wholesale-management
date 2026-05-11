@@ -2990,7 +2990,7 @@ function normalizeTnPaymentStatus(order) {
 }
 /** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
 const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
@@ -3014,6 +3014,7 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
         }
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const results = [];
+        const payableOrders = [];
         for (const orderId of orderIds) {
             const orderIdStr = String(orderId);
             try {
@@ -3065,28 +3066,52 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                     || ((_m = order === null || order === void 0 ? void 0 : order.customer) === null || _m === void 0 ? void 0 : _m.fiscal_regime)
                     || ((_o = order === null || order === void 0 ? void 0 : order.customer) === null || _o === void 0 ? void 0 : _o.iva_condition)
                     || 'Consumidor Final').toString();
-                const afipResult = yield emitirAfip({
-                    id: `TN-${order.id}`,
-                    date: (order === null || order === void 0 ? void 0 : order.created_at) || new Date().toISOString().slice(0, 10),
+                payableOrders.push({
+                    orderId: String(order.id),
+                    orderNumber: String((_p = order.number) !== null && _p !== void 0 ? _p : order.id),
                     total,
-                    customerId: `TN-${((_p = order === null || order === void 0 ? void 0 : order.customer) === null || _p === void 0 ? void 0 : _p.id) || order.id}`
-                }, {
-                    id: `TN-${((_q = order === null || order === void 0 ? void 0 : order.customer) === null || _q === void 0 ? void 0 : _q.id) || order.id}`,
-                    businessName: customerName,
-                    cuit: maybeCuit,
-                    condicionIva: condicionIvaRaw
-                }, forceCbteTipo);
+                    date: String((order === null || order === void 0 ? void 0 : order.created_at) || new Date().toISOString().slice(0, 10)),
+                    customerId: `TN-${((_q = order === null || order === void 0 ? void 0 : order.customer) === null || _q === void 0 ? void 0 : _q.id) || order.id}`,
+                    customerName,
+                    customerCuit: maybeCuit,
+                    condicionIva: condicionIvaRaw || 'Consumidor Final'
+                });
+            }
+            catch (e) {
+                results.push({
+                    orderId: orderIdStr,
+                    status: 'error',
+                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
+                });
+            }
+        }
+        if (payableOrders.length > 0) {
+            const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
+            const base = payableOrders[0];
+            const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
+            const afipResult = yield emitirAfip({
+                id: `TN-BULK-${Date.now()}`,
+                date: base.date,
+                total: totalLote,
+                customerId: sameCustomer ? base.customerId : 'TN-BULK-CF'
+            }, {
+                id: sameCustomer ? base.customerId : 'TN-BULK-CF',
+                businessName: sameCustomer ? base.customerName : 'Consumidor Final',
+                cuit: sameCustomer ? base.customerCuit : undefined,
+                condicionIva: sameCustomer ? base.condicionIva : 'Consumidor Final'
+            }, forceCbteTipo);
+            for (const o of payableOrders) {
                 const invoiceId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO external_invoices
            (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
            VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
-                    String(order.id),
-                    String((_r = order.number) !== null && _r !== void 0 ? _r : order.id),
-                    customerName,
-                    maybeCuit || null,
-                    condicionIvaRaw || null,
-                    total,
+                    o.orderId,
+                    o.orderNumber,
+                    o.customerName,
+                    o.customerCuit || null,
+                    o.condicionIva || null,
+                    o.total,
                     afipResult.cae,
                     afipResult.caeFchVto || null,
                     afipResult.puntoVta,
@@ -3095,20 +3120,13 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                     afipResult.cbteHasta
                 ]);
                 results.push({
-                    orderId: String(order.id),
+                    orderId: o.orderId,
                     status: 'invoiced',
                     invoiceId,
                     cae: afipResult.cae,
                     cbteTipo: afipResult.cbteTipo,
                     cbteDesde: afipResult.cbteDesde,
                     cbteHasta: afipResult.cbteHasta
-                });
-            }
-            catch (e) {
-                results.push({
-                    orderId: orderIdStr,
-                    status: 'error',
-                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
                 });
             }
         }
@@ -3131,7 +3149,7 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
 exports.invoiceTiendaNubeOrdersBulk = invoiceTiendaNubeOrdersBulk;
 /** Emite facturas AFIP masivas para órdenes de Mercado Libre (solo pagadas). */
 const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
@@ -3151,6 +3169,7 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
         }
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const results = [];
+        const payableOrders = [];
         for (const orderId of orderIds) {
             const orderIdStr = String(orderId);
             try {
@@ -3189,28 +3208,49 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
                 const customerName = `${buyerFirst} ${buyerLast}`.trim()
                     || (((_f = order === null || order === void 0 ? void 0 : order.buyer) === null || _f === void 0 ? void 0 : _f.nickname) || '').toString().trim()
                     || 'Consumidor Final';
-                const afipResult = yield emitirAfip({
-                    id: `ML-${order.id}`,
-                    date: (order === null || order === void 0 ? void 0 : order.date_created) || new Date().toISOString().slice(0, 10),
+                payableOrders.push({
+                    orderId: String(order.id),
                     total,
-                    customerId: `ML-${((_g = order === null || order === void 0 ? void 0 : order.buyer) === null || _g === void 0 ? void 0 : _g.id) || order.id}`
-                }, {
-                    id: `ML-${((_h = order === null || order === void 0 ? void 0 : order.buyer) === null || _h === void 0 ? void 0 : _h.id) || order.id}`,
-                    businessName: customerName,
-                    cuit: undefined,
-                    condicionIva: 'Consumidor Final'
-                }, forceCbteTipo);
+                    date: String((order === null || order === void 0 ? void 0 : order.date_created) || new Date().toISOString().slice(0, 10)),
+                    customerId: `ML-${((_g = order === null || order === void 0 ? void 0 : order.buyer) === null || _g === void 0 ? void 0 : _g.id) || order.id}`,
+                    customerName
+                });
+            }
+            catch (e) {
+                results.push({
+                    orderId: orderIdStr,
+                    status: 'error',
+                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
+                });
+            }
+        }
+        if (payableOrders.length > 0) {
+            const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
+            const base = payableOrders[0];
+            const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
+            const afipResult = yield emitirAfip({
+                id: `ML-BULK-${Date.now()}`,
+                date: base.date,
+                total: totalLote,
+                customerId: sameCustomer ? base.customerId : 'ML-BULK-CF'
+            }, {
+                id: sameCustomer ? base.customerId : 'ML-BULK-CF',
+                businessName: sameCustomer ? base.customerName : 'Consumidor Final',
+                cuit: undefined,
+                condicionIva: 'Consumidor Final'
+            }, forceCbteTipo);
+            for (const o of payableOrders) {
                 const invoiceId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO external_invoices
            (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
            VALUES (?, 'MERCADOLIBRE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
-                    String(order.id),
-                    String(order.id),
-                    customerName,
+                    o.orderId,
+                    o.orderId,
+                    o.customerName,
                     null,
                     'Consumidor Final',
-                    total,
+                    o.total,
                     afipResult.cae,
                     afipResult.caeFchVto || null,
                     afipResult.puntoVta,
@@ -3219,20 +3259,13 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
                     afipResult.cbteHasta
                 ]);
                 results.push({
-                    orderId: String(order.id),
+                    orderId: o.orderId,
                     status: 'invoiced',
                     invoiceId,
                     cae: afipResult.cae,
                     cbteTipo: afipResult.cbteTipo,
                     cbteDesde: afipResult.cbteDesde,
                     cbteHasta: afipResult.cbteHasta
-                });
-            }
-            catch (e) {
-                results.push({
-                    orderId: orderIdStr,
-                    status: 'error',
-                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
                 });
             }
         }
@@ -3481,7 +3514,7 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.getMercadoLibreQuestions = getMercadoLibreQuestions;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -3538,6 +3571,34 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 dateCreated: order.date_created,
                 dateClosed: order.date_closed
             };
+        };
+        const groupMlOrdersByPurchase = (rows) => {
+            const groupKey = (o) => {
+                var _a, _b, _c;
+                const packId = String((_a = o === null || o === void 0 ? void 0 : o.pack_id) !== null && _a !== void 0 ? _a : '').trim();
+                if (packId)
+                    return `pack:${packId}`;
+                const buyerId = String((_c = (_b = o === null || o === void 0 ? void 0 : o.buyer) === null || _b === void 0 ? void 0 : _b.id) !== null && _c !== void 0 ? _c : '').trim();
+                const minute = String((o === null || o === void 0 ? void 0 : o.date_created) || '').slice(0, 16);
+                return `fallback:${buyerId}:${minute}`;
+            };
+            const groups = new Map();
+            for (const o of rows || []) {
+                const key = groupKey(o);
+                if (!groups.has(key))
+                    groups.set(key, []);
+                groups.get(key).push(o);
+            }
+            return Array.from(groups.values()).map((group) => {
+                const first = group[0];
+                const orderIds = group.map((o) => o.id);
+                const allItems = group.flatMap((o) => o.order_items || []);
+                const totalAmount = group.reduce((acc, o) => acc + (Number(o === null || o === void 0 ? void 0 : o.total_amount) || 0), 0);
+                const merged = Object.assign(Object.assign({}, first), { total_amount: totalAmount, order_ids: orderIds, order_items: allItems });
+                if (first === null || first === void 0 ? void 0 : first._shipment_status)
+                    merged._shipment_status = first._shipment_status;
+                return merged;
+            });
         };
         let orders;
         let total;
@@ -3605,29 +3666,7 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 });
             }
             ordersPorEnviar.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
-            // Agrupar misma compra: mismo comprador + misma fecha/hora (al minuto) = una sola fila
-            const groupKey = (o) => {
-                var _a, _b;
-                const buyerId = (_b = (_a = o.buyer) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : '';
-                const dateStr = (o.date_created || '').toString();
-                const toMinute = dateStr.slice(0, 16);
-                return `${buyerId}-${toMinute}`;
-            };
-            const groups = new Map();
-            for (const o of ordersPorEnviar) {
-                const key = groupKey(o);
-                if (!groups.has(key))
-                    groups.set(key, []);
-                groups.get(key).push(o);
-            }
-            const groupedOrders = Array.from(groups.values()).map((group) => {
-                const first = group[0];
-                const orderIds = group.map((o) => o.id);
-                const allItems = group.flatMap((o) => o.order_items || []);
-                const merged = Object.assign(Object.assign({}, first), { order_ids: orderIds, order_items: allItems });
-                merged._shipment_status = first._shipment_status;
-                return merged;
-            });
+            const groupedOrders = groupMlOrdersByPurchase(ordersPorEnviar);
             total = groupedOrders.length;
             orders = groupedOrders.slice(offsetNum, offsetNum + limitNum).map((o) => {
                 const mapped = mapOrder(o);
@@ -3638,19 +3677,37 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
             });
         }
         else {
-            let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${offsetNum}&limit=${limitNum}&sort=date_desc`;
-            if (status)
-                url += `&order.status=${status}`;
-            if (date_from)
-                url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
-            if (date_to)
-                url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
-            const ordersRes = yield axios_1.default.get(url, {
-                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+            const allRaw = [];
+            const fetchLimit = 50;
+            let fetchOffset = 0;
+            while (fetchOffset <= 5000) {
+                let url = `https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&offset=${fetchOffset}&limit=${fetchLimit}&sort=date_desc`;
+                if (status)
+                    url += `&order.status=${status}`;
+                if (date_from)
+                    url += `&order.date_created.from=${date_from}T00:00:00.000-03:00`;
+                if (date_to)
+                    url += `&order.date_created.to=${date_to}T23:59:59.999-03:00`;
+                const ordersRes = yield axios_1.default.get(url, {
+                    headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                });
+                const batch = ordersRes.data.results || [];
+                if (!batch.length)
+                    break;
+                allRaw.push(...batch);
+                if (batch.length < fetchLimit)
+                    break;
+                fetchOffset += fetchLimit;
+            }
+            const grouped = groupMlOrdersByPurchase(allRaw);
+            total = grouped.length;
+            orders = grouped.slice(offsetNum, offsetNum + limitNum).map((o) => {
+                const mapped = mapOrder(o);
+                if (o.order_ids && o.order_ids.length > 1) {
+                    mapped.orderIds = o.order_ids;
+                }
+                return mapped;
             });
-            const raw = ordersRes.data.results || [];
-            total = (_b = (_a = ordersRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) !== null && _b !== void 0 ? _b : raw.length;
-            orders = raw.map(mapOrder);
         }
         // Marcar si las órdenes ML del response ya están facturadas.
         const externalIdsFlat = Array.from(new Set(orders.flatMap((o) => {
@@ -3687,7 +3744,7 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
         });
     }
     catch (error) {
-        console.error('Error fetching ML orders:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
+        console.error('Error fetching ML orders:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo órdenes de Mercado Libre', error: error.message });
     }
 });

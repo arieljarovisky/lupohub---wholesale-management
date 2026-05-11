@@ -120,7 +120,7 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         }
         const paymentInvoicesEnabled = yield ensurePaymentInvoicesTable();
         const paymentInvoiceRefsEnabled = yield ensurePaymentInvoiceRefsTable();
-        const { customerId, invoiceId, orderId, desde, hasta } = req.query;
+        const { customerId, invoiceId, orderId, desde, hasta, province } = req.query;
         const where = [];
         const params = [];
         if (customerId) {
@@ -153,6 +153,10 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (hasta) {
             where.push('p.date <= ?');
             params.push(hasta);
+        }
+        if (province && String(province).trim()) {
+            where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
+            params.push(`%${String(province).trim().toLowerCase()}%`);
         }
         // Para SELLER: solo pagos de clientes asignados a ese vendedor
         if (user.role === 'SELLER') {
