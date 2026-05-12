@@ -14,7 +14,8 @@ import {
   applyMayoristaStockDeduction,
   exportTopWholesaleProductsMetricsXlsx,
   getOrderItemsMissingDespacho,
-  assignDespachosToOrderItems
+  assignDespachosToOrderItems,
+  assignRemitoNumber
 } from '../controllers/orders.controller';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
@@ -35,6 +36,7 @@ router.post('/:id/emitir-factura', authMiddleware, emitirFactura);
 router.post('/:id/emitir-nota-credito', authMiddleware, emitirNotaCredito);
 router.get('/:id/items-missing-despacho', getOrderItemsMissingDespacho);
 router.put('/:id/assign-despachos', authMiddleware, assignDespachosToOrderItems);
+router.post('/:id/remito-number/assign', assignRemitoNumber);
 router.get('/metrics/top-products/export', authMiddleware, exportTopWholesaleProductsMetricsXlsx);
 
 export default router;

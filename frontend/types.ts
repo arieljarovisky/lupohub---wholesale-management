@@ -205,6 +205,8 @@ export interface Order {
   mayoristaStockApplied?: boolean;
   /** Avisos al guardar: líneas que quedaron (total o parcial) sin despacho. */
   despachoWarnings?: string[];
+  /** N° de remito único asignado a este pedido (secuencia incremental que arranca en 31457). */
+  remitoNumber?: number;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

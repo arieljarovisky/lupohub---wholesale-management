@@ -65,6 +65,7 @@ const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
+const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -182,6 +183,7 @@ function initDatabase() {
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
+                yield (0, add_remito_sequence_1.addRemitoSequence)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

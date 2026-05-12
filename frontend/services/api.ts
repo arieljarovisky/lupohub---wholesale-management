@@ -633,6 +633,18 @@ export const api = {
   },
 
   /**
+   * Asigna (o devuelve si ya existía) el N° de remito único e incremental del pedido.
+   * Idempotente: si el pedido ya tiene número asignado, devuelve el mismo.
+   */
+  assignRemitoNumber: async (orderId: string): Promise<{
+    orderId: string;
+    remitoNumber: number;
+    assigned: boolean;
+  }> => {
+    return await request<any>(`/orders/${orderId}/remito-number/assign`, 'POST', {});
+  },
+
+  /**
    * Asigna despachos (existentes por id, existentes por número o nuevos) a ítems concretos de un pedido.
    * Cada asignación debe traer `orderItemId` y o `despachoId` o `numeroDespacho`.
    */

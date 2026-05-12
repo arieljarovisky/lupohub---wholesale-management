@@ -19,5 +19,6 @@ router.post('/:id/emitir-factura', auth_1.authMiddleware, orders_controller_1.em
 router.post('/:id/emitir-nota-credito', auth_1.authMiddleware, orders_controller_1.emitirNotaCredito);
 router.get('/:id/items-missing-despacho', orders_controller_1.getOrderItemsMissingDespacho);
 router.put('/:id/assign-despachos', auth_1.authMiddleware, orders_controller_1.assignDespachosToOrderItems);
+router.post('/:id/remito-number/assign', orders_controller_1.assignRemitoNumber);
 router.get('/metrics/top-products/export', auth_1.authMiddleware, orders_controller_1.exportTopWholesaleProductsMetricsXlsx);
 exports.default = router;

@@ -384,6 +384,7 @@ export const getOrders = async (req: any, res: any) => {
       pickedBy: order.picked_by ?? undefined,
       dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
       archived: !!(order.archived),
+      remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
       items: itemsByOrderId[order.id] || [],
       invoice: invoiceByOrderId[order.id] ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
@@ -1356,6 +1357,64 @@ export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: R
   } catch (error: any) {
     console.error('exportTopWholesaleProductsMetricsXlsx:', error);
     return res.status(500).json({ message: 'Error exportando métricas mayoristas' });
+  }
+};
+
+/**
+ * Asigna (o devuelve, si ya existía) el N° de remito único para el pedido.
+ *
+ * - Es **idempotente**: si el pedido ya tiene `remito_number`, devuelve el mismo valor (sin consumir
+ *   uno nuevo de la secuencia). Esto garantiza que reimprimir un remito muestre siempre el mismo número.
+ * - Es **atómico**: usa el truco de `LAST_INSERT_ID(expr)` para incrementar la secuencia sin necesidad
+ *   de transacciones explícitas con conexión dedicada.
+ * - **Único**: la columna `orders.remito_number` tiene constraint UNIQUE, por lo que aún en caso de
+ *   carrera el segundo proceso obtiene 0 affectedRows y lee el número que efectivamente quedó.
+ */
+export const assignRemitoNumber = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const order = await get('SELECT id, remito_number FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (order.remito_number != null) {
+      return res.json({
+        orderId: id,
+        remitoNumber: Number(order.remito_number),
+        assigned: false
+      });
+    }
+
+    // Inicialización defensiva (idempotente) por si la migración no llegó a correr aún.
+    await execute(`INSERT IGNORE INTO remito_sequence (id, next_value) VALUES (1, 31457)`);
+
+    // Atómico: setea LAST_INSERT_ID al valor actual y deja next_value+1 para el próximo.
+    const inc = await execute(
+      `UPDATE remito_sequence SET next_value = LAST_INSERT_ID(next_value) + 1 WHERE id = 1`
+    );
+    const candidate = Number((inc as any)?.insertId || 0);
+    if (!candidate) {
+      return res.status(500).json({ message: 'No se pudo obtener el próximo N° de remito (secuencia vacía).' });
+    }
+
+    const upd = await execute(
+      `UPDATE orders SET remito_number = ? WHERE id = ? AND remito_number IS NULL`,
+      [candidate, id]
+    );
+    const affected = Number((upd as any)?.affectedRows || 0);
+    if (affected === 1) {
+      return res.json({ orderId: id, remitoNumber: candidate, assigned: true });
+    }
+
+    // Race condition: otro request asignó antes. Devolver el valor que quedó persistido.
+    const reread = await get('SELECT remito_number FROM orders WHERE id = ?', [id]);
+    return res.json({
+      orderId: id,
+      remitoNumber: Number(reread?.remito_number || 0),
+      assigned: false
+    });
+  } catch (error: any) {
+    console.error('assignRemitoNumber:', error);
+    return res.status(500).json({ message: 'Error asignando N° de remito' });
   }
 };
 

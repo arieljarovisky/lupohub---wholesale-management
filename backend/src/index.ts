@@ -52,6 +52,7 @@ import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhoo
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addUserTasksTable } from './database/add_user_tasks_table';
+import { addRemitoSequence } from './database/add_remito_sequence';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -171,6 +172,7 @@ async function initDatabase() {
       await addVariantLuposhopStockTable();
       await addOrderCreatedBy();
       await addUserTasksTable();
+      await addRemitoSequence();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

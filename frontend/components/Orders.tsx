@@ -103,8 +103,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
   const [remitoBultos, setRemitoBultos] = useState<string>('');
   const [remitoDescripcion, setRemitoDescripcion] = useState<string>('');
-  /** N° de remito impreso (manual); obligatorio al generar el PDF. */
+  /** N° de remito asignado al pedido (secuencia única que arranca en 31457). Se autoasigna al abrir el modal. */
   const [remitoDocumentNumber, setRemitoDocumentNumber] = useState<string>('');
+  /** Estado de carga mientras el backend asigna el N° de remito al abrir el modal. */
+  const [remitoNumberLoading, setRemitoNumberLoading] = useState<boolean>(false);
   const [afipConfigured, setAfipConfigured] = useState(false);
   const [afipProduction, setAfipProduction] = useState(true);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
@@ -280,8 +282,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const enrichItem = (item: OrderItem): OrderItem => enrichOrderItem(item, products);
 
-  /** Abre el modal para elegir transporte, bultos y descripción (para expreso al interior) y luego genera el remito. */
-  const openRemitoModal = (order: Order, e: React.MouseEvent) => {
+  /**
+   * Abre el modal de remito. El N° de remito se asigna automáticamente (secuencia única que arranca en 31457).
+   * Es idempotente: si el pedido ya tiene un número asignado, devuelve el mismo (importante para reimprimir).
+   */
+  const openRemitoModal = async (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     const customer = customers.find(c => c.id === order.customerId);
     const firstTransport = customer?.transportes?.[0]?.name ?? '';
@@ -289,7 +294,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName(firstTransport);
     setRemitoBultos('');
     setRemitoDescripcion('');
-    setRemitoDocumentNumber((customer?.remitoNumber ?? '').toString().trim());
+    // Si el backend ya lo trae cargado, mostrarlo de una para evitar el flash de "Asignando...".
+    setRemitoDocumentNumber(order.remitoNumber != null ? String(order.remitoNumber) : '');
+    setRemitoNumberLoading(true);
+    try {
+      const res = await api.assignRemitoNumber(order.id);
+      setRemitoDocumentNumber(String(res.remitoNumber));
+      // Cachea el número en el pedido activo para que buildRemitoHtml lo tenga disponible sin esperar al refresh global.
+      setRemitoOrder((prev) => (prev && prev.id === order.id ? { ...prev, remitoNumber: res.remitoNumber } : prev));
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || err?.message || 'No se pudo asignar el N° de remito');
+    } finally {
+      setRemitoNumberLoading(false);
+    }
   };
 
   /** Genera el HTML del remito con formato de factura y multipágina. `remitoDocumentNumber` es el N° que va arriba a la derecha. */
@@ -661,7 +678,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!remitoOrder) return;
     const docNro = remitoDocumentNumber.trim();
     if (!docNro) {
-      showToast('error', 'Ingresá el número de remito (aparece arriba a la derecha en el PDF).');
+      showToast('error', 'Todavía no se asignó el N° de remito. Esperá unos segundos y reintentá.');
       return;
     }
     const bultosVal = remitoBultos.trim() ? remitoBultos : null;
@@ -1928,14 +1945,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-white mb-1">Generar remito</h3>
               <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {remitoOrder.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'}</p>
-              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">N° Remito (se imprime arriba a la derecha)</label>
-              <input
-                type="text"
-                value={remitoDocumentNumber}
-                onChange={(e) => setRemitoDocumentNumber(e.target.value)}
-                placeholder="Ej: 0008-12345678"
-                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white font-mono focus:ring-2 focus:ring-amber-500 outline-none mb-4"
-              />
+              <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">N° Remito (asignado automáticamente)</label>
+              <div className="relative mb-1">
+                <input
+                  type="text"
+                  value={remitoNumberLoading ? '' : remitoDocumentNumber}
+                  readOnly
+                  placeholder={remitoNumberLoading ? 'Asignando número…' : '—'}
+                  className="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-3 text-white font-mono cursor-not-allowed outline-none"
+                />
+                {remitoNumberLoading && (
+                  <Loader2 size={18} className="animate-spin text-amber-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mb-4">Único e incremental. Se conserva para reimpresiones de este pedido.</p>
               <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
               <select
                 value={remitoTransporteName}
@@ -1976,7 +1999,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               </div>
               <div className="flex gap-3 justify-end">
                 <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); setRemitoBultos(''); setRemitoDescripcion(''); setRemitoDocumentNumber(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
-                <button type="button" onClick={confirmRemito} className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition">
+                <button
+                  type="button"
+                  onClick={confirmRemito}
+                  disabled={remitoNumberLoading || !remitoDocumentNumber}
+                  className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <FileText size={18} /> Generar remito
                 </button>
               </div>

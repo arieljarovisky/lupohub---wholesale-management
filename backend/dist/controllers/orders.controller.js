@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
@@ -402,6 +402,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 pickedBy: (_g = order.picked_by) !== null && _g !== void 0 ? _g : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 archived: !!(order.archived),
+                remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
                 items: itemsByOrderId[order.id] || [],
                 invoice: (_h = invoiceByOrderId[order.id]) !== null && _h !== void 0 ? _h : undefined,
                 creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
@@ -1317,6 +1318,58 @@ const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, vo
     }
 });
 exports.exportTopWholesaleProductsMetricsXlsx = exportTopWholesaleProductsMetricsXlsx;
+/**
+ * Asigna (o devuelve, si ya existía) el N° de remito único para el pedido.
+ *
+ * - Es **idempotente**: si el pedido ya tiene `remito_number`, devuelve el mismo valor (sin consumir
+ *   uno nuevo de la secuencia). Esto garantiza que reimprimir un remito muestre siempre el mismo número.
+ * - Es **atómico**: usa el truco de `LAST_INSERT_ID(expr)` para incrementar la secuencia sin necesidad
+ *   de transacciones explícitas con conexión dedicada.
+ * - **Único**: la columna `orders.remito_number` tiene constraint UNIQUE, por lo que aún en caso de
+ *   carrera el segundo proceso obtiene 0 affectedRows y lee el número que efectivamente quedó.
+ */
+const assignRemitoNumber = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.params;
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const order = yield (0, db_1.get)('SELECT id, remito_number FROM orders WHERE id = ?', [id]);
+        if (!order)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        if (order.remito_number != null) {
+            return res.json({
+                orderId: id,
+                remitoNumber: Number(order.remito_number),
+                assigned: false
+            });
+        }
+        // Inicialización defensiva (idempotente) por si la migración no llegó a correr aún.
+        yield (0, db_1.execute)(`INSERT IGNORE INTO remito_sequence (id, next_value) VALUES (1, 31457)`);
+        // Atómico: setea LAST_INSERT_ID al valor actual y deja next_value+1 para el próximo.
+        const inc = yield (0, db_1.execute)(`UPDATE remito_sequence SET next_value = LAST_INSERT_ID(next_value) + 1 WHERE id = 1`);
+        const candidate = Number((inc === null || inc === void 0 ? void 0 : inc.insertId) || 0);
+        if (!candidate) {
+            return res.status(500).json({ message: 'No se pudo obtener el próximo N° de remito (secuencia vacía).' });
+        }
+        const upd = yield (0, db_1.execute)(`UPDATE orders SET remito_number = ? WHERE id = ? AND remito_number IS NULL`, [candidate, id]);
+        const affected = Number((upd === null || upd === void 0 ? void 0 : upd.affectedRows) || 0);
+        if (affected === 1) {
+            return res.json({ orderId: id, remitoNumber: candidate, assigned: true });
+        }
+        // Race condition: otro request asignó antes. Devolver el valor que quedó persistido.
+        const reread = yield (0, db_1.get)('SELECT remito_number FROM orders WHERE id = ?', [id]);
+        return res.json({
+            orderId: id,
+            remitoNumber: Number((reread === null || reread === void 0 ? void 0 : reread.remito_number) || 0),
+            assigned: false
+        });
+    }
+    catch (error) {
+        console.error('assignRemitoNumber:', error);
+        return res.status(500).json({ message: 'Error asignando N° de remito' });
+    }
+});
+exports.assignRemitoNumber = assignRemitoNumber;
 /**
  * Lista los ítems de un pedido que no tienen número de despacho asignado.
  * Devuelve además detalle de producto/variante para mostrar en el modal de corrección.
