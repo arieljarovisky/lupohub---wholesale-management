@@ -309,6 +309,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const saleCondition = (customer?.saleCondition || 'Cuenta Corriente').toString().trim();
     const numBultos = bultos !== undefined && bultos !== null && bultos !== '' ? (typeof bultos === 'number' ? bultos : parseInt(String(bultos), 10)) : null;
     const descripcionTrim = descripcion && String(descripcion).trim() ? String(descripcion).trim().replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+    // Envío por expreso (al interior): se identifica por tener bultos cargados.
+    // En ese caso el remito no detalla productos ni precios; muestra solo el valor declarado (sin IVA).
+    const isExpreso = numBultos != null && !isNaN(numBultos) && numBultos > 0;
+    const montoDeclaradoSinIva = isExpreso
+      ? Math.round(
+          items.reduce((s, i) => {
+            const qty = Number(i.quantity || 0);
+            const unit = Number(i.priceAtMoment ?? 0);
+            return s + qty * unit;
+          }, 0) * 100
+        ) / 100
+      : 0;
 
     const localSkuOf = (i: OrderItem) => {
       const variantId = i.variantId ?? i.productId;
@@ -340,8 +352,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const itemsPerPage = 16;
     const pages: OrderItem[][] = [];
-    for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
-    if (pages.length === 0) pages.push([]);
+    if (isExpreso) {
+      // En remito por expreso no se detallan los ítems, así que va una sola hoja.
+      pages.push([]);
+    } else {
+      for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
+      if (pages.length === 0) pages.push([]);
+    }
 
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -452,19 +469,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
           <div class="r-items-outer">
             ${watermarkBlock}
-            <table class="r-items">
-              <thead>
-                <tr>
-                  <th class="ri-c" style="width:52px;">CANT.</th>
-                  <th class="ri-c ri-code" style="width:100px;">CÓDIGO</th>
-                  <th>DESCRIPCIÓN</th>
-                  <th class="ri-c" style="width:118px;">Nº DESPACHO</th>
-                  <th class="ri-r" style="width:84px;">P. UNITARIO</th>
-                  <th class="ri-r" style="width:88px;">IMPORTE</th>
-                </tr>
-              </thead>
-              <tbody>${pageRows || '<tr><td class="ri-c" colspan="6">&nbsp;</td></tr>'}</tbody>
-            </table>
+            ${
+              isExpreso
+                ? `<div class="r-expreso-body">
+                    <div class="r-expreso-label">VALOR DECLARADO (sin IVA)</div>
+                    <div class="r-expreso-monto">$${formatMoneyAr(montoDeclaradoSinIva)}</div>
+                    <div class="r-expreso-aclaracion">A los efectos del transporte. No incluye IVA ni impuestos.</div>
+                  </div>`
+                : `<table class="r-items">
+                    <thead>
+                      <tr>
+                        <th class="ri-c" style="width:52px;">CANT.</th>
+                        <th class="ri-c ri-code" style="width:100px;">CÓDIGO</th>
+                        <th>DESCRIPCIÓN</th>
+                        <th class="ri-c" style="width:118px;">Nº DESPACHO</th>
+                        <th class="ri-r" style="width:84px;">P. UNITARIO</th>
+                        <th class="ri-r" style="width:88px;">IMPORTE</th>
+                      </tr>
+                    </thead>
+                    <tbody>${pageRows || '<tr><td class="ri-c" colspan="6">&nbsp;</td></tr>'}</tbody>
+                  </table>`
+            }
             <div class="r-items-ley">La mercadería viaja por cuenta y cargo del cliente</div>
           </div>
           ${
@@ -583,6 +608,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
       .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
       .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
+      .r-expreso-body { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28mm 12mm; text-align: center; }
+      .r-expreso-label { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 12px; }
+      .r-expreso-monto { font-size: 42px; font-weight: 800; line-height: 1.1; padding: 14px 26px; border: 2px solid #000; border-radius: 4px; min-width: 260px; }
+      .r-expreso-aclaracion { font-size: 9px; margin-top: 12px; color: #333; font-style: italic; }
       .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
       .r-firma-cell:last-child { border-right: none; }
