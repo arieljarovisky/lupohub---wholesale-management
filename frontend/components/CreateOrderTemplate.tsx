@@ -19,6 +19,12 @@ interface CreateOrderTemplateProps {
   priceLists?: PriceList[];
   selectedPriceListId?: string | null;
   onPriceListChange?: (id: string | null) => void;
+  /**
+   * Cuando es `true`, el editor se abre en modo solo lectura: todos los inputs y botones quedan
+   * deshabilitados y se oculta la barra de "Guardar" / "Confirmar". Se usa para abrir pedidos ya
+   * facturados sin que el usuario pueda modificarlos.
+   */
+  readOnly?: boolean;
 }
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
@@ -68,7 +74,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   role,
   priceLists = [],
   selectedPriceListId = null,
-  onPriceListChange
+  onPriceListChange,
+  readOnly = false
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -720,10 +727,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   return (
     <div className="flex flex-col h-full min-h-0 pb-32 md:pb-0 px-3 sm:px-0 max-w-full">
-      {/* Header */}
+      {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
       <header className="shrink-0 mb-5">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={onCancel}
             className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
             aria-label="Volver"
@@ -731,13 +739,35 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <ArrowLeft size={22} />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{isEditing ? 'Editar pedido' : 'Nuevo pedido'}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              {readOnly ? 'Ver pedido (solo lectura)' : (isEditing ? 'Editar pedido' : 'Nuevo pedido')}
+            </h1>
             <p className="text-sm text-slate-400 mt-0.5">
               {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
           </div>
         </div>
       </header>
+
+      {readOnly && (
+        <div className="shrink-0 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <p className="font-semibold">Este pedido ya está facturado.</p>
+          <p className="text-amber-200/80 text-xs mt-0.5">
+            Podés revisar el detalle, pero no se puede modificar. Si necesitás corregir cantidades o precios, emití una nota de crédito desde la pantalla de pedidos.
+          </p>
+        </div>
+      )}
+
+      {/*
+        `inert` (React 19 + browsers modernos) deshabilita focus y clicks dentro del subtree sin alterar
+        el layout ni el scroll. Permite que el usuario lea/scrollee todo el detalle del pedido facturado
+        pero no pueda modificar ningún input ni disparar acciones.
+      */}
+      <div
+        inert={readOnly || undefined}
+        aria-disabled={readOnly || undefined}
+        className={`contents ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
+      >
 
       {/* Lista de precios: solo ADMIN/WAREHOUSE */}
       {showPriceListSelector && (
@@ -1055,35 +1085,48 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         )}
       </div>
 
-      {/* Pie: subtotal + confirmar */}
-      <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-5 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
-        <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
-          <div className="flex items-center justify-between mb-3">
+      {/* Pie: subtotal + confirmar. Se oculta en modo solo lectura para no inducir a guardar cambios. */}
+      {!readOnly && (
+        <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-5 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
+          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-slate-400">Subtotal</span>
+              <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
+            </div>
+            {hasExceededStock && (
+              <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
+            )}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
+                onClick={handleSaveDraft}
+                className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 border border-slate-600 disabled:opacity-60 transition-all touch-manipulation"
+              >
+                <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
+              </button>
+              <button
+                disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
+                onClick={handleSave}
+                className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+              >
+                <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
+              </button>
+            </div>
+          </div>
+        </footer>
+      )}
+
+      {readOnly && (
+        <div className="shrink-0 mt-5 rounded-2xl border border-slate-700/80 bg-slate-800/60 p-4">
+          <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-slate-400">Subtotal</span>
             <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
           </div>
-          {hasExceededStock && (
-            <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
-          )}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
-              onClick={handleSaveDraft}
-              className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 border border-slate-600 disabled:opacity-60 transition-all touch-manipulation"
-            >
-              <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
-            </button>
-            <button
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
-              onClick={handleSave}
-              className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
-            >
-              <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
-            </button>
-          </div>
         </div>
-      </footer>
+      )}
+
+      </div>{/* /inert subtree */}
 
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[100] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

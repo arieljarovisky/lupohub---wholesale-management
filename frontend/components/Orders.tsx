@@ -283,10 +283,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const enrichItem = (item: OrderItem): OrderItem => enrichOrderItem(item, products);
 
   /**
-   * Abre el modal de remito. El N° de remito se asigna automáticamente (secuencia única que arranca en 31457).
-   * Es idempotente: si el pedido ya tiene un número asignado, devuelve el mismo (importante para reimprimir).
+   * Abre el modal de remito sin consumir número de la secuencia.
+   *
+   * - Si el pedido **ya tiene** un remito generado previamente (`order.remitoNumber`), se muestra ese mismo
+   *   número (idempotente: una reimpresión no consume un número nuevo).
+   * - Si **nunca se generó**, el número queda en blanco con la leyenda "Se asignará al generar".
+   *   La asignación real (y atómica) ocurre solo cuando el usuario hace click en "Generar remito".
    */
-  const openRemitoModal = async (order: Order, e: React.MouseEvent) => {
+  const openRemitoModal = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     const customer = customers.find(c => c.id === order.customerId);
     const firstTransport = customer?.transportes?.[0]?.name ?? '';
@@ -294,19 +298,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoTransporteName(firstTransport);
     setRemitoBultos('');
     setRemitoDescripcion('');
-    // Si el backend ya lo trae cargado, mostrarlo de una para evitar el flash de "Asignando...".
     setRemitoDocumentNumber(order.remitoNumber != null ? String(order.remitoNumber) : '');
-    setRemitoNumberLoading(true);
-    try {
-      const res = await api.assignRemitoNumber(order.id);
-      setRemitoDocumentNumber(String(res.remitoNumber));
-      // Cachea el número en el pedido activo para que buildRemitoHtml lo tenga disponible sin esperar al refresh global.
-      setRemitoOrder((prev) => (prev && prev.id === order.id ? { ...prev, remitoNumber: res.remitoNumber } : prev));
-    } catch (err: any) {
-      showToast('error', err?.response?.data?.message || err?.message || 'No se pudo asignar el N° de remito');
-    } finally {
-      setRemitoNumberLoading(false);
-    }
+    setRemitoNumberLoading(false);
   };
 
   /** Genera el HTML del remito con formato de factura y multipágina. `remitoDocumentNumber` es el N° que va arriba a la derecha. */
@@ -674,15 +667,42 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     </body></html>`;
   };
 
-  const confirmRemito = () => {
+  /**
+   * Genera el remito. Recién acá se consume un número de la secuencia (si el pedido todavía no tenía uno).
+   *
+   * Importante para preservar la regla "el contador solo avanza cuando el remito se imprime de verdad":
+   *  - Si el pedido ya tiene `remitoNumber`, lo reutilizamos sin tocar la secuencia.
+   *  - Si no, le pedimos al backend que asigne uno (operación atómica).
+   *  - Si el usuario cancela el modal sin llegar acá, ningún número se consume.
+   */
+  const confirmRemito = async () => {
     if (!remitoOrder) return;
-    const docNro = remitoDocumentNumber.trim();
-    if (!docNro) {
-      showToast('error', 'Todavía no se asignó el N° de remito. Esperá unos segundos y reintentá.');
+    setRemitoNumberLoading(true);
+    let docNro = (remitoDocumentNumber || '').trim();
+    let updatedOrder: Order | null = null;
+    try {
+      if (!docNro) {
+        const res = await api.assignRemitoNumber(remitoOrder.id);
+        docNro = String(res.remitoNumber);
+        setRemitoDocumentNumber(docNro);
+        updatedOrder = { ...remitoOrder, remitoNumber: res.remitoNumber };
+        setRemitoOrder(updatedOrder);
+      }
+    } catch (err: any) {
+      setRemitoNumberLoading(false);
+      showToast('error', err?.response?.data?.message || err?.message || 'No se pudo asignar el N° de remito');
       return;
     }
+    setRemitoNumberLoading(false);
+
+    if (!docNro) {
+      showToast('error', 'No se pudo obtener un N° de remito. Reintentá en unos segundos.');
+      return;
+    }
+
     const bultosVal = remitoBultos.trim() ? remitoBultos : null;
-    const html = buildRemitoHtml(remitoOrder, remitoTransporteName, docNro, bultosVal, remitoDescripcion.trim() || null);
+    const orderForHtml = updatedOrder || remitoOrder;
+    const html = buildRemitoHtml(orderForHtml, remitoTransporteName, docNro, bultosVal, remitoDescripcion.trim() || null);
     const w = window.open('', '_blank');
     if (w) {
       w.document.write(html);
@@ -1285,6 +1305,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-4">
           {filteredOrders.map((order) => {
+          /** Permite hacer click en la tarjeta y abrir el detalle. Si el pedido está facturado, el editor se abre en modo solo lectura. */
+          const canOpenOrder = canEditOrderBase;
+          /** Permite editar (modificar). Se sigue bloqueando cuando ya hay factura emitida. */
           const canEditOrder = canEditOrderBase && !order.invoice;
           const customer = customers.find(c => c.id === order.customerId);
           const sellerDisplayName =
@@ -1299,8 +1322,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           return (
             <div 
               key={order.id} 
-              onClick={() => canEditOrder && onEditOrder?.(order)}
-              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canEditOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation ${stockImpact.cardAccentClass}`}
+              onClick={() => canOpenOrder && onEditOrder?.(order)}
+              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canOpenOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation ${stockImpact.cardAccentClass}`}
             >
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                 <div className="space-y-1 min-w-0 flex-1">
@@ -1667,7 +1690,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       </button>
                     )
                   )}
-                  {canEditOrder && <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />}
+                  {canOpenOrder && <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />}
                 </div>
               </div>
 
@@ -1949,16 +1972,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <div className="relative mb-1">
                 <input
                   type="text"
-                  value={remitoNumberLoading ? '' : remitoDocumentNumber}
+                  value={remitoDocumentNumber}
                   readOnly
-                  placeholder={remitoNumberLoading ? 'Asignando número…' : '—'}
-                  className="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-3 text-white font-mono cursor-not-allowed outline-none"
+                  placeholder={remitoNumberLoading ? 'Asignando número…' : 'Se asignará al generar el remito'}
+                  className="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-3 text-white font-mono cursor-not-allowed outline-none placeholder-slate-500"
                 />
                 {remitoNumberLoading && (
                   <Loader2 size={18} className="animate-spin text-amber-400 absolute right-3 top-1/2 -translate-y-1/2" />
                 )}
               </div>
-              <p className="text-[11px] text-slate-500 mb-4">Único e incremental. Se conserva para reimpresiones de este pedido.</p>
+              <p className="text-[11px] text-slate-500 mb-4">
+                {remitoDocumentNumber
+                  ? 'Este pedido ya tiene un N° asignado: se reutiliza para reimpresiones.'
+                  : 'El N° único se asigna recién al hacer click en "Generar remito" (no se consume si cancelás).'}
+              </p>
               <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
               <select
                 value={remitoTransporteName}
@@ -2002,10 +2029,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <button
                   type="button"
                   onClick={confirmRemito}
-                  disabled={remitoNumberLoading || !remitoDocumentNumber}
+                  disabled={remitoNumberLoading}
                   className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <FileText size={18} /> Generar remito
+                  {remitoNumberLoading ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />}
+                  {remitoNumberLoading ? 'Asignando N°…' : 'Generar remito'}
                 </button>
               </div>
             </div>

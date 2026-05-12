@@ -1053,6 +1053,7 @@ const App: React.FC = () => {
                 priceLists={priceLists}
                 selectedPriceListId={createOrderPriceListId}
                 onPriceListChange={setCreateOrderPriceListId}
+                readOnly={!!editingOrder?.invoice}
               />
             </Suspense>
           ) : null}
