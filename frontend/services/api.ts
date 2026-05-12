@@ -616,6 +616,43 @@ export const api = {
     return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data);
   },
 
+  /** Lista los ítems del pedido que quedaron sin número de despacho asignado. */
+  getOrderItemsMissingDespacho: async (orderId: string): Promise<Array<{
+    orderItemId: string;
+    variantId: string;
+    productId: string;
+    sku: string;
+    productName: string;
+    sizeCode: string;
+    colorName: string;
+    quantity: number;
+    productLastDespachoId: string | null;
+    productLastDespachoNumero: string | null;
+  }>> => {
+    return await request<any[]>(`/orders/${orderId}/items-missing-despacho`, 'GET');
+  },
+
+  /**
+   * Asigna despachos (existentes por id, existentes por número o nuevos) a ítems concretos de un pedido.
+   * Cada asignación debe traer `orderItemId` y o `despachoId` o `numeroDespacho`.
+   */
+  assignDespachosToOrderItems: async (
+    orderId: string,
+    assignments: Array<{
+      orderItemId: string;
+      despachoId?: string;
+      numeroDespacho?: string;
+      paisOrigen?: string;
+      fechaDespacho?: string;
+    }>
+  ): Promise<{
+    orderId: string;
+    applied: Array<{ orderItemId: string; despachoId: string; numeroDespacho: string; created: boolean }>;
+    errors: string[];
+  }> => {
+    return await request<any>(`/orders/${orderId}/assign-despachos`, 'PUT', { assignments });
+  },
+
   // --- CUSTOMERS ---
   getCustomers: async (): Promise<Customer[]> => {
     return handleRequest(async () => {

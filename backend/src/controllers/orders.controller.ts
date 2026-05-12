@@ -1358,3 +1358,216 @@ export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: R
     return res.status(500).json({ message: 'Error exportando métricas mayoristas' });
   }
 };
+
+/**
+ * Lista los ítems de un pedido que no tienen número de despacho asignado.
+ * Devuelve además detalle de producto/variante para mostrar en el modal de corrección.
+ */
+export const getOrderItemsMissingDespacho = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const order = await get('SELECT id FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const rows = await query(
+      `SELECT
+         i.id AS orderItemId,
+         i.variant_id AS variantId,
+         i.quantity,
+         pc.product_id AS productId,
+         COALESCE(pv.sku, p.sku) AS sku,
+         p.name AS productName,
+         s.size_code AS sizeCode,
+         c.name AS colorName,
+         p.ultimo_despacho_id AS productLastDespachoId,
+         d_last.numero_despacho AS productLastDespachoNumero
+       FROM order_items i
+       JOIN product_variants pv ON pv.id = i.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN despachos d_last ON d_last.id = p.ultimo_despacho_id
+       WHERE i.order_id = ? AND i.despacho_id IS NULL
+       ORDER BY p.name ASC, i.id ASC`,
+      [id]
+    ) as any[];
+
+    res.json(rows.map((r) => ({
+      orderItemId: r.orderItemId,
+      variantId: r.variantId,
+      productId: r.productId,
+      sku: r.sku ?? '',
+      productName: r.productName ?? '',
+      sizeCode: r.sizeCode ?? '',
+      colorName: r.colorName ?? '',
+      quantity: Number(r.quantity) || 0,
+      productLastDespachoId: r.productLastDespachoId ?? null,
+      productLastDespachoNumero: r.productLastDespachoNumero ?? null
+    })));
+  } catch (error: any) {
+    console.error('getOrderItemsMissingDespacho:', error);
+    res.status(500).json({ message: 'Error obteniendo ítems sin despacho del pedido' });
+  }
+};
+
+/**
+ * Asigna despachos (existentes o nuevos por número) a una lista de order_items de un pedido.
+ * Body: { assignments: [{ orderItemId, despachoId?, numeroDespacho?, paisOrigen?, fechaDespacho? }] }
+ * Si viene `numeroDespacho` y no existe, crea el despacho; si existe lo reutiliza.
+ * Solo afecta a items del pedido indicado y, por seguridad, solo si actualmente tienen despacho_id NULL.
+ */
+export const assignDespachosToOrderItems = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const assignmentsRaw = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  if (assignmentsRaw.length === 0) {
+    return res.status(400).json({ message: 'No hay asignaciones para aplicar' });
+  }
+
+  try {
+    const order = await get('SELECT id FROM orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const orderItemIds: string[] = assignmentsRaw
+      .map((a: any) => String(a?.orderItemId || '').trim())
+      .filter(Boolean);
+    if (orderItemIds.length === 0) {
+      return res.status(400).json({ message: 'Las asignaciones no traen orderItemId válido' });
+    }
+
+    const placeholders = orderItemIds.map(() => '?').join(',');
+    const itemsRows = await query(
+      `SELECT i.id, i.variant_id, i.despacho_id, pc.product_id, p.ultimo_despacho_id AS productLastDespachoId
+       FROM order_items i
+       JOIN product_variants pv ON pv.id = i.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE i.order_id = ? AND i.id IN (${placeholders})`,
+      [id, ...orderItemIds]
+    ) as any[];
+
+    if (itemsRows.length === 0) {
+      return res.status(404).json({ message: 'Ningún ítem coincide con el pedido' });
+    }
+    const itemsById = new Map<string, any>(itemsRows.map((r: any) => [String(r.id), r]));
+
+    type ResolvedAssignment = {
+      orderItemId: string;
+      productId: string | null;
+      despachoId: string;
+      numeroDespacho: string;
+      paisOrigen: string | null;
+      created: boolean;
+    };
+    const resolved: ResolvedAssignment[] = [];
+    const errors: string[] = [];
+
+    for (const a of assignmentsRaw) {
+      const orderItemId = String(a?.orderItemId || '').trim();
+      const itemRow = itemsById.get(orderItemId);
+      if (!orderItemId || !itemRow) {
+        errors.push(`Ítem ${orderItemId || '(sin id)'} no pertenece al pedido o no existe`);
+        continue;
+      }
+      if (itemRow.despacho_id) {
+        errors.push(`El ítem ${orderItemId} ya tiene un despacho asignado; usá la edición del pedido para cambiarlo`);
+        continue;
+      }
+
+      let despachoId = String(a?.despachoId || '').trim() || null;
+      let numeroDespacho = String(a?.numeroDespacho || '').trim();
+      const paisOrigen = String(a?.paisOrigen || '').trim() || null;
+      const fechaDespachoRaw = String(a?.fechaDespacho || '').trim();
+
+      if (!despachoId && !numeroDespacho) {
+        errors.push(`El ítem ${orderItemId} no trae despachoId ni numeroDespacho`);
+        continue;
+      }
+
+      let created = false;
+      let resolvedNumero = '';
+      let resolvedPais: string | null = paisOrigen;
+
+      if (despachoId) {
+        const row = await get('SELECT id, numero_despacho, pais_origen FROM despachos WHERE id = ?', [despachoId]);
+        if (!row) {
+          errors.push(`Despacho ${despachoId} no encontrado`);
+          continue;
+        }
+        resolvedNumero = String(row.numero_despacho || '');
+        resolvedPais = paisOrigen || row.pais_origen || null;
+      } else {
+        const existing = await get(
+          'SELECT id, numero_despacho, pais_origen FROM despachos WHERE numero_despacho = ?',
+          [numeroDespacho]
+        );
+        if (existing?.id) {
+          despachoId = String(existing.id);
+          resolvedNumero = String(existing.numero_despacho || numeroDespacho);
+          resolvedPais = paisOrigen || existing.pais_origen || null;
+        } else {
+          const newId = uuidv4();
+          const fecha = fechaDespachoRaw || new Date().toISOString().slice(0, 10);
+          const pais = paisOrigen || 'Brasil';
+          await execute(
+            `INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, estado, notas)
+             VALUES (?, ?, ?, ?, 'despachado', ?)`,
+            [newId, numeroDespacho, fecha, pais, 'Creado al asignar a items de pedido']
+          );
+          despachoId = newId;
+          resolvedNumero = numeroDespacho;
+          resolvedPais = pais;
+          created = true;
+        }
+      }
+
+      resolved.push({
+        orderItemId,
+        productId: itemRow.product_id ?? null,
+        despachoId: despachoId!,
+        numeroDespacho: resolvedNumero,
+        paisOrigen: resolvedPais,
+        created
+      });
+    }
+
+    if (resolved.length === 0) {
+      return res.status(400).json({
+        message: 'No se pudo aplicar ninguna asignación',
+        errors
+      });
+    }
+
+    for (const r of resolved) {
+      await execute(
+        'UPDATE order_items SET despacho_id = ? WHERE id = ? AND order_id = ? AND despacho_id IS NULL',
+        [r.despachoId, r.orderItemId, id]
+      );
+      if (r.productId) {
+        await execute(
+          `UPDATE products
+             SET ultimo_despacho_id = ?,
+                 pais_origen = COALESCE(?, pais_origen)
+           WHERE id = ?`,
+          [r.despachoId, r.paisOrigen, r.productId]
+        );
+      }
+    }
+
+    res.json({
+      orderId: id,
+      applied: resolved.map((r) => ({
+        orderItemId: r.orderItemId,
+        despachoId: r.despachoId,
+        numeroDespacho: r.numeroDespacho,
+        created: r.created
+      })),
+      errors
+    });
+  } catch (error: any) {
+    console.error('assignDespachosToOrderItems:', error);
+    res.status(500).json({ message: 'Error asignando despachos a los ítems del pedido' });
+  }
+};

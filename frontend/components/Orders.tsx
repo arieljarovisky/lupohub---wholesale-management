@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2 } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -138,6 +138,31 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** '' = imprimir todos los transportes asignados al cliente (si hay más de uno). */
   const [facturaTransporteId, setFacturaTransporteId] = useState('');
   const [emitirFacturaTransporteId, setEmitirFacturaTransporteId] = useState('');
+  /** Modal: asignar despachos faltantes a los ítems de un pedido específico. */
+  const [assignDespachosOrder, setAssignDespachosOrder] = useState<Order | null>(null);
+  const [assignDespachosItems, setAssignDespachosItems] = useState<Array<{
+    orderItemId: string;
+    variantId: string;
+    productId: string;
+    sku: string;
+    productName: string;
+    sizeCode: string;
+    colorName: string;
+    quantity: number;
+    productLastDespachoId: string | null;
+    productLastDespachoNumero: string | null;
+  }>>([]);
+  const [assignDespachosCatalog, setAssignDespachosCatalog] = useState<Array<{ id: string; numero_despacho: string; pais_origen?: string | null; fecha_despacho?: string | null }>>([]);
+  const [assignDespachosLoading, setAssignDespachosLoading] = useState(false);
+  const [assignDespachosSaving, setAssignDespachosSaving] = useState(false);
+  /** Selección por ítem: 'existing' usa `despachoId`; 'new' usa `numeroDespacho` (crea o reutiliza por número). */
+  const [assignDespachosByItem, setAssignDespachosByItem] = useState<Record<string, {
+    mode: 'existing' | 'new';
+    despachoId: string;
+    numeroDespacho: string;
+    paisOrigen: string;
+    fechaDespacho: string;
+  }>>({});
 
   useEffect(() => {
     if (!ncOrder) {
@@ -651,6 +676,112 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setRemitoBultos('');
     setRemitoDescripcion('');
     setRemitoDocumentNumber('');
+  };
+
+  /** Abre el modal para asignar despachos a los ítems del pedido que están en NULL. */
+  const openAssignDespachosModal = async (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setAssignDespachosOrder(order);
+    setAssignDespachosLoading(true);
+    setAssignDespachosByItem({});
+    try {
+      const [items, despachos] = await Promise.all([
+        api.getOrderItemsMissingDespacho(order.id),
+        api.getDespachos({ limit: 500 })
+      ]);
+      setAssignDespachosItems(items || []);
+      setAssignDespachosCatalog((despachos?.despachos || []).map((d: any) => ({
+        id: d.id,
+        numero_despacho: d.numero_despacho ?? d.numeroDespacho ?? '',
+        pais_origen: d.pais_origen ?? d.paisOrigen ?? null,
+        fecha_despacho: d.fecha_despacho ?? d.fechaDespacho ?? null
+      })));
+      const init: Record<string, { mode: 'existing' | 'new'; despachoId: string; numeroDespacho: string; paisOrigen: string; fechaDespacho: string }> = {};
+      for (const it of items || []) {
+        init[it.orderItemId] = {
+          mode: it.productLastDespachoId ? 'existing' : 'new',
+          despachoId: it.productLastDespachoId || '',
+          numeroDespacho: '',
+          paisOrigen: '',
+          fechaDespacho: ''
+        };
+      }
+      setAssignDespachosByItem(init);
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || err?.message || 'Error cargando ítems sin despacho.');
+      setAssignDespachosOrder(null);
+    } finally {
+      setAssignDespachosLoading(false);
+    }
+  };
+
+  const closeAssignDespachosModal = () => {
+    if (assignDespachosSaving) return;
+    setAssignDespachosOrder(null);
+    setAssignDespachosItems([]);
+    setAssignDespachosByItem({});
+    setAssignDespachosCatalog([]);
+  };
+
+  /** Aplica las asignaciones elegidas y refresca el pedido para que aparezcan los despachos en el remito/factura. */
+  const confirmAssignDespachos = async () => {
+    if (!assignDespachosOrder) return;
+    const orderId = assignDespachosOrder.id;
+    const assignments: Array<{ orderItemId: string; despachoId?: string; numeroDespacho?: string; paisOrigen?: string; fechaDespacho?: string }> = [];
+    const validationErrors: string[] = [];
+    for (const it of assignDespachosItems) {
+      const sel = assignDespachosByItem[it.orderItemId];
+      const label = `${it.productName || it.sku || it.orderItemId}${it.sizeCode || it.colorName ? ` (${[it.sizeCode, it.colorName].filter(Boolean).join(' / ')})` : ''}`;
+      if (!sel) {
+        validationErrors.push(`Falta asignar despacho a ${label}.`);
+        continue;
+      }
+      if (sel.mode === 'existing') {
+        if (!sel.despachoId) {
+          validationErrors.push(`Falta elegir despacho para ${label}.`);
+          continue;
+        }
+        assignments.push({ orderItemId: it.orderItemId, despachoId: sel.despachoId });
+      } else {
+        const numero = sel.numeroDespacho.trim();
+        if (!numero) {
+          validationErrors.push(`Ingresá el número de despacho para ${label}.`);
+          continue;
+        }
+        assignments.push({
+          orderItemId: it.orderItemId,
+          numeroDespacho: numero,
+          paisOrigen: sel.paisOrigen.trim() || undefined,
+          fechaDespacho: sel.fechaDespacho.trim() || undefined
+        });
+      }
+    }
+    if (validationErrors.length > 0) {
+      showToast('error', validationErrors[0]);
+      return;
+    }
+    if (assignments.length === 0) {
+      showToast('warning', 'No hay asignaciones para aplicar.');
+      return;
+    }
+    setAssignDespachosSaving(true);
+    try {
+      const res = await api.assignDespachosToOrderItems(orderId, assignments);
+      const appliedCount = res?.applied?.length || 0;
+      const errs = res?.errors || [];
+      if (appliedCount > 0) {
+        showToast('success', `Se actualizaron ${appliedCount} ítem(s). Re-imprimí el remito/factura para que muestren los despachos.`);
+      }
+      if (errs.length > 0) {
+        showToast('error', errs[0]);
+      }
+      await refreshOrders?.();
+      closeAssignDespachosModal();
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || err?.message || 'Error al asignar despachos.');
+    } finally {
+      setAssignDespachosSaving(false);
+    }
   };
 
   const mergedRemitenteForFactura = () => {
@@ -1342,6 +1473,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   >
                     <FileText size={16} />
                   </button>
+                  {(order.items || []).some((it: any) => !it?.despachoId) && (
+                    <button
+                      onClick={(e) => openAssignDespachosModal(order, e)}
+                      className="p-2 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition relative"
+                      title="Hay ítems sin número de despacho asignado. Asignalos para que aparezcan en remito/factura."
+                    >
+                      <Ship size={16} />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" aria-hidden />
+                    </button>
+                  )}
                   {role !== Role.CUSTOMER &&
                     !order.noStockImpact &&
                     order.status !== OrderStatus.CANCELLED &&
@@ -1843,6 +1984,183 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
         );
       })()}
+
+      {/* Modal: asignar despachos faltantes a los ítems del pedido */}
+      {assignDespachosOrder && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={closeAssignDespachosModal}
+        >
+          <div
+            className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-1">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Ship size={18} className="text-amber-400" />
+                  Asignar despachos faltantes
+                </h3>
+                <p className="text-sm text-slate-400">
+                  Pedido #{assignDespachosOrder.id} — {assignDespachosOrder.customerBusinessName || getCustomerName(assignDespachosOrder)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeAssignDespachosModal}
+                disabled={assignDespachosSaving}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition disabled:opacity-50"
+                aria-label="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-amber-200/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-4 leading-relaxed">
+              Al asignar despachos se actualiza el pedido para que aparezcan en remito/factura impresos.
+              El comprobante AFIP ya emitido (CAE) no cambia: los despachos solo se imprimen en el PDF del sistema.
+            </p>
+
+            {assignDespachosLoading ? (
+              <div className="py-12 flex items-center justify-center text-slate-400 gap-2">
+                <Loader2 className="animate-spin" size={18} /> Cargando ítems sin despacho...
+              </div>
+            ) : assignDespachosItems.length === 0 ? (
+              <div className="py-8 text-center text-slate-300">
+                Este pedido no tiene ítems con despacho NULL. Si igualmente aparece "—" en el PDF, puede ser por el último despacho del producto; volvé a imprimir luego de cargarlo.
+              </div>
+            ) : (
+              <div className="space-y-3 mb-5">
+                {assignDespachosItems.map((it) => {
+                  const sel = assignDespachosByItem[it.orderItemId] || { mode: 'existing', despachoId: '', numeroDespacho: '', paisOrigen: '', fechaDespacho: '' };
+                  const updateSel = (patch: Partial<typeof sel>) => {
+                    setAssignDespachosByItem((prev) => ({
+                      ...prev,
+                      [it.orderItemId]: { ...sel, ...patch }
+                    }));
+                  };
+                  return (
+                    <div key={it.orderItemId} className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                        <div className="min-w-0">
+                          <div className="text-white font-semibold leading-tight truncate">
+                            {it.productName || it.sku || it.orderItemId}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {[it.sku, it.sizeCode, it.colorName].filter(Boolean).join(' · ') || '—'}
+                          </div>
+                        </div>
+                        <div className="text-sm text-amber-300 font-semibold">
+                          {it.quantity} u. sin despacho
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 mb-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`mode-${it.orderItemId}`}
+                            checked={sel.mode === 'existing'}
+                            onChange={() => updateSel({ mode: 'existing' })}
+                            className="text-amber-500"
+                          />
+                          <span className="text-sm text-slate-200">Usar despacho existente</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`mode-${it.orderItemId}`}
+                            checked={sel.mode === 'new'}
+                            onChange={() => updateSel({ mode: 'new' })}
+                            className="text-amber-500"
+                          />
+                          <span className="text-sm text-slate-200">Ingresar nuevo número</span>
+                        </label>
+                      </div>
+
+                      {sel.mode === 'existing' ? (
+                        <div>
+                          <select
+                            value={sel.despachoId}
+                            onChange={(e) => updateSel({ despachoId: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                          >
+                            <option value="">— Elegí un despacho cargado —</option>
+                            {assignDespachosCatalog.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.numero_despacho || d.id}{d.pais_origen ? ` · ${d.pais_origen}` : ''}{d.fecha_despacho ? ` · ${String(d.fecha_despacho).slice(0, 10)}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {it.productLastDespachoNumero && (
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              Último despacho cargado para este producto: <span className="text-slate-300 font-mono">{it.productLastDespachoNumero}</span>
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="md:col-span-1">
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Nº Despacho</label>
+                            <input
+                              type="text"
+                              value={sel.numeroDespacho}
+                              onChange={(e) => updateSel({ numeroDespacho: e.target.value })}
+                              placeholder="Ej: 25001IC04200218H"
+                              className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">País origen</label>
+                            <input
+                              type="text"
+                              value={sel.paisOrigen}
+                              onChange={(e) => updateSel({ paisOrigen: e.target.value })}
+                              placeholder="Brasil"
+                              className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Fecha despacho</label>
+                            <input
+                              type="date"
+                              value={sel.fechaDespacho}
+                              onChange={(e) => updateSel({ fechaDespacho: e.target.value })}
+                              className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-500 md:col-span-3">
+                            Si el número ya existe en la base se reutiliza; si no, se crea un despacho nuevo con estos datos.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-3 justify-end">
+              <button
+                type="button"
+                onClick={closeAssignDespachosModal}
+                disabled={assignDespachosSaving}
+                className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 hover:bg-slate-700 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmAssignDespachos}
+                disabled={assignDespachosSaving || assignDespachosLoading || assignDespachosItems.length === 0}
+                className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition disabled:opacity-50"
+              >
+                {assignDespachosSaving ? <Loader2 size={18} className="animate-spin" /> : <Ship size={18} />}
+                Asignar despachos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
       {ncOrder && (() => {
