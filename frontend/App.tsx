@@ -101,6 +101,8 @@ const App: React.FC = () => {
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  /** Modal de aviso post-guardado: artículos cuyas unidades quedaron sin número de despacho. */
+  const [despachoWarningsToShow, setDespachoWarningsToShow] = useState<string[] | null>(null);
   /** Filtro de archivados en pedidos: 'no' = ocultar archivados, 'yes' = ver todos, 'only' = solo archivados */
   const [orderArchivedFilter, setOrderArchivedFilter] = useState<'no' | 'yes' | 'only'>('no');
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
@@ -431,7 +433,7 @@ const App: React.FC = () => {
       setCurrentView('orders');
       if (Array.isArray((savedOrder as any)?.despachoWarnings) && (savedOrder as any).despachoWarnings.length > 0) {
         const warnings = (savedOrder as any).despachoWarnings as string[];
-        showToast('warning', warnings.slice(0, 2).join(' ') + (warnings.length > 2 ? ' ...' : ''));
+        setDespachoWarningsToShow(warnings);
       }
       try {
         localStorage.removeItem('lupo_order_template_draft');
@@ -1136,6 +1138,71 @@ const App: React.FC = () => {
           <span className="text-[10px] font-medium">Más</span>
         </button>
       </nav>
+
+      {/* Modal: avisos de artículos sin despacho al guardar un pedido */}
+      {despachoWarningsToShow && despachoWarningsToShow.length > 0 && (() => {
+        const canGoToDespachos = currentUser?.role === Role.ADMIN;
+        const closeModal = () => setDespachoWarningsToShow(null);
+        return (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+            onClick={closeModal}
+          >
+            <div
+              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 pt-6 pb-4 border-b border-slate-800">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 w-10 h-10 rounded-full bg-amber-500/15 text-amber-400 flex items-center justify-center">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-bold text-lg leading-tight">Artículos sin número de despacho</h3>
+                    <p className="text-slate-400 text-sm mt-1">
+                      El pedido se guardó correctamente, pero algunas unidades quedaron sin despacho asignado.
+                      Asignales un número en la sección Despachos para que aparezcan completas en remito y factura.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-4 max-h-[50vh] overflow-y-auto">
+                <ul className="space-y-2">
+                  {despachoWarningsToShow.map((w, idx) => (
+                    <li
+                      key={idx}
+                      className="text-sm text-slate-200 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 leading-relaxed"
+                    >
+                      {w}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="px-6 pb-6 pt-2 flex flex-wrap gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 hover:bg-slate-800 transition"
+                >
+                  Cerrar
+                </button>
+                {canGoToDespachos && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeModal();
+                      handleChangeView('despachos');
+                    }}
+                    className="px-5 py-2.5 rounded-xl font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-2 transition"
+                  >
+                    <Ship size={18} /> Ir a Despachos
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Mobile full menu drawer */}
       {mobileMenuOpen && (
