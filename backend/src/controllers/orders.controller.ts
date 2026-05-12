@@ -113,6 +113,52 @@ function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
 
+/**
+ * Devuelve una descripción legible de un artículo (nombre + talle + color + SKU) para mostrar
+ * en avisos al usuario. Si el item ya trae `sku`/`productName` desde el frontend se usan,
+ * y si faltan campos los completa consultando la variante por `variantId`.
+ */
+async function getItemLabelForWarning(item: any, variantId: string): Promise<string> {
+  const fromItemName = String(item?.productName || '').trim();
+  const fromItemSku = String(item?.sku || '').trim();
+  const fromItemSize = String(item?.sizeCode || '').trim();
+  const fromItemColor = String(item?.colorName || item?.colorCode || '').trim();
+
+  let name = fromItemName;
+  let sku = fromItemSku;
+  let size = fromItemSize;
+  let color = fromItemColor;
+
+  if (!name || !sku || !size || !color) {
+    const row = await get(
+      `SELECT p.name AS productName,
+              COALESCE(pv.sku, p.sku) AS sku,
+              s.size_code AS sizeCode,
+              c.name AS colorName
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       WHERE pv.id = ?
+       LIMIT 1`,
+      [variantId]
+    );
+    if (row) {
+      if (!name) name = String(row.productName || '').trim();
+      if (!sku) sku = String(row.sku || '').trim();
+      if (!size) size = String(row.sizeCode || '').trim();
+      if (!color) color = String(row.colorName || '').trim();
+    }
+  }
+
+  const base = name || sku;
+  if (!base) return variantId;
+  const extras = [size, color].filter(Boolean).join(' / ');
+  const skuSuffix = sku && sku !== base ? ` [${sku}]` : '';
+  return extras ? `${base} (${extras})${skuSuffix}` : `${base}${skuSuffix}`;
+}
+
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
 async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   const rows = await query(
@@ -429,7 +475,7 @@ export const createOrder = async (req: any, res: any) => {
         .filter((a) => !a.despachoId)
         .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
       if (unassignedQty > 0) {
-        const itemLabel = item?.sku || item?.productName || variantId;
+        const itemLabel = await getItemLabelForWarning(item, variantId);
         despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
       }
       for (const alloc of allocations) {
@@ -640,7 +686,7 @@ export const updateOrder = async (req: any, res: any) => {
         .filter((a) => !a.despachoId)
         .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
       if (unassignedQty > 0) {
-        const itemLabel = item?.sku || item?.productName || variantId;
+        const itemLabel = await getItemLabelForWarning(item, variantId);
         despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
       }
       let pickedRemaining = Math.max(0, Math.floor(Number(item.picked) || 0));
