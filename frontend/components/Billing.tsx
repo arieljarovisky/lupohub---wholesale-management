@@ -177,6 +177,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
+  /** Exporta Excel "Ventas por Jurisdicción" para el rango de fechas seleccionado. */
+  const handleExportVentasJurisdiccion = async () => {
+    const d = (desde || '').trim();
+    const h = (hasta || '').trim();
+    if (!d || !h) {
+      showToast('error', 'Elegí "Desde" y "Hasta" para exportar Ventas por Jurisdicción.');
+      return;
+    }
+    try {
+      await api.exportVentasJurisdiccion({ desde: d, hasta: h });
+      showToast('success', 'Excel de Ventas por Jurisdicción descargado.');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando Ventas por Jurisdicción');
+    }
+  };
+
   const handleExportBillingFromCustomersFile = async (file: File | null) => {
     const month = (retPerMonth || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) {
@@ -625,6 +641,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             title="Exportar TXT de retenciones/percepciones (layout RetPer)"
           >
             <FileSpreadsheet size={16} /> Exportar TXT IIBB (RetPer)
+          </button>
+          <button
+            type="button"
+            onClick={handleExportVentasJurisdiccion}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-700 text-white text-sm font-bold shadow-lg shadow-indigo-900/40 hover:bg-indigo-600"
+            title="Excel para el estudio con formato Tango (FAC + NC del rango Desde/Hasta). Provincia detectada de la ciudad del cliente."
+          >
+            <FileSpreadsheet size={16} /> Ventas por Jurisdicción (Excel)
           </button>
           <input
             ref={billingCustomersFileInputRef}

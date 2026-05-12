@@ -81,6 +81,8 @@ function labelTipoSaldoExporter(m) {
         return 'NOTA DE CREDITO';
     if (tipo === 'NOTA_CREDITO_IMPORTADA')
         return 'NOTA DE CREDITO (import.)';
+    if (tipo === 'NOTA_DEBITO_IMPORTADA')
+        return 'NOTA DE DEBITO (import.)';
     if (comprobanteIndicaNotaCredito(comp)) {
         if (tipo === 'RECIBO_IMPORTADO' ||
             tipo === 'FACTURA_IMPORTADA' ||
@@ -1947,60 +1949,29 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         const requestedSellerId = String(req.query.sellerId || '').trim();
         const from = String(req.query.from || '').trim();
         const to = String(req.query.to || '').trim();
-        const hasDateRange = Boolean(from || to);
         const sellerIdFilter = user.role === 'SELLER'
             ? user.id
             : (user.role === 'ADMIN' || user.role === 'WAREHOUSE') && requestedSellerId
                 ? requestedSellerId
                 : '';
+        const source = String(req.query.source || '').trim().toLowerCase();
+        const mode = source === 'tango'
+            ? 'tango'
+            : source === 'sistema' || source === 'solo-sistema'
+                ? 'sistema'
+                : 'historial';
         const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
         const sellerParams = sellerIdFilter ? [sellerIdFilter] : [];
         const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
         /**
-         * Filtrar NC por la misma “fecha de hecho” que la factura (factura emitida / pedido),
-         * no por la fecha de emisión de la NC: si la NC sale en otro mes, sigue apareciendo
-         * cuando el rango incluye la factura o el pedido. Si no hay fila invoice, se usa fecha del pedido.
+         * NC del sistema: rango por fecha de emisión de la NC o, en su defecto, factura/pedido
+         * (evita que queden fuera del export cuando el rango no coincide con la fecha de la factura).
          */
-        const ncDateFilter = `${from ? ' AND DATE(COALESCE(inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(inv.created_at, o.date)) <= ?' : ''}`;
+        const ncDateFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
         const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
         const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
         const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
-        const movementParams = [];
-        if (from)
-            movementParams.push(from);
-        if (to)
-            movementParams.push(to);
-        if (from)
-            movementParams.push(from);
-        if (to)
-            movementParams.push(to);
-        if (from)
-            movementParams.push(from);
-        if (to)
-            movementParams.push(to);
-        if (from)
-            movementParams.push(from);
-        if (to)
-            movementParams.push(to);
-        if (from)
-            movementParams.push(from);
-        if (to)
-            movementParams.push(to);
-        if (sellerIdFilter)
-            movementParams.push(sellerIdFilter);
-        const movements = yield (0, db_1.query)(`
-      SELECT
-        m.customer_id,
-        m.customer_name,
-        m.seller_id,
-        m.seller_name,
-        m.fecha,
-        m.tipo,
-        m.comprobante,
-        m.order_id,
-        m.debe,
-        m.haber
-      FROM (
+        const branchFacturaSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2025,10 +1996,8 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${invoiceDateFilter}
-
-        UNION ALL
-
+        WHERE 1=1 ${invoiceDateFilter}`;
+        const branchNcSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2055,10 +2024,8 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${ncDateFilter}
-
-        UNION ALL
-
+        WHERE 1=1 ${ncDateFilter}`;
+        const branchNcExterna = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2087,10 +2054,8 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
              REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
-          ${externalNcDateFilter}
-
-        UNION ALL
-
+          ${externalNcDateFilter}`;
+        const branchReciboSistema = `
         SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
@@ -2105,73 +2070,14 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${receiptDateFilter}
-
-        UNION ALL
-
-        SELECT
-          c.id AS customer_id,
-          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
-          c.seller_id AS seller_id,
-          u.name AS seller_name,
-          e.line_date AS fecha,
-          CASE
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            THEN 'NOTA_CREDITO_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            THEN 'FACTURA_IMPORTADA'
-            WHEN UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            THEN 'RECIBO_IMPORTADO'
-            ELSE 'MOV_IMPORTADO'
-          END AS tipo,
-          TRIM(CONCAT(
-            COALESCE(NULLIF(TRIM(e.numero), ''), ''),
-            CASE WHEN TRIM(COALESCE(e.detalle, '')) <> '' THEN CONCAT(' — ', LEFT(TRIM(e.detalle), 120)) ELSE '' END
-          )) AS comprobante,
-          NULL AS order_id,
-          CASE
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-            ) THEN 0
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
-            ELSE 0
-          END AS debe,
-          CASE
-            WHEN (
-              UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-              OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-              OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            ) THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
-            ELSE 0
-          END AS haber
-        FROM customer_multimedia_entries e
-        JOIN customers c ON c.id = e.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-        WHERE e.importe IS NOT NULL
-          AND ABS(COALESCE(e.importe, 0)) > 0.001
-          ${importedDateFilter}
-          AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
-          AND (
-            UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('FAC', 'FACTURA', 'FCA', 'FCB', 'FCC', 'FCE', 'COMP', 'NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO', 'REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-            OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-          )
+        WHERE 1=1 ${receiptDateFilter}`;
+        /**
+         * Rama de importados Multimedia (Tango). En modo `tango` no se deduplican recibos
+         * contra `payments` porque por definición el export es solo lo importado.
+         */
+        const dedupeReciboPagos = mode === 'tango'
+            ? ''
+            : `
           AND NOT (
             UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
             AND TRIM(COALESCE(e.numero, '')) <> ''
@@ -2190,7 +2096,134 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                   )
                 END
             )
-          )
+          )`;
+        /**
+         * Patrones permisivos para detectar NC importadas de Tango.
+         * Tango exporta el "Tipo" tal cual: NC, NCA, NCB, NCC, NCE, N/C, N/CR, CRE, CRED, NOTA CRED,
+         * y en muchas instalaciones aparece como CDE (Crédito) o CRÉ. Detectamos por prefijo.
+         */
+        const isNcImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N/C%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N.C%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CDE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CRE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'CRÉ%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRED%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%CRÉD%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRED%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉD%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+      OR UPPER(COALESCE(e.numero, '')) LIKE 'NC %'
+      OR UPPER(COALESCE(e.numero, '')) LIKE 'N/C%'
+    )`;
+        /**
+         * Notas de débito. Las dejamos identificadas para que sumen al saldo (DEBE)
+         * en lugar de quedar como MOV_IMPORTADO con 0.
+         */
+        const isNdImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'ND%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'N/D%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DEB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DBE%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'DÉB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%DEB%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'NOTA%DÉB%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%DEB%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%DÉB%'
+    )`;
+        const isFacturaImportada = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'F/A%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('COMP', 'COMPROBANTE')
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%FACTURA%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
+    )`;
+        const isReciboImportado = `(
+      UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
+      OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('PAGO', 'COBRO', 'INGRESO', 'R/C')
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%RECIBO%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%PAGO%'
+      OR UPPER(COALESCE(e.detalle, '')) LIKE '%COBRO%'
+    )`;
+        const branchImportado = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          CASE
+            WHEN ${isNcImportado} THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN ${isNdImportado} THEN 'NOTA_DEBITO_IMPORTADA'
+            WHEN ${isFacturaImportada} THEN 'FACTURA_IMPORTADA'
+            WHEN ${isReciboImportado} THEN 'RECIBO_IMPORTADO'
+            ELSE 'MOV_IMPORTADO'
+          END AS tipo,
+          TRIM(CONCAT(
+            COALESCE(NULLIF(TRIM(e.numero), ''), ''),
+            CASE WHEN TRIM(COALESCE(e.detalle, '')) <> '' THEN CONCAT(' — ', LEFT(TRIM(e.detalle), 120)) ELSE '' END
+          )) AS comprobante,
+          NULL AS order_id,
+          CASE
+            WHEN ${isNcImportado} THEN 0
+            WHEN ${isFacturaImportada} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isNdImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN ${isNcImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isReciboImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE e.importe IS NOT NULL
+          AND ABS(COALESCE(e.importe, 0)) > 0.001
+          ${importedDateFilter}
+          AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
+          AND (${isNcImportado} OR ${isNdImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
+        /**
+         * Cada rama aporta los placeholders from/to (si los hay) en este orden.
+         * Mantener este array sincronizado con `branchesByMode` define `movementParams`.
+         */
+        const branchesByMode = {
+            historial: [
+                branchFacturaSistema,
+                branchNcSistema,
+                branchNcExterna,
+                branchReciboSistema,
+                branchImportado
+            ],
+            sistema: [branchFacturaSistema, branchNcSistema, branchReciboSistema],
+            tango: [branchImportado]
+        };
+        const branches = branchesByMode[mode];
+        const movementParams = [];
+        for (let b = 0; b < branches.length; b += 1) {
+            if (from)
+                movementParams.push(from);
+            if (to)
+                movementParams.push(to);
+        }
+        if (sellerIdFilter)
+            movementParams.push(sellerIdFilter);
+        const movements = yield (0, db_1.query)(`
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        ${branches.join('\n        UNION ALL\n')}
       ) m
       ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -2552,7 +2585,8 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             .replace(/[\\/:*?"<>|]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
-        const filename = `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
+        const modoLabel = mode;
+        const filename = `saldos ${modoLabel} - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         return res.send(buf);

@@ -1928,6 +1928,21 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Exporta Excel "Ventas por Jurisdicción" con el formato del estudio (FAC + NC del rango de fechas). */
+  exportVentasJurisdiccion: async (params: { desde: string; hasta: string }): Promise<void> => {
+    const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta }).toString();
+    const blob = await getBlob(`/billing/export-ventas-jurisdiccion?${qs}`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const yyyymm = (params.desde || '').slice(0, 7).replace('-', '');
+    a.download = `VENTAS_JURISDICCION_${yyyymm || 'rango'}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string; province?: string }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

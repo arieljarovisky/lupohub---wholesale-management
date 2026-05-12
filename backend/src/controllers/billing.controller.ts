@@ -559,6 +559,240 @@ export const exportBilling = async (req: Request, res: Response) => {
   }
 }
 
+/** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
+function detectProvincia(city: string, address: string = ''): { code: string; name: string } {
+  const haystack = `${city || ''} ${address || ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (!haystack.trim()) return { code: '', name: '' };
+
+  /** Códigos conocidos según Excel modelo del estudio contable (Tango). El resto va vacío y se completa manual. */
+  const PROVINCIAS: Array<{ code: string; name: string; patterns: RegExp[] }> = [
+    { code: '01', name: 'CAPITAL', patterns: [/capital\s*federal/, /\bcaba\b/, /ciudad\s*autonoma/, /^capital$/] },
+    { code: '02', name: 'BUENOS AIRES', patterns: [/buenos\s*aires/, /\bbs\s*\.?\s*as\b/, /provincia\s*de\s*buenos\s*aires/] },
+    { code: '',   name: 'CATAMARCA', patterns: [/catamarca/] },
+    { code: '',   name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
+    { code: '',   name: 'CHUBUT', patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/] },
+    { code: '',   name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
+    { code: '',   name: 'CORRIENTES', patterns: [/corrientes/] },
+    { code: '09', name: 'ENTRE RIOS', patterns: [/entre\s*rios/, /\bparana\b/, /concordia/, /gualeguaychu/] },
+    { code: '',   name: 'FORMOSA', patterns: [/formosa/] },
+    { code: '',   name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
+    { code: '',   name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
+    { code: '',   name: 'LA RIOJA', patterns: [/la\s*rioja/] },
+    { code: '05', name: 'MENDOZA', patterns: [/mendoza/, /godoy\s*cruz/, /malargue/, /san\s*rafael/] },
+    { code: '',   name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
+    { code: '',   name: 'NEUQUEN', patterns: [/neuquen/] },
+    { code: '',   name: 'RIO NEGRO', patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/] },
+    { code: '',   name: 'SALTA', patterns: [/\bsalta\b/] },
+    { code: '',   name: 'SAN JUAN', patterns: [/san\s*juan/] },
+    { code: '',   name: 'SAN LUIS', patterns: [/san\s*luis/] },
+    { code: '',   name: 'SANTA CRUZ', patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/] },
+    { code: '10', name: 'SANTA FE', patterns: [/santa\s*fe/, /\brosario\b/, /rafaela/, /reconquista/, /venado\s*tuerto/] },
+    { code: '',   name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
+    { code: '24', name: 'Tierra del Fuego', patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/] },
+    { code: '',   name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] }
+  ];
+  // Buscar CAPITAL antes que BUENOS AIRES para resolver ambigüedad (CAPITAL FEDERAL contiene "buenos aires" en algunos formatos).
+  for (const p of PROVINCIAS) {
+    if (p.patterns.some((rx) => rx.test(haystack))) {
+      return { code: p.code, name: p.name };
+    }
+  }
+  return { code: '', name: '' };
+}
+
+/** Convierte 'YYYY-MM-DD' (o Date) al serial de Excel (días desde 1899-12-30, con bug del año bisiesto 1900). */
+function toExcelSerialDate(value: any): number {
+  const s = typeof value === 'string' ? value : value instanceof Date ? value.toISOString().slice(0, 10) : '';
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return 0;
+  const yyyy = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  const utc = Date.UTC(yyyy, mm - 1, dd);
+  return Math.floor(utc / 86400000) + 25569;
+}
+
+/** Letra del comprobante AFIP a partir de `cbte_tipo`. 1/3 = A, 6/8 = B, 11/13 = C. */
+function letraFromCbteTipo(t: any): string {
+  const n = Number(t);
+  if (n === 1 || n === 3) return 'A';
+  if (n === 6 || n === 8) return 'B';
+  if (n === 11 || n === 13) return 'C';
+  if (n === 51) return 'M';
+  return 'A';
+}
+
+/**
+ * Exporta el Excel "Ventas por Jurisdicción" con el formato esperado por el estudio contable.
+ * Columnas: COD_PROVI, NOM_PROVI, FECHA_EMI (serial), T_COMP (FAC/CDE), N_COMP (A0002000012131),
+ *           RAZON_SOC, SIN_IVA, IMP_IVA, IMPUEST, IMPORTE, COD_TRANSP, NOM_TRANSP.
+ * NC va con montos en negativo y sin transporte.
+ */
+export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) => {
+  try {
+    const { desde, hasta } = req.query as { desde?: string; hasta?: string };
+    if (!desde || !hasta) {
+      return res.status(400).json({ message: 'Faltan parámetros desde / hasta (YYYY-MM-DD)' });
+    }
+
+    const authUser = (req as any).user;
+    const sellerJoinSql = authUser?.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+    const sellerParam = authUser?.role === 'SELLER' ? [authUser.id] : [];
+
+    const rows = await query(
+      `
+      SELECT *
+      FROM (
+        SELECT
+          'FAC' AS tipo,
+          o.date AS fecha,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde,
+          i.cbte_hasta,
+          o.total AS neto,
+          COALESCE(i.agip_ret_per, 0) AS otros_impuestos,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS razon_social,
+          COALESCE(c.city, '') AS city,
+          COALESCE(c.address, '') AS address
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
+
+        UNION ALL
+
+        SELECT
+          'CDE' AS tipo,
+          o.date AS fecha,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde,
+          cn.cbte_hasta,
+          cn.amount_credited AS neto,
+          0 AS otros_impuestos,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS razon_social,
+          COALESCE(c.city, '') AS city,
+          COALESCE(c.address, '') AS address
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
+      ) AS x
+      ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
+      `,
+      [desde, hasta, ...sellerParam, desde, hasta, ...sellerParam]
+    ) as any[];
+
+    // Primer transporte por cliente (fallback a customers.transport_number).
+    const customerIds = Array.from(new Set(rows.map((r) => String(r.customer_id || '')))).filter(Boolean);
+    const transportesByCustomer = new Map<string, { code: string; name: string }>();
+    if (customerIds.length > 0) {
+      const placeholders = customerIds.map(() => '?').join(',');
+      const ct = await query(
+        `
+        SELECT ct.customer_id, t.name, t.id
+        FROM customer_transportes ct
+        JOIN transportes t ON t.id = ct.transporte_id
+        WHERE ct.customer_id IN (${placeholders})
+        ORDER BY ct.customer_id ASC, LOWER(t.name) ASC, t.id ASC
+        `,
+        customerIds
+      ) as any[];
+      for (const t of ct) {
+        const k = String(t.customer_id);
+        if (!transportesByCustomer.has(k)) {
+          transportesByCustomer.set(k, { code: '', name: String(t.name || '').trim() });
+        }
+      }
+      // Fallback: si el cliente no tiene transporte asignado en customer_transportes, usar `transport_number` del cliente.
+      const missing = customerIds.filter((id) => !transportesByCustomer.has(id));
+      if (missing.length > 0) {
+        const ph = missing.map(() => '?').join(',');
+        const fallbackRows = await query(
+          `SELECT id, transport_number FROM customers WHERE id IN (${ph})`,
+          missing
+        ) as any[];
+        for (const r of fallbackRows) {
+          const raw = String(r.transport_number || '').trim();
+          if (!raw) continue;
+          // Formato esperable "código - nombre"; si no aplica, se deja todo en NOM_TRANSP.
+          const sep = raw.split(/\s*-\s*/);
+          if (sep.length >= 2 && /^\d+$/.test(sep[0].trim())) {
+            transportesByCustomer.set(String(r.id), { code: sep[0].trim(), name: sep.slice(1).join(' - ').trim() });
+          } else {
+            transportesByCustomer.set(String(r.id), { code: '', name: raw });
+          }
+        }
+      }
+    }
+
+    const data: any[][] = [];
+    for (const r of rows) {
+      const tipo = String(r.tipo); // 'FAC' o 'CDE'
+      const signo = tipo === 'CDE' ? -1 : 1;
+      const sinIva = round2((Number(r.neto) || 0) * signo);
+      const iva = round2(sinIva * 0.21);
+      const otros = round2((Number(r.otros_impuestos) || 0) * signo);
+      const importe = round2(sinIva + iva + otros);
+
+      const letra = letraFromCbteTipo(r.cbte_tipo);
+      const pv = String(Number(r.punto_venta) || 0).padStart(4, '0');
+      const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
+      const nComp = `${letra}${pv}${nro}`;
+
+      const prov = detectProvincia(String(r.city || ''), String(r.address || ''));
+      const fechaSerial = toExcelSerialDate(r.fecha);
+
+      // Para NC: sin transporte, igual que el modelo del estudio.
+      const transp = tipo === 'CDE'
+        ? { code: '', name: '' }
+        : (transportesByCustomer.get(String(r.customer_id)) || { code: '', name: '' });
+
+      data.push([
+        prov.code,
+        prov.name,
+        fechaSerial,
+        tipo,
+        nComp,
+        String(r.razon_social || '').trim(),
+        sinIva,
+        iva,
+        otros,
+        importe,
+        transp.code,
+        transp.name,
+        ''
+      ]);
+    }
+
+    const headers = [
+      'COD_PROVI', 'NOM_PROVI', 'FECHA_EMI', 'T_COMP', 'N_COMP',
+      'RAZON_SOC', 'SIN_IVA', 'IMP_IVA', 'IMPUEST', 'IMPORTE',
+      'COD_TRANSP', 'NOM_TRANSP', ''
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const yyyymm = (desde || '').slice(0, 7).replace('-', '');
+    const filename = `VENTAS_JURISDICCION_${yyyymm || 'rango'}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (error: any) {
+    console.error('exportVentasJurisdiccionXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando ventas por jurisdicción' });
+  }
+};
+
 /** Exporta TXT "RetPer_YYYYMM.txt" con layout fijo compatible con estudio (AGIP). */
 export const exportRetPerTxt = async (req: Request, res: Response) => {
   try {

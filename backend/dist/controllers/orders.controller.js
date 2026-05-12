@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
@@ -146,6 +146,52 @@ function resolveDespachoIdForItem(item, variantId) {
 }
 function mapPaymentStatus(row) {
     return (row === null || row === void 0 ? void 0 : row.payment_status) === 'pendiente' ? 'pendiente' : 'pagado';
+}
+/**
+ * Devuelve una descripción legible de un artículo (nombre + talle + color + SKU) para mostrar
+ * en avisos al usuario. Si el item ya trae `sku`/`productName` desde el frontend se usan,
+ * y si faltan campos los completa consultando la variante por `variantId`.
+ */
+function getItemLabelForWarning(item, variantId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const fromItemName = String((item === null || item === void 0 ? void 0 : item.productName) || '').trim();
+        const fromItemSku = String((item === null || item === void 0 ? void 0 : item.sku) || '').trim();
+        const fromItemSize = String((item === null || item === void 0 ? void 0 : item.sizeCode) || '').trim();
+        const fromItemColor = String((item === null || item === void 0 ? void 0 : item.colorName) || (item === null || item === void 0 ? void 0 : item.colorCode) || '').trim();
+        let name = fromItemName;
+        let sku = fromItemSku;
+        let size = fromItemSize;
+        let color = fromItemColor;
+        if (!name || !sku || !size || !color) {
+            const row = yield (0, db_1.get)(`SELECT p.name AS productName,
+              COALESCE(pv.sku, p.sku) AS sku,
+              s.size_code AS sizeCode,
+              c.name AS colorName
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       WHERE pv.id = ?
+       LIMIT 1`, [variantId]);
+            if (row) {
+                if (!name)
+                    name = String(row.productName || '').trim();
+                if (!sku)
+                    sku = String(row.sku || '').trim();
+                if (!size)
+                    size = String(row.sizeCode || '').trim();
+                if (!color)
+                    color = String(row.colorName || '').trim();
+            }
+        }
+        const base = name || sku;
+        if (!base)
+            return variantId;
+        const extras = [size, color].filter(Boolean).join(' / ');
+        const skuSuffix = sku && sku !== base ? ` [${sku}]` : '';
+        return extras ? `${base} (${extras})${skuSuffix}` : `${base}${skuSuffix}`;
+    });
 }
 /** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
 function getOrderNetFromLineItems(orderId) {
@@ -438,7 +484,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 .filter((a) => !a.despachoId)
                 .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
             if (unassignedQty > 0) {
-                const itemLabel = (item === null || item === void 0 ? void 0 : item.sku) || (item === null || item === void 0 ? void 0 : item.productName) || variantId;
+                const itemLabel = yield getItemLabelForWarning(item, variantId);
                 despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
             }
             for (const alloc of allocations) {
@@ -629,7 +675,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 .filter((a) => !a.despachoId)
                 .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
             if (unassignedQty > 0) {
-                const itemLabel = (item === null || item === void 0 ? void 0 : item.sku) || (item === null || item === void 0 ? void 0 : item.productName) || variantId;
+                const itemLabel = yield getItemLabelForWarning(item, variantId);
                 despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
             }
             let pickedRemaining = Math.max(0, Math.floor(Number(item.picked) || 0));
@@ -1271,3 +1317,186 @@ const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, vo
     }
 });
 exports.exportTopWholesaleProductsMetricsXlsx = exportTopWholesaleProductsMetricsXlsx;
+/**
+ * Lista los ítems de un pedido que no tienen número de despacho asignado.
+ * Devuelve además detalle de producto/variante para mostrar en el modal de corrección.
+ */
+const getOrderItemsMissingDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.params;
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const order = yield (0, db_1.get)('SELECT id FROM orders WHERE id = ?', [id]);
+        if (!order)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const rows = yield (0, db_1.query)(`SELECT
+         i.id AS orderItemId,
+         i.variant_id AS variantId,
+         i.quantity,
+         pc.product_id AS productId,
+         COALESCE(pv.sku, p.sku) AS sku,
+         p.name AS productName,
+         s.size_code AS sizeCode,
+         c.name AS colorName,
+         p.ultimo_despacho_id AS productLastDespachoId,
+         d_last.numero_despacho AS productLastDespachoNumero
+       FROM order_items i
+       JOIN product_variants pv ON pv.id = i.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN despachos d_last ON d_last.id = p.ultimo_despacho_id
+       WHERE i.order_id = ? AND i.despacho_id IS NULL
+       ORDER BY p.name ASC, i.id ASC`, [id]);
+        res.json(rows.map((r) => {
+            var _a, _b, _c, _d, _e, _f;
+            return ({
+                orderItemId: r.orderItemId,
+                variantId: r.variantId,
+                productId: r.productId,
+                sku: (_a = r.sku) !== null && _a !== void 0 ? _a : '',
+                productName: (_b = r.productName) !== null && _b !== void 0 ? _b : '',
+                sizeCode: (_c = r.sizeCode) !== null && _c !== void 0 ? _c : '',
+                colorName: (_d = r.colorName) !== null && _d !== void 0 ? _d : '',
+                quantity: Number(r.quantity) || 0,
+                productLastDespachoId: (_e = r.productLastDespachoId) !== null && _e !== void 0 ? _e : null,
+                productLastDespachoNumero: (_f = r.productLastDespachoNumero) !== null && _f !== void 0 ? _f : null
+            });
+        }));
+    }
+    catch (error) {
+        console.error('getOrderItemsMissingDespacho:', error);
+        res.status(500).json({ message: 'Error obteniendo ítems sin despacho del pedido' });
+    }
+});
+exports.getOrderItemsMissingDespacho = getOrderItemsMissingDespacho;
+/**
+ * Asigna despachos (existentes o nuevos por número) a una lista de order_items de un pedido.
+ * Body: { assignments: [{ orderItemId, despachoId?, numeroDespacho?, paisOrigen?, fechaDespacho? }] }
+ * Si viene `numeroDespacho` y no existe, crea el despacho; si existe lo reutiliza.
+ * Solo afecta a items del pedido indicado y, por seguridad, solo si actualmente tienen despacho_id NULL.
+ */
+const assignDespachosToOrderItems = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const { id } = req.params;
+    const assignmentsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.assignments) ? req.body.assignments : [];
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    if (assignmentsRaw.length === 0) {
+        return res.status(400).json({ message: 'No hay asignaciones para aplicar' });
+    }
+    try {
+        const order = yield (0, db_1.get)('SELECT id FROM orders WHERE id = ?', [id]);
+        if (!order)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const orderItemIds = assignmentsRaw
+            .map((a) => String((a === null || a === void 0 ? void 0 : a.orderItemId) || '').trim())
+            .filter(Boolean);
+        if (orderItemIds.length === 0) {
+            return res.status(400).json({ message: 'Las asignaciones no traen orderItemId válido' });
+        }
+        const placeholders = orderItemIds.map(() => '?').join(',');
+        const itemsRows = yield (0, db_1.query)(`SELECT i.id, i.variant_id, i.despacho_id, pc.product_id, p.ultimo_despacho_id AS productLastDespachoId
+       FROM order_items i
+       JOIN product_variants pv ON pv.id = i.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE i.order_id = ? AND i.id IN (${placeholders})`, [id, ...orderItemIds]);
+        if (itemsRows.length === 0) {
+            return res.status(404).json({ message: 'Ningún ítem coincide con el pedido' });
+        }
+        const itemsById = new Map(itemsRows.map((r) => [String(r.id), r]));
+        const resolved = [];
+        const errors = [];
+        for (const a of assignmentsRaw) {
+            const orderItemId = String((a === null || a === void 0 ? void 0 : a.orderItemId) || '').trim();
+            const itemRow = itemsById.get(orderItemId);
+            if (!orderItemId || !itemRow) {
+                errors.push(`Ítem ${orderItemId || '(sin id)'} no pertenece al pedido o no existe`);
+                continue;
+            }
+            if (itemRow.despacho_id) {
+                errors.push(`El ítem ${orderItemId} ya tiene un despacho asignado; usá la edición del pedido para cambiarlo`);
+                continue;
+            }
+            let despachoId = String((a === null || a === void 0 ? void 0 : a.despachoId) || '').trim() || null;
+            let numeroDespacho = String((a === null || a === void 0 ? void 0 : a.numeroDespacho) || '').trim();
+            const paisOrigen = String((a === null || a === void 0 ? void 0 : a.paisOrigen) || '').trim() || null;
+            const fechaDespachoRaw = String((a === null || a === void 0 ? void 0 : a.fechaDespacho) || '').trim();
+            if (!despachoId && !numeroDespacho) {
+                errors.push(`El ítem ${orderItemId} no trae despachoId ni numeroDespacho`);
+                continue;
+            }
+            let created = false;
+            let resolvedNumero = '';
+            let resolvedPais = paisOrigen;
+            if (despachoId) {
+                const row = yield (0, db_1.get)('SELECT id, numero_despacho, pais_origen FROM despachos WHERE id = ?', [despachoId]);
+                if (!row) {
+                    errors.push(`Despacho ${despachoId} no encontrado`);
+                    continue;
+                }
+                resolvedNumero = String(row.numero_despacho || '');
+                resolvedPais = paisOrigen || row.pais_origen || null;
+            }
+            else {
+                const existing = yield (0, db_1.get)('SELECT id, numero_despacho, pais_origen FROM despachos WHERE numero_despacho = ?', [numeroDespacho]);
+                if (existing === null || existing === void 0 ? void 0 : existing.id) {
+                    despachoId = String(existing.id);
+                    resolvedNumero = String(existing.numero_despacho || numeroDespacho);
+                    resolvedPais = paisOrigen || existing.pais_origen || null;
+                }
+                else {
+                    const newId = (0, uuid_1.v4)();
+                    const fecha = fechaDespachoRaw || new Date().toISOString().slice(0, 10);
+                    const pais = paisOrigen || 'Brasil';
+                    yield (0, db_1.execute)(`INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, estado, notas)
+             VALUES (?, ?, ?, ?, 'despachado', ?)`, [newId, numeroDespacho, fecha, pais, 'Creado al asignar a items de pedido']);
+                    despachoId = newId;
+                    resolvedNumero = numeroDespacho;
+                    resolvedPais = pais;
+                    created = true;
+                }
+            }
+            resolved.push({
+                orderItemId,
+                productId: (_b = itemRow.product_id) !== null && _b !== void 0 ? _b : null,
+                despachoId: despachoId,
+                numeroDespacho: resolvedNumero,
+                paisOrigen: resolvedPais,
+                created
+            });
+        }
+        if (resolved.length === 0) {
+            return res.status(400).json({
+                message: 'No se pudo aplicar ninguna asignación',
+                errors
+            });
+        }
+        for (const r of resolved) {
+            yield (0, db_1.execute)('UPDATE order_items SET despacho_id = ? WHERE id = ? AND order_id = ? AND despacho_id IS NULL', [r.despachoId, r.orderItemId, id]);
+            if (r.productId) {
+                yield (0, db_1.execute)(`UPDATE products
+             SET ultimo_despacho_id = ?,
+                 pais_origen = COALESCE(?, pais_origen)
+           WHERE id = ?`, [r.despachoId, r.paisOrigen, r.productId]);
+            }
+        }
+        res.json({
+            orderId: id,
+            applied: resolved.map((r) => ({
+                orderItemId: r.orderItemId,
+                despachoId: r.despachoId,
+                numeroDespacho: r.numeroDespacho,
+                created: r.created
+            })),
+            errors
+        });
+    }
+    catch (error) {
+        console.error('assignDespachosToOrderItems:', error);
+        res.status(500).json({ message: 'Error asignando despachos a los ítems del pedido' });
+    }
+});
+exports.assignDespachosToOrderItems = assignDespachosToOrderItems;

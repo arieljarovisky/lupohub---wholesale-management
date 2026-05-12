@@ -23,6 +23,7 @@ router.use(auth_1.authMiddleware, auth_1.billingAccessMiddleware);
 router.get('/', billing_controller_1.listBilling);
 router.get('/export', billing_controller_1.exportBilling);
 router.get('/export-retper', billing_controller_1.exportRetPerTxt);
+router.get('/export-ventas-jurisdiccion', billing_controller_1.exportVentasJurisdiccionXlsx);
 router.post('/export-by-customers-file', uploadAgipPadronFile, billing_controller_1.exportBillingByCustomersFile);
 router.post('/agip-padron/import/start', billing_controller_1.importAgipPadronStart);
 router.post('/agip-padron/import/chunk', billing_controller_1.importAgipPadronChunk);
