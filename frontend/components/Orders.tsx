@@ -334,19 +334,26 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   ) => {
     const customer = customers.find(c => c.id === order.customerId);
     const localRemitente = getRemitente();
-    // Merge en orden de prioridad para asegurar que el CAI siempre tenga el valor del servidor (no del localStorage):
-    //   1) `localRemitente` (localStorage)  ←  fallback histórico, sin CAI si no se guardó acá
-    //   2) `remitenteFromApi` (backend)     ←  fuente de verdad: incluye caiRemito y caiRemitoVencimiento
-    //   3) `issuerFromApi` (AFIP env vars)  ←  emisor fiscal: pisa razón social/CUIT/domicilio
-    // El logo siempre lo conservamos del local (es el SVG fijo del corporativo).
-    const remitenteServerSafe = remitenteFromApi || {};
-    const remitenteMerged: any = { ...localRemitente, ...remitenteServerSafe };
+    // Merge "soft": un campo del servidor solo pisa al local si tiene valor real (no string vacío / null).
+    // Antes hacíamos `{ ...local, ...server }` lo que rompía: si el backend devolvía `caiRemito: ''`,
+    // sobrescribía el valor válido del localStorage y el remito salía sin CAI.
+    const mergeSoft = (base: any, extra: any): any => {
+      if (!extra) return { ...base };
+      const out: any = { ...base };
+      for (const k of Object.keys(extra)) {
+        const v = (extra as any)[k];
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' && v.trim() === '') continue;
+        out[k] = v;
+      }
+      return out;
+    };
+    // Prioridad: 1) localStorage  ←  2) backend (remitente_config)  ←  3) AFIP issuer env (solo razón social / CUIT / domicilio).
+    let remitenteMerged: any = mergeSoft(localRemitente, remitenteFromApi);
     if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
-      Object.assign(remitenteMerged, issuerFromApi);
+      remitenteMerged = mergeSoft(remitenteMerged, issuerFromApi);
     }
     remitenteMerged.logoUrl = localRemitente.logoUrl; // siempre el SVG fijo
-    if (!remitenteMerged.email) remitenteMerged.email = localRemitente.email;
-    if (!remitenteMerged.phone) remitenteMerged.phone = localRemitente.phone;
     const remitente = remitenteMerged;
     const items = sortItemsForFacturaPrint(order.items.map(enrichItem), products);
     const formatDateShort = (d: string) => {
@@ -882,14 +889,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const mergedRemitenteForFactura = () => {
     const localRemitente = getRemitente();
-    const remitenteServerSafe: any = remitenteFromApi || {};
-    const merged: any = { ...localRemitente, ...remitenteServerSafe };
+    const mergeSoft = (base: any, extra: any): any => {
+      if (!extra) return { ...base };
+      const out: any = { ...base };
+      for (const k of Object.keys(extra)) {
+        const v = (extra as any)[k];
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' && v.trim() === '') continue;
+        out[k] = v;
+      }
+      return out;
+    };
+    let merged: any = mergeSoft(localRemitente, remitenteFromApi);
     if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
-      Object.assign(merged, issuerFromApi);
+      merged = mergeSoft(merged, issuerFromApi);
     }
     merged.logoUrl = localRemitente.logoUrl;
-    if (!merged.email) merged.email = localRemitente.email;
-    if (!merged.phone) merged.phone = localRemitente.phone;
     return merged;
   };
 

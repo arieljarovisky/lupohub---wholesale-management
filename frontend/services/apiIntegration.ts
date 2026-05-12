@@ -1,5 +1,6 @@
 import { Product, ApiConfig, RemitenteConfig } from '../types';
 import FIXED_COMPANY_LOGO_URL from '../Lupo_logo.svg (1).png?inline';
+import { request } from './httpClient';
 
 // Helper to get config from localStorage (in a real app, this might come from a secure backend or context)
 export const getApiConfig = (): ApiConfig => {
@@ -37,8 +38,32 @@ export const getRemitente = (): RemitenteConfig => {
   };
 };
 
+/**
+ * Persiste los datos del remitente en **dos lugares**:
+ *  1. `localStorage` (acceso síncrono inmediato para impresión sin tener que esperar al backend).
+ *  2. La base de datos (vía `PUT /api/afip/remitente`), para que el CAI y demás datos estén
+ *     disponibles desde cualquier navegador / sesión.
+ *
+ * El backend incluye campos como `caiRemito` y `caiRemitoVencimiento` que son críticos para el
+ * pie del remito; antes solo se guardaban en localStorage y por eso desaparecían al usar otro navegador.
+ */
 export const saveRemitente = (config: RemitenteConfig) => {
   localStorage.setItem(REMITENTE_KEY, JSON.stringify(config));
+  // Persistimos también en el backend. Es fire-and-forget: si falla (red caída / sin login),
+  // los datos quedan en localStorage y el usuario puede reintentar más tarde.
+  void request('/afip/remitente', 'PUT', {
+    businessName: config.businessName ?? '',
+    address: config.address ?? '',
+    city: config.city ?? '',
+    cuit: config.cuit ?? '',
+    email: config.email ?? '',
+    phone: config.phone ?? '',
+    logoUrl: config.logoUrl ?? '',
+    caiRemito: config.caiRemito ?? '',
+    caiRemitoVencimiento: config.caiRemitoVencimiento ?? ''
+  }).catch((err) => {
+    console.warn('[saveRemitente] No se pudo persistir en el backend:', err?.message || err);
+  });
 };
 
 // --- TIENDA NUBE API ---

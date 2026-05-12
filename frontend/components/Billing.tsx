@@ -87,14 +87,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
   const mergedRemitenteForFactura = () => {
     const localRemitente = getRemitente();
-    const remitenteServerSafe: any = remitenteFromApi || {};
-    const merged: any = { ...localRemitente, ...remitenteServerSafe };
+    const mergeSoft = (base: any, extra: any): any => {
+      if (!extra) return { ...base };
+      const out: any = { ...base };
+      for (const k of Object.keys(extra)) {
+        const v = (extra as any)[k];
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' && v.trim() === '') continue;
+        out[k] = v;
+      }
+      return out;
+    };
+    let merged: any = mergeSoft(localRemitente, remitenteFromApi);
     if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
-      Object.assign(merged, issuerFromApi);
+      merged = mergeSoft(merged, issuerFromApi);
     }
     merged.logoUrl = localRemitente.logoUrl;
-    if (!merged.email) merged.email = localRemitente.email;
-    if (!merged.phone) merged.phone = localRemitente.phone;
     return merged;
   };
 
