@@ -152,9 +152,9 @@ export const createProduct = async (req: any, res: any) => {
       baseSku = parts.slice(0, -2).join('-');
       sizeCode = parts[parts.length - 2];
       colorCode = parts[parts.length - 1];
-    } else if (sku.length >= 13 && !sku.includes('-')) {
+    } else if (sku.length >= 12 && !sku.includes('-')) {
       const parsed = parseCodigoTango(sku);
-      if (parsed.codigo13.length >= 13) {
+      if (parsed.articulo && parsed.talle && parsed.color) {
         baseSku = parsed.articulo;
         sizeCode = parsed.talle;
         colorCode = parsed.color;
@@ -1020,15 +1020,51 @@ function findColumn(headers: string[], name: string): number {
   return -1;
 }
 
-function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; color: string; codigo13: string } {
-  const raw = (codigo != null ? String(codigo).trim() : '');
-  const s = raw.replace(/\D/g, '');
-  return {
-    articulo: s.slice(0, 7),
-    talle: s.slice(7, 10),
-    color: s.slice(10, 13),
-    codigo13: s.slice(0, 13),
-  };
+/**
+ * Parsea un código Tango respetando los caracteres no numéricos del prefijo (ej.: "Q05875", "C01303").
+ *
+ * El layout real del código en Tango es de ancho fijo:
+ *   - Posiciones 0..8 (9 caracteres): código del artículo, padded a la derecha con espacios.
+ *     Ej.: "Q05875   ", "C01303   ", "0012501  ", "0587513  "
+ *   - Posiciones 9..11 (3 caracteres): talle.
+ *   - Posiciones 12..14 (3 caracteres): color.
+ *
+ * Versiones anteriores hacían `raw.replace(/\D/g, '')` antes de cortar; eso **eliminaba** los prefijos
+ * tipo "Q"/"C" del SKU y producía duplicados (ej. "Q05875" y "0587500" como dos productos distintos).
+ * Este parser conserva el prefijo como parte del artículo.
+ *
+ * `codigoCompleto` mantiene el código completo *sin espacios* (artículo + talle + color), útil para
+ * usarlo como SKU de variante (legible en remitos/facturas).
+ */
+function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; color: string; codigo13: string; codigoCompleto: string } {
+  const raw = (codigo != null ? String(codigo) : '');
+  if (!raw) return { articulo: '', talle: '', color: '', codigo13: '', codigoCompleto: '' };
+
+  const padded = raw.padEnd(15, ' ');
+  let articulo = padded.slice(0, 9).trim();
+  let talle = padded.slice(9, 12).trim();
+  let color = padded.slice(12, 15).trim();
+
+  // Si el formato no respeta el ancho fijo (códigos más cortos o concatenados sin padding) intentamos un fallback.
+  if (!articulo) {
+    const cleaned = raw.trim();
+    if (cleaned.length >= 13) {
+      // Asumimos formato concatenado: 7 artículo + 3 talle + 3 color (puede tener letra al inicio o no).
+      articulo = cleaned.slice(0, cleaned.length - 6);
+      talle = cleaned.slice(cleaned.length - 6, cleaned.length - 3);
+      color = cleaned.slice(cleaned.length - 3);
+    } else {
+      articulo = cleaned;
+    }
+  }
+
+  // Solo aceptamos talle/color compuestos por dígitos; si trae cualquier otra cosa los descartamos.
+  if (!/^\d{1,3}$/.test(talle)) talle = '';
+  if (!/^\d{1,3}$/.test(color)) color = '';
+
+  const codigoCompleto = `${articulo}${talle}${color}`;
+  // `codigo13` se mantiene para compatibilidad: sigue siendo el "ancho" del SKU concatenado.
+  return { articulo, talle, color, codigo13: codigoCompleto, codigoCompleto };
 }
 
 export const importTangoArticles = async (req: Request, res: Response) => {
@@ -1053,13 +1089,15 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     for (const row of rawRows) {
       const codigo = row[codigoKey];
       const parsed = parseCodigoTango(codigo);
-      if (parsed.codigo13.length < 13 && onlyComplete) continue;
+      // Una variante es "completa" cuando trae artículo + talle + color (la fila "Es base" no los tiene).
+      const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
+      if (!isCompleta && onlyComplete) continue;
       const descripcion = (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
       rows.push({
         articulo: parsed.articulo,
         talle: parsed.talle,
         color: parsed.color,
-        codigo13: parsed.codigo13,
+        codigo13: parsed.codigoCompleto,
         descripcion,
       });
     }
@@ -1072,8 +1110,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
 
     for (const r of rows) {
       try {
-        if (r.codigo13.length < 13) continue;
-        if (!r.articulo) continue;
+        if (!r.articulo || !r.talle || !r.color) continue;
 
         if (!productNamesByArticulo[r.articulo] && r.descripcion) {
           productNamesByArticulo[r.articulo] = r.descripcion;
@@ -1135,12 +1172,119 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       productsCreated,
       variantsCreated,
       variantsUpdated,
-      totalProcessed: rows.filter((r) => r.codigo13.length >= 13).length,
+      totalProcessed: rows.filter((r) => r.articulo && r.talle && r.color).length,
       errors: errors.slice(0, 50),
     });
   } catch (error: any) {
     console.error('Import Tango:', error);
     res.status(500).json({ message: 'Error importando art?culos Tango', error: error?.message });
+  }
+};
+
+/**
+ * Diagnóstico: lista productos potencialmente duplicados (mismo nombre, distinto SKU base).
+ *
+ * Devuelve grupos donde:
+ *   - El nombre del producto se repite (normalizado a UPPER + TRIM, ignorando espacios múltiples).
+ *   - Y/o el "núcleo numérico" del SKU coincide (sirve para detectar pares "Q05875" vs "058750"
+ *     donde uno tiene un prefijo letra y el otro no).
+ *
+ * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products`.
+ *
+ * Query params opcionales:
+ *   - q: filtra por substring en el nombre (case-insensitive). Ej.: ?q=trifil
+ *   - limit: tope de grupos a devolver (default 200)
+ */
+export const getDuplicateProducts = async (req: Request, res: Response) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 200));
+
+    // Traemos todos los productos (más sus métricas básicas) y agrupamos en memoria.
+    const params: any[] = [];
+    let whereName = '';
+    if (q) {
+      whereName = `WHERE p.name LIKE ?`;
+      params.push(`%${q}%`);
+    }
+    const rows = await query(
+      `SELECT p.id, p.sku, p.name,
+              (SELECT COUNT(*) FROM product_colors pc WHERE pc.product_id = p.id) AS color_count,
+              (SELECT COUNT(*) FROM product_variants pv
+                 JOIN product_colors pc ON pc.id = pv.product_color_id
+                 WHERE pc.product_id = p.id) AS variant_count,
+              (SELECT COALESCE(SUM(st.stock), 0) FROM stocks st
+                 JOIN product_variants pv ON pv.id = st.variant_id
+                 JOIN product_colors pc ON pc.id = pv.product_color_id
+                 WHERE pc.product_id = p.id) AS stock_total
+       FROM products p
+       ${whereName}
+       ORDER BY p.name, p.sku`,
+      params
+    );
+
+    // Clave 1: nombre normalizado (UPPER + colapsa espacios). Detecta duplicados visibles para el usuario.
+    const byName = new Map<string, any[]>();
+    // Clave 2: núcleo numérico del SKU. Detecta pares tipo "Q05875" vs "058750".
+    const byCore = new Map<string, any[]>();
+
+    const normalizeName = (s: string) => String(s || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    const skuCore = (s: string) => {
+      const digits = String(s || '').replace(/\D/g, '');
+      // 5 dígitos como núcleo "fuerte"; suficiente para hermanar 058750 con Q058750 (ambos comparten 05875).
+      return digits.slice(0, 5);
+    };
+
+    for (const r of rows as any[]) {
+      const nameKey = normalizeName(r.name);
+      if (nameKey) {
+        if (!byName.has(nameKey)) byName.set(nameKey, []);
+        byName.get(nameKey)!.push(r);
+      }
+      const core = skuCore(r.sku);
+      if (core && core.length >= 4) {
+        if (!byCore.has(core)) byCore.set(core, []);
+        byCore.get(core)!.push(r);
+      }
+    }
+
+    const buildGroup = (kind: 'name' | 'sku_core', key: string, list: any[]) => ({
+      kind,
+      key,
+      productCount: list.length,
+      products: list.map((p: any) => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        colorCount: Number(p.color_count) || 0,
+        variantCount: Number(p.variant_count) || 0,
+        stockTotal: Number(p.stock_total) || 0
+      }))
+    });
+
+    const nameGroups = Array.from(byName.entries())
+      .filter(([, list]) => list.length > 1)
+      .map(([k, list]) => buildGroup('name', k, list));
+
+    // Núcleo numérico: solo lo reportamos si además existen al menos dos SKUs base distintos
+    // (sino estamos mostrando un único producto con muchas variantes, que no es duplicado).
+    const coreGroups = Array.from(byCore.entries())
+      .filter(([, list]) => {
+        if (list.length < 2) return false;
+        const baseSkus = new Set(list.map((p: any) => String(p.sku)));
+        return baseSkus.size > 1;
+      })
+      .map(([k, list]) => buildGroup('sku_core', k, list));
+
+    return res.json({
+      filter: q || null,
+      totalProducts: (rows as any[]).length,
+      duplicateByName: nameGroups.slice(0, limit),
+      duplicateBySkuCore: coreGroups.slice(0, limit)
+    });
+  } catch (error: any) {
+    console.error('getDuplicateProducts:', error);
+    return res.status(500).json({ message: 'Error obteniendo duplicados', error: error?.message });
   }
 };
 

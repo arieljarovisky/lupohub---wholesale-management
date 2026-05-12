@@ -16,6 +16,7 @@ router.delete('/variants/:variantId/publications/:publicationId', auth_1.authMid
 router.delete('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteVariant);
 router.delete('/all', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.deleteAllProducts);
 router.post('/import-tango', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.importTangoArticles);
+router.get('/duplicates', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.getDuplicateProducts);
 router.get('/export-inventory', auth_1.authMiddleware, products_controller_1.exportInventory);
 router.get('/', auth_1.authMiddleware, products_controller_1.getProducts);
 router.get('/by-id/:id', auth_1.authMiddleware, products_controller_1.getProductById);
