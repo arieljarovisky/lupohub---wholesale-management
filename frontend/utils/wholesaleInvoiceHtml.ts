@@ -200,7 +200,14 @@ export function buildWholesaleFacturaHtml(params: {
     })
     .filter(Boolean);
   const transporteNombreFactura = manualTransporteLabel || (transportesCliente.length ? transportesCliente.join(', ') : '');
-  const remitoNumber = (manual?.remitoNumber ?? customer?.remitoNumber ?? '').toString().trim();
+  // Prioridad: 1) el N° tipeado manualmente; 2) el N° de remito YA generado para este pedido
+  // (`order.remitoNumber`, secuencia única desde 31457); 3) el default histórico del cliente.
+  // Así, si el usuario imprimió el remito del pedido, la factura sale automáticamente vinculada
+  // a ese mismo N° sin tener que copiarlo a mano.
+  const manualRemitoTrim = (manual?.remitoNumber ?? '').toString().trim();
+  const orderRemitoTrim = (order as any)?.remitoNumber != null ? String((order as any).remitoNumber).trim() : '';
+  const customerRemitoTrim = (customer?.remitoNumber ?? '').toString().trim();
+  const remitoNumber = manualRemitoTrim || orderRemitoTrim || customerRemitoTrim;
   const saleConditionRaw = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim().toLowerCase();
   const saleCondition = saleConditionRaw.includes('60') ? '60 días' : '30 días';
   const dirCliente = clienteDir || '';

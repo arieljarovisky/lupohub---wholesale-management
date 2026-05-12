@@ -232,25 +232,30 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 
         UNION ALL
 
+        -- Las NC por ítems insertan UNA fila por ítem creditado, pero todas comparten el mismo
+        -- comprobante AFIP (mismo CAE / punto_venta / cbte_tipo / cbte_desde). Agrupamos por
+        -- comprobante para mostrar una sola línea por NC real, con el importe sumado.
         SELECT
-          cn.id,
+          MIN(cn.id) AS id,
           'NC' AS tipo,
           cn.cbte_tipo,
           cn.punto_venta,
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          o.date AS fecha,
-          cn.amount_credited AS importe,
+          MAX(o.date) AS fecha,
+          SUM(cn.amount_credited) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
-          cn.created_at
+          MIN(cn.created_at) AS created_at
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
       ) AS b
       ${whereSql}
       ORDER BY b.fecha DESC, b.created_at DESC
@@ -439,25 +444,29 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 
         UNION ALL
 
+        -- Agrupamos por comprobante AFIP para evitar mostrar una fila por ítem creditado
+        -- cuando la NC es parcial por ítems (todas comparten mismo CAE).
         SELECT
-          cn.id,
+          MIN(cn.id) AS id,
           'NC' AS tipo,
           cn.cbte_tipo,
           cn.punto_venta,
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          o.date AS fecha,
-          cn.amount_credited AS importe,
+          MAX(o.date) AS fecha,
+          SUM(cn.amount_credited) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
-          cn.created_at
+          MIN(cn.created_at) AS created_at
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
       ${whereSql}
       ORDER BY b.fecha DESC, b.created_at DESC
@@ -686,14 +695,16 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
 
         UNION ALL
 
+        -- Agrupamos por comprobante AFIP: una NC parcial por ítems genera N filas en credit_notes
+        -- pero corresponde a UN solo comprobante (mismo CAE / pv / nro). Sumamos importes para el reporte.
         SELECT
           'CDE' AS tipo,
-          o.date AS fecha,
+          MAX(o.date) AS fecha,
           cn.cbte_tipo,
           cn.punto_venta,
           cn.cbte_desde,
           cn.cbte_hasta,
-          cn.amount_credited AS neto,
+          SUM(cn.amount_credited) AS neto,
           0 AS otros_impuestos,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
@@ -703,6 +714,8 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 c.id, c.business_name, c.name, c.city, c.address
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
       `, [desde, hasta, ...sellerParam, desde, hasta, ...sellerParam]);
@@ -857,12 +870,13 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
       ${whereSql}
       UNION ALL
+      -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para AGIP.
       SELECT
-        o.date AS fecha,
+        MAX(o.date) AS fecha,
         cn.cbte_tipo,
         cn.punto_venta,
         cn.cbte_desde,
-        cn.amount_credited AS importe,
+        SUM(cn.amount_credited) AS importe,
         c.cuit,
         COALESCE(c.business_name, c.name, '') AS razon_social,
         COALESCE(ap.alicuota, 0) AS alicuota
@@ -871,6 +885,8 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
       ${whereSql}
+      GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
+               c.cuit, c.business_name, c.name, ap.alicuota
       ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
       `, [period, ...params, period, ...params]);
         const lines = rows
@@ -1329,9 +1345,10 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
 
         UNION ALL
 
+        -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para el export por cliente.
         SELECT
           'NC' AS tipo,
-          o.date AS fecha,
+          MAX(o.date) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1339,7 +1356,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
           cn.punto_venta,
           cn.cbte_desde,
           cn.cbte_hasta,
-          cn.amount_credited AS importe,
+          SUM(cn.amount_credited) AS importe,
           cn.order_id AS order_id,
           cn.cae,
           cn.cae_fch_vto,
@@ -1350,6 +1367,8 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
         WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) x
       ORDER BY x.fecha ASC, x.cliente ASC, x.punto_venta ASC, x.cbte_desde ASC
       `, [...params, ...params]);

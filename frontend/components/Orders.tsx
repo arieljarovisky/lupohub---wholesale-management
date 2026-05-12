@@ -1016,7 +1016,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const transporteOpts = transporteOptionsForCustomer(customer, transportes);
     setFacturaPreviewOrder(order);
     setFacturaTransportNumber((manual.transportNumber ?? '').toString());
-    setFacturaRemitoNumber((manual.remitoNumber ?? '').toString());
+    // Si el pedido ya tiene un N° de remito generado, lo precargamos automáticamente.
+    // Solo dejamos prevalecer lo que el usuario tipeó antes (`prev?.remitoNumber`) si efectivamente
+    // ingresó algo distinto al default del cliente; un valor vacío en `manual` no debe pisar el
+    // remito real del pedido.
+    const manualRemitoTyped = (manual.remitoNumber ?? '').toString().trim();
+    const orderRemito = order.remitoNumber != null ? String(order.remitoNumber) : '';
+    setFacturaRemitoNumber(manualRemitoTyped || orderRemito);
     setFacturaSaleCondition(String(manual.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días');
     setFacturaTransporteId(pickInitialTransporteId(prev, transporteOpts));
   };
@@ -2014,6 +2020,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                   placeholder="Ej: R-0001-00001234"
                 />
+                {facturaPreviewOrder?.remitoNumber != null && String(facturaPreviewOrder.remitoNumber) === facturaRemitoNumber && (
+                  <p className="text-[11px] text-emerald-400/90 mt-1">
+                    Vinculado automáticamente al remito generado para este pedido.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Condición de venta</label>
