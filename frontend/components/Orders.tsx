@@ -539,11 +539,34 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             ${watermarkBlock}
             ${
               isExpreso
-                ? `<div class="r-expreso-body">
-                    <div class="r-expreso-label">VALOR DECLARADO (sin IVA)</div>
-                    <div class="r-expreso-monto">$${formatMoneyAr(montoDeclaradoSinIva)}</div>
-                    <div class="r-expreso-aclaracion">A los efectos del transporte. No incluye IVA ni impuestos.</div>
-                  </div>`
+                ? (() => {
+                    // En el remito por expreso se imita la planilla manuscrita del cliente:
+                    // una tabla simple de dos columnas (CANTIDAD + DESCRIPCIÓN) con UNA sola fila que detalla
+                    // qué se envía, valor declarado sin IVA, expreso y su dirección.
+                    const expresoDescripcion = descripcionTrim || 'CAJA TIENDA';
+                    const expresoExpNombre = transporteName ? esc(transporteName.toUpperCase()) : '';
+                    const expresoExpDireccion = selectedTransport?.address ? esc(String(selectedTransport.address).toUpperCase()) : '';
+                    const expresoValor = `$${formatMoneyAr(montoDeclaradoSinIva)}`;
+                    return `<table class="r-items r-items-expreso">
+                      <thead>
+                        <tr>
+                          <th class="ri-c" style="width:80px;">CANTIDAD</th>
+                          <th>DESCRIPCIÓN</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td class="ri-c ri-exp-qty">${numBultos}</td>
+                          <td class="ri-desc ri-exp-desc">
+                            <div class="ri-exp-line">${esc(expresoDescripcion)}</div>
+                            <div class="ri-exp-line"><span class="ri-exp-lbl">VALOR:</span> ${esc(expresoValor)}</div>
+                            ${expresoExpNombre ? `<div class="ri-exp-line"><span class="ri-exp-lbl">EXP:</span> ${expresoExpNombre}</div>` : ''}
+                            ${expresoExpDireccion ? `<div class="ri-exp-line">${expresoExpDireccion}</div>` : ''}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>`;
+                  })()
                 : `<table class="r-items">
                     <thead>
                       <tr>
@@ -676,10 +699,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
       .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
       .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
-      .r-expreso-body { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28mm 12mm; text-align: center; }
-      .r-expreso-label { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 12px; }
-      .r-expreso-monto { font-size: 42px; font-weight: 800; line-height: 1.1; padding: 14px 26px; border: 2px solid #000; border-radius: 4px; min-width: 260px; }
-      .r-expreso-aclaracion { font-size: 9px; margin-top: 12px; color: #333; font-style: italic; }
+      /* Variante "expreso" de la tabla: una sola fila con cantidad de bultos + descripción multi-línea. */
+      .r-items-expreso tbody td { padding: 18px 14px; vertical-align: top; min-height: 110mm; }
+      .ri-exp-qty { font-size: 26px; font-weight: 800; vertical-align: middle; }
+      .ri-exp-desc { font-size: 14px; font-weight: 700; line-height: 1.7; letter-spacing: 0.02em; }
+      .ri-exp-line { margin-bottom: 4px; }
+      .ri-exp-line:last-child { margin-bottom: 0; }
+      .ri-exp-lbl { font-weight: 800; margin-right: 4px; }
       .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
       .r-firma-cell:last-child { border-right: none; }
