@@ -110,6 +110,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [afipConfigured, setAfipConfigured] = useState(false);
   const [afipProduction, setAfipProduction] = useState(true);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
+  /**
+   * Datos del remitente persistidos en la base (incluye `caiRemito` y `caiRemitoVencimiento`).
+   * `getRemitente()` de `apiIntegration.ts` solo lee localStorage, por eso aunque el CAI esté configurado
+   * en Settings, los remitos imprimían "Documento no fiscal" desde otros navegadores. Acá lo traemos del backend.
+   */
+  const [remitenteFromApi, setRemitenteFromApi] = useState<{
+    caiRemito: string;
+    caiRemitoVencimiento: string;
+    businessName: string;
+    address: string;
+    city: string;
+    cuit: string;
+    email: string;
+    phone: string;
+    logoUrl: string;
+  } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
   const [applyingMayoristaStockId, setApplyingMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
@@ -202,6 +218,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }).catch(() => { setAfipConfigured(false); setAfipProduction(true); });
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
+
+  // El remitente (CAI y vencimiento incluidos) se carga siempre que el componente esté visible:
+  // cualquier rol que genere un remito debe poder ver el CAI configurado en Settings.
+  useEffect(() => {
+    api.getRemitenteServer().then(setRemitenteFromApi).catch(() => setRemitenteFromApi(null));
+  }, []);
 
   useEffect(() => {
     try {
@@ -312,9 +334,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   ) => {
     const customer = customers.find(c => c.id === order.customerId);
     const localRemitente = getRemitente();
-    const remitente = (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
-      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
-      : localRemitente;
+    // Merge en orden de prioridad para asegurar que el CAI siempre tenga el valor del servidor (no del localStorage):
+    //   1) `localRemitente` (localStorage)  ←  fallback histórico, sin CAI si no se guardó acá
+    //   2) `remitenteFromApi` (backend)     ←  fuente de verdad: incluye caiRemito y caiRemitoVencimiento
+    //   3) `issuerFromApi` (AFIP env vars)  ←  emisor fiscal: pisa razón social/CUIT/domicilio
+    // El logo siempre lo conservamos del local (es el SVG fijo del corporativo).
+    const remitenteServerSafe = remitenteFromApi || {};
+    const remitenteMerged: any = { ...localRemitente, ...remitenteServerSafe };
+    if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
+      Object.assign(remitenteMerged, issuerFromApi);
+    }
+    remitenteMerged.logoUrl = localRemitente.logoUrl; // siempre el SVG fijo
+    if (!remitenteMerged.email) remitenteMerged.email = localRemitente.email;
+    if (!remitenteMerged.phone) remitenteMerged.phone = localRemitente.phone;
+    const remitente = remitenteMerged;
     const items = sortItemsForFacturaPrint(order.items.map(enrichItem), products);
     const formatDateShort = (d: string) => {
       const x = new Date(d);
@@ -823,9 +856,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const mergedRemitenteForFactura = () => {
     const localRemitente = getRemitente();
-    return (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
-      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
-      : localRemitente;
+    const remitenteServerSafe: any = remitenteFromApi || {};
+    const merged: any = { ...localRemitente, ...remitenteServerSafe };
+    if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
+      Object.assign(merged, issuerFromApi);
+    }
+    merged.logoUrl = localRemitente.logoUrl;
+    if (!merged.email) merged.email = localRemitente.email;
+    if (!merged.phone) merged.phone = localRemitente.phone;
+    return merged;
   };
 
   const buildFacturaHtml = (order: Order, manual?: ManualFacturaFields) => {

@@ -76,17 +76,26 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payNotes, setPayNotes] = useState<string>('');
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
+  /** Datos completos del remitente (incluye CAI). Necesarios para imprimir el CAI en remitos/facturas. */
+  const [remitenteFromApi, setRemitenteFromApi] = useState<any>(null);
   const [billingExportCuitsText, setBillingExportCuitsText] = useState('');
 
   useEffect(() => {
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
+    api.getRemitenteServer().then(setRemitenteFromApi).catch(() => setRemitenteFromApi(null));
   }, []);
 
   const mergedRemitenteForFactura = () => {
     const localRemitente = getRemitente();
-    return (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit))
-      ? { ...localRemitente, ...issuerFromApi, logoUrl: localRemitente.logoUrl, email: localRemitente.email, phone: localRemitente.phone }
-      : localRemitente;
+    const remitenteServerSafe: any = remitenteFromApi || {};
+    const merged: any = { ...localRemitente, ...remitenteServerSafe };
+    if (issuerFromApi && (issuerFromApi.businessName || issuerFromApi.cuit)) {
+      Object.assign(merged, issuerFromApi);
+    }
+    merged.logoUrl = localRemitente.logoUrl;
+    if (!merged.email) merged.email = localRemitente.email;
+    if (!merged.phone) merged.phone = localRemitente.phone;
+    return merged;
   };
 
   const load = async () => {

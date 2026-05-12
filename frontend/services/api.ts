@@ -554,6 +554,40 @@ export const api = {
     }
   },
 
+  /**
+   * Datos completos del remitente (incluye `caiRemito` y `caiRemitoVencimiento`) leídos de la base de datos.
+   * Se usa al imprimir remitos/facturas porque `getRemitente()` de `apiIntegration.ts` solo lee localStorage
+   * (que puede no tener el CAI si el usuario lo configuró desde otro navegador/dispositivo).
+   */
+  getRemitenteServer: async (): Promise<{
+    businessName: string;
+    address: string;
+    city: string;
+    cuit: string;
+    email: string;
+    phone: string;
+    logoUrl: string;
+    caiRemito: string;
+    caiRemitoVencimiento: string;
+  }> => {
+    try {
+      const res = await request<any>('/afip/remitente', 'GET');
+      return {
+        businessName: res?.businessName ?? '',
+        address: res?.address ?? '',
+        city: res?.city ?? '',
+        cuit: res?.cuit ?? '',
+        email: res?.email ?? '',
+        phone: res?.phone ?? '',
+        logoUrl: res?.logoUrl ?? '',
+        caiRemito: res?.caiRemito ?? '',
+        caiRemitoVencimiento: res?.caiRemitoVencimiento ?? ''
+      };
+    } catch {
+      return { businessName: '', address: '', city: '', cuit: '', email: '', phone: '', logoUrl: '', caiRemito: '', caiRemitoVencimiento: '' };
+    }
+  },
+
   /** Condición IVA (y opcional razón social, domicilio) de un CUIT vía Padrón AFIP. Requiere login. */
   getCondicionIvaByCuit: async (cuit: string): Promise<{ condicionIva: string; businessName?: string; address?: string; city?: string }> => {
     const cuitClean = String(cuit).replace(/\D/g, '');
