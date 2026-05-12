@@ -1021,32 +1021,74 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.emitirFactura = emitirFactura;
-/** Lista las notas de crédito emitidas para un pedido. */
+/** Lista las notas de crédito emitidas para un pedido.
+ *  Una misma NC AFIP puede haberse guardado como N filas (una por ítem creditado),
+ *  todas con el mismo (cae, punto_venta, cbte_tipo, cbte_desde, cbte_hasta).
+ *  Devolvemos UNA entrada por comprobante, consolidando el detalle por ítem
+ *  para que el PDF muestre todos los renglones (no solo el primero).
+ */
 const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const rows = yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
-       FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC`, [id]);
-        res.json(rows.map((r) => {
-            var _a, _b, _c;
-            return ({
-                id: r.id,
-                orderId: r.order_id,
-                invoiceId: r.invoice_id,
-                cae: r.cae,
-                caeFchVto: (_a = r.cae_fch_vto) !== null && _a !== void 0 ? _a : undefined,
-                puntoVta: r.punto_venta,
-                cbteTipo: r.cbte_tipo,
-                cbteDesde: r.cbte_desde,
-                cbteHasta: r.cbte_hasta,
-                amountCredited: Number(r.amount_credited),
-                scope: (_b = r.scope) !== null && _b !== void 0 ? _b : 'total',
-                itemIndex: (_c = r.item_index) !== null && _c !== void 0 ? _c : undefined,
-                createdAt: r.created_at
-            });
-        }));
+        const rows = (yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
+       FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC, id ASC`, [id]));
+        // Necesitamos los precios de los ítems para inferir cantidades por línea.
+        const itemRows = (yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id ASC`, [id]));
+        const itemPriceByIndex = new Map();
+        itemRows.forEach((it, idx) => itemPriceByIndex.set(idx, Number(it.price_at_moment) || 0));
+        const groups = new Map();
+        for (const r of rows) {
+            const key = `${(_a = r.cae) !== null && _a !== void 0 ? _a : ''}|${(_b = r.punto_venta) !== null && _b !== void 0 ? _b : ''}|${(_c = r.cbte_tipo) !== null && _c !== void 0 ? _c : ''}|${(_d = r.cbte_desde) !== null && _d !== void 0 ? _d : ''}|${(_e = r.cbte_hasta) !== null && _e !== void 0 ? _e : ''}`;
+            let g = groups.get(key);
+            if (!g) {
+                g = {
+                    id: r.id,
+                    orderId: r.order_id,
+                    invoiceId: (_f = r.invoice_id) !== null && _f !== void 0 ? _f : null,
+                    cae: r.cae,
+                    caeFchVto: (_g = r.cae_fch_vto) !== null && _g !== void 0 ? _g : undefined,
+                    puntoVta: r.punto_venta,
+                    cbteTipo: r.cbte_tipo,
+                    cbteDesde: r.cbte_desde,
+                    cbteHasta: r.cbte_hasta,
+                    amountCredited: 0,
+                    scope: ((_h = r.scope) !== null && _h !== void 0 ? _h : 'total'),
+                    itemIndex: (_j = r.item_index) !== null && _j !== void 0 ? _j : undefined,
+                    itemIndexes: [],
+                    amountByItemIndex: {},
+                    quantityByItemIndex: {},
+                    createdAt: (_k = r.created_at) !== null && _k !== void 0 ? _k : null,
+                };
+                groups.set(key, g);
+            }
+            const amount = Number(r.amount_credited || 0);
+            g.amountCredited = Math.round((g.amountCredited + amount) * 100) / 100;
+            // Si al menos una fila es 'item' o tiene item_index, considerar el grupo como 'item'.
+            if (((_l = r.scope) !== null && _l !== void 0 ? _l : 'total') === 'item' || r.item_index != null) {
+                g.scope = 'item';
+                const idx = Number(r.item_index);
+                if (Number.isInteger(idx) && idx >= 0) {
+                    if (!g.itemIndexes.includes(idx))
+                        g.itemIndexes.push(idx);
+                    g.amountByItemIndex[idx] = Math.round(((g.amountByItemIndex[idx] || 0) + amount) * 100) / 100;
+                    const price = itemPriceByIndex.get(idx) || 0;
+                    if (price > 0) {
+                        const q = amount / price;
+                        g.quantityByItemIndex[idx] = Math.round(((g.quantityByItemIndex[idx] || 0) + q) * 1000) / 1000;
+                    }
+                }
+            }
+        }
+        // Ordenar grupos por fecha desc (los más recientes primero).
+        const out = Array.from(groups.values()).sort((a, b) => {
+            const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return db - da;
+        });
+        res.json(out);
     }
     catch (error) {
         console.error(error);
