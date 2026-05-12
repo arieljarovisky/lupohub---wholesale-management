@@ -221,10 +221,16 @@ export interface CreditNote {
   cbteDesde: number;
   cbteHasta: number;
   amountCredited: number;
-  /** 'total' = NC por todo el pedido; 'item' = NC por un ítem */
+  /** 'total' = NC por todo el pedido; 'item' = NC por un ítem (o varios) */
   scope?: 'total' | 'item';
-  /** Índice del ítem cuando scope === 'item' */
+  /** Índice del ítem cuando scope === 'item' (primer ítem creditado, compat) */
   itemIndex?: number;
+  /** Lista de índices de ítems cuando la NC se emitió sobre varios artículos. */
+  itemIndexes?: number[];
+  /** Monto neto creditado por índice de ítem. */
+  amountByItemIndex?: Record<number, number>;
+  /** Cantidad creditada por índice de ítem (calculada por backend). */
+  quantityByItemIndex?: Record<number, number>;
   createdAt?: string;
 }
 

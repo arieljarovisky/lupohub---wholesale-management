@@ -78,6 +78,27 @@ function afipDesdeNeto(neto: number) {
   return { neto: n, iva, impTotal };
 }
 
+/** Suma el monto neto ya creditado por cada ítem (índice) a partir de la lista
+ *  de notas de crédito del pedido. Soporta NC nuevas (con `amountByItemIndex`)
+ *  y NC históricas (que solo tienen `itemIndex` + `amountCredited`). */
+function sumCreditedByItemIndex(notes: CreditNote[]): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const n of notes) {
+    if ((n.scope || 'total') !== 'item') continue;
+    const map = n.amountByItemIndex;
+    if (map && typeof map === 'object' && Object.keys(map).length > 0) {
+      for (const k of Object.keys(map)) {
+        const idx = Number(k);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        out[idx] = Math.round(((out[idx] || 0) + Number(map[idx] || 0)) * 100) / 100;
+      }
+    } else if (typeof n.itemIndex === 'number' && n.itemIndex >= 0) {
+      out[n.itemIndex] = Math.round(((out[n.itemIndex] || 0) + Number(n.amountCredited || 0)) * 100) / 100;
+    }
+  }
+  return out;
+}
+
 /** Neto gravado según líneas (cantidad × precio); coincide con subtotal de factura por ítems. `orders.total` puede estar desfasado. */
 function orderNetoFromItems(order: Order): number {
   if (!order.items?.length) return Number(order.total) || 0;
@@ -195,10 +216,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   useEffect(() => {
     if (!ncOrder || ncTipo !== 'item' || !ncOrder.items[ncItemIndex]) return;
-    const creditedByItem: Record<number, number> = {};
-    orderCreditNotes.filter((n) => n.scope === 'item' && typeof n.itemIndex === 'number').forEach((n) => {
-      creditedByItem[n.itemIndex!] = (creditedByItem[n.itemIndex!] || 0) + n.amountCredited;
-    });
+    const creditedByItem = sumCreditedByItemIndex(orderCreditNotes);
     const item = ncOrder.items[ncItemIndex];
     const price = Number(item?.priceAtMoment ?? 0);
     const qty = item?.quantity ?? 0;
@@ -1064,46 +1082,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         showToast('info', 'No hay notas de crédito para este pedido');
         return;
       }
-      const byVoucher = new Map<string, CreditNote[]>();
-      for (const n of notes) {
-        const k = `${n.puntoVta}|${n.cbteTipo}|${n.cbteDesde}|${n.cae}`;
-        if (!byVoucher.has(k)) byVoucher.set(k, []);
-        byVoucher.get(k)!.push(n);
-      }
-      const grouped = Array.from(byVoucher.values()).sort((a, b) => {
-        const da = new Date(a[0]?.createdAt || 0).getTime() || 0;
-        const db = new Date(b[0]?.createdAt || 0).getTime() || 0;
+      // El backend ya consolida varias filas de credit_notes que comparten CAE en
+      // una sola entrada con itemIndexes/amountByItemIndex/quantityByItemIndex.
+      // Tomamos la más reciente.
+      const sorted = [...notes].sort((a, b) => {
+        const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return db - da;
       });
-      const selectedGroup = grouped[0] || [];
-      const baseNc = selectedGroup[0];
-      if (!baseNc) {
+      const nc = sorted[0];
+      if (!nc) {
         showToast('info', 'No hay notas de crédito para este pedido');
         return;
       }
-      const amountByItemIndex: Record<number, number> = {};
-      const quantityByItemIndex: Record<number, number> = {};
-      const itemIndexes: number[] = [];
-      selectedGroup
-        .filter((n) => (n.scope || 'total') === 'item' && typeof n.itemIndex === 'number')
-        .forEach((n) => {
-          const idx = Number(n.itemIndex);
-          if (!Number.isInteger(idx) || idx < 0) return;
-          itemIndexes.push(idx);
-          amountByItemIndex[idx] = (amountByItemIndex[idx] || 0) + Number(n.amountCredited || 0);
-          const price = Number(order.items[idx]?.priceAtMoment ?? 0);
-          if (price > 0) {
-            const q = Number(n.amountCredited || 0) / price;
-            quantityByItemIndex[idx] = (quantityByItemIndex[idx] || 0) + q;
-          }
-        });
-      const nc = {
-        ...baseNc,
-        amountCredited: selectedGroup.reduce((s, n) => s + Number(n.amountCredited || 0), 0),
-        itemIndexes: Array.from(new Set(itemIndexes)),
-        amountByItemIndex,
-        quantityByItemIndex
-      } as CreditNote & { itemIndexes?: number[]; amountByItemIndex?: Record<number, number>; quantityByItemIndex?: Record<number, number> };
       const html = buildCreditNoteHtml(order, nc);
       if (!html) {
         showToast('error', 'No se pudo generar la nota de crédito');
@@ -2312,10 +2303,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
       {ncOrder && (() => {
         const hasNCTotal = orderCreditNotes.some((nc) => (nc.scope || 'total') === 'total');
-        const creditedByItemIndex: Record<number, number> = {};
-        orderCreditNotes.filter((nc) => nc.scope === 'item' && typeof nc.itemIndex === 'number').forEach((nc) => {
-          creditedByItemIndex[nc.itemIndex!] = (creditedByItemIndex[nc.itemIndex!] || 0) + nc.amountCredited;
-        });
+        const creditedByItemIndex = sumCreditedByItemIndex(orderCreditNotes);
         const currentItem = ncOrder.items[ncItemIndex];
         const itemPrice = Number(currentItem?.priceAtMoment ?? 0);
         const itemQty = currentItem?.quantity ?? 0;

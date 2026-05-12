@@ -622,24 +622,47 @@ export const api = {
     }
   },
 
-  /** Lista las notas de crédito de un pedido. */
+  /** Lista las notas de crédito de un pedido.
+   *  Cada entrada representa un comprobante AFIP único (CAE) ya consolidado en
+   *  backend. Cuando la NC fue emitida sobre varios ítems, el backend devuelve
+   *  `itemIndexes`, `amountByItemIndex` y `quantityByItemIndex` para que el PDF
+   *  pueda renderizar un renglón por ítem (no agruparlo en uno solo). */
   getOrderCreditNotes: async (orderId: string): Promise<import('../types').CreditNote[]> => {
     const rows = await request<any[]>(`/orders/${orderId}/credit-notes`, 'GET');
-    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
-      id: r.id,
-      orderId: r.orderId,
-      invoiceId: r.invoiceId,
-      cae: r.cae,
-      caeFchVto: r.caeFchVto,
-      puntoVta: r.puntoVta,
-      cbteTipo: r.cbteTipo,
-      cbteDesde: r.cbteDesde,
-      cbteHasta: r.cbteHasta,
-      amountCredited: Number(r.amountCredited),
-      scope: r.scope === 'item' ? 'item' : 'total',
-      itemIndex: r.itemIndex,
-      createdAt: r.createdAt
-    }));
+    return (Array.isArray(rows) ? rows : []).map((r: any) => {
+      const itemIndexesRaw = Array.isArray(r.itemIndexes) ? r.itemIndexes : [];
+      const itemIndexes = itemIndexesRaw
+        .map((x: any) => Number(x))
+        .filter((x: number) => Number.isInteger(x) && x >= 0);
+      const sanitizeNumMap = (obj: any): Record<number, number> => {
+        if (!obj || typeof obj !== 'object') return {};
+        const out: Record<number, number> = {};
+        for (const k of Object.keys(obj)) {
+          const idx = Number(k);
+          const val = Number((obj as any)[k]);
+          if (Number.isInteger(idx) && idx >= 0 && Number.isFinite(val)) out[idx] = val;
+        }
+        return out;
+      };
+      return {
+        id: r.id,
+        orderId: r.orderId,
+        invoiceId: r.invoiceId,
+        cae: r.cae,
+        caeFchVto: r.caeFchVto,
+        puntoVta: r.puntoVta,
+        cbteTipo: r.cbteTipo,
+        cbteDesde: r.cbteDesde,
+        cbteHasta: r.cbteHasta,
+        amountCredited: Number(r.amountCredited),
+        scope: r.scope === 'item' ? 'item' : 'total',
+        itemIndex: r.itemIndex,
+        itemIndexes,
+        amountByItemIndex: sanitizeNumMap(r.amountByItemIndex),
+        quantityByItemIndex: sanitizeNumMap(r.quantityByItemIndex),
+        createdAt: r.createdAt,
+      } as import('../types').CreditNote;
+    });
   },
 
   /** Emite una Nota de Crédito AFIP: todo el pedido (tipo: 'total') o un ítem (tipo: 'item', itemIndex, quantity opcional). */
