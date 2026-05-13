@@ -51,6 +51,59 @@ const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
+function parseDeliveryAddressesFromRow(raw) {
+    var _a, _b, _c, _d;
+    if (raw == null || raw === '')
+        return [];
+    try {
+        const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(arr))
+            return [];
+        const out = [];
+        for (const it of arr) {
+            if (!it || typeof it !== 'object')
+                continue;
+            const address = String((_a = it.address) !== null && _a !== void 0 ? _a : '').trim();
+            if (!address)
+                continue;
+            const id = String((_b = it.id) !== null && _b !== void 0 ? _b : '').trim() || (0, uuid_1.v4)();
+            out.push({
+                id,
+                label: (String((_c = it.label) !== null && _c !== void 0 ? _c : 'Sucursal').trim() || 'Sucursal'),
+                address,
+                city: String((_d = it.city) !== null && _d !== void 0 ? _d : '').trim(),
+            });
+        }
+        return out;
+    }
+    catch (_e) {
+        return [];
+    }
+}
+/** Serializa direcciones de sucursal para `customers.delivery_addresses` (TEXT JSON). */
+function normalizeDeliveryAddressesForDb(input) {
+    var _a, _b, _c, _d;
+    if (input === undefined || input === null)
+        return null;
+    if (!Array.isArray(input))
+        return null;
+    const cleaned = [];
+    for (const raw of input) {
+        if (!raw || typeof raw !== 'object')
+            continue;
+        const address = String((_a = raw.address) !== null && _a !== void 0 ? _a : '').trim();
+        if (!address)
+            continue;
+        const id = String((_b = raw.id) !== null && _b !== void 0 ? _b : '').trim() || (0, uuid_1.v4)();
+        cleaned.push({
+            id,
+            label: (String((_c = raw.label) !== null && _c !== void 0 ? _c : 'Sucursal').trim() || 'Sucursal'),
+            address,
+            city: String((_d = raw.city) !== null && _d !== void 0 ? _d : '').trim(),
+        });
+    }
+    return cleaned.length ? JSON.stringify(cleaned) : null;
+}
 /** Detecta NC por leyenda en el comprobante (import Tango, texto libre en recibo, etc.). */
 function comprobanteIndicaNotaCredito(comp) {
     const u = String(comp !== null && comp !== void 0 ? comp : '')
@@ -125,7 +178,8 @@ function toCustomer(row, transportes) {
         shouldRetainIibb: Number(row.should_retain_iibb || 0) === 1,
         agipPadronPeriod: (_t = row.agip_padron_period) !== null && _t !== void 0 ? _t : undefined,
         iibbAlicuota: row.iibb_alicuota != null ? Number(row.iibb_alicuota) : undefined,
-        transportes: transportes !== null && transportes !== void 0 ? transportes : []
+        transportes: transportes !== null && transportes !== void 0 ? transportes : [],
+        deliveryAddresses: parseDeliveryAddressesFromRow(row.delivery_addresses)
     };
 }
 /** Listar todos los clientes (camelCase para el frontend) con transportes asignados. */
@@ -161,7 +215,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         AND apc.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '')`
             : '';
         const rows = yield (0, db_1.query)(`SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
-              c.legacy_code, c.account_zone, c.account_seller_label
+              c.legacy_code, c.account_zone, c.account_seller_label, c.delivery_addresses
               ${agipSelect}
        FROM customers c
        ${agipJoin}
@@ -540,14 +594,15 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const legacyCode = ((_p = body.legacyCode) !== null && _p !== void 0 ? _p : '').toString().trim() || null;
         const accountZone = ((_q = body.accountZone) !== null && _q !== void 0 ? _q : '').toString().trim() || null;
         const accountSellerLabel = ((_r = body.accountSellerLabel) !== null && _r !== void 0 ? _r : '').toString().trim() || null;
+        const deliveryJson = normalizeDeliveryAddressesForDb(body.deliveryAddresses);
         // Guardar nombre de contacto y razón social en columnas separadas:
         // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
         // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
         const sqlName = name || null;
         const sqlBusinessName = businessName || name || null;
-        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel]);
-        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
+        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]);
+        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
         const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x) => x && typeof x === 'string') : [];
         for (const tid of transporteIds) {
             yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
@@ -640,6 +695,10 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             updates.push('account_seller_label = ?');
             params.push(((_p = body.accountSellerLabel) === null || _p === void 0 ? void 0 : _p.trim()) || null);
         }
+        if (body.deliveryAddresses !== undefined) {
+            updates.push('delivery_addresses = ?');
+            params.push(normalizeDeliveryAddressesForDb(body.deliveryAddresses));
+        }
         if (updates.length > 0) {
             params.push(id);
             yield (0, db_1.execute)(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -651,7 +710,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
             }
         }
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => { var _a, _b; return ({ id: l.transporteId, name: (_a = l.transporteName) !== null && _a !== void 0 ? _a : l.transporteId, address: (_b = l.transporteAddress) !== null && _b !== void 0 ? _b : undefined }); });
         res.json(toCustomer(updated, transportes));
@@ -709,7 +768,7 @@ const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, fun
         }
         // Vincular usuario al cliente
         yield (0, db_1.execute)('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => {
             var _a, _b;

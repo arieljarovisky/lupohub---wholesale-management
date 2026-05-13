@@ -69,6 +69,8 @@ interface OrdersProps {
 
 const CONDICIONES_VENTA_FACTURA = ['30 días', '60 días'] as const;
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
+/** Valor de `remitoEntregaId` cuando se usa la dirección principal del cliente (no una sucursal). */
+const REMITO_ENTREGA_PRINCIPAL = '__principal__';
 
 /** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
 function afipDesdeNeto(neto: number) {
@@ -121,7 +123,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
-  const [remitoTransporteName, setRemitoTransporteName] = useState<string>('');
+  const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
+  const [remitoEntregaId, setRemitoEntregaId] = useState<string>(REMITO_ENTREGA_PRINCIPAL);
   const [remitoBultos, setRemitoBultos] = useState<string>('');
   const [remitoDescripcion, setRemitoDescripcion] = useState<string>('');
   /** N° de remito asignado al pedido (secuencia única que arranca en 31457). Se autoasigna al abrir el modal. */
@@ -333,9 +336,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const openRemitoModal = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     const customer = customers.find(c => c.id === order.customerId);
-    const firstTransport = customer?.transportes?.[0]?.name ?? '';
+    const topOpts = transporteOptionsForCustomer(customer, transportes);
     setRemitoOrder(order);
-    setRemitoTransporteName(firstTransport);
+    setRemitoTransporteId(topOpts[0]?.id ?? '');
+    setRemitoEntregaId(REMITO_ENTREGA_PRINCIPAL);
     setRemitoBultos('');
     setRemitoDescripcion('');
     setRemitoDocumentNumber(order.remitoNumber != null ? String(order.remitoNumber) : '');
@@ -345,10 +349,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Genera el HTML del remito con formato de factura y multipágina. `remitoDocumentNumber` es el N° que va arriba a la derecha. */
   const buildRemitoHtml = (
     order: Order,
-    transporteName: string,
     remitoDocumentNumber: string,
     bultos?: number | string | null,
-    descripcion?: string | null
+    descripcion?: string | null,
+    remitoOpts?: { transporteId?: string; entregaId?: string }
   ) => {
     const customer = customers.find(c => c.id === order.customerId);
     const localRemitente = getRemitente();
@@ -394,9 +398,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-    const selectedTransport = customer?.transportes?.find(t => t.name === transporteName) ?? transportes.find(t => t.name === transporteName);
-    const transportNumber = transporteName.trim()
-      ? (selectedTransport?.address ? `${transporteName} — ${selectedTransport.address}` : transporteName)
+    const transporteIdSel = (remitoOpts?.transporteId ?? '').trim();
+    const selectedTransport =
+      transporteIdSel.length > 0
+        ? (customer?.transportes?.find((t) => t.id === transporteIdSel) ?? transportes.find((t) => t.id === transporteIdSel))
+        : undefined;
+    const transportNumber = selectedTransport
+      ? selectedTransport.address
+        ? `${selectedTransport.name} — ${selectedTransport.address}`
+        : selectedTransport.name
       : (customer?.transportNumber || '').toString().trim();
     const remitoBaseNumber = (remitoDocumentNumber || '').toString().trim();
     const saleCondition = (customer?.saleCondition || 'Cuenta Corriente').toString().trim();
@@ -458,9 +468,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
     const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
-    const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
-    const clienteDomicilio = (customer?.address || '').toString().trim();
-    const clienteLocalidad = (customer?.city || '').toString().trim();
+    const entregaId = (remitoOpts?.entregaId ?? REMITO_ENTREGA_PRINCIPAL).trim() || REMITO_ENTREGA_PRINCIPAL;
+    const branch =
+      entregaId !== REMITO_ENTREGA_PRINCIPAL
+        ? customer?.deliveryAddresses?.find((d) => d.id === entregaId)
+        : undefined;
+    const clienteDomicilio = (branch ? branch.address : customer?.address || '').toString().trim();
+    const clienteLocalidad = (branch ? branch.city : customer?.city || '').toString().trim();
+    const clienteDir = [clienteDomicilio, clienteLocalidad].filter(Boolean).join(', ') || '';
     const razonEmpresa = (remitente.businessName || '—').toString();
     const cuitEmpresa = ((remitente as any).cuit || '').toString();
     const ingresosBrutosEmpresa = ((remitente as any).ingresosBrutos || '901-2113373').toString();
@@ -572,13 +587,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     // una tabla simple de dos columnas (CANTIDAD + DESCRIPCIÓN) con UNA sola fila que detalla
                     // qué se envía, valor declarado sin IVA, expreso y su dirección.
                     const expresoDescripcion = descripcionTrim || 'CAJA TIENDA';
-                    const expresoExpNombre = transporteName ? esc(transporteName.toUpperCase()) : '';
+                    const expresoExpNombre = selectedTransport?.name ? esc(String(selectedTransport.name).toUpperCase()) : '';
                     const expresoExpDireccion = selectedTransport?.address ? esc(String(selectedTransport.address).toUpperCase()) : '';
+                    // Un solo importe: neto del pedido menos NC (sin mostrar la NC por separado).
                     const expresoValor = `$${formatMoneyAr(montoDeclaradoSinIva)}`;
-                    const ncDetalle =
-                      ncNetoTotal > 0.005
-                        ? `<div class="ri-exp-line ri-exp-nc"><span class="ri-exp-lbl">NC (sin IVA):</span> −$${formatMoneyAr(ncNetoTotal)}</div>`
-                        : '';
                     return `<table class="r-items r-items-expreso">
                       <thead>
                         <tr>
@@ -592,7 +604,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           <td class="ri-desc ri-exp-desc">
                             <div class="ri-exp-line">${esc(expresoDescripcion)}</div>
                             <div class="ri-exp-line"><span class="ri-exp-lbl">VALOR DECLARADO (sin IVA):</span> ${esc(expresoValor)}</div>
-                            ${ncDetalle}
                             ${expresoExpNombre ? `<div class="ri-exp-line"><span class="ri-exp-lbl">EXP:</span> ${expresoExpNombre}</div>` : ''}
                             ${expresoExpDireccion ? `<div class="ri-exp-line">${expresoExpDireccion}</div>` : ''}
                           </td>
@@ -739,7 +750,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-exp-line { margin-bottom: 4px; }
       .ri-exp-line:last-child { margin-bottom: 0; }
       .ri-exp-lbl { font-weight: 800; margin-right: 4px; }
-      .ri-exp-nc { font-size: 12px; color: #334155; }
       .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
       .r-firma-cell:last-child { border-right: none; }
@@ -795,14 +805,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
     const bultosVal = remitoBultos.trim() ? remitoBultos : null;
     const orderForHtml = updatedOrder || remitoOrder;
-    const html = buildRemitoHtml(orderForHtml, remitoTransporteName, docNro, bultosVal, remitoDescripcion.trim() || null);
+    const html = buildRemitoHtml(orderForHtml, docNro, bultosVal, remitoDescripcion.trim() || null, {
+      transporteId: remitoTransporteId || undefined,
+      entregaId: remitoEntregaId || REMITO_ENTREGA_PRINCIPAL,
+    });
     const w = window.open('', '_blank');
     if (w) {
       w.document.write(html);
       w.document.close();
     }
     setRemitoOrder(null);
-    setRemitoTransporteName('');
+    setRemitoTransporteId('');
+    setRemitoEntregaId(REMITO_ENTREGA_PRINCIPAL);
     setRemitoBultos('');
     setRemitoDescripcion('');
     setRemitoDocumentNumber('');
@@ -2055,7 +2069,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         const transportesDelCliente = customer?.transportes ?? [];
         const transportesOpciones = transportesDelCliente.length > 0 ? transportesDelCliente : transportes;
         return (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); setRemitoBultos(''); setRemitoDescripcion(''); setRemitoDocumentNumber(''); }}>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { setRemitoOrder(null); setRemitoTransporteId(''); setRemitoEntregaId(REMITO_ENTREGA_PRINCIPAL); setRemitoBultos(''); setRemitoDescripcion(''); setRemitoDocumentNumber(''); }}>
             <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-white mb-1">Generar remito</h3>
               <p className="text-sm text-slate-400 mb-4">Pedido #{remitoOrder.id} — {remitoOrder.customerBusinessName || customer?.businessName || customer?.name || 'Cliente'}</p>
@@ -2079,13 +2093,28 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               </p>
               <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Transporte para este envío</label>
               <select
-                value={remitoTransporteName}
-                onChange={(e) => setRemitoTransporteName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-4"
+                value={remitoTransporteId}
+                onChange={(e) => setRemitoTransporteId(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-3"
               >
                 <option value="">— No especificado</option>
                 {transportesOpciones.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}{t.address ? ` — ${t.address}` : ''}</option>
+                  <option key={t.id} value={t.id}>{t.name}{t.address ? ` — ${t.address}` : ''}</option>
+                ))}
+              </select>
+              <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Dirección de entrega en el remito</label>
+              <select
+                value={remitoEntregaId}
+                onChange={(e) => setRemitoEntregaId(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none mb-4"
+              >
+                <option value={REMITO_ENTREGA_PRINCIPAL}>
+                  Principal{customer?.address ? ` — ${customer.address}${customer?.city ? `, ${customer.city}` : ''}` : ''}
+                </option>
+                {(customer?.deliveryAddresses ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}: {d.address}{d.city ? `, ${d.city}` : ''}
+                  </option>
                 ))}
               </select>
               {transportesOpciones.length === 0 && (
@@ -2116,7 +2145,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </div>
               </div>
               <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteName(''); setRemitoBultos(''); setRemitoDescripcion(''); setRemitoDocumentNumber(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
+                <button type="button" onClick={() => { setRemitoOrder(null); setRemitoTransporteId(''); setRemitoEntregaId(REMITO_ENTREGA_PRINCIPAL); setRemitoBultos(''); setRemitoDescripcion(''); setRemitoDocumentNumber(''); }} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition">Cancelar</button>
                 <button
                   type="button"
                   onClick={confirmRemito}

@@ -1,4 +1,4 @@
-import { Product, Order, OrderStatus, User, Customer, Transporte, UserTask } from '../types';
+import { Product, Order, OrderStatus, User, Customer, CustomerDeliveryAddress, Transporte, UserTask } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob, postFormDataBlob } from './httpClient';
 
@@ -26,6 +26,57 @@ const getFilenameFromContentDisposition = (headerValue?: string): string => {
   const plainMatch = raw.match(/filename\s*=\s*"([^"]+)"/i) || raw.match(/filename\s*=\s*([^;]+)/i);
   return plainMatch?.[1]?.trim() || '';
 };
+
+function parseDeliveryAddressesFromApi(raw: unknown): CustomerDeliveryAddress[] | undefined {
+  if (raw == null || raw === '') return undefined;
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw as string) : raw;
+    if (!Array.isArray(arr)) return undefined;
+    const out: CustomerDeliveryAddress[] = [];
+    for (const it of arr) {
+      if (!it || typeof it !== 'object') continue;
+      const address = String((it as { address?: string }).address ?? '').trim();
+      if (!address) continue;
+      out.push({
+        id: String((it as { id?: string }).id ?? '').trim() || `da-${Date.now()}-${out.length}`,
+        label: (String((it as { label?: string }).label ?? 'Sucursal').trim() || 'Sucursal') as string,
+        address,
+        city: String((it as { city?: string }).city ?? '').trim(),
+      });
+    }
+    return out.length ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mapCustomerFromApi(r: any): Customer {
+  return {
+    id: r.id,
+    sellerId: r.sellerId ?? r.seller_id ?? '',
+    userId: r.userId ?? r.user_id ?? undefined,
+    name: r.name ?? '',
+    businessName: r.businessName ?? r.business_name ?? '',
+    email: r.email ?? '',
+    address: r.address ?? '',
+    city: r.city ?? '',
+    cuit: r.cuit ?? undefined,
+    phone: r.phone ?? undefined,
+    transportNumber: r.transportNumber ?? r.transport_number ?? undefined,
+    remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
+    saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
+    condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
+    transportes: r.transportes ?? [],
+    deliveryAddresses: parseDeliveryAddressesFromApi(r.deliveryAddresses ?? r.delivery_addresses),
+    priceListId: r.priceListId ?? r.price_list_id ?? undefined,
+    legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
+    accountZone: r.accountZone ?? r.account_zone ?? undefined,
+    accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
+    shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
+    agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
+    iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined),
+  };
+}
 
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
@@ -726,30 +777,7 @@ export const api = {
   getCustomers: async (): Promise<Customer[]> => {
     return handleRequest(async () => {
       const rows = await request<any[]>('/customers', 'GET');
-      return (Array.isArray(rows) ? rows : []).map((r: any) => ({
-        id: r.id,
-        sellerId: r.sellerId ?? r.seller_id ?? '',
-        userId: r.userId ?? r.user_id ?? undefined,
-        name: r.name ?? '',
-        businessName: r.businessName ?? r.business_name ?? '',
-        email: r.email ?? '',
-        address: r.address ?? '',
-        city: r.city ?? '',
-        cuit: r.cuit ?? undefined,
-        phone: r.phone ?? undefined,
-        transportNumber: r.transportNumber ?? r.transport_number ?? undefined,
-        remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
-        saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
-        condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
-        transportes: r.transportes ?? [],
-        priceListId: r.priceListId ?? r.price_list_id ?? undefined,
-        legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
-        accountZone: r.accountZone ?? r.account_zone ?? undefined,
-        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
-        shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
-        agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
-        iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined)
-      })) as Customer[];
+      return (Array.isArray(rows) ? rows : []).map((r: any) => mapCustomerFromApi(r));
     }, [], 'getCustomers');
   },
 
@@ -1093,25 +1121,7 @@ export const api = {
   getMyCustomer: async (): Promise<Customer | null> => {
     try {
       const r = await request<any>('/auth/me/customer', 'GET');
-      return {
-        id: r.id,
-        sellerId: r.sellerId ?? undefined,
-        name: r.name ?? '',
-        businessName: r.businessName ?? '',
-        email: r.email ?? '',
-        address: r.address ?? '',
-        city: r.city ?? '',
-        cuit: r.cuit ?? undefined,
-        phone: r.phone ?? undefined,
-        transportNumber: r.transportNumber ?? r.transport_number ?? undefined,
-        remitoNumber: r.remitoNumber ?? r.remito_number ?? undefined,
-        saleCondition: r.saleCondition ?? r.sale_condition ?? undefined,
-        condicionIva: r.condicionIva ?? r.condicion_iva ?? undefined,
-        priceListId: r.priceListId ?? undefined,
-        legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
-        accountZone: r.accountZone ?? r.account_zone ?? undefined,
-        accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined
-      } as Customer;
+      return mapCustomerFromApi(r);
     } catch {
       return null;
     }
@@ -1137,28 +1147,10 @@ export const api = {
         priceListId: customer.priceListId,
         legacyCode: customer.legacyCode,
         accountZone: customer.accountZone,
-        accountSellerLabel: customer.accountSellerLabel
+        accountSellerLabel: customer.accountSellerLabel,
+        deliveryAddresses: customer.deliveryAddresses
       });
-      return {
-        id: created.id,
-        sellerId: created.sellerId ?? created.seller_id ?? '',
-        name: created.name ?? '',
-        businessName: created.businessName ?? created.business_name ?? '',
-        email: created.email ?? '',
-        address: created.address ?? '',
-        city: created.city ?? '',
-        cuit: created.cuit ?? undefined,
-        phone: created.phone ?? undefined,
-        transportNumber: created.transportNumber ?? created.transport_number ?? undefined,
-        remitoNumber: created.remitoNumber ?? created.remito_number ?? undefined,
-        saleCondition: created.saleCondition ?? created.sale_condition ?? undefined,
-        condicionIva: created.condicionIva ?? created.condicion_iva ?? undefined,
-        transportes: created.transportes ?? [],
-        priceListId: created.priceListId ?? created.price_list_id ?? undefined,
-        legacyCode: created.legacyCode ?? created.legacy_code ?? undefined,
-        accountZone: created.accountZone ?? created.account_zone ?? undefined,
-        accountSellerLabel: created.accountSellerLabel ?? created.account_seller_label ?? undefined
-      } as Customer;
+      return mapCustomerFromApi(created);
     }, customer, 'createCustomer');
   },
 
@@ -1172,28 +1164,9 @@ export const api = {
     return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
   },
 
-  updateCustomer: async (id: string, data: { name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; transportNumber?: string; remitoNumber?: string; saleCondition?: string; condicionIva?: string; transporteIds?: string[]; sellerId?: string; priceListId?: string | null; legacyCode?: string; accountZone?: string; accountSellerLabel?: string }): Promise<Customer> => {
+  updateCustomer: async (id: string, data: Partial<Customer> & { transporteIds?: string[] }): Promise<Customer> => {
     const updated = await request<any>(`/customers/${id}`, 'PATCH', data);
-    return {
-      id: updated.id,
-      sellerId: updated.sellerId ?? updated.seller_id ?? '',
-      name: updated.name ?? '',
-      businessName: updated.businessName ?? updated.business_name ?? '',
-      email: updated.email ?? '',
-      address: updated.address ?? '',
-      city: updated.city ?? '',
-      cuit: updated.cuit ?? undefined,
-      phone: updated.phone ?? undefined,
-      transportNumber: updated.transportNumber ?? updated.transport_number ?? undefined,
-      remitoNumber: updated.remitoNumber ?? updated.remito_number ?? undefined,
-      saleCondition: updated.saleCondition ?? updated.sale_condition ?? undefined,
-      condicionIva: updated.condicionIva ?? updated.condicion_iva ?? undefined,
-      transportes: updated.transportes ?? [],
-      priceListId: updated.priceListId ?? updated.price_list_id ?? undefined,
-      legacyCode: updated.legacyCode ?? updated.legacy_code ?? undefined,
-      accountZone: updated.accountZone ?? updated.account_zone ?? undefined,
-      accountSellerLabel: updated.accountSellerLabel ?? updated.account_seller_label ?? undefined
-    } as Customer;
+    return mapCustomerFromApi(updated);
   },
 
   getTransportes: async (): Promise<Transporte[]> => {

@@ -76,6 +76,14 @@ export interface Transporte {
   address?: string;
 }
 
+/** Sucursal u otro punto de entrega del cliente (para elegir en el remito). */
+export interface CustomerDeliveryAddress {
+  id: string;
+  label: string;
+  address: string;
+  city: string;
+}
+
 /** Datos del remitente para remitos y factura (guardado en localStorage) */
 export interface RemitenteConfig {
   businessName: string;
@@ -117,6 +125,10 @@ export interface Customer {
   condicionIva?: string;
   /** Transportes (express) asignados para despachar pedidos a este cliente */
   transportes?: Transporte[];
+  /** Solo actualización PATCH: ids de transportes a vincular al cliente. */
+  transporteIds?: string[];
+  /** Sucursales u otras direcciones de entrega (además de `address` / `city` principal). */
+  deliveryAddresses?: CustomerDeliveryAddress[];
   priceListId?: string;
   /** Código de cliente en sistema legacy (ej. Multimedias: 000809) */
   legacyCode?: string;

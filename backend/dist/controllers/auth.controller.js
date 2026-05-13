@@ -97,7 +97,7 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.refreshToken = refreshToken;
 /** Devuelve el cliente vinculado al usuario cuando el rol es CUSTOMER (cliente directo). */
 const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
     const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
     const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
     if (!userId)
@@ -105,25 +105,49 @@ const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (role !== 'CUSTOMER')
         return res.status(403).json({ message: 'Solo para clientes directos' });
     try {
-        const row = yield (0, db_1.get)(`SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE user_id = ?`, [userId]);
+        const row = yield (0, db_1.get)(`SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, delivery_addresses FROM customers WHERE user_id = ?`, [userId]);
         if (!row)
             return res.status(404).json({ message: 'No se encontró el perfil de cliente' });
+        let deliveryAddresses = [];
+        try {
+            const raw = row.delivery_addresses;
+            const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (Array.isArray(arr)) {
+                for (const it of arr) {
+                    if (!it || typeof it !== 'object')
+                        continue;
+                    const address = String((_c = it.address) !== null && _c !== void 0 ? _c : '').trim();
+                    if (!address)
+                        continue;
+                    deliveryAddresses.push({
+                        id: String((_d = it.id) !== null && _d !== void 0 ? _d : '').trim() || `${row.id}-da-${deliveryAddresses.length}`,
+                        label: (String((_e = it.label) !== null && _e !== void 0 ? _e : 'Sucursal').trim() || 'Sucursal'),
+                        address,
+                        city: String((_f = it.city) !== null && _f !== void 0 ? _f : '').trim(),
+                    });
+                }
+            }
+        }
+        catch (_u) {
+            deliveryAddresses = [];
+        }
         res.json({
             id: row.id,
             userId: row.user_id,
-            sellerId: (_c = row.seller_id) !== null && _c !== void 0 ? _c : '',
+            sellerId: (_g = row.seller_id) !== null && _g !== void 0 ? _g : '',
             name: row.name,
-            businessName: (_d = row.business_name) !== null && _d !== void 0 ? _d : '',
-            email: (_e = row.email) !== null && _e !== void 0 ? _e : '',
-            address: (_f = row.address) !== null && _f !== void 0 ? _f : '',
-            city: (_g = row.city) !== null && _g !== void 0 ? _g : '',
-            cuit: (_h = row.cuit) !== null && _h !== void 0 ? _h : undefined,
-            phone: (_j = row.phone) !== null && _j !== void 0 ? _j : undefined,
-            transportNumber: (_k = row.transport_number) !== null && _k !== void 0 ? _k : undefined,
-            remitoNumber: (_l = row.remito_number) !== null && _l !== void 0 ? _l : undefined,
-            saleCondition: (_m = row.sale_condition) !== null && _m !== void 0 ? _m : undefined,
-            condicionIva: (_o = row.condicion_iva) !== null && _o !== void 0 ? _o : undefined,
-            priceListId: (_p = row.price_list_id) !== null && _p !== void 0 ? _p : undefined
+            businessName: (_h = row.business_name) !== null && _h !== void 0 ? _h : '',
+            email: (_j = row.email) !== null && _j !== void 0 ? _j : '',
+            address: (_k = row.address) !== null && _k !== void 0 ? _k : '',
+            city: (_l = row.city) !== null && _l !== void 0 ? _l : '',
+            cuit: (_m = row.cuit) !== null && _m !== void 0 ? _m : undefined,
+            phone: (_o = row.phone) !== null && _o !== void 0 ? _o : undefined,
+            transportNumber: (_p = row.transport_number) !== null && _p !== void 0 ? _p : undefined,
+            remitoNumber: (_q = row.remito_number) !== null && _q !== void 0 ? _q : undefined,
+            saleCondition: (_r = row.sale_condition) !== null && _r !== void 0 ? _r : undefined,
+            condicionIva: (_s = row.condicion_iva) !== null && _s !== void 0 ? _s : undefined,
+            priceListId: (_t = row.price_list_id) !== null && _t !== void 0 ? _t : undefined,
+            deliveryAddresses
         });
     }
     catch (e) {

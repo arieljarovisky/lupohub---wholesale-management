@@ -98,10 +98,30 @@ export const getMyCustomer = async (req: Request, res: Response) => {
   if (role !== 'CUSTOMER') return res.status(403).json({ message: 'Solo para clientes directos' });
   try {
     const row = await get(
-      `SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id FROM customers WHERE user_id = ?`,
+      `SELECT id, user_id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, delivery_addresses FROM customers WHERE user_id = ?`,
       [userId]
     );
     if (!row) return res.status(404).json({ message: 'No se encontró el perfil de cliente' });
+    let deliveryAddresses: { id: string; label: string; address: string; city: string }[] = [];
+    try {
+      const raw = row.delivery_addresses;
+      const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(arr)) {
+        for (const it of arr) {
+          if (!it || typeof it !== 'object') continue;
+          const address = String((it as any).address ?? '').trim();
+          if (!address) continue;
+          deliveryAddresses.push({
+            id: String((it as any).id ?? '').trim() || `${row.id}-da-${deliveryAddresses.length}`,
+            label: (String((it as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
+            address,
+            city: String((it as any).city ?? '').trim(),
+          });
+        }
+      }
+    } catch {
+      deliveryAddresses = [];
+    }
     res.json({
       id: row.id,
       userId: row.user_id,
@@ -117,7 +137,8 @@ export const getMyCustomer = async (req: Request, res: Response) => {
       remitoNumber: row.remito_number ?? undefined,
       saleCondition: row.sale_condition ?? undefined,
       condicionIva: row.condicion_iva ?? undefined,
-      priceListId: row.price_list_id ?? undefined
+      priceListId: row.price_list_id ?? undefined,
+      deliveryAddresses
     });
   } catch (e) {
     console.error('getMyCustomer:', e);

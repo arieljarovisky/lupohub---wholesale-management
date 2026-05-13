@@ -5,6 +5,52 @@ import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 
+export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
+
+function parseDeliveryAddressesFromRow(raw: unknown): CustomerDeliveryAddressDto[] {
+  if (raw == null || raw === '') return [];
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw as string) : raw;
+    if (!Array.isArray(arr)) return [];
+    const out: CustomerDeliveryAddressDto[] = [];
+    for (const it of arr) {
+      if (!it || typeof it !== 'object') continue;
+      const address = String((it as any).address ?? '').trim();
+      if (!address) continue;
+      const id = String((it as any).id ?? '').trim() || uuidv4();
+      out.push({
+        id,
+        label: (String((it as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
+        address,
+        city: String((it as any).city ?? '').trim(),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Serializa direcciones de sucursal para `customers.delivery_addresses` (TEXT JSON). */
+function normalizeDeliveryAddressesForDb(input: unknown): string | null {
+  if (input === undefined || input === null) return null;
+  if (!Array.isArray(input)) return null;
+  const cleaned: CustomerDeliveryAddressDto[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const address = String((raw as any).address ?? '').trim();
+    if (!address) continue;
+    const id = String((raw as any).id ?? '').trim() || uuidv4();
+    cleaned.push({
+      id,
+      label: (String((raw as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
+      address,
+      city: String((raw as any).city ?? '').trim(),
+    });
+  }
+  return cleaned.length ? JSON.stringify(cleaned) : null;
+}
+
 /** Detecta NC por leyenda en el comprobante (import Tango, texto libre en recibo, etc.). */
 function comprobanteIndicaNotaCredito(comp: string | null | undefined): boolean {
   const u = String(comp ?? '')
@@ -74,7 +120,8 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     shouldRetainIibb: Number(row.should_retain_iibb || 0) === 1,
     agipPadronPeriod: row.agip_padron_period ?? undefined,
     iibbAlicuota: row.iibb_alicuota != null ? Number(row.iibb_alicuota) : undefined,
-    transportes: transportes ?? []
+    transportes: transportes ?? [],
+    deliveryAddresses: parseDeliveryAddressesFromRow(row.delivery_addresses)
   };
 }
 
@@ -113,7 +160,7 @@ export const getCustomers = async (req: Request, res: Response) => {
       : '';
     const rows = await query(
       `SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
-              c.legacy_code, c.account_zone, c.account_seller_label
+              c.legacy_code, c.account_zone, c.account_seller_label, c.delivery_addresses
               ${agipSelect}
        FROM customers c
        ${agipJoin}
@@ -516,6 +563,7 @@ export const createCustomer = async (req: Request, res: Response) => {
       legacyCode?: string;
       accountZone?: string;
       accountSellerLabel?: string;
+      deliveryAddresses?: unknown[];
     };
     const name = (body.name ?? '').toString().trim();
     const businessName = (body.businessName ?? '').toString().trim();
@@ -541,6 +589,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     const legacyCode = (body.legacyCode ?? '').toString().trim() || null;
     const accountZone = (body.accountZone ?? '').toString().trim() || null;
     const accountSellerLabel = (body.accountSellerLabel ?? '').toString().trim() || null;
+    const deliveryJson = normalizeDeliveryAddressesForDb(body.deliveryAddresses);
 
     // Guardar nombre de contacto y razón social en columnas separadas:
     // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
@@ -549,13 +598,13 @@ export const createCustomer = async (req: Request, res: Response) => {
     const sqlBusinessName = businessName || name || null;
 
     await execute(
-      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel]
+      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]
     );
 
     const created = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
       [id]
     );
     const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x: string) => x && typeof x === 'string') : [];
@@ -599,6 +648,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       legacyCode?: string;
       accountZone?: string;
       accountSellerLabel?: string;
+      deliveryAddresses?: unknown[] | null;
     };
     const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Cliente no encontrado' });
@@ -620,6 +670,10 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.legacyCode !== undefined) { updates.push('legacy_code = ?'); params.push(body.legacyCode?.trim() || null); }
     if (body.accountZone !== undefined) { updates.push('account_zone = ?'); params.push(body.accountZone?.trim() || null); }
     if (body.accountSellerLabel !== undefined) { updates.push('account_seller_label = ?'); params.push(body.accountSellerLabel?.trim() || null); }
+    if (body.deliveryAddresses !== undefined) {
+      updates.push('delivery_addresses = ?');
+      params.push(normalizeDeliveryAddressesForDb(body.deliveryAddresses));
+    }
     if (updates.length > 0) {
       params.push(id);
       await execute(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -632,7 +686,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(
@@ -711,7 +765,7 @@ export const attachUserToCustomer = async (req: Request, res: Response) => {
     await execute('UPDATE customers SET user_id = ? WHERE id = ?', [userId, id]);
 
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle } from 'lucide-react';
-import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User } from '../types';
+import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User, CustomerDeliveryAddress } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
 import { api } from '../services/api';
@@ -193,6 +193,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newAccountZone, setNewAccountZone] = useState('');
   const [newAccountSellerLabel, setNewAccountSellerLabel] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
+  /** Sucursales / puntos de entrega adicionales (se guardan en `deliveryAddresses`). */
+  const [deliveryBranchRows, setDeliveryBranchRows] = useState<CustomerDeliveryAddress[]>([]);
   const multimediaHistorialInputRef = useRef<HTMLInputElement>(null);
   const assignSellersResumenInputRef = useRef<HTMLInputElement>(null);
   const [groupBySeller, setGroupBySeller] = useState(false);
@@ -385,6 +387,16 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     }, 0);
   };
 
+  const normalizedDeliveryBranches = (): CustomerDeliveryAddress[] =>
+    deliveryBranchRows
+      .map((r, idx) => ({
+        id: (r.id || '').trim() || `da-${Date.now()}-${idx}`,
+        label: (r.label || 'Sucursal').trim() || 'Sucursal',
+        address: r.address.trim(),
+        city: (r.city || '').trim(),
+      }))
+      .filter((r) => r.address.length > 0);
+
   const handleSave = () => {
     if (!newBusinessName || !newEmail) return;
 
@@ -404,10 +416,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         transporteIds: selectedTransporteIds,
         legacyCode: newLegacyCode.trim() || undefined,
         accountZone: newAccountZone.trim() || undefined,
-        accountSellerLabel: newAccountSellerLabel.trim() || undefined
+        accountSellerLabel: newAccountSellerLabel.trim() || undefined,
+        deliveryAddresses: normalizedDeliveryBranches(),
       };
       Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
-        setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data, transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })) } : prev);
+        setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data, transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })), deliveryAddresses: normalizedDeliveryBranches() } : prev);
         setEditingCustomer(null);
         setNewBusinessName('');
         setNewContactName('');
@@ -424,6 +437,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewAccountZone('');
         setNewAccountSellerLabel('');
         setSelectedTransporteIds([]);
+        setDeliveryBranchRows([]);
       }).catch(() => {});
       return;
     }
@@ -445,7 +459,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       legacyCode: newLegacyCode.trim() || undefined,
       accountZone: newAccountZone.trim() || undefined,
       accountSellerLabel: newAccountSellerLabel.trim() || undefined,
-      transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' }))
+      transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })),
+      deliveryAddresses: normalizedDeliveryBranches(),
     };
 
     onCreateCustomer(newCustomer);
@@ -465,7 +480,64 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setNewAccountZone('');
     setNewAccountSellerLabel('');
     setSelectedTransporteIds([]);
+    setDeliveryBranchRows([]);
   };
+
+  const renderDeliveryBranchesBlock = () => (
+    <div className="pt-3 border-t border-slate-800/80">
+      <p className="text-[10px] text-slate-500 uppercase font-black mb-1 ml-1">Sucursales u otras direcciones de entrega</p>
+      <p className="text-[10px] text-slate-500 mb-3 ml-1">Opcional: al generar el remito se puede elegir una de estas direcciones en lugar de la principal.</p>
+      <div className="space-y-3">
+        {deliveryBranchRows.map((row, idx) => (
+          <div key={row.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Punto de entrega {idx + 1}</span>
+              <button
+                type="button"
+                onClick={() => setDeliveryBranchRows((prev) => prev.filter((_, i) => i !== idx))}
+                className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+              >
+                <Trash2 size={14} /> Quitar
+              </button>
+            </div>
+            <input
+              type="text"
+              className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-white text-sm"
+              placeholder="Nombre (ej: Sucursal Rosario)"
+              value={row.label}
+              onChange={(e) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, label: e.target.value } : r)))}
+            />
+            <input
+              type="text"
+              className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-white text-sm"
+              placeholder="Dirección"
+              value={row.address}
+              onChange={(e) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, address: e.target.value } : r)))}
+            />
+            <input
+              type="text"
+              className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-white text-sm"
+              placeholder="Ciudad / localidad"
+              value={row.city}
+              onChange={(e) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, city: e.target.value } : r)))}
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() =>
+          setDeliveryBranchRows((prev) => [
+            ...prev,
+            { id: `da-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, label: 'Sucursal', address: '', city: '' },
+          ])
+        }
+        className="mt-3 w-full py-2 text-sm font-semibold text-blue-300 border border-blue-700/50 rounded-xl hover:bg-blue-900/20 transition"
+      >
+        + Agregar sucursal
+      </button>
+    </div>
+  );
 
   // --- LOGIC FOR STATISTICS ---
   const getCustomerStats = (customerId: string) => {
@@ -692,7 +764,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
             <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
             <button
-              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
+              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
               className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
             >
               <X size={20} />
@@ -779,6 +851,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCity} onChange={(e) => setNewCity(e.target.value)} placeholder="CABA" />
               </div>
             </div>
+            {renderDeliveryBranchesBlock()}
             <div className="pt-3 border-t border-slate-800/80">
               <p className="text-[10px] text-slate-500 uppercase font-black mb-2 ml-1">Cuenta corriente / Excel Multimedias</p>
               <div className="space-y-3">
@@ -798,7 +871,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </div>
           </div>
           <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
-            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
+            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
             <button onClick={handleSave} disabled={!newBusinessName || !newEmail} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all">
               <Save size={18} />
               {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
@@ -908,6 +981,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewAccountZone(selectedCustomer.accountZone || '');
                  setNewAccountSellerLabel(selectedCustomer.accountSellerLabel || '');
                  setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
+                 setDeliveryBranchRows((selectedCustomer.deliveryAddresses ?? []).map((d) => ({ ...d })));
                  setEditingCustomer(selectedCustomer);
                }}
                className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
@@ -1926,7 +2000,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <span className="leading-tight break-words">{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
           </button>
           <button 
-            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
+            onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
             className="bg-blue-600 text-white px-3 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium min-h-[44px] whitespace-normal text-left"
           >
             <Plus size={18} />
@@ -2163,7 +2237,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -2317,6 +2391,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     />
                 </div>
               </div>
+              {renderDeliveryBranchesBlock()}
               <div className="pt-3 border-t border-slate-800/80">
                 <p className="text-[10px] text-slate-500 uppercase font-black mb-2 ml-1">Cuenta corriente / Excel Multimedias</p>
                 <div className="space-y-3">
@@ -2338,7 +2413,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar
