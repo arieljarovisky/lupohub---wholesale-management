@@ -113,6 +113,16 @@ function orderNetoFromItems(order: Order): number {
   return Math.round(s * 100) / 100;
 }
 
+/** Percepción IIBB (AGIP) que aplica al pedido facturado: viene de `getOrders` (BD o recálculo con padrón). */
+function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: number } | null {
+  if (!order.invoice) return null;
+  const inv = order.invoice as any;
+  const retPer = Number(inv.agipRetPer ?? inv.agip_ret_per ?? 0);
+  const alicuota = Number(inv.agipAlicuota ?? inv.agip_alicuota ?? 0);
+  if (retPer <= 0.005 && alicuota <= 0.005) return null;
+  return { alicuota, retPer };
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -1679,7 +1689,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       >
                         Vista previa
                       </button>
-                      {canEmitirFactura && (
+                      {canEmitirFactura && orderInvoiceApplicableAgip(order) && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1715,7 +1725,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           )}
                         </button>
                       )}
-                      {canEmitirFactura && Number(order.creditNotesCount || 0) === 0 && (
+                      {canEmitirFactura &&
+                        orderInvoiceApplicableAgip(order) &&
+                        Number(order.creditNotesCount || 0) === 0 && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1920,6 +1932,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                    <div className="text-right ml-auto sm:ml-0">
                      <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
+                     {order.invoice &&
+                       (() => {
+                         const agip = orderInvoiceApplicableAgip(order);
+                         if (!agip) return null;
+                         const neto = orderNetoFromItems(order);
+                         const { impTotal } = afipDesdeNeto(neto);
+                         const totalConIvaEIibb = Math.round((impTotal + agip.retPer) * 100) / 100;
+                         return (
+                           <div className="mt-1.5 space-y-0.5 text-right">
+                             <div className="text-[11px] text-amber-200/95">
+                               IIBB
+                               {agip.alicuota > 0.005 ? ` (${agip.alicuota.toFixed(2)}%)` : ''}:{' '}
+                               <span className="font-mono font-bold">${formatMoneyAr(agip.retPer)}</span>
+                             </div>
+                             <div className="text-[11px] font-bold text-slate-200">
+                               Total c/ IVA e IIBB:{' '}
+                               <span className="text-emerald-300">${formatMoneyAr(totalConIvaEIibb)}</span>
+                             </div>
+                           </div>
+                         );
+                       })()}
                    </div>
                 </div>
               </div>

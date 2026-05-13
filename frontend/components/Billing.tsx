@@ -883,7 +883,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         {canAfipInvoiceActions &&
                           item.tipo === 'FACTURA' &&
                           item.orderId &&
-                          !String(item.id || '').startsWith('mm-fac-') && (
+                          !String(item.id || '').startsWith('mm-fac-') &&
+                          (Number(item.agipRetPer || 0) > 0.005 || Number(item.agipAlicuota || 0) > 0.005) && (
                             <>
                               <button
                                 type="button"
