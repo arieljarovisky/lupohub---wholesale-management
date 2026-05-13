@@ -7,6 +7,8 @@ import {
   deleteOrder,
   archiveOrder,
   getOrderInvoice,
+  recalculateStoredInvoiceAgip,
+  reemitirFacturaConAgip,
   emitirFactura,
   getOrderCreditNotes,
   emitirNotaCredito,
@@ -31,6 +33,8 @@ router.put('/:id', updateOrder);
 router.patch('/:id/archive', authMiddleware, archiveOrder);
 router.delete('/:id', deleteOrder);
 router.get('/:id/invoice', getOrderInvoice);
+router.post('/:id/invoice/recalculate-agip', authMiddleware, recalculateStoredInvoiceAgip);
+router.post('/:id/invoice/reemitir-con-agip', authMiddleware, reemitirFacturaConAgip);
 router.get('/:id/credit-notes', getOrderCreditNotes);
 router.post('/:id/emitir-factura', authMiddleware, emitirFactura);
 router.post('/:id/emitir-nota-credito', authMiddleware, emitirNotaCredito);

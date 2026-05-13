@@ -1,6 +1,6 @@
 /**
  * HTML imprimible de factura y nota de crédito para pedidos mayorista (misma vista en Pedidos y Facturación).
- * Totales: precios de línea y total del pedido son neto gravado; IVA 21% y total como en AFIP (neto + IVA).
+ * Totales: neto gravado + IVA 21% + percepción IIBB (si figura en la factura); total alineado con AFIP.
  */
 import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
 import { formatMoneyAr } from './moneyFormat';
@@ -136,11 +136,11 @@ export function buildWholesaleFacturaHtml(params: {
   /** Neto gravado: suma de líneas; si no hay ítems, fallback a orders.total (puede estar desactualizado). */
   const netoGravado =
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
-  const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
-  const total = Math.round((netoGravado + iva21) * 100) / 100;
-  const subtotalBruto = netoGravado;
   const agipAlicuota = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
   const agipRetPer = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
+  const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
+  const total = Math.round((netoGravado + iva21 + agipRetPer) * 100) / 100;
+  const subtotalBruto = netoGravado;
 
   const rows = items
     .map((i) => {

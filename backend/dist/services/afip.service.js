@@ -77,6 +77,8 @@ const IVA_RESPONSABLE_INSCRIPTO = 1;
 const CONSUMIDOR_FINAL = 5;
 /** Alícuota IVA 21% = Id 5 */
 const ID_IVA_21 = 5;
+/** Tipo de tributo WSFE: otros / percepción IIBB (ejemplo oficial AfipSDK). */
+const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9999999999999.99; // 13 enteros + 2 decimales
 function readCertOrKey(envVar, value, description) {
     let p = value.trim();
@@ -235,7 +237,15 @@ function emitirFactura(order, customer, forceCbteTipo) {
             throw new Error(`El total neto (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP para un comprobante (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
         }
         const impIva = Math.round(impNeto * 0.21 * 100) / 100;
-        const total = Math.round((impNeto + impIva) * 100) / 100;
+        const perc = order.iibbPercepcion;
+        const impTributo = perc && Number(perc.importe) > 0.005
+            ? Math.round(Number(perc.importe) * 100) / 100
+            : 0;
+        const baseIibb = perc && Number(perc.baseImp) > 0
+            ? Math.round(Number(perc.baseImp) * 100) / 100
+            : impNeto;
+        const alicuotaIibb = perc && impTributo > 0 ? Math.round(Number(perc.alicuota || 0) * 100) / 100 : 0;
+        const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
         // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
         const dateStr = new Date().toISOString().split('T')[0];
         const fecha = dateStr.replace(/-/g, '');
@@ -283,7 +293,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
             ImpNeto: impNeto,
             ImpOpEx: 0,
             ImpIVA: impIva,
-            ImpTrib: 0,
+            ImpTrib: impTributo,
             MonId: 'PES',
             MonCotiz: 1,
             CondicionIVAReceptorId: condicionIva,
@@ -291,6 +301,17 @@ function emitirFactura(order, customer, forceCbteTipo) {
                 { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
             ]
         };
+        if (impTributo > 0) {
+            data.Tributos = [
+                {
+                    Id: TRIBUTO_OTROS_IIBB,
+                    Desc: 'Percepción IIBB',
+                    BaseImp: baseIibb,
+                    Alic: alicuotaIibb,
+                    Importe: impTributo
+                }
+            ];
+        }
         const res = yield afip.ElectronicBilling.createVoucher(data);
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';

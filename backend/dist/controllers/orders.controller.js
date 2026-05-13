@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.recalculateStoredInvoiceAgip = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
@@ -933,6 +933,54 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.deleteOrder = deleteOrder;
+/**
+ * Recalcula la percepción IIBB (padrón AGIP) y la guarda en `invoices` para un pedido **ya facturado**.
+ * Sirve para corregir el PDF interno cuando la factura salió con AGIP en cero (p. ej. bug de fecha).
+ *
+ * **No modifica el comprobante en AFIP** (el CAE y el total registrado en ARCA no cambian).
+ */
+const recalculateStoredInvoiceAgip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+        return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden actualizar la percepción IIBB' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const invRow = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
+        if (!invRow)
+            return res.status(404).json({ message: 'Este pedido no tiene factura guardada en el sistema' });
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total FROM orders WHERE id = ?', [id]);
+        if (!orderRow)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const customerRow = yield (0, db_1.get)('SELECT cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+        const netFromItems = yield getOrderNetFromLineItems(id);
+        const netAmount = netFromItems > 0 ? netFromItems : Number(orderRow.total || 0);
+        const agip = yield getAgipRetentionForOrder({
+            orderDate: orderRow.date,
+            customerCuit: customerRow === null || customerRow === void 0 ? void 0 : customerRow.cuit,
+            netAmount
+        });
+        if (!agip || !(agip.amount > 0.005)) {
+            return res.status(400).json({
+                message: 'No hay percepción IIBB calculable (CUIT del cliente incompleto, sin alícuota en el padrón AGIP del mes del pedido, o importe redondeado a cero).'
+            });
+        }
+        yield (0, db_1.execute)(`UPDATE invoices SET agip_alicuota = ?, agip_ret_per = ? WHERE order_id = ?`, [agip.alicuota, agip.amount, id]);
+        res.json({
+            orderId: id,
+            agipAlicuota: agip.alicuota,
+            agipRetPer: agip.amount,
+            message: 'Percepción IIBB guardada. Volvé a abrir el PDF de la factura. El CAE en AFIP no se modifica; si necesitás registrar el tributo en ARCA, consultá a tu contador (p. ej. nota de débito u otro esquema).'
+        });
+    }
+    catch (error) {
+        console.error('recalculateStoredInvoiceAgip:', error);
+        res.status(500).json({ message: 'Error actualizando percepción IIBB', detail: error === null || error === void 0 ? void 0 : error.message });
+    }
+});
+exports.recalculateStoredInvoiceAgip = recalculateStoredInvoiceAgip;
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -955,7 +1003,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
             const netFromItems = yield getOrderNetFromLineItems(id);
             const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
             const calc = yield getAgipRetentionForOrder({
-                orderDate: String(inv.order_date || inv.created_at || ''),
+                orderDate: inv.order_date || inv.created_at || '',
                 customerCuit: inv.customer_cuit,
                 netAmount
             });
@@ -1009,8 +1057,22 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const netFromItems = yield getOrderNetFromLineItems(id);
         const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+        const agip = yield getAgipRetentionForOrder({
+            orderDate: orderRow.date,
+            customerCuit: customerRow.cuit,
+            netAmount: totalForAfip
+        });
+        const iibbPercepcion = agip && agip.amount > 0.005
+            ? { baseImp: totalForAfip, alicuota: agip.alicuota, importe: agip.amount }
+            : undefined;
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirAfip({ id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id }, {
+        const result = yield emitirAfip({
+            id: orderRow.id,
+            date: orderRow.date,
+            total: totalForAfip,
+            customerId: orderRow.customer_id,
+            iibbPercepcion: iibbPercepcion !== null && iibbPercepcion !== void 0 ? iibbPercepcion : null
+        }, {
             id: customerRow.id,
             businessName: (_d = customerRow.business_name) !== null && _d !== void 0 ? _d : '',
             cuit: customerRow.cuit,
@@ -1018,11 +1080,6 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }, forceCbteTipo);
         const { v4: uuidv4 } = yield Promise.resolve().then(() => __importStar(require('uuid')));
         const invoiceId = uuidv4();
-        const agip = yield getAgipRetentionForOrder({
-            orderDate: String(orderRow.date || ''),
-            customerCuit: customerRow.cuit,
-            netAmount: totalForAfip
-        });
         yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             invoiceId,

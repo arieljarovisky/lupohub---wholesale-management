@@ -28,13 +28,24 @@ const IVA_RESPONSABLE_INSCRIPTO = 1;
 const CONSUMIDOR_FINAL = 5;
 /** Alícuota IVA 21% = Id 5 */
 const ID_IVA_21 = 5;
+/** Tipo de tributo WSFE: otros / percepción IIBB (ejemplo oficial AfipSDK). */
+const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9_999_999_999_999.99; // 13 enteros + 2 decimales
 
 export interface OrderForAfip {
   id: string;
-  date: string;
+  date: string | Date;
   total: number;
   customerId: string;
+  /**
+   * Percepción IIBB (padrón AGIP): si viene con importe > 0 se informa en AFIP (ImpTrib + Tributos Id 99)
+   * y debe coincidir con lo guardado en `invoices.agip_*`.
+   */
+  iibbPercepcion?: {
+    baseImp: number;
+    alicuota: number;
+    importe: number;
+  } | null;
 }
 
 export interface CustomerForAfip {
@@ -219,7 +230,19 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     );
   }
   const impIva = Math.round(impNeto * 0.21 * 100) / 100;
-  const total = Math.round((impNeto + impIva) * 100) / 100;
+
+  const perc = order.iibbPercepcion;
+  const impTributo =
+    perc && Number(perc.importe) > 0.005
+      ? Math.round(Number(perc.importe) * 100) / 100
+      : 0;
+  const baseIibb =
+    perc && Number(perc.baseImp) > 0
+      ? Math.round(Number(perc.baseImp) * 100) / 100
+      : impNeto;
+  const alicuotaIibb =
+    perc && impTributo > 0 ? Math.round(Number(perc.alicuota || 0) * 100) / 100 : 0;
+  const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
 
   // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
   const dateStr = new Date().toISOString().split('T')[0];
@@ -270,7 +293,7 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     ImpNeto: impNeto,
     ImpOpEx: 0,
     ImpIVA: impIva,
-    ImpTrib: 0,
+    ImpTrib: impTributo,
     MonId: 'PES',
     MonCotiz: 1,
     CondicionIVAReceptorId: condicionIva,
@@ -278,6 +301,18 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
       { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
     ]
   };
+
+  if (impTributo > 0) {
+    data.Tributos = [
+      {
+        Id: TRIBUTO_OTROS_IIBB,
+        Desc: 'Percepción IIBB',
+        BaseImp: baseIibb,
+        Alic: alicuotaIibb,
+        Importe: impTributo
+      }
+    ];
+  }
 
   const res = await afip.ElectronicBilling.createVoucher(data);
   const cae = res?.CAE ?? res?.cae;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -165,6 +165,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
+  const [recalculatingAgipOrderId, setRecalculatingAgipOrderId] = useState<string | null>(null);
+  const [reemittingInvoiceOrderId, setReemittingInvoiceOrderId] = useState<string | null>(null);
   const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, ManualFacturaFields>>(() => {
     try {
       const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
@@ -1677,6 +1679,99 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       >
                         Vista previa
                       </button>
+                      {canEmitirFactura && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showConfirm({
+                              title: 'Guardar IIBB en esta factura (PDF)',
+                              message:
+                                'Se recalcula la percepción con el padrón AGIP y el neto del pedido y se guarda en el sistema. Al reabrir el PDF verás percepción y total actualizados. El CAE en AFIP no cambia: si el contador te pide registrar el tributo en ARCA, puede ser con otro comprobante (p. ej. nota de débito).',
+                              confirmLabel: 'Guardar IIBB',
+                              onConfirm: () => {
+                                setRecalculatingAgipOrderId(order.id);
+                                api
+                                  .recalculateStoredInvoiceAgip(order.id)
+                                  .then((r: { message?: string }) => {
+                                    showToast('success', r?.message || 'IIBB actualizado. Reabrí la factura para ver el PDF.');
+                                    refreshOrders?.();
+                                  })
+                                  .catch((err: any) =>
+                                    showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar IIBB')
+                                  )
+                                  .finally(() => setRecalculatingAgipOrderId(null));
+                              }
+                            });
+                          }}
+                          disabled={recalculatingAgipOrderId === order.id}
+                          className="p-2 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700/50 transition disabled:opacity-50"
+                          title="Recalcular percepción IIBB (padrón AGIP) y guardarla para el PDF de esta factura"
+                        >
+                          {recalculatingAgipOrderId === order.id ? (
+                            <Loader2 size={16} className="animate-spin text-amber-400" />
+                          ) : (
+                            <Percent size={16} />
+                          )}
+                        </button>
+                      )}
+                      {canEmitirFactura && Number(order.creditNotesCount || 0) === 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showConfirm({
+                              title: 'Nuevo CAE con IIBB en AFIP',
+                              message:
+                                'Se emitirá en AFIP una nota de crédito por el total del pedido (anula fiscalmente la factura actual) y enseguida una nueva factura con percepción IIBB según el padrón AGIP. El inventario no se modifica (no se revierte stock). Solo disponible si el pedido no tiene notas de crédito previas. ¿Continuar?',
+                              confirmLabel: 'Reemitir con IIBB',
+                              onConfirm: () => {
+                                setReemittingInvoiceOrderId(order.id);
+                                api
+                                  .reemitirFacturaConAgip(order.id)
+                                  .then((r: any) => {
+                                    const inv = r?.invoice;
+                                    if (inv && typeof inv === 'object') {
+                                      onFacturaEmitida?.(order.id, {
+                                        cae: String(inv.cae ?? ''),
+                                        caeFchVto: inv.caeFchVto,
+                                        cbteDesde: Number(inv.cbteDesde),
+                                        cbteHasta: Number(inv.cbteHasta),
+                                        cbteTipo: Number(inv.cbteTipo),
+                                        puntoVta: inv.puntoVta != null ? Number(inv.puntoVta) : undefined,
+                                        agipAlicuota: Number(inv.agipAlicuota ?? 0),
+                                        agipRetPer: Number(inv.agipRetPer ?? 0)
+                                      });
+                                    }
+                                    onCreditNoteEmitida?.(order.id);
+                                    showToast('success', r?.message || 'Factura reemitida con nuevo CAE e IIBB en AFIP.');
+                                    refreshOrders?.();
+                                  })
+                                  .catch((err: any) => {
+                                    const d = err?.response?.data;
+                                    const base =
+                                      d?.message || err?.message || 'No se pudo reemitir la factura con IIBB';
+                                    const extra = d?.creditNoteEmitted
+                                      ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
+                                      : '';
+                                    showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
+                                    refreshOrders?.();
+                                  })
+                                  .finally(() => setReemittingInvoiceOrderId(null));
+                              }
+                            });
+                          }}
+                          disabled={reemittingInvoiceOrderId === order.id}
+                          className="p-2 rounded-lg text-slate-400 hover:text-sky-300 hover:bg-slate-700/50 transition disabled:opacity-50"
+                          title="Nota de crédito total + nueva factura AFIP con percepción IIBB (nuevo CAE). Sin cambios de stock."
+                        >
+                          {reemittingInvoiceOrderId === order.id ? (
+                            <Loader2 size={16} className="animate-spin text-sky-400" />
+                          ) : (
+                            <RefreshCcw size={16} />
+                          )}
+                        </button>
+                      )}
                     </>
                   )}
                   {Number(order.creditNotesCount || 0) > 0 && (

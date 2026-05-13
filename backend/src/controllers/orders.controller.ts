@@ -932,6 +932,262 @@ export const deleteOrder = async (req: any, res: any) => {
   }
 };
 
+/**
+ * Recalcula la percepción IIBB (padrón AGIP) y la guarda en `invoices` para un pedido **ya facturado**.
+ * Sirve para corregir el PDF interno cuando la factura salió con AGIP en cero (p. ej. bug de fecha).
+ *
+ * **No modifica el comprobante en AFIP** (el CAE y el total registrado en ARCA no cambian).
+ */
+export const recalculateStoredInvoiceAgip = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden actualizar la percepción IIBB' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const invRow = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
+    if (!invRow) return res.status(404).json({ message: 'Este pedido no tiene factura guardada en el sistema' });
+
+    const orderRow = await get(
+      'SELECT id, customer_id, date, total FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const customerRow = await get('SELECT cuit FROM customers WHERE id = ?', [orderRow.customer_id]);
+    const netFromItems = await getOrderNetFromLineItems(id);
+    const netAmount = netFromItems > 0 ? netFromItems : Number(orderRow.total || 0);
+
+    const agip = await getAgipRetentionForOrder({
+      orderDate: orderRow.date,
+      customerCuit: customerRow?.cuit,
+      netAmount
+    });
+
+    if (!agip || !(agip.amount > 0.005)) {
+      return res.status(400).json({
+        message:
+          'No hay percepción IIBB calculable (CUIT del cliente incompleto, sin alícuota en el padrón AGIP del mes del pedido, o importe redondeado a cero).'
+      });
+    }
+
+    await execute(
+      `UPDATE invoices SET agip_alicuota = ?, agip_ret_per = ? WHERE order_id = ?`,
+      [agip.alicuota, agip.amount, id]
+    );
+
+    res.json({
+      orderId: id,
+      agipAlicuota: agip.alicuota,
+      agipRetPer: agip.amount,
+      message:
+        'Percepción IIBB guardada. Volvé a abrir el PDF de la factura. El CAE en AFIP no se modifica; si necesitás registrar el tributo en ARCA, consultá a tu contador (p. ej. nota de débito u otro esquema).'
+    });
+  } catch (error: any) {
+    console.error('recalculateStoredInvoiceAgip:', error);
+    res.status(500).json({ message: 'Error actualizando percepción IIBB', detail: error?.message });
+  }
+};
+
+/**
+ * Anula la factura actual en AFIP con una **NC total** (sin tocar stock) y emite una **nueva factura**
+ * con percepción IIBB informada en WSFE. Actualiza la fila `invoices` con el nuevo CAE.
+ *
+ * Requisitos: el pedido tiene factura, **no** tiene notas de crédito previas, y el padrón AGIP
+ * devuelve percepción > 0 para el neto del pedido.
+ */
+export const reemitirFacturaConAgip = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden reemitir la factura con IIBB' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+
+  try {
+    const invRow = await get(
+      'SELECT id, order_id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?',
+      [id]
+    );
+    if (!invRow) {
+      return res.status(400).json({ message: 'Este pedido no tiene factura emitida.' });
+    }
+
+    const cnCountRow = await get(
+      `SELECT COUNT(*) AS c FROM credit_notes WHERE order_id = ?`,
+      [id]
+    );
+    if (Number((cnCountRow as any)?.c || 0) > 0) {
+      return res.status(400).json({
+        message:
+          'No se puede reemitir: el pedido ya tiene notas de crédito. Si necesitás corregir la facturación, coordiná con el contador o emití manualmente en AFIP.'
+      });
+    }
+
+    const orderRow = await get(
+      'SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const customerRow = await get(
+      'SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?',
+      [orderRow.customer_id]
+    );
+    if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+
+    const netFromItems = await getOrderNetFromLineItems(id);
+    const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
+    if (totalForAfip <= 0) {
+      return res.status(400).json({ message: 'El neto del pedido debe ser mayor a 0 para reemitir.' });
+    }
+
+    const agip = await getAgipRetentionForOrder({
+      orderDate: orderRow.date,
+      customerCuit: customerRow.cuit,
+      netAmount: totalForAfip
+    });
+    if (!agip || !(agip.amount > 0.005)) {
+      return res.status(400).json({
+        message:
+          'No hay percepción IIBB calculable para reemitir (padrón AGIP en cero o CUIT incompleto). Si solo querés actualizar el PDF sin nuevo CAE, usá “Guardar IIBB”.'
+      });
+    }
+
+    const cbteTipoFromBody = req.body?.cbteTipo;
+    const forceCbteTipo =
+      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? (cbteTipoFromBody as 1 | 6) : undefined;
+
+    const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = await import('../services/afip.service');
+
+    const ncResult = await emitirNCAfip(
+      {
+        puntoVta: invRow.punto_venta,
+        cbteTipo: invRow.cbte_tipo,
+        cbteDesde: invRow.cbte_desde
+      },
+      {
+        id: customerRow.id,
+        businessName: customerRow.business_name ?? '',
+        cuit: customerRow.cuit,
+        condicionIva: customerRow.condicion_iva ?? undefined
+      },
+      totalForAfip
+    );
+
+    const creditNoteId = uuidv4();
+    await execute(
+      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        creditNoteId,
+        id,
+        invRow.id,
+        ncResult.cae,
+        ncResult.caeFchVto || null,
+        ncResult.puntoVta,
+        ncResult.cbteTipo,
+        ncResult.cbteDesde,
+        ncResult.cbteHasta,
+        totalForAfip,
+        'total',
+        null
+      ]
+    );
+
+    const iibbPercepcion = {
+      baseImp: totalForAfip,
+      alicuota: agip.alicuota,
+      importe: agip.amount
+    };
+
+    try {
+      const faResult = await emitirAfip(
+        {
+          id: orderRow.id,
+          date: orderRow.date,
+          total: totalForAfip,
+          customerId: orderRow.customer_id,
+          iibbPercepcion
+        },
+        {
+          id: customerRow.id,
+          businessName: customerRow.business_name ?? '',
+          cuit: customerRow.cuit,
+          condicionIva: customerRow.condicion_iva ?? null
+        },
+        forceCbteTipo
+      );
+
+      await execute(
+        `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?
+         WHERE order_id = ?`,
+        [
+          faResult.cae,
+          faResult.caeFchVto || null,
+          faResult.puntoVta,
+          faResult.cbteTipo,
+          faResult.cbteDesde,
+          faResult.cbteHasta,
+          agip.alicuota,
+          agip.amount,
+          id
+        ]
+      );
+
+      res.status(201).json({
+        message:
+          'Se emitió nota de crédito total en AFIP y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
+        creditNote: {
+          id: creditNoteId,
+          orderId: id,
+          cae: ncResult.cae,
+          caeFchVto: ncResult.caeFchVto,
+          puntoVta: ncResult.puntoVta,
+          cbteTipo: ncResult.cbteTipo,
+          cbteDesde: ncResult.cbteDesde,
+          cbteHasta: ncResult.cbteHasta,
+          amountCredited: totalForAfip
+        },
+        invoice: {
+          id: invRow.id,
+          orderId: id,
+          cae: faResult.cae,
+          caeFchVto: faResult.caeFchVto,
+          puntoVta: faResult.puntoVta,
+          cbteTipo: faResult.cbteTipo,
+          cbteDesde: faResult.cbteDesde,
+          cbteHasta: faResult.cbteHasta,
+          agipAlicuota: agip.alicuota,
+          agipRetPer: agip.amount
+        }
+      });
+    } catch (faErr: any) {
+      console.error('reemitirFacturaConAgip: nueva factura falló tras NC:', faErr);
+      res.status(500).json({
+        message:
+          'Se emitió la nota de crédito en AFIP pero falló la nueva factura. Completá la factura en AFIP con percepción IIBB y actualizá manualmente la fila en `invoices`, o contactá soporte con el CAE de la NC.',
+        creditNoteEmitted: true,
+        creditNote: {
+          id: creditNoteId,
+          cae: ncResult.cae,
+          puntoVta: ncResult.puntoVta,
+          cbteTipo: ncResult.cbteTipo,
+          cbteDesde: ncResult.cbteDesde,
+          cbteHasta: ncResult.cbteHasta
+        },
+        detail: faErr?.message || String(faErr)
+      });
+    }
+  } catch (error: any) {
+    console.error('reemitirFacturaConAgip:', error);
+    const msg = error?.message || 'Error reemitiendo factura con IIBB';
+    const status = msg.includes('no configurado') ? 503 : 500;
+    res.status(status).json({ message: msg });
+  }
+};
+
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 export const getOrderInvoice = async (req: any, res: any) => {
   const { id } = req.params;
@@ -954,7 +1210,7 @@ export const getOrderInvoice = async (req: any, res: any) => {
       const netFromItems = await getOrderNetFromLineItems(id);
       const netAmount = netFromItems > 0 ? netFromItems : Number(inv.order_total || 0);
       const calc = await getAgipRetentionForOrder({
-        orderDate: String(inv.order_date || inv.created_at || ''),
+        orderDate: inv.order_date || inv.created_at || '',
         customerCuit: inv.customer_cuit,
         netAmount
       });
@@ -1009,9 +1265,25 @@ export const emitirFactura = async (req: any, res: any) => {
     const netFromItems = await getOrderNetFromLineItems(id);
     const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
 
+    const agip = await getAgipRetentionForOrder({
+      orderDate: orderRow.date,
+      customerCuit: customerRow.cuit,
+      netAmount: totalForAfip
+    });
+    const iibbPercepcion =
+      agip && agip.amount > 0.005
+        ? { baseImp: totalForAfip, alicuota: agip.alicuota, importe: agip.amount }
+        : undefined;
+
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const result = await emitirAfip(
-      { id: orderRow.id, date: orderRow.date, total: totalForAfip, customerId: orderRow.customer_id },
+      {
+        id: orderRow.id,
+        date: orderRow.date,
+        total: totalForAfip,
+        customerId: orderRow.customer_id,
+        iibbPercepcion: iibbPercepcion ?? null
+      },
       {
         id: customerRow.id,
         businessName: customerRow.business_name ?? '',
@@ -1023,11 +1295,6 @@ export const emitirFactura = async (req: any, res: any) => {
 
     const { v4: uuidv4 } = await import('uuid');
     const invoiceId = uuidv4();
-    const agip = await getAgipRetentionForOrder({
-      orderDate: String(orderRow.date || ''),
-      customerCuit: customerRow.cuit,
-      netAmount: totalForAfip
-    });
     await execute(
       `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

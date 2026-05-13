@@ -673,6 +673,33 @@ export const api = {
     }
   },
 
+  /**
+   * Recalcula IIBB (AGIP) y la persiste en `invoices` para un pedido ya facturado.
+   * Actualiza el PDF interno al refrescar; no modifica el CAE en AFIP.
+   */
+  recalculateStoredInvoiceAgip: async (
+    orderId: string
+  ): Promise<{ orderId: string; agipAlicuota: number; agipRetPer: number; message?: string }> => {
+    return await request(`/orders/${encodeURIComponent(orderId)}/invoice/recalculate-agip`, 'POST', {});
+  },
+
+  /**
+   * NC total en AFIP (sin restaurar stock) + nueva factura con percepción IIBB en WSFE.
+   * Solo si el pedido no tiene NC previas y AGIP devuelve importe > 0.
+   */
+  reemitirFacturaConAgip: async (
+    orderId: string,
+    body?: { cbteTipo?: 1 | 6 }
+  ): Promise<{
+    message?: string;
+    creditNote?: Record<string, unknown>;
+    invoice?: Record<string, unknown>;
+    creditNoteEmitted?: boolean;
+    detail?: string;
+  }> => {
+    return await request(`/orders/${encodeURIComponent(orderId)}/invoice/reemitir-con-agip`, 'POST', body ?? {});
+  },
+
   /** Lista las notas de crédito de un pedido.
    *  Cada entrada representa un comprobante AFIP único (CAE) ya consolidado en
    *  backend. Cuando la NC fue emitida sobre varios ítems, el backend devuelve
