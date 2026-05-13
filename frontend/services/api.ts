@@ -872,7 +872,9 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  /** Excel de saldos pendientes: resumen + una hoja por cliente (opcional rango de fechas). */
+  /** Excel de saldos pendientes: resumen + detalle por cliente. Rango opcional: solo lista movimientos
+   *  dentro del período; el saldo corrido y el total usan el mismo criterio que el historial unificado
+   *  incluyendo arrastre de movimientos anteriores a "desde" (no se listan, sí impactan en el saldo). */
   exportSaldosPendientesPorCliente: async (params?: {
     sellerId?: string;
     from?: string;

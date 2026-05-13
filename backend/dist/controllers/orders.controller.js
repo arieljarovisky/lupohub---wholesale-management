@@ -350,11 +350,13 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         let creditNotesCountByOrderId = {};
         let creditNotesTotalByOrderId = {};
         let creditNotesItemByOrderId = {};
+        let creditNotesNetoCreditedByOrderId = {};
         try {
             const cnRows = yield (0, db_1.query)(`SELECT order_id,
                 COUNT(*) AS cnt,
                 SUM(CASE WHEN scope = 'total' THEN 1 ELSE 0 END) AS total_cnt,
-                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt
+                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt,
+                COALESCE(SUM(amount_credited), 0) AS neto_credited_sum
          FROM credit_notes
          WHERE order_id IN (${placeholders})
          GROUP BY order_id`, orderIds);
@@ -362,6 +364,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
                 creditNotesTotalByOrderId[r.order_id] = Number(r.total_cnt) || 0;
                 creditNotesItemByOrderId[r.order_id] = Number(r.item_cnt) || 0;
+                creditNotesNetoCreditedByOrderId[r.order_id] = Math.round(Number(r.neto_credited_sum || 0) * 100) / 100;
             }
         }
         catch (_) {
@@ -386,7 +389,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             // stock_movements puede no existir en DB antiguas
         }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
             return ({
                 id: order.id,
                 customerId: order.customer_id,
@@ -408,6 +411,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
                 creditNotesTotalCount: (_k = creditNotesTotalByOrderId[order.id]) !== null && _k !== void 0 ? _k : 0,
                 creditNotesItemCount: (_l = creditNotesItemByOrderId[order.id]) !== null && _l !== void 0 ? _l : 0,
+                /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
+                creditNotesNetoCredited: (_m = creditNotesNetoCreditedByOrderId[order.id]) !== null && _m !== void 0 ? _m : 0,
                 paymentStatus: mapPaymentStatus(order),
                 noStockImpact: !!order.no_stock_impact,
                 mayoristaStockApplied: mayoristaStockLoaded

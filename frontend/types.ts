@@ -195,6 +195,8 @@ export interface Order {
   creditNotesTotalCount?: number;
   /** Nota de crédito emitida sobre ítems (parcial) */
   creditNotesItemCount?: number;
+  /** Suma de montos netos creditados por NC del pedido (sin IVA), todas las filas `credit_notes` del pedido. */
+  creditNotesNetoCredited?: number;
   /** Si está archivado (oculto de la lista por defecto) */
   archived?: boolean;
   /** Cobro del pedido mayorista (cuenta corriente / saldos pendientes) */

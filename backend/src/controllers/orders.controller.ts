@@ -328,12 +328,14 @@ export const getOrders = async (req: any, res: any) => {
     let creditNotesCountByOrderId: Record<string, number> = {};
     let creditNotesTotalByOrderId: Record<string, number> = {};
     let creditNotesItemByOrderId: Record<string, number> = {};
+    let creditNotesNetoCreditedByOrderId: Record<string, number> = {};
     try {
       const cnRows = await query(
         `SELECT order_id,
                 COUNT(*) AS cnt,
                 SUM(CASE WHEN scope = 'total' THEN 1 ELSE 0 END) AS total_cnt,
-                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt
+                SUM(CASE WHEN scope = 'item' THEN 1 ELSE 0 END) AS item_cnt,
+                COALESCE(SUM(amount_credited), 0) AS neto_credited_sum
          FROM credit_notes
          WHERE order_id IN (${placeholders})
          GROUP BY order_id`,
@@ -343,6 +345,7 @@ export const getOrders = async (req: any, res: any) => {
         creditNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
         creditNotesTotalByOrderId[r.order_id] = Number(r.total_cnt) || 0;
         creditNotesItemByOrderId[r.order_id] = Number(r.item_cnt) || 0;
+        creditNotesNetoCreditedByOrderId[r.order_id] = Math.round(Number(r.neto_credited_sum || 0) * 100) / 100;
       }
     } catch (_) {
       // Tabla credit_notes puede no existir en DB antiguas
@@ -390,6 +393,8 @@ export const getOrders = async (req: any, res: any) => {
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
       creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
       creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0,
+      /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
+      creditNotesNetoCredited: creditNotesNetoCreditedByOrderId[order.id] ?? 0,
       paymentStatus: mapPaymentStatus(order),
       noStockImpact: !!order.no_stock_impact,
       mayoristaStockApplied: mayoristaStockLoaded

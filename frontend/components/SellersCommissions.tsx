@@ -607,6 +607,12 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                 />
               </div>
 
+              {massExportMode === 'saldos' && (
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  El detalle del Excel solo incluye movimientos del rango; el saldo por cliente sigue la misma lógica que el historial unificado (con arrastre de lo anterior al inicio del rango).
+                </p>
+              )}
+
               {massExportMode === 'saldos' ? (
                 <div className="space-y-2">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Tipo de saldos por cliente</p>
@@ -752,21 +758,26 @@ function SellerDetailView({
           {saldosLoading ? <Loader2 size={16} className="animate-spin" /> : null}
           Actualizar saldos
         </button>
-        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 text-sm">
-          <span className="text-slate-400">Desde</span>
-          <input
-            type="date"
-            value={exportFrom}
-            onChange={(e) => setExportFrom(e.target.value)}
-            className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <span className="text-slate-400">Hasta</span>
-          <input
-            type="date"
-            value={exportTo}
-            onChange={(e) => setExportTo(e.target.value)}
-            className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
-          />
+        <div className="inline-flex flex-col gap-1 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">Desde</span>
+            <input
+              type="date"
+              value={exportFrom}
+              onChange={(e) => setExportFrom(e.target.value)}
+              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-slate-400">Hasta</span>
+            <input
+              type="date"
+              value={exportTo}
+              onChange={(e) => setExportTo(e.target.value)}
+              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <span className="text-[10px] text-slate-500 max-w-md leading-snug">
+            En el Excel solo se listan movimientos del rango; el saldo coincide con el historial unificado (se suma lo anterior al inicio del rango aunque no aparezca en el detalle).
+          </span>
         </div>
         <button
           type="button"

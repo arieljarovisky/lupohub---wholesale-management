@@ -2048,15 +2048,25 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
-    const invoiceDateFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
+    /**
+     * Rango visible en el Excel: solo movimientos dentro del período (no se listan anteriores).
+     * El saldo corrido y el total deben coincidir con el historial unificado: se suma primero
+     * todo lo anterior a `from` como saldo de apertura (misma lógica de ramas que el historial).
+     */
+    const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
+    const invoiceOpeningFilter = ' AND DATE(COALESCE(i.created_at, o.date)) < ?';
     /**
      * NC del sistema: rango por fecha de emisión de la NC o, en su defecto, factura/pedido
      * (evita que queden fuera del export cuando el rango no coincide con la fecha de la factura).
      */
-    const ncDateFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
-    const externalNcDateFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
-    const receiptDateFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
-    const importedDateFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
+    const ncRangeFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
+    const ncOpeningFilter = ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) < ?';
+    const externalNcRangeFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
+    const externalNcOpeningFilter = ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) < ?';
+    const receiptRangeFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
+    const receiptOpeningFilter = ' AND DATE(p.date) < ?';
+    const importedRangeFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
+    const importedOpeningFilter = ' AND DATE(e.line_date) < ?';
 
     const branchFacturaSistema = `
         SELECT
@@ -2083,7 +2093,34 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${invoiceDateFilter}`;
+        WHERE 1=1 ${invoiceRangeFilter}`;
+
+    const branchFacturaSistemaOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(i.created_at, o.date) AS fecha,
+          'FACTURA' AS tipo,
+          CONCAT(
+            CASE
+              WHEN i.cbte_tipo = 1 THEN 'A '
+              WHEN i.cbte_tipo = 6 THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(i.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          o.id AS order_id,
+          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          0 AS haber
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${invoiceOpeningFilter}`;
 
     const branchNcSistema = `
         SELECT
@@ -2112,7 +2149,36 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${ncDateFilter}`;
+        WHERE 1=1 ${ncRangeFilter}`;
+
+    const branchNcSistemaOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(cn.created_at, inv.created_at, o.date) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN cn.cbte_tipo = 3 THEN 'NC A '
+              WHEN cn.cbte_tipo = 8 THEN 'NC B '
+              WHEN cn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(cn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          cn.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        LEFT JOIN invoices inv ON inv.id = cn.invoice_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${ncOpeningFilter}`;
 
     const branchNcExterna = `
         SELECT
@@ -2143,7 +2209,38 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
              REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
-          ${externalNcDateFilter}`;
+          ${externalNcRangeFilter}`;
+
+    const branchNcExternaOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          COALESCE(ecn.created_at, ei.created_at) AS fecha,
+          'NOTA_CREDITO' AS tipo,
+          CONCAT(
+            CASE
+              WHEN ecn.cbte_tipo = 3 THEN 'NC A '
+              WHEN ecn.cbte_tipo = 8 THEN 'NC B '
+              WHEN ecn.cbte_tipo = 13 THEN 'NC C '
+              ELSE 'NC '
+            END,
+            LPAD(COALESCE(ecn.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(ecn.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          ecn.external_order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(ecn.amount_credited, 0) * 1.21, 2) AS haber
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        JOIN customers c
+          ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
+             REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
+          ${externalNcOpeningFilter}`;
 
     const branchReciboSistema = `
         SELECT
@@ -2160,7 +2257,24 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE 1=1 ${receiptDateFilter}`;
+        WHERE 1=1 ${receiptRangeFilter}`;
+
+    const branchReciboSistemaOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          p.date AS fecha,
+          'RECIBO' AS tipo,
+          p.receipt_number AS comprobante,
+          p.order_id AS order_id,
+          0 AS debe,
+          ROUND(COALESCE(p.amount, 0), 2) AS haber
+        FROM payments p
+        JOIN customers c ON c.id = p.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${receiptOpeningFilter}`;
 
     /**
      * Rama de importados Multimedia (Tango). En modo `tango` no se deduplican recibos
@@ -2276,7 +2390,46 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE e.importe IS NOT NULL
           AND ABS(COALESCE(e.importe, 0)) > 0.001
-          ${importedDateFilter}
+          ${importedRangeFilter}
+          AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
+          AND (${isNcImportado} OR ${isNdImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
+
+    const branchImportadoOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          CASE
+            WHEN ${isNcImportado} THEN 'NOTA_CREDITO_IMPORTADA'
+            WHEN ${isNdImportado} THEN 'NOTA_DEBITO_IMPORTADA'
+            WHEN ${isFacturaImportada} THEN 'FACTURA_IMPORTADA'
+            WHEN ${isReciboImportado} THEN 'RECIBO_IMPORTADO'
+            ELSE 'MOV_IMPORTADO'
+          END AS tipo,
+          TRIM(CONCAT(
+            COALESCE(NULLIF(TRIM(e.numero), ''), ''),
+            CASE WHEN TRIM(COALESCE(e.detalle, '')) <> '' THEN CONCAT(' — ', LEFT(TRIM(e.detalle), 120)) ELSE '' END
+          )) AS comprobante,
+          NULL AS order_id,
+          CASE
+            WHEN ${isNcImportado} THEN 0
+            WHEN ${isFacturaImportada} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isNdImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN ${isNcImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            WHEN ${isReciboImportado} THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE e.importe IS NOT NULL
+          AND ABS(COALESCE(e.importe, 0)) > 0.001
+          ${importedOpeningFilter}
           AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
           AND (${isNcImportado} OR ${isNdImportado} OR ${isFacturaImportada} OR ${isReciboImportado})${dedupeReciboPagos}`;
 
@@ -2295,7 +2448,42 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       sistema: [branchFacturaSistema, branchNcSistema, branchReciboSistema],
       tango: [branchImportado]
     };
+    const branchesOpeningByMode: Record<typeof mode, string[]> = {
+      historial: [
+        branchFacturaSistemaOpening,
+        branchNcSistemaOpening,
+        branchNcExternaOpening,
+        branchReciboSistemaOpening,
+        branchImportadoOpening
+      ],
+      sistema: [branchFacturaSistemaOpening, branchNcSistemaOpening, branchReciboSistemaOpening],
+      tango: [branchImportadoOpening]
+    };
     const branches = branchesByMode[mode];
+
+    const openingByCustomer = new Map<string, number>();
+    if (from) {
+      const openingBranches = branchesOpeningByMode[mode];
+      const openingParams: any[] = [];
+      for (let b = 0; b < openingBranches.length; b += 1) {
+        openingParams.push(from);
+      }
+      if (sellerIdFilter) openingParams.push(sellerIdFilter);
+      const openingRows = (await query(
+        `
+        SELECT m.customer_id, ROUND(SUM(m.debe - m.haber), 2) AS opening
+        FROM (
+          ${openingBranches.join('\n          UNION ALL\n')}
+        ) m
+        ${sellerIdFilter ? 'WHERE m.seller_id = ?' : ''}
+        GROUP BY m.customer_id
+        `,
+        openingParams
+      )) as Array<{ customer_id: string; opening: number | string }>;
+      for (const r of openingRows) {
+        openingByCustomer.set(r.customer_id, Number(r.opening) || 0);
+      }
+    }
 
     const movementParams: any[] = [];
     for (let b = 0; b < branches.length; b += 1) {
@@ -2629,11 +2817,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     let lastSellerGroup = '';
     for (const c of customersOrdered) {
       const movs = byCustomer.get(c.id) || [];
-      let running = 0;
+      const openingBalance = from ? Math.round((openingByCustomer.get(c.id) || 0) * 100) / 100 : 0;
+      let running = openingBalance;
       for (const m of movs) {
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
-      // Saldo final estrictamente por histórico del sistema (sin ajuste externo).
+      // Saldo final = mismo criterio que historial (debe/haber acumulados), con arrastre previo al "desde".
       const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
 
       wsSummary.addRow({
@@ -2672,7 +2861,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         cell.alignment = { horizontal: 'left', vertical: 'middle' };
       });
 
-      let saldo = 0;
+      let saldo = openingBalance;
       let totalDebeMovs = 0;
       let totalHaberMovs = 0;
       for (const m of movs) {
@@ -2693,12 +2882,26 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       }
 
       // Bloque de conciliación para mostrar cómo se llega al saldo final.
+      const concStartRow = wsDetalle.rowCount + 1;
       wsDetalle.addRow(['RESUMEN DE CONCILIACION', '', '', '', '', '', '']);
-      wsDetalle.addRow(['Total debe (movimientos)', '', '', '', totalDebeMovs, '', '']);
-      wsDetalle.addRow(['Total haber (movimientos)', '', '', '', '', totalHaberMovs, '']);
-      wsDetalle.addRow(['Saldo por movimientos (debe - haber)', '', '', '', '', '', saldo]);
-      wsDetalle.addRow(['Saldo final', '', '', '', '', '', saldoPendiente]);
-      for (let r = wsDetalle.rowCount - 4; r <= wsDetalle.rowCount; r += 1) {
+      if (from) {
+        wsDetalle.addRow([
+          'Saldo arrastrado (movimientos con fecha anterior al período; no se listan arriba)',
+          '',
+          '',
+          '',
+          '',
+          '',
+          openingBalance
+        ]);
+      }
+      wsDetalle.addRow(['Total debe (movimientos del período)', '', '', '', totalDebeMovs, '', '']);
+      wsDetalle.addRow(['Total haber (movimientos del período)', '', '', '', '', totalHaberMovs, '']);
+      const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
+      wsDetalle.addRow(['Saldo neto del período (debe − haber)', '', '', '', '', '', netoPeriodo]);
+      wsDetalle.addRow(['Saldo acumulado al cierre del período (arrastre + período)', '', '', '', '', '', saldo]);
+      wsDetalle.addRow(['Saldo final (máx. 0)', '', '', '', '', '', saldoPendiente]);
+      for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
         wsDetalle.mergeCells(r, 1, r, 4);
         const row = wsDetalle.getRow(r);
         row.getCell(1).font = { bold: true };

@@ -405,14 +405,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     // Envío por expreso (al interior): se identifica por tener bultos cargados.
     // En ese caso el remito no detalla productos ni precios; muestra solo el valor declarado (sin IVA).
     const isExpreso = numBultos != null && !isNaN(numBultos) && numBultos > 0;
+    /** Neto pedido por líneas (mismo criterio que antes). Las NC AFIP guardan `amount_credited` en neto. */
+    const netoPedidoPorItems = Math.round(
+      items.reduce((s, i) => {
+        const qty = Number(i.quantity || 0);
+        const unit = Number(i.priceAtMoment ?? 0);
+        return s + qty * unit;
+      }, 0) * 100
+    ) / 100;
+    const ncNetoTotal = Math.round((Number(order.creditNotesNetoCredited) || 0) * 100) / 100;
     const montoDeclaradoSinIva = isExpreso
-      ? Math.round(
-          items.reduce((s, i) => {
-            const qty = Number(i.quantity || 0);
-            const unit = Number(i.priceAtMoment ?? 0);
-            return s + qty * unit;
-          }, 0) * 100
-        ) / 100
+      ? Math.max(0, Math.round((netoPedidoPorItems - ncNetoTotal) * 100) / 100)
       : 0;
 
     const localSkuOf = (i: OrderItem) => {
@@ -572,6 +575,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     const expresoExpNombre = transporteName ? esc(transporteName.toUpperCase()) : '';
                     const expresoExpDireccion = selectedTransport?.address ? esc(String(selectedTransport.address).toUpperCase()) : '';
                     const expresoValor = `$${formatMoneyAr(montoDeclaradoSinIva)}`;
+                    const ncDetalle =
+                      ncNetoTotal > 0.005
+                        ? `<div class="ri-exp-line ri-exp-nc"><span class="ri-exp-lbl">NC (sin IVA):</span> −$${formatMoneyAr(ncNetoTotal)}</div>`
+                        : '';
                     return `<table class="r-items r-items-expreso">
                       <thead>
                         <tr>
@@ -584,7 +591,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           <td class="ri-c ri-exp-qty">${numBultos}</td>
                           <td class="ri-desc ri-exp-desc">
                             <div class="ri-exp-line">${esc(expresoDescripcion)}</div>
-                            <div class="ri-exp-line"><span class="ri-exp-lbl">VALOR:</span> ${esc(expresoValor)}</div>
+                            <div class="ri-exp-line"><span class="ri-exp-lbl">VALOR DECLARADO (sin IVA):</span> ${esc(expresoValor)}</div>
+                            ${ncDetalle}
                             ${expresoExpNombre ? `<div class="ri-exp-line"><span class="ri-exp-lbl">EXP:</span> ${expresoExpNombre}</div>` : ''}
                             ${expresoExpDireccion ? `<div class="ri-exp-line">${expresoExpDireccion}</div>` : ''}
                           </td>
@@ -731,6 +739,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-exp-line { margin-bottom: 4px; }
       .ri-exp-line:last-child { margin-bottom: 0; }
       .ri-exp-lbl { font-weight: 800; margin-right: 4px; }
+      .ri-exp-nc { font-size: 12px; color: #334155; }
       .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
       .r-firma-cell:last-child { border-right: none; }
