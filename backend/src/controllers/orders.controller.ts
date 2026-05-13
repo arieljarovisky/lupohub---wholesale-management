@@ -174,15 +174,36 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
+/**
+ * Período del padrón AGIP (YYYYMM) a partir de la fecha del pedido.
+ * MySQL devuelve `DATE` como `Date` en node: `String(date)` no es ISO y rompía el cálculo IIBB al emitir.
+ */
+function agipPeriodYyyymmFromOrderDate(orderDate: unknown): string | null {
+  if (orderDate == null || orderDate === '') return null;
+  if (orderDate instanceof Date && !isNaN(orderDate.getTime())) {
+    const y = orderDate.getFullYear();
+    const m = orderDate.getMonth() + 1;
+    return `${y}${String(m).padStart(2, '0')}`;
+  }
+  const s = String(orderDate).trim();
+  const mIso = s.match(/^(\d{4})-(\d{2})/);
+  if (mIso) return `${mIso[1]}${mIso[2]}`;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return null;
+}
+
 async function getAgipRetentionForOrder(args: {
-  orderDate: string;
+  orderDate: string | Date | null | undefined;
   customerCuit?: string | null;
   netAmount: number;
 }): Promise<{ alicuota: number; amount: number } | null> {
   const cuit = String(args.customerCuit || '').replace(/\D/g, '').slice(0, 11);
   if (cuit.length !== 11) return null;
-  const period = String(args.orderDate || '').slice(0, 7).replace('-', '');
-  if (!/^\d{6}$/.test(period)) return null;
+  const period = agipPeriodYyyymmFromOrderDate(args.orderDate);
+  if (!period || !/^\d{6}$/.test(period)) return null;
   const row = await get(
     `SELECT alicuota
      FROM agip_padron_alicuotas
@@ -314,10 +335,19 @@ export const getOrders = async (req: any, res: any) => {
       if (!inv) continue;
       const hasStoredAgip = Number(inv.agipAlicuota || 0) > 0 || Number(inv.agipRetPer || 0) > 0;
       if (hasStoredAgip) continue;
+      const lines = itemsByOrderId[o.id] || [];
+      let netFromItems = 0;
+      for (const it of lines) {
+        const qty = Number(it.quantity || 0);
+        const price = Number(it.priceAtMoment || 0);
+        netFromItems += Math.round(qty * price * 100) / 100;
+      }
+      netFromItems = Math.round(netFromItems * 100) / 100;
+      const netAmount = netFromItems > 0 ? netFromItems : Number(o.total || 0);
       const calc = await getAgipRetentionForOrder({
-        orderDate: String(o.date || ''),
+        orderDate: o.date,
         customerCuit: o.customer_cuit,
-        netAmount: Number(o.total || 0),
+        netAmount,
       });
       if (calc) {
         inv.agipAlicuota = Number(calc.alicuota || 0);
