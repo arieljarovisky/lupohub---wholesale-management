@@ -192,7 +192,8 @@ export const listBilling = async (req: Request, res: Response) => {
           c.name AS customer_name,
           i.cae,
           i.cae_fch_vto AS cae_fch_vto,
-          i.created_at
+          i.created_at,
+          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -217,7 +218,8 @@ export const listBilling = async (req: Request, res: Response) => {
           c.name AS customer_name,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
-          MIN(cn.created_at) AS created_at
+          MIN(cn.created_at) AS created_at,
+          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -244,7 +246,8 @@ export const listBilling = async (req: Request, res: Response) => {
       customerBusinessName: r.customer_business_name ?? r.customer_name ?? '',
       cae: r.cae,
       caeFchVto: r.cae_fch_vto ?? null,
-      createdAt: r.created_at
+      createdAt: r.created_at,
+      creditNotesCount: Number(r.credit_notes_count) || 0
     }));
 
     // Integrar facturas importadas desde Tango/Multimedias en la misma vista de facturación.
@@ -319,7 +322,8 @@ export const listBilling = async (req: Request, res: Response) => {
               customerBusinessName: r.customer_business_name ?? r.customer_name ?? '',
               cae: null,
               caeFchVto: null,
-              createdAt: null
+              createdAt: null,
+              creditNotesCount: 0
             }
           };
         })

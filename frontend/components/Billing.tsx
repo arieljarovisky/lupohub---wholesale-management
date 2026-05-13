@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 
@@ -19,7 +19,8 @@ interface BillingProps {
 }
 
 const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [] }) => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
+  const canAfipInvoiceActions = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   const defaultRetPerMonth = (() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -79,6 +80,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   /** Datos completos del remitente (incluye CAI). Necesarios para imprimir el CAI en remitos/facturas. */
   const [remitenteFromApi, setRemitenteFromApi] = useState<any>(null);
   const [billingExportCuitsText, setBillingExportCuitsText] = useState('');
+  const [billingRecalcOrderId, setBillingRecalcOrderId] = useState<string | null>(null);
+  const [billingReemitOrderId, setBillingReemitOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
@@ -868,14 +871,101 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     <td className="px-3 py-2 text-right whitespace-nowrap">${formatMoneyAr(item.importe ?? 0)}</td>
                     <td className="px-3 py-2 text-xs font-mono whitespace-nowrap">{item.cae}</td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleVer(item)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
-                        title="Ver detalle del comprobante"
-                      >
-                        <Eye size={14} /> Ver
-                      </button>
+                      <div className="inline-flex flex-wrap items-center justify-end gap-1 max-w-[220px]">
+                        <button
+                          type="button"
+                          onClick={() => handleVer(item)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
+                          title="Ver detalle del comprobante"
+                        >
+                          <Eye size={14} /> Ver
+                        </button>
+                        {canAfipInvoiceActions &&
+                          item.tipo === 'FACTURA' &&
+                          item.orderId &&
+                          !String(item.id || '').startsWith('mm-fac-') && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  showConfirm({
+                                    title: 'Guardar IIBB en esta factura (PDF)',
+                                    message:
+                                      'Se recalcula la percepción con el padrón AGIP y el neto del pedido y se guarda en el sistema. Al reabrir el PDF verás percepción y total actualizados. El CAE en AFIP no cambia.',
+                                    confirmLabel: 'Guardar IIBB',
+                                    onConfirm: () => {
+                                      setBillingRecalcOrderId(item.orderId);
+                                      api
+                                        .recalculateStoredInvoiceAgip(item.orderId)
+                                        .then((r: { message?: string }) => {
+                                          showToast('success', r?.message || 'IIBB actualizado. Reabrí la factura para ver el PDF.');
+                                          void load();
+                                        })
+                                        .catch((err: any) =>
+                                          showToast(
+                                            'error',
+                                            err?.response?.data?.message || err?.message || 'No se pudo actualizar IIBB'
+                                          )
+                                        )
+                                        .finally(() => setBillingRecalcOrderId(null));
+                                    }
+                                  });
+                                }}
+                                disabled={billingRecalcOrderId === item.orderId}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-amber-200/95 text-xs hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
+                                title="Recalcular IIBB (AGIP) y guardar para el PDF"
+                              >
+                                {billingRecalcOrderId === item.orderId ? (
+                                  <Loader2 size={14} className="animate-spin text-amber-300" />
+                                ) : (
+                                  <Percent size={14} />
+                                )}
+                              </button>
+                              {Number(item.creditNotesCount || 0) === 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    showConfirm({
+                                      title: 'Nuevo CAE con IIBB en AFIP',
+                                      message:
+                                        'Se emitirá en AFIP una nota de crédito por el total del pedido y enseguida una nueva factura con percepción IIBB. El inventario no se modifica. Solo si el pedido no tiene notas de crédito previas. ¿Continuar?',
+                                      confirmLabel: 'Reemitir con IIBB',
+                                      onConfirm: () => {
+                                        setBillingReemitOrderId(item.orderId);
+                                        api
+                                          .reemitirFacturaConAgip(item.orderId)
+                                          .then((r: any) => {
+                                            showToast('success', r?.message || 'Factura reemitida con nuevo CAE e IIBB en AFIP.');
+                                            void load();
+                                          })
+                                          .catch((err: any) => {
+                                            const d = err?.response?.data;
+                                            const base =
+                                              d?.message || err?.message || 'No se pudo reemitir la factura con IIBB';
+                                            const extra = d?.creditNoteEmitted
+                                              ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
+                                              : '';
+                                            showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
+                                            void load();
+                                          })
+                                          .finally(() => setBillingReemitOrderId(null));
+                                      }
+                                    });
+                                  }}
+                                  disabled={billingReemitOrderId === item.orderId}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-sky-200/95 text-xs hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
+                                  title="NC total + nueva factura AFIP con IIBB (nuevo CAE). Sin cambios de stock."
+                                >
+                                  {billingReemitOrderId === item.orderId ? (
+                                    <Loader2 size={14} className="animate-spin text-sky-300" />
+                                  ) : (
+                                    <RefreshCcw size={14} />
+                                  )}
+                                </button>
+                              )}
+                            </>
+                          )}
+                      </div>
                     </td>
                   </tr>
                 );
