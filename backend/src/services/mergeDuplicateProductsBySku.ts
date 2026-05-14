@@ -9,6 +9,7 @@
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
+import { syncStockToExternalPlatforms } from '../controllers/stock.controller';
 
 export type MergeDuplicateProductsOptions = {
   dryRun?: boolean;
@@ -267,6 +268,8 @@ export async function mergeTwoVariants(
   }
 
   await execute(`DELETE FROM product_variants WHERE id = ?`, [fromVariantId]);
+
+  await syncStockToExternalPlatforms(toVariantId, sumStock);
 }
 
 /**
