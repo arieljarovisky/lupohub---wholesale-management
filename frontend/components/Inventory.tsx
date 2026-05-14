@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
@@ -22,6 +22,10 @@ import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
+
+/** Referencia estable: cuando no hay filtro ML≠TN, el agrupado no debe recalcularse por cada actualización de stocks externos. */
+const STABLE_EMPTY_EXTERNAL_STOCKS: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> =
+  {};
 
 function InventoryViewSwitch(
   props: { view: 'mine' | 'ml' | 'tn'; ml: React.ReactNode; tn: React.ReactNode; mine: React.ReactNode }
@@ -200,6 +204,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [filterSize, setFilterSize] = useState(stored.filterSize ?? 'ALL');
   const [filterStockLevel, setFilterStockLevel] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
   const [filterSync, setFilterSync] = useState<'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH'>('ALL');
+  /** Búsqueda aplicada al GET /products (debounce) para no disparar una tormenta de requests al escribir. */
+  const [serverListSearch, setServerListSearch] = useState(() => (stored.search ?? '').trim());
   const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
@@ -211,6 +217,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }>>({});
+
+  const extStocksForMismatchFilter =
+    filterSync === 'MISMATCH' ? variantExternalStocks : STABLE_EMPTY_EXTERNAL_STOCKS;
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
 
@@ -271,21 +280,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   }, [availableSizes]);
 
   useEffect(() => {
-    if (import.meta.env.DEV && products.length > 0) {
-      try {
-        console.table(products.map(p => ({
-          id: p.id,
-          sku: p.sku,
-          name: p.name,
-          category: p.category,
-          stock: (p as any).stock_total ?? (p as any).stock ?? 0,
-          price: (p as any).base_price ?? (p as any).price ?? 0
-        })));
-      } catch {
-        console.log('Productos', products);
-      }
-    }
-  }, [products]);
+    const q = (searchTerm ?? '').trim();
+    const t = window.setTimeout(() => setServerListSearch(q), 380);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
   const checkColorMatch = useCallback((p: Product, colorKey: string) => {
     if (colorKey === 'ALL') return true;
@@ -468,18 +466,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return baseRef || '—';
   };
 
-  // Server: menos requests (páginas grandes) y lotes paralelos acotados para no saturar red ni MySQL.
-  const FETCH_PAGE_SIZE = 2500;
+  // Server: páginas moderadas, lotes paralelos acotados, ceder el hilo entre lotes y transición para no congelar la UI.
+  const FETCH_PAGE_SIZE = 2000;
   const MAX_PRODUCTS = 50000;
-  const FETCH_PAGE_CONCURRENCY = 5;
+  const FETCH_PAGE_CONCURRENCY = 3;
   const loadIdRef = useRef(0);
+  const yieldToMain = () =>
+    new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(() => resolve());
+      else setTimeout(resolve, 0);
+    });
   useEffect(() => {
     if (!serverMode) return;
     const loadId = ++loadIdRef.current;
     (async () => {
       try {
         const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
-        const first = await api.getProductsPaged(1, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync);
+        const q = serverListSearch || undefined;
+        const first = await api.getProductsPaged(1, FETCH_PAGE_SIZE, q, sortMap[sortKey] || 'sku', sortDir, filterSync);
         if (loadId !== loadIdRef.current) return;
         setServerTotal(first.total);
         setServerItems(first.items);
@@ -492,17 +496,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           for (let p = start; p <= end; p++) pageNums.push(p);
           const restPages = await Promise.all(
             pageNums.map((page) =>
-              api.getProductsPaged(page, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync, { skipTotal: true })
+              api.getProductsPaged(page, FETCH_PAGE_SIZE, q, sortMap[sortKey] || 'sku', sortDir, filterSync, { skipTotal: true })
             )
           );
           if (loadId !== loadIdRef.current) return;
-          setServerItems((prev) => [...prev, ...restPages.flatMap((r) => r.items)]);
+          const chunk = restPages.flatMap((r) => r.items);
+          startTransition(() => {
+            setServerItems((prev) => [...prev, ...chunk]);
+          });
+          await yieldToMain();
         }
       } catch {
         if (loadId === loadIdRef.current) setServerMode(false);
       }
     })();
-  }, [serverMode, searchTerm, sortKey, sortDir, filterSync, serverListRefreshKey]);
+  }, [serverMode, serverListSearch, sortKey, sortDir, filterSync, serverListRefreshKey]);
 
   const filteredProducts = useMemo(() => {
     const source = serverMode ? serverItems : products;
@@ -1209,7 +1217,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const byColor = filterColor === 'ALL' ? raw : raw.filter(p => checkColorMatch(p, filterColor));
     if (filterSync === 'MISMATCH') {
       return byColor.filter(p => {
-        const ext = variantExternalStocks[p.id];
+        const ext = extStocksForMismatchFilter[p.id];
         const ml = ext?.stockML;
         const tn = ext?.stockTN;
         // Solo excluir cuando ya tenemos ambos stocks y coinciden. Si falta ML o TN (carga,
@@ -1323,7 +1331,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
     const safePage = Math.min(currentPage, totalPages);
     return { displayGroups: groups, totalPages, safePage };
-  }, [groupedProducts, filterColor, filterSync, variantExternalStocks, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
+  }, [groupedProducts, filterColor, filterSync, extStocksForMismatchFilter, sortKey, sortDir, pageSize, currentPage, loadedVariants, hideZeroStock]);
 
   // Si tras filtrar la página actual supera el total, volver a la última página válida
   React.useEffect(() => {

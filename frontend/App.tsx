@@ -336,7 +336,15 @@ const App: React.FC = () => {
     }
 
     if (currentUser) {
-      loadHeavyCatalog();
+      const runHeavy = () => loadHeavyCatalog();
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        (window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout?: number }) => number }).requestIdleCallback(
+          runHeavy,
+          { timeout: 3000 }
+        );
+      } else {
+        setTimeout(runHeavy, 200);
+      }
     }
   };
 
