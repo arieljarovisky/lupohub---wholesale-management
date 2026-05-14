@@ -65,6 +65,8 @@ const Despachos: React.FC = () => {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [addCantidad, setAddCantidad] = useState('');
   const [addCosto, setAddCosto] = useState('');
+  /** Al agregar línea al despacho: sumar cantidad al stock del depósito (por defecto sí). */
+  const [addDespachoIncrementStock, setAddDespachoIncrementStock] = useState(true);
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
 
@@ -252,6 +254,7 @@ const Despachos: React.FC = () => {
     setSelectedProductId('');
     setAddCantidad('0');
     setAddCosto('');
+    setAddDespachoIncrementStock(true);
     setProductSearchTerm('');
     try {
       const productos = await api.getProductosSinDespacho();
@@ -289,7 +292,8 @@ const Despachos: React.FC = () => {
         costo_unitario: costoNum,
         descripcion_item: producto
           ? `${producto.name} - ${producto.variant_sku || producto.sku || ''} ${producto.color_name ? `(${producto.color_name}` : ''}${producto.size_code ? ` ${producto.size_code}` : ''}${producto.color_name ? ')' : ''}`.trim()
-          : ''
+          : '',
+        incrementStock: addDespachoIncrementStock
       });
       if (!res?.id) {
         throw new Error(res?.message || 'No se pudo agregar el producto al despacho');
@@ -299,7 +303,12 @@ const Despachos: React.FC = () => {
       const detail = await api.getDespachoById(selectedDespacho.id);
       setSelectedDespacho(detail);
       setShowAddProductModal(false);
-      showToast('success', 'Producto agregado al despacho');
+      showToast(
+        'success',
+        res?.stockIncremented === false
+          ? 'Agregado al despacho sin modificar stock del depósito.'
+          : 'Producto agregado al despacho y sumado al stock.'
+      );
       fetchDespachos();
     } catch (error: any) {
       showToast('error', error.message || 'No se pudo agregar');
@@ -950,6 +959,18 @@ const Despachos: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none px-0.5">
+                <input
+                  type="checkbox"
+                  checked={addDespachoIncrementStock}
+                  onChange={(e) => setAddDespachoIncrementStock(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500 shrink-0"
+                />
+                <span className="text-xs text-slate-400 leading-snug">
+                  <strong className="text-slate-300">Sumar al stock del depósito</strong> esta cantidad. Desmarcá si el stock ya está cargado (ej. Tango) y solo necesitás trazabilidad del despacho.
+                </span>
+              </label>
 
               {/* Quantity and Cost */}
               <div className="grid grid-cols-2 gap-4 pt-2">

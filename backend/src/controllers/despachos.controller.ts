@@ -24,6 +24,17 @@ const getAssignedTotalByProductId = async (productId: string): Promise<number> =
   return Number((assignedRow as any)?.total_asignado) || 0;
 };
 
+/** Suma cantidad al stock de depósito de una variante (ingreso por despacho). */
+async function incrementVariantDepotStock(variantId: string, cantidadNum: number): Promise<void> {
+  const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+  const currentStock = Number(stockRow?.stock || 0);
+  await execute(
+    `INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE stock = ?`,
+    [variantId, currentStock + cantidadNum, currentStock + cantidadNum]
+  );
+}
+
 // Obtener todos los despachos
 export const getDespachos = async (req: Request, res: Response) => {
   try {
@@ -124,7 +135,9 @@ export const createDespacho = async (req: Request, res: Response) => {
       moneda = 'USD',
       estado = 'despachado',
       notas,
-      items = []
+      items = [],
+      /** Si es true, al crear ítems con variant_id suma esa cantidad al stock (por defecto no, para no cambiar integraciones existentes). */
+      incrementStockForItems = false
     } = req.body;
 
     if (!numero_despacho || !fecha_despacho) {
@@ -144,13 +157,20 @@ export const createDespacho = async (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [despachoId, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas]);
 
+    const doStock = incrementStockForItems === true;
+
     // Agregar items si se proporcionaron
     for (const item of items) {
       const itemId = uuidv4();
+      const qty = Math.floor(Number(item.cantidad) || 0);
       await execute(`
         INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [itemId, despachoId, item.product_id || null, item.variant_id || null, item.cantidad || 0, item.costo_unitario || null, item.descripcion_item || null]);
+      `, [itemId, despachoId, item.product_id || null, item.variant_id || null, qty, item.costo_unitario || null, item.descripcion_item || null]);
+
+      if (doStock && item.variant_id && qty > 0) {
+        await incrementVariantDepotStock(String(item.variant_id), qty);
+      }
 
       // Actualizar el último despacho del producto
       if (item.product_id) {
@@ -160,7 +180,8 @@ export const createDespacho = async (req: Request, res: Response) => {
 
     res.status(201).json({ 
       message: 'Despacho creado exitosamente',
-      id: despachoId
+      id: despachoId,
+      incrementStockForItems: doStock
     });
   } catch (error: any) {
     console.error('Error creating despacho:', error);
@@ -244,7 +265,9 @@ export const deleteDespacho = async (req: Request, res: Response) => {
 export const addDespachoItem = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { product_id, variant_id, cantidad, costo_unitario, descripcion_item } = req.body;
+    const { product_id, variant_id, cantidad, costo_unitario, descripcion_item, incrementStock } = req.body;
+    /** Por defecto true: agregar al depósito al cargar mercadería al despacho. Pasar false si el stock ya se cargó (ej. Tango) y solo querés trazabilidad. */
+    const shouldIncrementStock = incrementStock !== false;
 
     const despacho = await get(`SELECT id, pais_origen FROM despachos WHERE id = ?`, [id]);
     if (!despacho) {
@@ -277,14 +300,9 @@ export const addDespachoItem = async (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [itemId, id, resolvedProductId || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
 
-    // Al cargar mercadería al despacho, sumar al stock de la variante
-    const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variant_id]);
-    const currentStock = Number(stockRow?.stock || 0);
-    await execute(
-      `INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE stock = ?`,
-      [variant_id, currentStock + cantidadNum, currentStock + cantidadNum]
-    );
+    if (shouldIncrementStock) {
+      await incrementVariantDepotStock(variant_id, cantidadNum);
+    }
 
     // Actualizar el último despacho del producto
     if (resolvedProductId) {
@@ -293,7 +311,8 @@ export const addDespachoItem = async (req: Request, res: Response) => {
 
     res.status(201).json({ 
       message: 'Item agregado al despacho',
-      id: itemId
+      id: itemId,
+      stockIncremented: shouldIncrementStock
     });
   } catch (error: any) {
     console.error('Error adding despacho item:', error);

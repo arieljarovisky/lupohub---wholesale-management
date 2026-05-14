@@ -1986,9 +1986,16 @@ export const api = {
     }, { message: 'Error' }, 'deleteDespacho');
   },
 
-  addDespachoItem: async (despachoId: string, item: any): Promise<{ message: string; id: string }> => {
+  addDespachoItem: async (
+    despachoId: string,
+    item: any & { incrementStock?: boolean }
+  ): Promise<{ message: string; id: string; stockIncremented?: boolean }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; id: string }>(`/despachos/${despachoId}/items`, 'POST', item);
+      return await request<{ message: string; id: string; stockIncremented?: boolean }>(
+        `/despachos/${despachoId}/items`,
+        'POST',
+        item
+      );
     }, { message: 'Error', id: '' }, 'addDespachoItem');
   },
 

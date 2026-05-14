@@ -165,6 +165,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [selectedDespachoId, setSelectedDespachoId] = useState('');
   const [despachoCantidad, setDespachoCantidad] = useState('');
   const [despachoCosto, setDespachoCosto] = useState('');
+  /** Si es true, al agregar al despacho se suma la cantidad al stock del depósito (ingreso físico). */
+  const [despachoIncrementStock, setDespachoIncrementStock] = useState(true);
   const [savingDespacho, setSavingDespacho] = useState(false);
   const [showStockHistoryModal, setShowStockHistoryModal] = useState(false);
   const [stockHistoryLoading, setStockHistoryLoading] = useState(false);
@@ -372,6 +374,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setSelectedDespachoId('');
     setDespachoCantidad(product.stock?.toString() || '0');
     setDespachoCosto('');
+    setDespachoIncrementStock(true);
     loadDespachos();
     setShowDespachoModal(true);
   };
@@ -384,16 +387,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
     setSavingDespacho(true);
     try {
-      await api.addDespachoItem(selectedDespachoId, {
+      const res = await api.addDespachoItem(selectedDespachoId, {
         product_id: selectedProductForDespacho.productId || selectedProductForDespacho.id,
         variant_id: selectedProductForDespacho.variantId || null,
         cantidad: parseInt(despachoCantidad) || 0,
         costo_unitario: despachoCosto ? parseFloat(despachoCosto) : null,
-        descripcion_item: `${selectedProductForDespacho.name} - ${selectedProductForDespacho.sku}`
+        descripcion_item: `${selectedProductForDespacho.name} - ${selectedProductForDespacho.sku}`,
+        incrementStock: despachoIncrementStock
       });
       
       setShowDespachoModal(false);
-      showToast('success', 'Producto asignado al despacho correctamente');
+      showToast(
+        'success',
+        res?.stockIncremented === false
+          ? 'Asignado al despacho sin modificar stock del depósito.'
+          : 'Producto asignado al despacho y sumado al stock.'
+      );
     } catch (error: any) {
       showToast('error', error.message || 'No se pudo asignar');
     } finally {
@@ -4444,6 +4453,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       ))}
                     </select>
                  </div>
+
+                 <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={despachoIncrementStock}
+                      onChange={(e) => setDespachoIncrementStock(e.target.checked)}
+                      className="mt-1 rounded border-slate-600 text-amber-500 focus:ring-amber-500 shrink-0"
+                    />
+                    <span className="text-xs text-slate-400 leading-snug">
+                      <strong className="text-slate-300">Sumar al stock del depósito</strong> esta cantidad (mercadería que ingresa). Desmarcá si el stock ya lo cargaste por otro medio (ej. importación Tango) y solo querés el registro del despacho.
+                    </span>
+                 </label>
 
                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
