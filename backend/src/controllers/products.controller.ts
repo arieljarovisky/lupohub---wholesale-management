@@ -1020,6 +1020,77 @@ function findColumn(headers: string[], name: string): number {
   return -1;
 }
 
+/** Coincidencia exacta del encabezado normalizado (sin acentos, minúsculas). */
+function findColumnExact(headers: string[], ...targets: string[]): number {
+  for (const t of targets) {
+    const want = normalizeHeader(t);
+    for (let i = 0; i < headers.length; i++) {
+      if (normalizeHeader(headers[i]) === want) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Talle y color como códigos numéricos (1–3 dígitos), alineado a `parseCodigoTango`.
+ */
+function normalizeTalleColorCell(val: unknown): string {
+  const s = String(val ?? '').trim();
+  if (!s) return '';
+  const digits = s.replace(/\D/g, '');
+  if (!digits) return '';
+  const n = digits.length > 3 ? digits.slice(-3) : digits;
+  return /^\d{1,3}$/.test(n) ? n : '';
+}
+
+type TangoImportLayout =
+  | { mode: 'single'; codigoKey: string; descKey: string | null }
+  | { mode: 'triple'; articuloKey: string; talleKey: string; colorKey: string; descKey: string | null };
+
+function resolveTangoImportLayout(headers: string[]): TangoImportLayout | { error: string } {
+  const descIdx = findColumn(headers, 'descripcion');
+  const descKey = descIdx >= 0 ? headers[descIdx] : null;
+
+  const talleIdx = findColumnExact(headers, 'talle', 'talla', 'size');
+  const colorIdx = findColumnExact(headers, 'color');
+  if (talleIdx >= 0 && colorIdx >= 0) {
+    const used = new Set([talleIdx, colorIdx]);
+    let articuloIdx = findColumnExact(headers, 'articulo', 'artículo', 'sku');
+    if (articuloIdx < 0 || used.has(articuloIdx)) {
+      const skuCol = findColumn(headers, 'sku');
+      if (skuCol >= 0 && !used.has(skuCol)) articuloIdx = skuCol;
+    }
+    if (articuloIdx < 0 || used.has(articuloIdx)) {
+      articuloIdx = findColumnExact(headers, 'codigo articulo', 'codigoarticulo');
+    }
+    if (articuloIdx < 0 || used.has(articuloIdx)) {
+      articuloIdx = findColumnExact(headers, 'codigo', 'código');
+    }
+    if (articuloIdx < 0 || used.has(articuloIdx)) {
+      return {
+        error:
+          'Con columnas Talle y Color hace falta también una columna de artículo (Articulo, Codigo, SKU o Codigo articulo).',
+      };
+    }
+    return {
+      mode: 'triple',
+      articuloKey: headers[articuloIdx],
+      talleKey: headers[talleIdx],
+      colorKey: headers[colorIdx],
+      descKey,
+    };
+  }
+
+  const codigoCol = findColumn(headers, 'codigo');
+  if (codigoCol < 0) {
+    return {
+      error:
+        'No se encontró columna Código. Usá un código Tango completo en una columna "Código", o columnas separadas: Código/Articulo/SKU + Talle + Color.',
+    };
+  }
+  return { mode: 'single', codigoKey: headers[codigoCol], descKey };
+}
+
 /**
  * Parsea un código Tango respetando los caracteres no numéricos del prefijo (ej.: "Q05875", "C01303").
  *
@@ -1074,32 +1145,55 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       onlyComplete?: boolean;
     };
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
-      return res.status(400).json({ message: 'Se requiere un array "rows" con las filas del Excel (con columna C?digo y opcional Descripci?n).' });
+      return res.status(400).json({
+        message:
+          'Se requiere un array "rows" con filas del Excel: columna "Código" (Tango completo) o columnas "Código"/Articulo/SKU + Talle + Color, y opcional "Descripción".',
+      });
     }
     const headers = Object.keys(rawRows[0] || {});
-    const codigoCol = findColumn(headers, 'codigo');
-    if (codigoCol < 0) {
-      return res.status(400).json({ message: 'No se encontr? la columna "C?digo" en las filas enviadas.' });
+    const layout = resolveTangoImportLayout(headers);
+    if ('error' in layout) {
+      return res.status(400).json({ message: layout.error });
     }
-    const descCol = findColumn(headers, 'descripcion');
-    const codigoKey = headers[codigoCol];
-    const descKey = descCol >= 0 ? headers[descCol] : null;
 
     const rows: { articulo: string; talle: string; color: string; codigo13: string; descripcion: string }[] = [];
-    for (const row of rawRows) {
-      const codigo = row[codigoKey];
-      const parsed = parseCodigoTango(codigo);
-      // Una variante es "completa" cuando trae artículo + talle + color (la fila "Es base" no los tiene).
-      const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
-      if (!isCompleta && onlyComplete) continue;
-      const descripcion = (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
-      rows.push({
-        articulo: parsed.articulo,
-        talle: parsed.talle,
-        color: parsed.color,
-        codigo13: parsed.codigoCompleto,
-        descripcion,
-      });
+
+    if (layout.mode === 'triple') {
+      const { articuloKey, talleKey, colorKey, descKey } = layout;
+      for (const row of rawRows) {
+        const articulo = String(row[articuloKey] ?? '').trim();
+        const talle = normalizeTalleColorCell(row[talleKey]);
+        const color = normalizeTalleColorCell(row[colorKey]);
+        const parsed = { articulo, talle, color, codigoCompleto: `${articulo}${talle}${color}` };
+        const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
+        if (!isCompleta && onlyComplete) continue;
+        const descripcion =
+          (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
+        rows.push({
+          articulo: parsed.articulo,
+          talle: parsed.talle,
+          color: parsed.color,
+          codigo13: parsed.codigoCompleto,
+          descripcion,
+        });
+      }
+    } else {
+      const { codigoKey, descKey } = layout;
+      for (const row of rawRows) {
+        const codigo = row[codigoKey];
+        const parsed = parseCodigoTango(codigo);
+        const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
+        if (!isCompleta && onlyComplete) continue;
+        const descripcion =
+          (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
+        rows.push({
+          articulo: parsed.articulo,
+          talle: parsed.talle,
+          color: parsed.color,
+          codigo13: parsed.codigoCompleto,
+          descripcion,
+        });
+      }
     }
 
     let productsCreated = 0;
@@ -1168,7 +1262,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     }
 
     res.json({
-      message: 'Importaci?n Tango finalizada',
+      message: 'Importación Tango finalizada',
       productsCreated,
       variantsCreated,
       variantsUpdated,
@@ -1177,7 +1271,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Import Tango:', error);
-    res.status(500).json({ message: 'Error importando art?culos Tango', error: error?.message });
+    res.status(500).json({ message: 'Error importando artículos Tango', error: error?.message });
   }
 };
 

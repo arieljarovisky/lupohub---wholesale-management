@@ -728,7 +728,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(firstSheet);
         if (rows.length === 0) {
           setTangoImportResult(null);
-          showToast('info', 'El archivo no tiene filas. Debe tener columna "Código" (7+3+3) y opcional "Descripción".');
+          showToast('info', 'Sin filas válidas. Usá columna "Código" (Tango completo) o columnas Código/Articulo/SKU + Talle + Color (números). Opcional: Descripción.');
           setImportingTango(false);
           return;
         }
@@ -737,7 +737,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setServerListRefreshKey((k) => k + 1);
           onImportComplete?.();
         }).catch((err) => {
-          showToast('error', err?.message || 'Error al importar. Revisá que el Excel tenga columna Código.');
+          showToast('error', err?.message || 'Error al importar. Revisá columnas Código (completo o artículo) + Talle + Color.');
         }).finally(() => {
           setImportingTango(false);
           if (tangoFileInputRef.current) tangoFileInputRef.current.value = '';
@@ -2377,7 +2377,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       <div className="bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2 flex items-center gap-2 text-slate-400 text-xs">
         <Info size={16} className="shrink-0 text-blue-400" />
         <span>
-          <strong className="text-slate-300">Código</strong> es tu artículo (ej. Tango). <strong className="text-slate-300">Nombre</strong> se completa al sincronizar con Tienda Nube o Mercado Libre (título de la publicación). Así unificás todo en un solo listado.
+          <strong className="text-slate-300">Importar Tango:</strong> una columna <strong className="text-slate-300">Código</strong> con artículo+talle+color concatenados, <strong className="text-slate-300">o</strong> columnas separadas{' '}
+          <strong className="text-slate-300">Código</strong>/<strong className="text-slate-300">Articulo</strong>/<strong className="text-slate-300">SKU</strong> + <strong className="text-slate-300">Talle</strong> + <strong className="text-slate-300">Color</strong> (códigos numéricos). Opcional: <strong className="text-slate-300">Descripción</strong>. El <strong className="text-slate-300">Nombre</strong> del artículo también se puede completar al sincronizar con Tienda Nube o Mercado Libre.
         </span>
       </div>
 

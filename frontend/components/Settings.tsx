@@ -180,6 +180,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [editingColorName, setEditingColorName] = useState('');
   const [editingColorHex, setEditingColorHex] = useState('#000000');
   const [savingColor, setSavingColor] = useState(false);
+  const [importingStandardColors, setImportingStandardColors] = useState(false);
 
   // Integration State
   const [apiConfig, setApiConfig] = useState<ApiConfig>({
@@ -897,6 +898,29 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error al actualizar el color.');
     } finally {
       setSavingColor(false);
+    }
+  };
+
+  const handleImportStandardColorCatalog = async () => {
+    if (importingStandardColors) return;
+    setImportingStandardColors(true);
+    try {
+      const r = await api.importStandardColorCatalog();
+      if (r.inserted > 0) {
+        showToast(
+          'success',
+          `Se agregaron ${r.inserted} color(es) del catálogo estándar.${r.skipped > 0 ? ` Ya existían ${r.skipped}.` : ''}`
+        );
+      } else if (r.skipped > 0) {
+        showToast('info', `Los ${r.skipped} códigos del catálogo ya estaban cargados. No se duplicó nada.`);
+      } else {
+        showToast('info', r.message || 'Listo.');
+      }
+      onRefreshData?.();
+    } catch (e: any) {
+      showToast('error', e?.response?.data?.message || e?.message || 'No se pudo importar el catálogo.');
+    } finally {
+      setImportingStandardColors(false);
     }
   };
 
@@ -2848,7 +2872,29 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           )}
           {activeTab === 'colors' && (
-            <p className="text-xs text-slate-500 mb-6">Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá <strong>Agregar</strong> para crearlo de nuevo.</p>
+            <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-6">
+              <button
+                type="button"
+                onClick={handleImportStandardColorCatalog}
+                disabled={importingStandardColors}
+                className="self-start px-5 py-3 rounded-xl font-bold text-sm bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 disabled:opacity-50 transition flex items-center gap-2"
+              >
+                {importingStandardColors ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Palette size={18} />
+                )}
+                {importingStandardColors ? 'Importando…' : 'Catálogo estándar (111–999)'}
+              </button>
+              <div className="text-xs text-slate-500 space-y-1">
+                <p>
+                  Carga en bloque los colores de la tabla maestra (Blanco 111, Arena 614, Negro 999, etc.) con nombre y
+                  color en pantalla (RGB → hex). <strong className="text-slate-400">Solo crea</strong> códigos que todavía
+                  no existan; no pisa colores que ya cargaste.
+                </p>
+                <p>Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá Agregar.</p>
+              </div>
+            </div>
           )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">

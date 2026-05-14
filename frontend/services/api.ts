@@ -431,6 +431,11 @@ export const api = {
     return request<any>('/colors', 'POST', payload);
   },
 
+  /** Crea en BD los colores del catálogo estándar (códigos 111–999) que aún no existan por `code`. */
+  importStandardColorCatalog: async (): Promise<{ message: string; inserted: number; skipped: number; total: number }> => {
+    return request<any>('/colors/import-standard-catalog', 'POST');
+  },
+
   updateColor: async (id: string, payload: { code?: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
     return request<any>(`/colors/${encodeURIComponent(id)}`, 'PUT', payload);
   },
@@ -446,7 +451,7 @@ export const api = {
     return request<Product>('/products', 'POST', product);
   },
 
-  /** Importar artículos desde Excel de Tango (columna Código = 7+3+3, opcional Descripción). */
+  /** Importar artículos desde Excel Tango: columna Código (concatenado) o columnas Código/Articulo/SKU + Talle + Color + opcional Descripción. */
   importTangoArticles: async (
     rows: Record<string, unknown>[],
     onlyComplete = true

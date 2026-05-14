@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import { STANDARD_COLOR_CATALOG, rgbToHex } from '../data/standardColorCatalog';
 
 export const getColors = async (req: Request, res: Response) => {
   try {
@@ -79,6 +80,69 @@ export const createColor = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error creando color:', error);
     res.status(500).json({ message: 'Error creando color', detail: error?.message });
+  }
+};
+
+/**
+ * Inserta en `colors` los códigos del catálogo estándar que aún no existan (mismo `code`).
+ * No modifica filas ya cargadas.
+ */
+export const importStandardColorCatalog = async (req: Request, res: Response) => {
+  try {
+    const tblCheck = await query(`
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'colors'
+    `);
+    const hasColorsTable = Number(tblCheck?.[0]?.cnt || 0) > 0;
+    if (!hasColorsTable) {
+      return res.status(400).json({ message: 'La tabla colors no existe en esta base de datos.' });
+    }
+
+    const hexColCheck = await query(`
+      SELECT COUNT(*) AS cnt
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE() AND table_name = 'colors' AND column_name = 'hex'
+    `);
+    const hasHex = Number(hexColCheck?.[0]?.cnt || 0) > 0;
+
+    let inserted = 0;
+    let skipped = 0;
+
+    for (const row of STANDARD_COLOR_CATALOG) {
+      const codeNorm = String(row.code).trim();
+      const existing = await get(
+        `SELECT id FROM colors WHERE TRIM(CAST(code AS CHAR)) = ? LIMIT 1`,
+        [codeNorm]
+      );
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      const id = uuidv4();
+      const hex = hasHex ? rgbToHex(row.rgb[0], row.rgb[1], row.rgb[2]) : null;
+      if (hasHex) {
+        await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [
+          id,
+          row.name,
+          codeNorm,
+          hex
+        ]);
+      } else {
+        await execute(`INSERT INTO colors (id, name, code) VALUES (?, ?, ?)`, [id, row.name, codeNorm]);
+      }
+      inserted++;
+    }
+
+    res.json({
+      message: 'Catálogo procesado: se crearon solo los colores cuyo código no existía.',
+      inserted,
+      skipped,
+      total: STANDARD_COLOR_CATALOG.length
+    });
+  } catch (error: any) {
+    console.error('importStandardColorCatalog:', error);
+    res.status(500).json({ message: 'Error importando catálogo de colores', detail: error?.message });
   }
 };
 
