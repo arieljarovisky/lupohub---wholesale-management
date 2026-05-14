@@ -467,7 +467,7 @@ export const api = {
   importTangoArticles: async (
     rows: Record<string, unknown>[],
     onlyComplete = true,
-    opts?: { keepStockOnExistingVariants?: boolean }
+    opts?: { keepStockOnExistingVariants?: boolean; despachoId?: string }
   ): Promise<{
     productsCreated: number;
     variantsCreated: number;
@@ -475,12 +475,17 @@ export const api = {
     totalProcessed: number;
     keepStockOnExistingVariants?: boolean;
     stockUpdatesSkipped?: number;
+    despachoId?: string;
+    despachoItemsInserted?: number;
+    despachoItemsUpdated?: number;
+    despachoProductsTagged?: number;
     errors: string[];
   }> => {
     const res = await request<any>('/products/import-tango', 'POST', {
       rows,
       onlyComplete,
       keepStockOnExistingVariants: opts?.keepStockOnExistingVariants,
+      despachoId: opts?.despachoId,
     });
     return {
       productsCreated: res.productsCreated ?? 0,
@@ -489,6 +494,10 @@ export const api = {
       totalProcessed: res.totalProcessed ?? 0,
       keepStockOnExistingVariants: res.keepStockOnExistingVariants,
       stockUpdatesSkipped: res.stockUpdatesSkipped,
+      despachoId: res.despachoId,
+      despachoItemsInserted: res.despachoItemsInserted,
+      despachoItemsUpdated: res.despachoItemsUpdated,
+      despachoProductsTagged: res.despachoProductsTagged,
       errors: Array.isArray(res.errors) ? res.errors : [],
     };
   },

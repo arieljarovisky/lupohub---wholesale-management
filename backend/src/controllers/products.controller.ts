@@ -1210,9 +1210,20 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       onlyComplete?: boolean;
       /** Default true: al reimportar, no pisa el stock de variantes que ya existían (evita duplicar cantidades). */
       keepStockOnExistingVariants?: boolean;
+      /** Si viene, cada fila importada vincula variante/producto a este despacho (ítems + último despacho del producto). */
+      despachoId?: string;
     };
     const { rows: rawRows, onlyComplete = true } = body;
     const keepStockOnExistingVariants = body.keepStockOnExistingVariants !== false;
+    const despachoIdRaw = body.despachoId != null ? String(body.despachoId).trim() : '';
+    let despachoLink: { id: string; pais_origen: string | null } | null = null;
+    if (despachoIdRaw) {
+      const dRow = await get(`SELECT id, pais_origen FROM despachos WHERE id = ? LIMIT 1`, [despachoIdRaw]);
+      if (!dRow?.id) {
+        return res.status(400).json({ message: 'despachoId no válido: no existe ese despacho.' });
+      }
+      despachoLink = { id: dRow.id as string, pais_origen: (dRow as any).pais_origen ?? null };
+    }
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({
         message:
@@ -1288,8 +1299,16 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     let variantsCreated = 0;
     let variantsUpdated = 0;
     let stockUpdatesSkipped = 0;
+    let despachoItemsInserted = 0;
+    let despachoItemsUpdated = 0;
+    let despachoProductsTagged = 0;
     const errors: string[] = [];
     const productNamesByArticulo: Record<string, string> = {};
+
+    const paisForProductUpdate =
+      despachoLink?.pais_origen && String(despachoLink.pais_origen).trim()
+        ? String(despachoLink.pais_origen).trim()
+        : 'Brasil';
 
     for (const r of rows) {
       try {
@@ -1335,8 +1354,9 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           `SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`,
           [productColorId, sizeId]
         );
+        let variantId: string;
         if (!existingVariant) {
-          const variantId = uuidv4();
+          variantId = uuidv4();
           await execute(
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
             [variantId, productColorId, sizeId, r.codigo13]
@@ -1345,15 +1365,57 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
-          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, existingVariant.id]);
+          variantId = existingVariant.id as string;
+          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, variantId]);
           variantsUpdated++;
           if (r.initialStock !== undefined) {
             if (keepStockOnExistingVariants) {
               stockUpdatesSkipped++;
             } else {
-              await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, existingVariant.id]);
+              await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, variantId]);
             }
           }
+        }
+
+        if (despachoLink) {
+          let qtyDespacho: number;
+          if (r.initialStock !== undefined) {
+            qtyDespacho = Math.max(0, Math.floor(Number(r.initialStock) || 0));
+          } else {
+            const stRow = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
+            qtyDespacho = Math.max(0, Math.floor(Number((stRow as any)?.stock) || 0));
+          }
+          const prodRow = await get(`SELECT name FROM products WHERE id = ?`, [productId]);
+          const prodName = String((prodRow as any)?.name || r.articulo || '').trim();
+          const descripcionItem = `${prodName} - ${r.codigo13}`.trim();
+
+          if (qtyDespacho > 0) {
+            const di = await get(
+              `SELECT id FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`,
+              [despachoLink.id, variantId]
+            );
+            if (di?.id) {
+              await execute(
+                `UPDATE despacho_items SET cantidad = ?, product_id = ?, descripcion_item = ? WHERE id = ?`,
+                [qtyDespacho, productId, descripcionItem, di.id]
+              );
+              despachoItemsUpdated++;
+            } else {
+              const diId = uuidv4();
+              await execute(
+                `INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item) VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+                [diId, despachoLink.id, productId, variantId, qtyDespacho, descripcionItem]
+              );
+              despachoItemsInserted++;
+            }
+          }
+
+          await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
+            despachoLink.id,
+            paisForProductUpdate,
+            productId
+          ]);
+          despachoProductsTagged++;
         }
       } catch (err: any) {
         errors.push(`Fila ${r.codigo13}: ${err?.message || 'Error'}`);
@@ -1368,6 +1430,10 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       totalProcessed: rows.filter((r) => r.articulo && r.talle && r.color).length,
       keepStockOnExistingVariants,
       stockUpdatesSkipped: keepStockOnExistingVariants ? stockUpdatesSkipped : 0,
+      despachoId: despachoLink?.id,
+      despachoItemsInserted,
+      despachoItemsUpdated,
+      despachoProductsTagged,
       errors: errors.slice(0, 50),
     });
   } catch (error: any) {

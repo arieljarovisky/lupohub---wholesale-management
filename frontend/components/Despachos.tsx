@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Ship, Plus, RefreshCw, Loader2, Search, X, Calendar, Package, 
   DollarSign, MapPin, FileText, Trash2, Edit, Eye, ChevronDown,
-  CheckCircle, Clock, Truck, Building, Globe, AlertTriangle
+  CheckCircle, Clock, Truck, Building, Globe, AlertTriangle, Upload
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 
@@ -69,6 +70,11 @@ const Despachos: React.FC = () => {
   const [addDespachoIncrementStock, setAddDespachoIncrementStock] = useState(true);
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
+
+  const despachoTangoFileRef = useRef<HTMLInputElement>(null);
+  const [tangoImportingForDespacho, setTangoImportingForDespacho] = useState(false);
+  /** Misma lógica que Inventario: al reimportar no pisar stock de variantes ya existentes. */
+  const [tangoDespachoKeepStockOnExisting, setTangoDespachoKeepStockOnExisting] = useState(true);
 
   // Asignar despacho a todos
   const [showAsignarTodosModal, setShowAsignarTodosModal] = useState(false);
@@ -242,6 +248,7 @@ const Despachos: React.FC = () => {
     try {
       const detail = await api.getDespachoById(despacho.id);
       setSelectedDespacho(detail);
+      setTangoDespachoKeepStockOnExisting(true);
       setShowDetailModal(true);
     } catch (error) {
       showToast('error', 'Error cargando detalles');
@@ -333,6 +340,54 @@ const Despachos: React.FC = () => {
           .catch(() => showToast('error', 'Error quitando producto'));
       },
     });
+  };
+
+  const handleImportTangoToOpenDespacho = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedDespacho?.id) return;
+    setTangoImportingForDespacho(true);
+    const despachoId = selectedDespacho.id;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = ev.target?.result;
+        if (!data) throw new Error('No se pudo leer el archivo');
+        const wb = XLSX.read(data as string, { type: 'binary' });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(firstSheet);
+        if (rows.length === 0) {
+          showToast('info', 'Sin filas en la primera hoja. Usá el mismo Excel que en Inventario → Importar Tango (Código + Talle + Color; opcional Cantidad).');
+          return;
+        }
+        const res = await api.importTangoArticles(rows, true, {
+          keepStockOnExistingVariants: tangoDespachoKeepStockOnExisting,
+          despachoId,
+        });
+        const detail = await api.getDespachoById(despachoId);
+        setSelectedDespacho(detail);
+        fetchDespachos();
+        const lines = (res.despachoItemsInserted || 0) + (res.despachoItemsUpdated || 0);
+        const parts = [
+          `${lines} línea(s) en este despacho`,
+          `${res.despachoProductsTagged || 0} producto(s) con último despacho actualizado`,
+          `${res.productsCreated} prod. nuevos, ${res.variantsCreated} var. nuevas, ${res.variantsUpdated} filas existentes`,
+        ];
+        if (res.stockUpdatesSkipped) {
+          parts.push(`stock no modificado en ${res.stockUpdatesSkipped} variante(s) ya existente(s)`);
+        }
+        showToast('success', parts.join(' · '));
+        if (res.errors?.length) {
+          showToast('error', `Errores en algunas filas: ${res.errors.slice(0, 3).join('; ')}${res.errors.length > 3 ? '…' : ''}`);
+        }
+      } catch (err: any) {
+        const msg = err?.response?.data?.message || err?.message || 'Error importando';
+        showToast('error', msg);
+      } finally {
+        setTangoImportingForDespacho(false);
+        if (despachoTangoFileRef.current) despachoTangoFileRef.current.value = '';
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const filteredProductos = productosSinDespacho.filter(p => {
@@ -817,18 +872,57 @@ const Despachos: React.FC = () => {
 
               {/* Items */}
               <div>
-                <div className="flex justify-between items-center mb-3">
-                  <h4 className="text-white font-bold flex items-center gap-2">
-                    <Package size={18} />
-                    Productos en este despacho ({selectedDespacho.items?.length || 0})
-                  </h4>
-                  <button
-                    onClick={handleOpenAddProduct}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-sm font-bold flex items-center gap-1.5 transition-colors"
-                  >
-                    <Plus size={14} />
-                    Agregar Producto
-                  </button>
+                <input
+                  ref={despachoTangoFileRef}
+                  type="file"
+                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  className="hidden"
+                  onChange={handleImportTangoToOpenDespacho}
+                />
+                <div className="flex flex-col gap-3 mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-white font-bold flex items-center gap-2">
+                      <Package size={18} />
+                      Productos en este despacho ({selectedDespacho.items?.length || 0})
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => despachoTangoFileRef.current?.click()}
+                        disabled={tangoImportingForDespacho}
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm font-bold flex items-center gap-1.5 transition-colors border border-emerald-600/50"
+                      >
+                        {tangoImportingForDespacho ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Upload size={14} />
+                        )}
+                        Importar Excel (Tango)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenAddProduct}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-sm font-bold flex items-center gap-1.5 transition-colors"
+                      >
+                        <Plus size={14} />
+                        Agregar Producto
+                      </button>
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none max-w-3xl">
+                    <input
+                      type="checkbox"
+                      checked={tangoDespachoKeepStockOnExisting}
+                      onChange={(e) => setTangoDespachoKeepStockOnExisting(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-600 text-emerald-500 focus:ring-emerald-500 shrink-0"
+                    />
+                    <span className="text-xs text-slate-400 leading-snug">
+                      <strong className="text-slate-300">Reimportar sin pisar stock:</strong> si está marcado, las variantes que ya existían no cambian cantidad en depósito (como en Inventario). Las filas se vinculan igual a este despacho con la cantidad del Excel o del stock actual.
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Mismo formato que <strong className="text-slate-400">Inventario → Importar Tango</strong>. Si una variante ya tenía línea en este despacho, la cantidad se reemplaza por la del Excel (o stock actual si no hay columna Cantidad).
+                  </p>
                 </div>
                 {selectedDespacho.items && selectedDespacho.items.length > 0 ? (
                   <div className="bg-slate-800/30 rounded-xl overflow-hidden">
@@ -867,7 +961,9 @@ const Despachos: React.FC = () => {
                   <div className="bg-slate-800/30 rounded-xl p-8 text-center">
                     <AlertTriangle className="mx-auto text-yellow-500 mb-2" size={32} />
                     <p className="text-slate-400">No hay productos asignados a este despacho</p>
-                    <p className="text-slate-500 text-sm mt-1">Hacé clic en "Agregar Producto" para asignar productos</p>
+                    <p className="text-slate-500 text-sm mt-1">
+                      Importá el Excel Tango arriba o usá &quot;Agregar Producto&quot; para cargar variantes una a una.
+                    </p>
                   </div>
                 )}
               </div>
