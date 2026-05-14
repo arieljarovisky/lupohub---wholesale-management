@@ -463,17 +463,32 @@ export const api = {
     return request<Product>('/products', 'POST', product);
   },
 
-  /** Importar artículos desde Excel: Código Tango completo, o Codigo + Talle (letra o num.) + Codigo color + opcional Modelo/Cantidad/RGB. */
+  /** Importar artículos desde Excel. `keepStockOnExistingVariants` default true: no pisa stock al reimportar filas ya cargadas. */
   importTangoArticles: async (
     rows: Record<string, unknown>[],
-    onlyComplete = true
-  ): Promise<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] }> => {
-    const res = await request<any>('/products/import-tango', 'POST', { rows, onlyComplete });
+    onlyComplete = true,
+    opts?: { keepStockOnExistingVariants?: boolean }
+  ): Promise<{
+    productsCreated: number;
+    variantsCreated: number;
+    variantsUpdated: number;
+    totalProcessed: number;
+    keepStockOnExistingVariants?: boolean;
+    stockUpdatesSkipped?: number;
+    errors: string[];
+  }> => {
+    const res = await request<any>('/products/import-tango', 'POST', {
+      rows,
+      onlyComplete,
+      keepStockOnExistingVariants: opts?.keepStockOnExistingVariants,
+    });
     return {
       productsCreated: res.productsCreated ?? 0,
       variantsCreated: res.variantsCreated ?? 0,
       variantsUpdated: res.variantsUpdated ?? 0,
       totalProcessed: res.totalProcessed ?? 0,
+      keepStockOnExistingVariants: res.keepStockOnExistingVariants,
+      stockUpdatesSkipped: res.stockUpdatesSkipped,
       errors: Array.isArray(res.errors) ? res.errors : [],
     };
   },

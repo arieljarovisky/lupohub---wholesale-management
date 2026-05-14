@@ -179,7 +179,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
   const [tnSearchTerm, setTnSearchTerm] = useState('');
-  const [tangoImportResult, setTangoImportResult] = useState<{ productsCreated: number; variantsCreated: number; variantsUpdated: number; totalProcessed: number; errors: string[] } | null>(null);
+  const [tangoImportResult, setTangoImportResult] = useState<{
+    productsCreated: number;
+    variantsCreated: number;
+    variantsUpdated: number;
+    totalProcessed: number;
+    stockUpdatesSkipped?: number;
+    keepStockOnExistingVariants?: boolean;
+    errors: string[];
+  } | null>(null);
+  const [tangoKeepStockOnExisting, setTangoKeepStockOnExisting] = useState(true);
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
   const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
@@ -732,7 +741,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setImportingTango(false);
           return;
         }
-        api.importTangoArticles(rows, true).then((res) => {
+        api.importTangoArticles(rows, true, { keepStockOnExistingVariants: tangoKeepStockOnExisting }).then((res) => {
           setTangoImportResult(res);
           setServerListRefreshKey((k) => k + 1);
           onImportComplete?.();
@@ -2383,14 +2392,31 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </span>
       </div>
 
+      <label className="flex items-start gap-2.5 mb-3 px-1 cursor-pointer select-none max-w-3xl">
+        <input
+          type="checkbox"
+          checked={tangoKeepStockOnExisting}
+          onChange={(e) => setTangoKeepStockOnExisting(e.target.checked)}
+          className="mt-0.5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 shrink-0"
+        />
+        <span className="text-xs text-slate-400 leading-snug">
+          <strong className="text-slate-300">Reimportar sin tocar stock:</strong> si está marcado, las filas cuya variante ya existía no actualizan la cantidad en depósito (solo se crean artículos/talles/colores/variantes nuevos y el stock del Excel aplica solo a esos). Desmarcá si querés que el Excel <strong className="text-slate-300">pise</strong> el stock de todo lo que coincida.
+        </span>
+      </label>
+
       {/* Resultado importación Tango */}
       {tangoImportResult && (
         <div className="bg-emerald-900/40 border border-emerald-700 rounded-xl px-4 py-3 flex items-start justify-between gap-2">
           <div className="text-sm text-emerald-200">
             <p className="font-semibold">Importación Tango finalizada</p>
             <p className="mt-1">
-              {tangoImportResult.productsCreated} productos nuevos, {tangoImportResult.variantsCreated} variantes creadas{tangoImportResult.variantsUpdated ? `, ${tangoImportResult.variantsUpdated} actualizadas` : ''}. Procesadas: {tangoImportResult.totalProcessed} filas.
+              {tangoImportResult.productsCreated} productos nuevos, {tangoImportResult.variantsCreated} variantes creadas{tangoImportResult.variantsUpdated ? `, ${tangoImportResult.variantsUpdated} filas ya existentes (SKU actualizado)` : ''}. Procesadas: {tangoImportResult.totalProcessed} filas.
             </p>
+            {typeof tangoImportResult.stockUpdatesSkipped === 'number' && tangoImportResult.stockUpdatesSkipped > 0 && (
+              <p className="mt-1 text-slate-300 text-xs">
+                Stock no modificado en {tangoImportResult.stockUpdatesSkipped} fila(s) que ya tenían variante (reimportación sin duplicar cantidad).
+              </p>
+            )}
             {tangoImportResult.errors.length > 0 && (
               <p className="mt-1 text-amber-300 text-xs">Errores: {tangoImportResult.errors.slice(0, 3).join('; ')}{tangoImportResult.errors.length > 3 ? ` (+${tangoImportResult.errors.length - 3} más)` : ''}</p>
             )}

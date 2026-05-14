@@ -1205,10 +1205,14 @@ function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; c
 
 export const importTangoArticles = async (req: Request, res: Response) => {
   try {
-    const { rows: rawRows, onlyComplete = true } = req.body as {
+    const body = req.body as {
       rows: Record<string, unknown>[];
       onlyComplete?: boolean;
+      /** Default true: al reimportar, no pisa el stock de variantes que ya existían (evita duplicar cantidades). */
+      keepStockOnExistingVariants?: boolean;
     };
+    const { rows: rawRows, onlyComplete = true } = body;
+    const keepStockOnExistingVariants = body.keepStockOnExistingVariants !== false;
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({
         message:
@@ -1283,6 +1287,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     let productsCreated = 0;
     let variantsCreated = 0;
     let variantsUpdated = 0;
+    let stockUpdatesSkipped = 0;
     const errors: string[] = [];
     const productNamesByArticulo: Record<string, string> = {};
 
@@ -1343,7 +1348,11 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, existingVariant.id]);
           variantsUpdated++;
           if (r.initialStock !== undefined) {
-            await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, existingVariant.id]);
+            if (keepStockOnExistingVariants) {
+              stockUpdatesSkipped++;
+            } else {
+              await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, existingVariant.id]);
+            }
           }
         }
       } catch (err: any) {
@@ -1357,6 +1366,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       variantsCreated,
       variantsUpdated,
       totalProcessed: rows.filter((r) => r.articulo && r.talle && r.color).length,
+      keepStockOnExistingVariants,
+      stockUpdatesSkipped: keepStockOnExistingVariants ? stockUpdatesSkipped : 0,
       errors: errors.slice(0, 50),
     });
   } catch (error: any) {
