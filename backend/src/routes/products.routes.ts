@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts, mergeManualVariants } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
 
 // Rutas específicas primero (evitar que /:sku o /:id capturen)
 router.post('/variants/bulk-link', authMiddleware, adminOrDepositoMiddleware, bulkLinkVariants);
+router.post('/variants/merge-manual', authMiddleware, adminOrDepositoMiddleware, mergeManualVariants);
 router.get('/variants/:variantId', authMiddleware, getVariantById);
 // Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
 router.put('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, updateVariant);

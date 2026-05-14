@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.nameEmbedsOwnSkuCode = nameEmbedsOwnSkuCode;
 exports.mergeTwoVariants = mergeTwoVariants;
+exports.mergeManualVariantPair = mergeManualVariantPair;
 exports.mergeManualIntoKeeper = mergeManualIntoKeeper;
 exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
 /**
@@ -22,6 +23,7 @@ exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
  * Uso: script `npm run merge-duplicate-products` o POST /products/merge-duplicate-by-sku
  */
 const db_1 = require("../database/db");
+const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 function skuNormCompactKey(s) {
     return String(s !== null && s !== void 0 ? s : '')
         .trim()
@@ -220,6 +222,36 @@ function mergeTwoVariants(fromVariantId, toVariantId, keeperProductId) {
         yield (0, db_1.execute)(`DELETE FROM product_variants WHERE id = ?`, [fromVariantId]);
     });
 }
+/**
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle/size_id).
+ * Útil cuando hay dos códigos de color (ej. 111 y 112) para el mismo Blanco + GG.
+ */
+function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
+            throw new Error('Indicá dos variantes distintas.');
+        }
+        const k = (yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?`, [keeperVariantId]));
+        const a = (yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?`, [absorbVariantId]));
+        if (!(k === null || k === void 0 ? void 0 : k.product_id))
+            throw new Error('Variante destino no encontrada.');
+        if (!(a === null || a === void 0 ? void 0 : a.product_id))
+            throw new Error('Variante a absorber no encontrada.');
+        if (String(k.product_id) !== String(a.product_id)) {
+            throw new Error('Las variantes deben ser del mismo artículo (producto).');
+        }
+        if (String(k.size_id) !== String(a.size_id)) {
+            throw new Error('Los talles deben coincidir para unificar variantes.');
+        }
+        yield mergeTwoVariants(absorbVariantId, keeperVariantId, k.product_id);
+    });
+}
 function mergePriceListItems(keeperId, duplicateId) {
     return __awaiter(this, void 0, void 0, function* () {
         if (!(yield tableExists('price_list_items')))
@@ -238,6 +270,49 @@ function mergePriceListItems(keeperId, duplicateId) {
         }
     });
 }
+/** Color equivalente en el keeper (mismo id, mismo nombre o mismo código canónico de 3 dígitos). */
+function findKeeperProductColorSemMatch(keeperProductId, dupColorId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
+        const exact = yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [
+            keeperProductId,
+            dupColorId,
+        ]);
+        if (exact === null || exact === void 0 ? void 0 : exact.id)
+            return { id: exact.id };
+        const dupC = (yield (0, db_1.get)(`SELECT id, code, name FROM colors WHERE id = ?`, [dupColorId]));
+        if (!dupC)
+            return undefined;
+        const dupName = String((_a = dupC.name) !== null && _a !== void 0 ? _a : '')
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+        const dupCodeCanon = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_c = (_b = dupC.code) !== null && _b !== void 0 ? _b : dupC.name) !== null && _c !== void 0 ? _c : '');
+        const rows = (yield (0, db_1.query)(`SELECT pc.id, c.code, c.name FROM product_colors pc
+     JOIN colors c ON c.id = pc.color_id
+     WHERE pc.product_id = ?`, [keeperProductId]));
+        if (dupName) {
+            for (const row of rows) {
+                const n = String((_d = row.name) !== null && _d !== void 0 ? _d : '')
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '');
+                if (n && n === dupName)
+                    return { id: row.id };
+            }
+        }
+        if (dupCodeCanon) {
+            for (const row of rows) {
+                const cc = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_f = (_e = row.code) !== null && _e !== void 0 ? _e : row.name) !== null && _f !== void 0 ? _f : '');
+                if (cc && cc === dupCodeCanon)
+                    return { id: row.id };
+            }
+        }
+        return undefined;
+    });
+}
 function mergeOneDuplicateProduct(keeper, duplicate, dryRun) {
     return __awaiter(this, void 0, void 0, function* () {
         let variantsMerged = 0;
@@ -248,14 +323,21 @@ function mergeOneDuplicateProduct(keeper, duplicate, dryRun) {
         yield mergePriceListItems(keeper.id, duplicate.id);
         const dupPcs = (yield (0, db_1.query)(`SELECT id, color_id FROM product_colors WHERE product_id = ?`, [duplicate.id]));
         for (const opc of dupPcs) {
-            const keeperPc = yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [keeper.id, opc.color_id]);
-            if (!(keeperPc === null || keeperPc === void 0 ? void 0 : keeperPc.id)) {
+            let keeperPcId = null;
+            const keeperExact = yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [keeper.id, opc.color_id]);
+            if (keeperExact === null || keeperExact === void 0 ? void 0 : keeperExact.id)
+                keeperPcId = keeperExact.id;
+            else {
+                const sem = yield findKeeperProductColorSemMatch(keeper.id, opc.color_id);
+                if (sem === null || sem === void 0 ? void 0 : sem.id)
+                    keeperPcId = sem.id;
+            }
+            if (!keeperPcId) {
                 yield (0, db_1.execute)(`UPDATE product_colors SET product_id = ? WHERE id = ?`, [keeper.id, opc.id]);
                 const moved = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM product_variants WHERE product_color_id = ?`, [opc.id]);
                 variantsMerged += Number((moved === null || moved === void 0 ? void 0 : moved.n) || 0);
                 continue;
             }
-            const keeperPcId = keeperPc.id;
             const vars = (yield (0, db_1.query)(`SELECT id, size_id FROM product_variants WHERE product_color_id = ?`, [
                 opc.id,
             ]));

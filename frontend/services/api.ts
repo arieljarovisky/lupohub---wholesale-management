@@ -566,6 +566,11 @@ export const api = {
     return request('/products/merge-manual', 'POST', payload, undefined, 120000);
   },
 
+  /** Une dos variantes del mismo artículo con el mismo talle (stock y vínculos ML/TN en la que queda). */
+  mergeManualVariantsPair: async (payload: { keeperVariantId: string; absorbVariantId: string }): Promise<{ ok: boolean }> => {
+    return request<{ ok: boolean }>('/products/variants/merge-manual', 'POST', payload, undefined, 120000);
+  },
+
   // --- CUSTOMERS ACCESS / USERS ---
 
   /** Asigna o crea un usuario (rol CUSTOMER) para un cliente existente. Solo ADMIN. */

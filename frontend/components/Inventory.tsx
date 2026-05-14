@@ -158,6 +158,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [mergeSaving, setMergeSaving] = useState(false);
   const mergeSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Unificar dos variantes del mismo artículo con el mismo talle (ej. color 111 vs 112). */
+  const [variantUnifyModal, setVariantUnifyModal] = useState<{
+    source: Product;
+    groupKey: string;
+    targets: Product[];
+    articleName: string;
+    articleCategory: string;
+    articlePrice: number;
+  } | null>(null);
+  const [variantUnifyKeeperId, setVariantUnifyKeeperId] = useState<string | null>(null);
+  const [variantUnifySaving, setVariantUnifySaving] = useState(false);
+
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [editingProductGroupKey, setEditingProductGroupKey] = useState<string | null>(null);
@@ -1578,6 +1590,97 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           showToast('error', Array.isArray(errs) && errs.length ? `${msg}: ${errs.join(' ')}` : msg);
         } finally {
           setMergeSaving(false);
+        }
+      },
+    });
+  };
+
+  const openVariantUnifyModal = (
+    product: Product,
+    groupKey: string,
+    groupVariants: Product[],
+    variantsToShow: Product[]
+  ) => {
+    const sz = getProductSizeCode(product);
+    const targets = variantsToShow.filter(
+      (p) => p.id !== product.id && getProductSizeCode(p) === sz
+    );
+    if (targets.length === 0) {
+      showToast('info', 'No hay otra variante con el mismo talle en este artículo.');
+      return;
+    }
+    const gv0 = groupVariants[0];
+    setVariantUnifyModal({
+      source: product,
+      groupKey,
+      targets,
+      articleName: String(gv0?.name || ''),
+      articleCategory: String(gv0?.category || 'General'),
+      articlePrice: Number((gv0 as any)?.price || 0),
+    });
+    setVariantUnifyKeeperId(targets[0]?.id ?? null);
+  };
+
+  const confirmVariantUnify = () => {
+    if (!variantUnifyModal || !variantUnifyKeeperId) return;
+    const srcId = variantUnifyModal.source.id;
+    if (variantUnifyKeeperId === srcId) {
+      showToast('error', 'Elegí otra variante como destino (la que queda con su SKU).');
+      return;
+    }
+    const { groupKey, articleName, articleCategory, articlePrice } = variantUnifyModal;
+    showConfirm({
+      title: 'Unificar variantes (mismo talle)',
+      message: `Se absorberá la variante ${variantUnifyModal.source.sku || srcId} en la elegida: el stock se suma y los vínculos ML/TN se combinan en la que queda. ¿Continuar?`,
+      confirmLabel: 'Unificar',
+      onConfirm: async () => {
+        setVariantUnifySaving(true);
+        try {
+          await api.mergeManualVariantsPair({
+            keeperVariantId: variantUnifyKeeperId,
+            absorbVariantId: srcId,
+          });
+          showToast('success', 'Variantes unificadas.');
+          setVariantUnifyModal(null);
+          setServerListRefreshKey((k) => k + 1);
+          try {
+            const variants = await api.getVariantsBySku(groupKey);
+            const mapped: Product[] = variants.map((v) => ({
+              id: v.variantId,
+              sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+              name: articleName,
+              category: articleCategory,
+              price: articlePrice,
+              description: '',
+              size: v.sizeCode,
+              color: v.colorName,
+              colorCode: v.colorCode,
+              stock: v.stock,
+              integrations: {
+                local: true,
+                tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
+                mercadoLibre: !!v.externalIds?.mercadoLibre,
+              },
+              externalIds: v.externalIds,
+            }));
+            setLoadedVariants((prev) => ({ ...prev, [groupKey]: mapped }));
+            const ids = mapped.map((p) => p.id);
+            if (ids.length) {
+              const res = await api.getVariantExternalStocks(ids);
+              if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
+            }
+          } catch {
+            setLoadedVariants((prev) => {
+              const n = { ...prev };
+              delete n[groupKey];
+              return n;
+            });
+          }
+          onImportComplete?.();
+        } catch (e: any) {
+          showToast('error', e?.response?.data?.message || e?.message || 'Error al unificar variantes');
+        } finally {
+          setVariantUnifySaving(false);
         }
       },
     });
@@ -3388,6 +3491,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       </button>
                                       <button
                                        type="button"
+                                       onClick={() => openVariantUnifyModal(product, groupKey, groupVariants, variantsToShow)}
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-violet-300 border border-slate-700 transition-colors touch-manipulation"
+                                       title="Unificar con otra variante del mismo talle (ej. color duplicado)"
+                                      >
+                                       <GitMerge size={16} />
+                                      </button>
+                                      <button
+                                       type="button"
                                        onClick={() => {
                                          openArticleStockHistory({
                                            productId: articleProductId,
@@ -3711,6 +3822,72 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               >
                 {mergeSaving ? <Loader2 size={16} className="animate-spin" /> : <GitMerge size={16} />}
                 Unificar ahora
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {variantUnifyModal && (
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] flex flex-col shadow-2xl">
+            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-2 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-white font-bold text-base">Unificar variantes (mismo talle)</h3>
+                <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                  Se elimina <span className="font-mono text-violet-300">{variantUnifyModal.source.sku}</span> y su stock pasa a la variante destino.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !variantUnifySaving && setVariantUnifyModal(null)}
+                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 shrink-0"
+                aria-label="Cerrar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destino (queda esta fila)</p>
+              <ul className="space-y-2">
+                {variantUnifyModal.targets.map((t) => (
+                  <li key={t.id}>
+                    <label className="flex items-start gap-2 p-2 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:border-violet-600/50">
+                      <input
+                        type="radio"
+                        name="variantUnifyKeeper"
+                        className="mt-1 accent-violet-500"
+                        checked={variantUnifyKeeperId === t.id}
+                        onChange={() => setVariantUnifyKeeperId(t.id)}
+                      />
+                      <span className="min-w-0">
+                        <span className="text-xs font-mono text-blue-300 block truncate">{t.sku}</span>
+                        <span className="text-xs text-slate-400">
+                          Color: {t.color || (t.sku || '').split('-').pop()} · Stock: {t.stock}
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setVariantUnifyModal(null)}
+                disabled={variantUnifySaving}
+                className="flex-1 py-2.5 rounded-xl border border-slate-600 text-slate-300 text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmVariantUnify}
+                disabled={variantUnifySaving || !variantUnifyKeeperId}
+                className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {variantUnifySaving ? <Loader2 size={16} className="animate-spin" /> : <GitMerge size={16} />}
+                Confirmar
               </button>
             </div>
           </div>

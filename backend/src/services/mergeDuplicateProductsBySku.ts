@@ -8,6 +8,7 @@
  */
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 
 export type MergeDuplicateProductsOptions = {
   dryRun?: boolean;
@@ -240,6 +241,39 @@ export async function mergeTwoVariants(
   await execute(`DELETE FROM product_variants WHERE id = ?`, [fromVariantId]);
 }
 
+/**
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle/size_id).
+ * Útil cuando hay dos códigos de color (ej. 111 y 112) para el mismo Blanco + GG.
+ */
+export async function mergeManualVariantPair(keeperVariantId: string, absorbVariantId: string): Promise<void> {
+  if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
+    throw new Error('Indicá dos variantes distintas.');
+  }
+  const k = (await get(
+    `SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?`,
+    [keeperVariantId]
+  )) as { variant_id: string; product_id: string; size_id: string } | undefined;
+  const a = (await get(
+    `SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     WHERE pv.id = ?`,
+    [absorbVariantId]
+  )) as { variant_id: string; product_id: string; size_id: string } | undefined;
+  if (!k?.product_id) throw new Error('Variante destino no encontrada.');
+  if (!a?.product_id) throw new Error('Variante a absorber no encontrada.');
+  if (String(k.product_id) !== String(a.product_id)) {
+    throw new Error('Las variantes deben ser del mismo artículo (producto).');
+  }
+  if (String(k.size_id) !== String(a.size_id)) {
+    throw new Error('Los talles deben coincidir para unificar variantes.');
+  }
+  await mergeTwoVariants(absorbVariantId, keeperVariantId, k.product_id);
+}
+
 async function mergePriceListItems(keeperId: string, duplicateId: string): Promise<void> {
   if (!(await tableExists('price_list_items'))) return;
   const items = (await query(`SELECT id, price_list_id, price FROM price_list_items WHERE product_id = ?`, [
@@ -256,6 +290,55 @@ async function mergePriceListItems(keeperId: string, duplicateId: string): Promi
       await execute(`UPDATE price_list_items SET product_id = ? WHERE id = ?`, [keeperId, it.id]);
     }
   }
+}
+
+/** Color equivalente en el keeper (mismo id, mismo nombre o mismo código canónico de 3 dígitos). */
+async function findKeeperProductColorSemMatch(
+  keeperProductId: string,
+  dupColorId: string
+): Promise<{ id: string } | undefined> {
+  const exact = await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [
+    keeperProductId,
+    dupColorId,
+  ]);
+  if ((exact as any)?.id) return { id: (exact as any).id as string };
+
+  const dupC = (await get(`SELECT id, code, name FROM colors WHERE id = ?`, [dupColorId])) as
+    | { id: string; code: string | null; name: string | null }
+    | undefined;
+  if (!dupC) return undefined;
+
+  const dupName = String(dupC.name ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const dupCodeCanon = normalizeColorCodeForImportValue(dupC.code ?? dupC.name ?? '');
+
+  const rows = (await query(
+    `SELECT pc.id, c.code, c.name FROM product_colors pc
+     JOIN colors c ON c.id = pc.color_id
+     WHERE pc.product_id = ?`,
+    [keeperProductId]
+  )) as { id: string; code: string | null; name: string | null }[];
+
+  if (dupName) {
+    for (const row of rows) {
+      const n = String(row.name ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      if (n && n === dupName) return { id: row.id };
+    }
+  }
+  if (dupCodeCanon) {
+    for (const row of rows) {
+      const cc = normalizeColorCodeForImportValue(row.code ?? row.name ?? '');
+      if (cc && cc === dupCodeCanon) return { id: row.id };
+    }
+  }
+  return undefined;
 }
 
 async function mergeOneDuplicateProduct(
@@ -277,12 +360,18 @@ async function mergeOneDuplicateProduct(
   const dupPcs = (await query(`SELECT id, color_id FROM product_colors WHERE product_id = ?`, [duplicate.id])) as any[];
 
   for (const opc of dupPcs) {
-    const keeperPc = await get(
+    let keeperPcId: string | null = null;
+    const keeperExact = await get(
       `SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`,
       [keeper.id, opc.color_id]
     );
+    if (keeperExact?.id) keeperPcId = keeperExact.id as string;
+    else {
+      const sem = await findKeeperProductColorSemMatch(keeper.id, opc.color_id);
+      if (sem?.id) keeperPcId = sem.id;
+    }
 
-    if (!keeperPc?.id) {
+    if (!keeperPcId) {
       await execute(`UPDATE product_colors SET product_id = ? WHERE id = ?`, [keeper.id, opc.id]);
       const moved = await get(
         `SELECT COUNT(*) AS n FROM product_variants WHERE product_color_id = ?`,
@@ -292,7 +381,6 @@ async function mergeOneDuplicateProduct(
       continue;
     }
 
-    const keeperPcId = keeperPc.id as string;
     const vars = (await query(`SELECT id, size_id FROM product_variants WHERE product_color_id = ?`, [
       opc.id,
     ])) as any[];

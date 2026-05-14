@@ -6,6 +6,7 @@ const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 // Rutas específicas primero (evitar que /:sku o /:id capturen)
 router.post('/variants/bulk-link', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.bulkLinkVariants);
+router.post('/variants/merge-manual', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.mergeManualVariants);
 router.get('/variants/:variantId', auth_1.authMiddleware, products_controller_1.getVariantById);
 // Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
 router.put('/variants/:variantId', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.updateVariant);

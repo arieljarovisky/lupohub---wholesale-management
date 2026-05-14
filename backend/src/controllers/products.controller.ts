@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
-import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper } from '../services/mergeDuplicateProductsBySku';
+import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper, mergeManualVariantPair } from '../services/mergeDuplicateProductsBySku';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -1729,6 +1729,32 @@ export const mergeManualProducts = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('mergeManualProducts:', error);
     return res.status(500).json({ message: 'Error en fusión manual', error: error?.message });
+  }
+};
+
+/** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
+export const mergeManualVariants = async (req: Request, res: Response) => {
+  try {
+    const keeperVariantId = String(req.body?.keeperVariantId || '').trim();
+    const absorbVariantId = String(req.body?.absorbVariantId || '').trim();
+    if (!keeperVariantId || !absorbVariantId) {
+      return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
+    }
+    await mergeManualVariantPair(keeperVariantId, absorbVariantId);
+    res.json({ ok: true });
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (
+      msg.includes('mismo artículo') ||
+      msg.includes('talles') ||
+      msg.includes('distintas') ||
+      msg.includes('no encontrada') ||
+      msg.includes('Indicá')
+    ) {
+      return res.status(400).json({ message: msg });
+    }
+    console.error('mergeManualVariants:', e);
+    return res.status(500).json({ message: 'Error fusionando variantes', error: msg });
   }
 };
 

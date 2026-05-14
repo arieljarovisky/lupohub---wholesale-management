@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualVariants = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
@@ -1582,6 +1582,32 @@ const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.mergeManualProducts = mergeManualProducts;
+/** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
+const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const keeperVariantId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperVariantId) || '').trim();
+        const absorbVariantId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.absorbVariantId) || '').trim();
+        if (!keeperVariantId || !absorbVariantId) {
+            return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
+        }
+        yield (0, mergeDuplicateProductsBySku_1.mergeManualVariantPair)(keeperVariantId, absorbVariantId);
+        res.json({ ok: true });
+    }
+    catch (e) {
+        const msg = (e === null || e === void 0 ? void 0 : e.message) || String(e);
+        if (msg.includes('mismo artículo') ||
+            msg.includes('talles') ||
+            msg.includes('distintas') ||
+            msg.includes('no encontrada') ||
+            msg.includes('Indicá')) {
+            return res.status(400).json({ message: msg });
+        }
+        console.error('mergeManualVariants:', e);
+        return res.status(500).json({ message: 'Error fusionando variantes', error: msg });
+    }
+});
+exports.mergeManualVariants = mergeManualVariants;
 /** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
 const mergeDuplicateProductsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
