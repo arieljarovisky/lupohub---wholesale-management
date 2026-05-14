@@ -2869,7 +2869,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       {reemitPreviewOrder && reemitPreviewOrder.invoice && (() => {
         const o = reemitPreviewOrder;
         const netoPed = orderNetoFromItems(o);
-        const ncAfip = ncComprobanteTotalesAfip(netoPed, o.invoice, netoPed);
+        const ncSoloNetoIva = afipDesdeNeto(netoPed);
         const cust = customers.find((c) => c.id === o.customerId);
         const alicNueva =
           cust?.shouldRetainIibb && Number(cust?.iibbAlicuota || 0) > 0 ? Number(cust?.iibbAlicuota || 0) : 0;
@@ -2890,34 +2890,32 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 Pedido #{o.id} — {o.customerBusinessName || getCustomerName(o)}
               </p>
               <p className="text-sm text-slate-300 mb-4">
-                Se emitirá una <strong className="text-white">nota de crédito por el total</strong> (anula fiscalmente la
-                factura actual) y enseguida una <strong className="text-white">factura nueva</strong> con percepción IIBB
-                según el cliente y el padrón AGIP en pantalla. El inventario no cambia.
+                Se emitirá una <strong className="text-white">nota de crédito por el total</strong> solo con neto e IVA
+                (sin percepción IIBB en la NC; anula fiscalmente la factura actual) y enseguida una{' '}
+                <strong className="text-white">factura nueva</strong> con percepción IIBB según el cliente y el padrón
+                AGIP en pantalla. El inventario no cambia.
               </p>
               <div className="grid sm:grid-cols-2 gap-4 mb-5 text-sm">
                 <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 space-y-2">
                   <div className="text-xs font-bold uppercase text-amber-500 tracking-wide">Nota de crédito (total)</div>
                   <div className="text-slate-400">
-                    Neto <span className="text-white float-right">${formatMoneyAr(ncAfip.neto)}</span>
+                    Neto <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.neto)}</span>
                   </div>
                   <div className="text-slate-400">
-                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ncAfip.iva)}</span>
+                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.iva)}</span>
                   </div>
-                  {ncAfip.iibb > 0.005 && (
-                    <div className="text-slate-400">
-                      Percep. IIBB <span className="text-white float-right">${formatMoneyAr(ncAfip.iibb)}</span>
-                    </div>
-                  )}
                   <div className="text-slate-200 font-bold pt-2 border-t border-slate-600 clear-both">
-                    Total NC <span className="float-right">${formatMoneyAr(ncAfip.total)}</span>
+                    Total NC <span className="float-right">${formatMoneyAr(ncSoloNetoIva.impTotal)}</span>
                   </div>
+                  <p className="text-[11px] text-slate-500 clear-both pt-1">
+                    Sin percepción IIBB en la NC (solo en la factura nueva).
+                  </p>
                   <button
                     type="button"
                     className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition"
                     onClick={() => {
                       const nc = syntheticCreditNotePreview(o, netoPed, 'total');
-                      const agip = iibbProratedFromInvoiceForNc(o.invoice, netoPed, netoPed);
-                      openHtmlPreviewWindow(injectPreviewBanner(buildCreditNoteHtml(o, nc, agip)));
+                      openHtmlPreviewWindow(injectPreviewBanner(buildCreditNoteHtml(o, nc)));
                     }}
                   >
                     <Eye size={16} />

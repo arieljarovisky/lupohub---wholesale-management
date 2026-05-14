@@ -1097,8 +1097,8 @@ export const recalculateStoredInvoiceAgip = async (req: any, res: any) => {
 };
 
 /**
- * Anula la factura actual en AFIP con una **NC total** (sin tocar stock) y emite una **nueva factura**
- * con percepción IIBB informada en WSFE. Actualiza la fila `invoices` con el nuevo CAE.
+ * Anula la factura actual en AFIP con una **NC total** solo con neto + IVA (sin percepción IIBB en la NC; sin tocar stock)
+ * y emite una **nueva factura** con percepción IIBB informada en WSFE. Actualiza la fila `invoices` con el nuevo CAE.
  *
  * Requisitos: el pedido tiene factura, **no** tiene notas de crédito previas, y el padrón AGIP
  * devuelve percepción > 0 para el neto del pedido.
@@ -1167,6 +1167,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
     const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = await import('../services/afip.service');
 
+    // NC total de reemisión: solo neto + IVA en AFIP (sin percepción IIBB). El IIBB se informa en la factura nueva.
     const ncResult = await emitirNCAfip(
       {
         puntoVta: invRow.punto_venta,
@@ -1180,13 +1181,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         condicionIva: customerRow.condicion_iva ?? undefined
       },
       totalForAfip,
-      Number(invRow.agip_ret_per || 0) > 0.005
-        ? {
-            baseImp: totalForAfip,
-            alicuota: Number(invRow.agip_alicuota || 0),
-            importe: Number(invRow.agip_ret_per || 0)
-          }
-        : undefined
+      undefined
     );
 
     const creditNoteId = uuidv4();
@@ -1259,7 +1254,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
       res.status(201).json({
         message:
-          'Se emitió nota de crédito total en AFIP y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
+          'Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
         creditNote: {
           id: creditNoteId,
           orderId: id,
