@@ -1,7 +1,8 @@
 /**
  * Fusiona productos duplicados que representan el mismo artículo (mismo “núcleo” de SKU:
  * guiones/espacios distintos, ceros a la izquierda, prefijo numérico común sin los últimos 2 dígitos
- * cuando el núcleo tiene ≥6 dígitos — p. ej. 0127501 y 1275-11 comparten 1275).
+ * cuando el núcleo tiene ≥6 dígitos — p. ej. 0322389 y 3223-89 comparten 32238 **solo si** en cada artículo
+ * el nombre/descripción incluye el código del propio SKU (no se fusionan solo por coincidencia de dígitos).
  *
  * Uso: script `npm run merge-duplicate-products` o POST /products/merge-duplicate-by-sku
  */
@@ -34,6 +35,24 @@ function digitCore(s: string): string {
   const d = String(s ?? '').replace(/\D/g, '');
   if (!d) return '';
   return d.replace(/^0+/, '') || '0';
+}
+
+/**
+ * True si el nombre/descripción del artículo incluye el código del propio SKU (núcleo numérico o forma compacta).
+ * Requisito para fusionar candidatos por prefijo `dpre:` (evita unir dos artículos que solo comparten dígitos al azar).
+ */
+export function nameEmbedsOwnSkuCode(name: string, sku: string): boolean {
+  const skuDc = digitCore(sku);
+  if (skuDc.length < 4 || skuDc === '0') return false;
+  const nameDigits = String(name ?? '').replace(/\D/g, '');
+  const nameDc = nameDigits.replace(/^0+/, '') || '';
+  if (!nameDc) return false;
+  if (nameDc === skuDc) return true;
+  if (nameDc.includes(skuDc) || skuDc.includes(nameDc)) return true;
+  const nc = skuNormCompactKey(name);
+  const sc = skuNormCompactKey(sku);
+  if (sc.length >= 4 && (nc.includes(sc) || sc.includes(nc))) return true;
+  return false;
 }
 
 /** Misma lógica que el import Tango: agrupa por núcleo numérico o por SKU compacto. */
@@ -365,10 +384,23 @@ export async function runMergeDuplicateProductsBySku(
     }
   }
   const dsu = new SkuMergeDsu(all.length);
-  for (const indices of keyToIndices.values()) {
+  for (const [key, indices] of keyToIndices.entries()) {
     if (indices.length < 2) continue;
-    const head = indices[0];
-    for (let j = 1; j < indices.length; j++) dsu.union(head, indices[j]);
+    if (key.startsWith('dpre:')) {
+      for (let a = 0; a < indices.length; a++) {
+        for (let b = a + 1; b < indices.length; b++) {
+          const ia = indices[a];
+          const ib = indices[b];
+          const pa = all[ia];
+          const pb = all[ib];
+          if (!nameEmbedsOwnSkuCode(pa.name, pa.sku) || !nameEmbedsOwnSkuCode(pb.name, pb.sku)) continue;
+          dsu.union(ia, ib);
+        }
+      }
+    } else {
+      const head = indices[0];
+      for (let j = 1; j < indices.length; j++) dsu.union(head, indices[j]);
+    }
   }
   const rootToProducts = new Map<number, { id: string; sku: string; name: string }[]>();
   for (let i = 0; i < all.length; i++) {

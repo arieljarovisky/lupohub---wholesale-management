@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
-import { runMergeDuplicateProductsBySku } from '../services/mergeDuplicateProductsBySku';
+import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode } from '../services/mergeDuplicateProductsBySku';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -1569,7 +1569,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
  *   - Y/o el "núcleo numérico" del SKU coincide (sirve para detectar pares "Q05875" vs "058750"
  *     donde uno tiene un prefijo letra y el otro no).
  *   - Y/o comparten prefijo numérico sin los últimos 2 dígitos (`duplicateBySkuDigitPrefix`, mismo criterio
- *     que merge por SKU: p. ej. `0127501` ↔ `1275-11`).
+ *     que merge por SKU: p. ej. `0322389` ↔ `3223-89` **solo si** el nombre incluye el código de cada SKU).
  *
  * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products` o
  * `npm run merge-duplicate-products` / POST `/products/merge-duplicate-by-sku`.
@@ -1676,8 +1676,12 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
       })
       .map(([k, list]) => buildGroup('sku_core', k, list));
 
-    /** Mismo criterio `dpre:` que merge-duplicate-by-sku (p. ej. 0127501 vs 1275-11). */
+    /** Mismo criterio `dpre:` que merge-duplicate-by-sku; solo filas cuyo nombre incluye el código del SKU. */
     const dpreGroups = Array.from(byDpre.entries())
+      .map(([k, list]) => {
+        const filtered = (list as any[]).filter((p) => nameEmbedsOwnSkuCode(p.name, p.sku));
+        return [k, filtered] as const;
+      })
       .filter(([, list]) => {
         if (list.length < 2) return false;
         const baseSkus = new Set(list.map((p: any) => String(p.sku)));
