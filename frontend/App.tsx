@@ -248,71 +248,95 @@ const App: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
+    let customerPriceListId: string | null | undefined;
+
+    const loadHeavyCatalog = () => {
+      void (async () => {
+        try {
+          if (currentUser?.role === Role.CUSTOMER) {
+            const [fetchedOrders, fetchedProducts] = await Promise.all([
+              api.getOrders(orderParams),
+              api.getProductsAll({ priceListId: customerPriceListId ?? undefined }),
+            ]);
+            setOrders(fetchedOrders);
+            setProducts(fetchedProducts);
+          } else if (currentUser) {
+            const [fetchedProducts, fetchedOrders] = await Promise.all([
+              api.getProductsAll({}),
+              api.getOrders(orderParams),
+            ]);
+            setProducts(fetchedProducts);
+            setOrders(fetchedOrders);
+          }
+        } catch (e) {
+          console.error('Error cargando catálogo o pedidos', e);
+          showToast('error', 'No se pudieron cargar todos los productos o pedidos. Probá recargar la página.');
+        }
+      })();
+    };
+
     try {
       if (currentUser?.role === Role.CUSTOMER) {
-        const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
-        const [myC, fetchedOrders] = await Promise.all([api.getMyCustomer(), api.getOrders(orderParams)]);
+        const myC = await api.getMyCustomer();
+        customerPriceListId = myC?.priceListId;
         setMyCustomer(myC || null);
-        const fetchedProducts = await api.getProductsAll({ priceListId: myC?.priceListId ?? undefined });
-        setProducts(fetchedProducts);
-        setOrders(fetchedOrders);
         setCustomers(myC ? [myC] : []);
         setAttributes([]);
         setTransportes([]);
       } else {
-      const orderParams = { includeArchived: orderArchivedFilter === 'yes', archivedOnly: orderArchivedFilter === 'only' };
-      const [fetchedProducts, fetchedOrders, fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
-        api.getProductsAll({}),
-        api.getOrders(orderParams),
-        api.getColors(),
-        api.getSizes(),
-        api.getCustomers(),
-        api.getTransportes()
-      ]);
-      setProducts(fetchedProducts);
-      setOrders(fetchedOrders);
-      setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
-      setTransportes(Array.isArray(fetchedTransportes) ? fetchedTransportes : []);
-      const colorAttrs = fetchedColors.map((c: { id: string; code?: string; name?: string; hex?: string | null }) => ({ 
-        id: c.id, 
-        type: 'color', 
-        name: c.name ?? c.code ?? '', 
-        value: c.hex ?? undefined, 
-        code: c.code ?? '' 
-      })) as any;
-      const sizeAttrs = fetchedSizes.map((s: { id: string; code: string; name: string }) => ({
-        id: s.id,
-        type: 'size',
-        name: s.name || s.code || 'Sin nombre',
-        code: s.code,
-      })) as any;
-      setAttributes([...sizeAttrs, ...colorAttrs]);
-      if (currentUser?.role === Role.ADMIN) {
-        try {
-          const [fetchedUsers, fetchedPriceLists] = await Promise.all([api.getUsers(), api.getPriceLists()]);
-          setUsers(fetchedUsers);
-          setPriceLists(fetchedPriceLists);
-        } catch {
+        const [fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
+          api.getColors(),
+          api.getSizes(),
+          api.getCustomers(),
+          api.getTransportes(),
+        ]);
+        setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
+        setTransportes(Array.isArray(fetchedTransportes) ? fetchedTransportes : []);
+        const colorAttrs = fetchedColors.map((c: { id: string; code?: string; name?: string; hex?: string | null }) => ({
+          id: c.id,
+          type: 'color',
+          name: c.name ?? c.code ?? '',
+          value: c.hex ?? undefined,
+          code: c.code ?? '',
+        })) as any;
+        const sizeAttrs = fetchedSizes.map((s: { id: string; code: string; name: string }) => ({
+          id: s.id,
+          type: 'size',
+          name: s.name || s.code || 'Sin nombre',
+          code: s.code,
+        })) as any;
+        setAttributes([...sizeAttrs, ...colorAttrs]);
+        if (currentUser?.role === Role.ADMIN) {
+          try {
+            const [fetchedUsers, fetchedPriceLists] = await Promise.all([api.getUsers(), api.getPriceLists()]);
+            setUsers(fetchedUsers);
+            setPriceLists(fetchedPriceLists);
+          } catch {
+            setUsers([]);
+            setPriceLists([]);
+          }
+        } else if (currentUser?.role === Role.WAREHOUSE) {
+          try {
+            const fetchedPriceLists = await api.getPriceLists();
+            setPriceLists(fetchedPriceLists);
+          } catch {
+            setPriceLists([]);
+          }
           setUsers([]);
-          setPriceLists([]);
+        } else {
+          setUsers([]);
         }
-      } else if (currentUser?.role === Role.WAREHOUSE) {
-        try {
-          const fetchedPriceLists = await api.getPriceLists();
-          setPriceLists(fetchedPriceLists);
-        } catch {
-          setPriceLists([]);
-        }
-        setUsers([]);
-      } else {
-        setUsers([]);
-      }
       }
     } catch (error) {
-      console.error("Error loading data form API", error);
+      console.error('Error loading data form API', error);
       showToast('error', 'Error conectando con el servidor. Verifica que el backend esté corriendo.');
     } finally {
       setIsLoading(false);
+    }
+
+    if (currentUser) {
+      loadHeavyCatalog();
     }
   };
 
