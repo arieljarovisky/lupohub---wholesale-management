@@ -163,6 +163,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 }) => {
   const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
+  /** Filtro por comprobante AFIP guardado en el pedido. */
+  const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'invoiced' | 'uninvoiced'>('all');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
@@ -317,6 +319,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const needle = customerSearchQuery.trim().toLowerCase();
     return orders.filter((o) => {
       if (filterStatus !== 'ALL' && o.status !== filterStatus) return false;
+      if (invoiceFilter === 'invoiced' && !o.invoice) return false;
+      if (invoiceFilter === 'uninvoiced' && o.invoice) return false;
       if (!needle) return true;
       const c = customers.find((x) => x.id === o.customerId);
       const hay = [
@@ -330,7 +334,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         .toLowerCase();
       return hay.includes(needle);
     });
-  }, [orders, customers, filterStatus, customerSearchQuery]);
+  }, [orders, customers, filterStatus, invoiceFilter, customerSearchQuery]);
 
   const statusesCancelables = [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
   const canCancelOrder = (order: Order) =>
@@ -1380,7 +1384,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
           <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
             Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
-            = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado.
+            = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado;
+            <strong className="text-orange-300/90"> naranja intenso (doble señal)</strong> = hay <strong className="text-slate-300">nota de crédito por el total</strong> (la factura quedó anulada fiscalmente en AFIP).
             Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
           </p>
         </div>
@@ -1447,6 +1452,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           )}
         </div>
 
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs font-semibold text-slate-500 uppercase">Facturación AFIP:</span>
+          {(['all', 'invoiced', 'uninvoiced'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setInvoiceFilter(key)}
+              className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
+                invoiceFilter === key
+                  ? 'bg-emerald-800/90 text-white border-emerald-600 shadow-md shadow-emerald-950/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+              }`}
+            >
+              {key === 'all' ? 'Todos' : key === 'invoiced' ? 'Solo facturados' : 'Sin facturar'}
+            </button>
+          ))}
+        </div>
+
         {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-semibold text-slate-500 uppercase">Archivados:</span>
@@ -1497,16 +1520,28 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
-          
+          const ncTotalAnnulled = Number(order.creditNotesTotalCount || 0) > 0;
+          const cardAccentClass = ncTotalAnnulled ? 'border-l-[5px] border-orange-500' : stockImpact.cardAccentClass;
+
           return (
             <div 
               key={order.id} 
               onClick={() => canOpenOrder && onEditOrder?.(order)}
-              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${canOpenOrder ? 'hover:border-blue-500 cursor-pointer' : 'cursor-default'} touch-manipulation ${stockImpact.cardAccentClass}`}
+              className={`bg-slate-800 rounded-2xl border border-slate-700 p-4 md:p-5 transition-all group shadow-sm active:bg-slate-750 ${
+                ncTotalAnnulled
+                  ? 'opacity-[0.93] ring-2 ring-orange-900/45 ring-inset bg-slate-900/50'
+                  : ''
+              } ${
+                canOpenOrder
+                  ? ncTotalAnnulled
+                    ? 'hover:border-orange-600/70 cursor-pointer'
+                    : 'hover:border-blue-500 cursor-pointer'
+                  : 'cursor-default'
+              } touch-manipulation ${cardAccentClass}`}
             >
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                 <div className="space-y-1 min-w-0 flex-1">
-                  <h3 className="text-lg sm:text-xl font-black text-white leading-tight break-words line-clamp-2 sm:line-clamp-1">
+                  <h3 className={`text-lg sm:text-xl font-black leading-tight break-words line-clamp-2 sm:line-clamp-1 ${ncTotalAnnulled ? 'text-slate-400 line-through decoration-slate-600 decoration-2' : 'text-white'}`}>
                     {order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}
                   </h3>
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1522,9 +1557,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     )}
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
-                    {order.invoice && (
+                    {ncTotalAnnulled ? (
                       <span
-                        className="inline-flex items-center gap-1 cursor-help text-slate-400"
+                        className="inline-flex items-center gap-1 rounded-full border border-orange-700/60 bg-orange-950/70 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-orange-100"
+                        title={[
+                          'La factura del pedido fue anulada fiscalmente en AFIP mediante nota(s) de crédito por el total.',
+                          order.invoice
+                            ? `Comprobante original: CAE ${order.invoice.cae} (${order.invoice.puntoVta != null ? `${order.invoice.puntoVta}-` : ''}${order.invoice.cbteDesde}).`
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        <FileMinus size={12} className="shrink-0 text-orange-300" aria-hidden />
+                        Anulado fiscal · NC total ({order.creditNotesTotalCount})
+                      </span>
+                    ) : order.invoice ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-emerald-700/50 bg-emerald-950/65 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-100 cursor-help"
                         title={
                           [
                             'Factura AFIP emitida.',
@@ -1537,8 +1587,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                             .join('\n')
                         }
                       >
+                        <Receipt size={12} className="shrink-0 text-emerald-300" aria-hidden />
+                        Facturado AFIP
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-600/80 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"
+                        title="Este pedido todavía no tiene comprobante AFIP guardado (sin factura emitida desde el sistema)."
+                      >
                         <Receipt size={12} className="shrink-0 text-slate-500" aria-hidden />
-                        <span className="font-medium text-slate-300">Factura AFIP</span>
+                        Sin facturar AFIP
                       </span>
                     )}
                     {stockImpact.label && (
@@ -1593,12 +1651,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <Wallet size={12} className="shrink-0 opacity-80" aria-hidden />
                         {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'Cobro pendiente' : 'Cobro registrado'}
                       </button>
-                    )}
-                    {Number(order.creditNotesTotalCount || 0) > 0 && (
-                      <span className="inline-flex items-center gap-1 text-violet-300/90">
-                        <FileMinus size={12} className="shrink-0 opacity-80" aria-hidden />
-                        <span className="font-medium">NC total ({order.creditNotesTotalCount})</span>
-                      </span>
                     )}
                     {Number(order.creditNotesTotalCount || 0) === 0 && Number(order.creditNotesItemCount || 0) > 0 && (
                       <span className="inline-flex items-center gap-1 text-slate-400">
@@ -2027,7 +2079,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className="text-right ml-auto sm:ml-0">
+                   <div className={`text-right ml-auto sm:ml-0 ${ncTotalAnnulled ? 'opacity-55' : ''}`}>
                      <div className="text-lg font-black text-blue-400">${formatMoneyAr(orderNetoFromItems(order))}</div>
                      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
                      {order.invoice &&
