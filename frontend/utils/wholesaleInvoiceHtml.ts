@@ -420,8 +420,10 @@ export function buildWholesaleCreditNoteHtml(params: {
   customer?: Customer;
   products: Product[];
   remitente: FacturaRemitente;
+  /** Si se pasa, suma percepción IIBB al total (mismo criterio que AFIP / factura). */
+  previewAgip?: { retPer: number; alicuota: number } | null;
 }): string {
-  const { order, nc, customer, products, remitente } = params;
+  const { order, nc, customer, products, remitente, previewAgip } = params;
 
   // Mantener ambos órdenes:
   // - original: para mapear nc.itemIndex (guardado contra order.items ORDER BY id)
@@ -445,7 +447,17 @@ export function buildWholesaleCreditNoteHtml(params: {
   const totalNota = Number(nc.amountCredited || 0);
   const netoNc = Math.round(totalNota * 100) / 100;
   const ivaNc = Math.round(netoNc * 0.21 * 100) / 100;
-  const totalComprobanteNc = Math.round((netoNc + ivaNc) * 100) / 100;
+  let iibbNc = 0;
+  let alicuotaIibbNc = 0;
+  if (previewAgip && Number(previewAgip.retPer) > 0.005) {
+    iibbNc = Math.round(Number(previewAgip.retPer) * 100) / 100;
+    alicuotaIibbNc = Math.round(Number(previewAgip.alicuota || 0) * 100) / 100;
+  }
+  const totalComprobanteNc = Math.round((netoNc + ivaNc + iibbNc) * 100) / 100;
+  const iibbRowHtml =
+    iibbNc > 0.005
+      ? `<div class="r"><span>Percepciones IIBB${alicuotaIibbNc > 0.005 ? ` (${alicuotaIibbNc.toFixed(2)}%)` : ''}</span><span>$${formatMoneyAr(iibbNc)}</span></div>`
+      : '';
 
   const despachoOf = (i: OrderItem) => {
     const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
@@ -646,6 +658,7 @@ export function buildWholesaleCreditNoteHtml(params: {
             <div class="totals">
               <div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>
+              ${iibbRowHtml}
               <div class="r"><span>Total NC</span><span>$${formatMoneyAr(totalComprobanteNc)}</span></div>
             </div>
           </div>

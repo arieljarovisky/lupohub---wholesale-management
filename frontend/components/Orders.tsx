@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -179,6 +179,71 @@ function formatAfipDocLine(puntoVta?: number | null, cbteDesde?: number | null, 
   return `${puntoVta}-${cbteDesde}${t}`;
 }
 
+/** Prorrateo de percepción IIBB de la factura guardada (mismo criterio que el backend al emitir NC). */
+function iibbProratedFromInvoiceForNc(
+  inv: Order['invoice'] | undefined,
+  netCredito: number,
+  netoTotalPedido: number
+): { retPer: number; alicuota: number } | undefined {
+  if (!inv) return undefined;
+  const retFull = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
+  if (!(retFull > 0.005)) return undefined;
+  const full = Math.max(Math.round((Number(netoTotalPedido) || 0) * 100) / 100, 0.01);
+  const netC = Math.round((Number(netCredito) || 0) * 100) / 100;
+  const ratio = Math.min(1, Math.max(0, netC / full));
+  const ret = Math.round(retFull * ratio * 100) / 100;
+  if (!(ret > 0.005)) return undefined;
+  const alic = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
+  return { retPer: ret, alicuota: alic };
+}
+
+function ncComprobanteTotalesAfip(
+  neto: number,
+  inv: Order['invoice'] | undefined,
+  netoPedidoTotal: number
+): { neto: number; iva: number; iibb: number; total: number } {
+  const n = Math.round((Number(neto) || 0) * 100) / 100;
+  const iva = Math.round(n * 0.21 * 100) / 100;
+  const pr = iibbProratedFromInvoiceForNc(inv, n, netoPedidoTotal);
+  const iibb = pr ? pr.retPer : 0;
+  const total = Math.round((n + iva + iibb) * 100) / 100;
+  return { neto: n, iva, iibb, total };
+}
+
+function syntheticCreditNotePreview(
+  order: Order,
+  netAmount: number,
+  tipo: 'total' | 'item' | 'items',
+  extra?: {
+    itemIndex?: number;
+    itemIndexes?: number[];
+    amountByItemIndex?: Record<number, number>;
+    quantityByItemIndex?: Record<number, number>;
+  }
+): CreditNote {
+  const inv = order.invoice!;
+  const factTipo = Number(inv.cbteTipo ?? 6);
+  const ncCbteTipo = factTipo === 1 ? 3 : 8;
+  return {
+    id: 'preview-nc',
+    orderId: order.id,
+    invoiceId: 'preview',
+    cae: '— BORRADOR —',
+    caeFchVto: '',
+    puntoVta: inv.puntoVta ?? 1,
+    cbteTipo: ncCbteTipo,
+    cbteDesde: 0,
+    cbteHasta: 0,
+    amountCredited: Math.round(netAmount * 100) / 100,
+    scope: tipo === 'items' ? 'item' : tipo,
+    itemIndex: extra?.itemIndex,
+    itemIndexes: extra?.itemIndexes,
+    amountByItemIndex: extra?.amountByItemIndex,
+    quantityByItemIndex: extra?.quantityByItemIndex,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -235,6 +300,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
   const [recalculatingAgipOrderId, setRecalculatingAgipOrderId] = useState<string | null>(null);
   const [reemittingInvoiceOrderId, setReemittingInvoiceOrderId] = useState<string | null>(null);
+  const [reemitPreviewOrder, setReemitPreviewOrder] = useState<Order | null>(null);
   const [manualFacturaDataByOrder, setManualFacturaDataByOrder] = useState<Record<string, ManualFacturaFields>>(() => {
     try {
       const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
@@ -1053,10 +1119,83 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     );
   };
 
+  const openHtmlPreviewWindow = (html: string) => {
+    if (!html) {
+      showToast('error', 'No se pudo generar la vista previa');
+      return;
+    }
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
+  };
+
   const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 => {
     if (emitirFacturaTipo === 'A') return 1;
     if (emitirFacturaTipo === 'B') return 6;
     return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
+  };
+
+  /** Proforma de la factura nueva que se emitiría tras NC total + reemisión (IIBB según cliente / padrón en UI). */
+  const buildProformaFacturaNuevaReemisiónHtml = (order: Order): string => {
+    const custEmit = customers.find((c) => c.id === order.customerId);
+    const cbteTipo = getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
+    const netPreview = orderNetoFromItems(order);
+    const agipAlicuotaPreview =
+      custEmit?.shouldRetainIibb && Number(custEmit?.iibbAlicuota || 0) > 0 ? Number(custEmit?.iibbAlicuota || 0) : 0;
+    const agipRetPerPreview = Math.round(netPreview * (agipAlicuotaPreview / 100) * 100) / 100;
+    const manual: ManualFacturaFields = { ...(manualFacturaDataByOrder[order.id] || {}) };
+    const previewOrder: Order = {
+      ...order,
+      invoice: {
+        cae: '',
+        caeFchVto: '',
+        puntoVta: 0,
+        cbteTipo,
+        cbteDesde: 0,
+        cbteHasta: 0,
+        createdAt: order.date,
+        agipAlicuota: agipAlicuotaPreview,
+        agipRetPer: agipRetPerPreview,
+      } as any,
+    };
+    return injectPreviewBanner(buildFacturaHtml(previewOrder, manual));
+  };
+
+  const runReemitFacturaConAgip = (order: Order) => {
+    setReemittingInvoiceOrderId(order.id);
+    setReemitPreviewOrder(null);
+    api
+      .reemitirFacturaConAgip(order.id)
+      .then((r: any) => {
+        const inv = r?.invoice;
+        if (inv && typeof inv === 'object') {
+          onFacturaEmitida?.(order.id, {
+            cae: String(inv.cae ?? ''),
+            caeFchVto: inv.caeFchVto,
+            cbteDesde: Number(inv.cbteDesde),
+            cbteHasta: Number(inv.cbteHasta),
+            cbteTipo: Number(inv.cbteTipo),
+            puntoVta: inv.puntoVta != null ? Number(inv.puntoVta) : undefined,
+            agipAlicuota: Number(inv.agipAlicuota ?? 0),
+            agipRetPer: Number(inv.agipRetPer ?? 0),
+          });
+        }
+        onCreditNoteEmitida?.(order.id);
+        showToast('success', r?.message || 'Factura reemitida con nuevo CAE e IIBB en AFIP.');
+        refreshOrders?.();
+      })
+      .catch((err: any) => {
+        const d = err?.response?.data;
+        const base = d?.message || err?.message || 'No se pudo reemitir la factura con IIBB';
+        const extra = d?.creditNoteEmitted
+          ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
+          : '';
+        showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
+        refreshOrders?.();
+      })
+      .finally(() => setReemittingInvoiceOrderId(null));
   };
 
   const openFacturaPreviewBeforeEmit = () => {
@@ -1116,7 +1255,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
-  const buildCreditNoteHtml = (order: Order, nc: CreditNote) => {
+  const buildCreditNoteHtml = (
+    order: Order,
+    nc: CreditNote,
+    previewAgip?: { retPer: number; alicuota: number }
+  ) => {
     const customer = customers.find((c) => c.id === order.customerId);
     return buildWholesaleCreditNoteHtml({
       order,
@@ -1124,6 +1267,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       customer,
       products,
       remitente: mergedRemitenteForFactura() as any,
+      previewAgip,
     });
   };
 
@@ -1994,46 +2138,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <OrderCardActionButton
                           onClick={(e) => {
                             e.stopPropagation();
-                            showConfirm({
-                              title: 'Nuevo CAE con IIBB en AFIP',
-                              message:
-                                'Se emitirá en AFIP una nota de crédito por el total del pedido (anula fiscalmente la factura actual) y enseguida una nueva factura con percepción IIBB según el padrón AGIP. El inventario no se modifica (no se revierte stock). Solo disponible si el pedido no tiene notas de crédito previas. ¿Continuar?',
-                              confirmLabel: 'Reemitir con IIBB',
-                              onConfirm: () => {
-                                setReemittingInvoiceOrderId(order.id);
-                                api
-                                  .reemitirFacturaConAgip(order.id)
-                                  .then((r: any) => {
-                                    const inv = r?.invoice;
-                                    if (inv && typeof inv === 'object') {
-                                      onFacturaEmitida?.(order.id, {
-                                        cae: String(inv.cae ?? ''),
-                                        caeFchVto: inv.caeFchVto,
-                                        cbteDesde: Number(inv.cbteDesde),
-                                        cbteHasta: Number(inv.cbteHasta),
-                                        cbteTipo: Number(inv.cbteTipo),
-                                        puntoVta: inv.puntoVta != null ? Number(inv.puntoVta) : undefined,
-                                        agipAlicuota: Number(inv.agipAlicuota ?? 0),
-                                        agipRetPer: Number(inv.agipRetPer ?? 0)
-                                      });
-                                    }
-                                    onCreditNoteEmitida?.(order.id);
-                                    showToast('success', r?.message || 'Factura reemitida con nuevo CAE e IIBB en AFIP.');
-                                    refreshOrders?.();
-                                  })
-                                  .catch((err: any) => {
-                                    const d = err?.response?.data;
-                                    const base =
-                                      d?.message || err?.message || 'No se pudo reemitir la factura con IIBB';
-                                    const extra = d?.creditNoteEmitted
-                                      ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
-                                      : '';
-                                    showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
-                                    refreshOrders?.();
-                                  })
-                                  .finally(() => setReemittingInvoiceOrderId(null));
-                              }
-                            });
+                            setReemitPreviewOrder(order);
                           }}
                           disabled={reemittingInvoiceOrderId === order.id}
                           title="NC total + nueva factura con IIBB (nuevo CAE). Sin tocar stock."
@@ -2760,6 +2865,120 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
       )}
 
+      {/* Modal: vista previa antes de reemitir (NC total + factura nueva con IIBB) */}
+      {reemitPreviewOrder && reemitPreviewOrder.invoice && (() => {
+        const o = reemitPreviewOrder;
+        const netoPed = orderNetoFromItems(o);
+        const ncAfip = ncComprobanteTotalesAfip(netoPed, o.invoice, netoPed);
+        const cust = customers.find((c) => c.id === o.customerId);
+        const alicNueva =
+          cust?.shouldRetainIibb && Number(cust?.iibbAlicuota || 0) > 0 ? Number(cust?.iibbAlicuota || 0) : 0;
+        const iibbNueva = Math.round(netoPed * (alicNueva / 100) * 100) / 100;
+        const ivaNueva = Math.round(netoPed * 0.21 * 100) / 100;
+        const totalNueva = Math.round((netoPed + ivaNueva + iibbNueva) * 100) / 100;
+        return (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => !reemittingInvoiceOrderId && setReemitPreviewOrder(null)}
+          >
+            <div
+              className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-lg p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-bold text-white mb-1">Vista previa — Reemitir con IIBB</h3>
+              <p className="text-sm text-slate-400 mb-4">
+                Pedido #{o.id} — {o.customerBusinessName || getCustomerName(o)}
+              </p>
+              <p className="text-sm text-slate-300 mb-4">
+                Se emitirá una <strong className="text-white">nota de crédito por el total</strong> (anula fiscalmente la
+                factura actual) y enseguida una <strong className="text-white">factura nueva</strong> con percepción IIBB
+                según el cliente y el padrón AGIP en pantalla. El inventario no cambia.
+              </p>
+              <div className="grid sm:grid-cols-2 gap-4 mb-5 text-sm">
+                <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 space-y-2">
+                  <div className="text-xs font-bold uppercase text-amber-500 tracking-wide">Nota de crédito (total)</div>
+                  <div className="text-slate-400">
+                    Neto <span className="text-white float-right">${formatMoneyAr(ncAfip.neto)}</span>
+                  </div>
+                  <div className="text-slate-400">
+                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ncAfip.iva)}</span>
+                  </div>
+                  {ncAfip.iibb > 0.005 && (
+                    <div className="text-slate-400">
+                      Percep. IIBB <span className="text-white float-right">${formatMoneyAr(ncAfip.iibb)}</span>
+                    </div>
+                  )}
+                  <div className="text-slate-200 font-bold pt-2 border-t border-slate-600 clear-both">
+                    Total NC <span className="float-right">${formatMoneyAr(ncAfip.total)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition"
+                    onClick={() => {
+                      const nc = syntheticCreditNotePreview(o, netoPed, 'total');
+                      const agip = iibbProratedFromInvoiceForNc(o.invoice, netoPed, netoPed);
+                      openHtmlPreviewWindow(injectPreviewBanner(buildCreditNoteHtml(o, nc, agip)));
+                    }}
+                  >
+                    <Eye size={16} />
+                    Vista previa PDF (NC)
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 space-y-2">
+                  <div className="text-xs font-bold uppercase text-sky-500 tracking-wide">Factura nueva (proforma)</div>
+                  <div className="text-slate-400">
+                    Neto <span className="text-white float-right">${formatMoneyAr(netoPed)}</span>
+                  </div>
+                  <div className="text-slate-400">
+                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ivaNueva)}</span>
+                  </div>
+                  {iibbNueva > 0.005 && (
+                    <div className="text-slate-400">
+                      Percep. IIBB ({alicNueva.toFixed(2)}%){' '}
+                      <span className="text-white float-right">${formatMoneyAr(iibbNueva)}</span>
+                    </div>
+                  )}
+                  <div className="text-slate-200 font-bold pt-2 border-t border-slate-600 clear-both">
+                    Total factura <span className="float-right">${formatMoneyAr(totalNueva)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition"
+                    onClick={() => openHtmlPreviewWindow(buildProformaFacturaNuevaReemisiónHtml(o))}
+                  >
+                    <Eye size={16} />
+                    Vista previa PDF (factura)
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3 justify-end">
+                <button
+                  type="button"
+                  disabled={!!reemittingInvoiceOrderId}
+                  onClick={() => setReemitPreviewOrder(null)}
+                  className="px-4 py-2.5 rounded-xl font-semibold text-slate-300 hover:bg-slate-700 transition disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={reemittingInvoiceOrderId === o.id}
+                  onClick={() => runReemitFacturaConAgip(o)}
+                  className="px-5 py-2.5 rounded-xl font-bold bg-sky-600 hover:bg-sky-500 text-white flex items-center gap-2 transition disabled:opacity-50"
+                >
+                  {reemittingInvoiceOrderId === o.id ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <RefreshCcw size={18} />
+                  )}
+                  {reemittingInvoiceOrderId === o.id ? 'Emitiendo…' : 'Confirmar y reemitir'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
       {ncOrder && (() => {
         const hasNCTotal = orderCreditNotes.some((nc) => (nc.scope || 'total') === 'total');
@@ -2786,6 +3005,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           .map((c) => ({ ...c, selectedQty: Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0))) }))
           .filter((c) => c.selectedQty > 0);
         const canEmitItems = selectedMulti.length > 0;
+        const netoPedidoTotalNc = orderNetoFromItems(ncOrder);
+        const netCredPreview =
+          ncTipo === 'total'
+            ? netoPedidoTotalNc
+            : ncTipo === 'item'
+              ? Math.round(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0) * 100) / 100
+              : Math.round(selectedMulti.reduce((sum, c) => sum + c.selectedQty * c.price, 0) * 100) / 100;
+        const totalesNcPreview = ncComprobanteTotalesAfip(netCredPreview, ncOrder.invoice, netoPedidoTotalNc);
+        const ncPreviewDisabled =
+          emitiendoNC ||
+          (ncTipo === 'total'
+            ? !canEmitTotal
+            : ncTipo === 'item'
+              ? !canEmitItem || ncQuantity < 1 || ncQuantity > maxQtyRemaining
+              : !canEmitItems);
         return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
@@ -2862,12 +3096,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <p className="text-xs text-slate-500">
                     {(() => {
                       const lineNet = ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0);
-                      const { iva, impTotal } = afipDesdeNeto(lineNet);
                       return (
                         <>
                           Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(lineNet)}</strong>
                           <span className="block mt-1 text-slate-400">
-                            AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
+                            AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                            {totalesNcPreview.iibb > 0.005 ? (
+                              <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                            ) : null}{' '}
+                            → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
                           </span>
                         </>
                       );
@@ -2875,21 +3112,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </p>
                 </div>
               )}
-              {ncTipo === 'total' && (() => {
-                const baseNc = orderNetoFromItems(ncOrder);
-                const { neto, iva, impTotal } = afipDesdeNeto(baseNc);
-                return (
-                  <div className="text-sm text-slate-500 space-y-2">
-                    <p>
-                      La NC se emite sobre el <strong className="text-white">monto neto</strong> del pedido (sin IVA), igual que la factura:{' '}
-                      <strong className="text-white">${formatMoneyAr(neto)}</strong>
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      En AFIP: IVA 21% ${formatMoneyAr(iva)} → total del comprobante ${formatMoneyAr(impTotal)}.
-                    </p>
-                  </div>
-                );
-              })()}
+              {ncTipo === 'total' && (
+                <div className="text-sm text-slate-500 space-y-2">
+                  <p>
+                    La NC se emite sobre el <strong className="text-white">monto neto</strong> del pedido (sin IVA), igual que la factura:{' '}
+                    <strong className="text-white">${formatMoneyAr(totalesNcPreview.neto)}</strong>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    En AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                    {totalesNcPreview.iibb > 0.005 ? (
+                      <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                    ) : null}{' '}
+                    → total del comprobante ${formatMoneyAr(totalesNcPreview.total)}.
+                  </p>
+                </div>
+              )}
               {ncTipo === 'items' && (
                 <div className="space-y-3 pl-1">
                   <div className="flex items-center justify-between gap-2">
@@ -2956,13 +3193,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </div>
                   <p className="text-xs text-slate-500">
                     {(() => {
-                      const net = selectedMulti.reduce((sum, c) => sum + (c.selectedQty * c.price), 0);
-                      const { iva, impTotal } = afipDesdeNeto(net);
+                      const net = selectedMulti.reduce((sum, c) => sum + c.selectedQty * c.price, 0);
                       return (
                         <>
                           Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(net)}</strong>
                           <span className="block mt-1 text-slate-400">
-                            AFIP: IVA 21% ${formatMoneyAr(iva)} → total comprobante ${formatMoneyAr(impTotal)}
+                            AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                            {totalesNcPreview.iibb > 0.005 ? (
+                              <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                            ) : null}{' '}
+                            → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
                           </span>
                         </>
                       );
@@ -2973,7 +3213,48 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </>
               )}
             </div>
-            <div className="flex gap-3 justify-end">
+            <div className="flex flex-wrap gap-3 justify-between items-center pt-2 border-t border-slate-700/80">
+              <button
+                type="button"
+                disabled={ncPreviewDisabled}
+                onClick={() => {
+                  if (!ncOrder.invoice || ncPreviewDisabled) return;
+                  const netoPed = orderNetoFromItems(ncOrder);
+                  let netCred = 0;
+                  let nc: CreditNote;
+                  if (ncTipo === 'total') {
+                    netCred = netoPed;
+                    nc = syntheticCreditNotePreview(ncOrder, netCred, 'total');
+                  } else if (ncTipo === 'item') {
+                    netCred = Math.round(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0) * 100) / 100;
+                    nc = syntheticCreditNotePreview(ncOrder, netCred, 'item', { itemIndex: ncItemIndex });
+                  } else {
+                    netCred = Math.round(
+                      selectedMulti.reduce((sum, c) => sum + c.selectedQty * c.price, 0) * 100
+                    ) / 100;
+                    const amountByItemIndex: Record<number, number> = {};
+                    const quantityByItemIndex: Record<number, number> = {};
+                    const itemIndexes: number[] = [];
+                    for (const c of selectedMulti) {
+                      itemIndexes.push(c.index);
+                      amountByItemIndex[c.index] = Math.round(c.selectedQty * c.price * 100) / 100;
+                      quantityByItemIndex[c.index] = c.selectedQty;
+                    }
+                    nc = syntheticCreditNotePreview(ncOrder, netCred, 'items', {
+                      itemIndexes,
+                      amountByItemIndex,
+                      quantityByItemIndex,
+                    });
+                  }
+                  const agip = iibbProratedFromInvoiceForNc(ncOrder.invoice, netCred, netoPed);
+                  openHtmlPreviewWindow(injectPreviewBanner(buildCreditNoteHtml(ncOrder, nc, agip)));
+                }}
+                className="px-4 py-2.5 rounded-xl font-semibold text-slate-200 bg-slate-700 hover:bg-slate-600 flex items-center gap-2 transition disabled:opacity-50 disabled:pointer-events-none text-sm"
+              >
+                <Eye size={18} />
+                Vista previa PDF (NC)
+              </button>
+              <div className="flex flex-wrap gap-3 justify-end">
               <button type="button" onClick={() => setNcOrder(null)} disabled={emitiendoNC} className="px-4 py-2.5 rounded-xl font-semibold text-slate-400 hover:bg-slate-700 transition disabled:opacity-50">Cancelar</button>
               {!hasNCTotal && (
               <button
@@ -3010,6 +3291,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 {emitiendoNC ? 'Emitiendo…' : 'Emitir nota de crédito'}
               </button>
               )}
+              </div>
             </div>
           </div>
         </div>
