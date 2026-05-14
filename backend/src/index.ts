@@ -55,6 +55,7 @@ import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
+import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -177,6 +178,7 @@ async function initDatabase() {
       await addUserTasksTable();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
+      await addOrdersPerformanceIndexes();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

@@ -303,9 +303,26 @@ export const getOrders = async (req: any, res: any) => {
     if (archivedOnly) whereArchived = ' AND o.archived = 1';
     else if (includeArchived) whereArchived = '';
     const whereUserScope = user?.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
-    const ordersParams = user?.role === 'SELLER' ? [user.id] : [];
+    const ordersParams: any[] = user?.role === 'SELLER' ? [user.id] : [];
 
-    let ordersRow = await query(
+    let whereCustomer = '';
+    if (user?.role === 'CUSTOMER') {
+      const { get } = await import('../database/db');
+      const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+      if (!customer?.id) {
+        return res.json([]);
+      }
+      whereCustomer = ' AND o.customer_id = ?';
+      ordersParams.push(customer.id);
+    }
+
+    const orderId = req.query.orderId as string | undefined;
+    if (orderId) {
+      ordersParams.push(orderId);
+    }
+    const whereOrderId = orderId ? ' AND o.id = ?' : '';
+
+    const ordersRow = await query(
       `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
               cu.name AS created_by_name, cu.role AS created_by_role,
               su.name AS seller_name
@@ -313,24 +330,10 @@ export const getOrders = async (req: any, res: any) => {
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
-       WHERE 1=1 ${whereArchived}${whereUserScope}
+       WHERE 1=1 ${whereArchived}${whereUserScope}${whereCustomer}${whereOrderId}
        ORDER BY o.date DESC`,
       ordersParams
     );
-    if (user?.role === 'CUSTOMER') {
-      const { get } = await import('../database/db');
-      const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
-      if (customer?.id) {
-        ordersRow = ordersRow.filter((o: any) => o.customer_id === customer.id);
-      } else {
-        ordersRow = [];
-      }
-    }
-
-    const orderId = req.query.orderId as string | undefined;
-    if (orderId) {
-      ordersRow = ordersRow.filter((o: any) => o.id === orderId);
-    }
 
     if (ordersRow.length === 0) {
       return res.json([]);
@@ -406,6 +409,7 @@ export const getOrders = async (req: any, res: any) => {
     }
     // Fallback para facturas antiguas sin retención guardada:
     // recalcular con padrón AGIP del período del pedido para no perder la línea en impresión.
+    const agipRecalcInputs: { inv: any; orderDate: any; customerCuit: string | null | undefined; netAmount: number }[] = [];
     for (const o of ordersRow as any[]) {
       const inv = invoiceByOrderId[o.id];
       if (!inv) continue;
@@ -420,11 +424,23 @@ export const getOrders = async (req: any, res: any) => {
       }
       netFromItems = Math.round(netFromItems * 100) / 100;
       const netAmount = netFromItems > 0 ? netFromItems : Number(o.total || 0);
-      const calc = await getAgipRetentionForOrder({
+      agipRecalcInputs.push({
+        inv,
         orderDate: o.date,
         customerCuit: o.customer_cuit,
         netAmount,
       });
+    }
+    const agipResults = await Promise.all(
+      agipRecalcInputs.map((row) =>
+        getAgipRetentionForOrder({
+          orderDate: row.orderDate,
+          customerCuit: row.customerCuit,
+          netAmount: row.netAmount,
+        }).then((calc) => ({ inv: row.inv, calc }))
+      )
+    );
+    for (const { inv, calc } of agipResults) {
       if (calc) {
         inv.agipAlicuota = Number(calc.alicuota || 0);
         inv.agipRetPer = Number(calc.amount || 0);

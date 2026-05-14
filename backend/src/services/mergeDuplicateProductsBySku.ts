@@ -1,6 +1,7 @@
 /**
  * Fusiona productos duplicados que representan el mismo artículo (mismo “núcleo” de SKU:
- * guiones/espacios distintos, ceros a la izquierda, etc.).
+ * guiones/espacios distintos, ceros a la izquierda, prefijo numérico común sin los últimos 2 dígitos
+ * cuando el núcleo tiene ≥6 dígitos — p. ej. 0127501 y 1275-11 comparten 1275).
  *
  * Uso: script `npm run merge-duplicate-products` o POST /products/merge-duplicate-by-sku
  */
@@ -37,11 +38,42 @@ function digitCore(s: string): string {
 
 /** Misma lógica que el import Tango: agrupa por núcleo numérico o por SKU compacto. */
 function mergeGroupKey(sku: string): string | null {
+  const keys = mergeGroupKeysForProduct(sku);
+  return keys.length ? keys[0] : null;
+}
+
+/**
+ * Varias claves por producto; si dos artículos comparten cualquiera, van al mismo grupo (union-find).
+ * Incluye `dpre:` = núcleo sin los últimos 2 dígitos (mín. 4 dígitos en el prefijo) para casos tipo
+ * `0127501` → 127501 y `1275-11` → 127511 (mismo artículo, sufijos distintos).
+ */
+function mergeGroupKeysForProduct(sku: string): string[] {
+  const out = new Set<string>();
   const dc = digitCore(sku);
-  if (dc.length >= 4) return `d:${dc}`;
+  if (dc.length >= 4) out.add(`d:${dc}`);
+  if (dc.length >= 6) {
+    const pre = dc.slice(0, -2);
+    if (pre.length >= 4) out.add(`dpre:${pre}`);
+  }
   const c = skuNormCompactKey(sku);
-  if (c.length >= 4) return `c:${c}`;
-  return null;
+  if (c.length >= 4) out.add(`c:${c}`);
+  return [...out];
+}
+
+class SkuMergeDsu {
+  private parent: number[];
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+  }
+  find(i: number): number {
+    if (this.parent[i] !== i) this.parent[i] = this.find(this.parent[i]);
+    return this.parent[i];
+  }
+  union(a: number, b: number): void {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra !== rb) this.parent[ra] = rb;
+  }
 }
 
 function isTrivialProductName(p: { sku: string; name: string }): boolean {
@@ -324,18 +356,43 @@ export async function runMergeDuplicateProductsBySku(
   let variantsMerged = 0;
 
   const all = (await query(`SELECT id, sku, name FROM products`)) as { id: string; sku: string; name: string }[];
-  const byKey = new Map<string, { id: string; sku: string; name: string }[]>();
-  for (const p of all) {
-    const key = mergeGroupKey(p.sku);
-    if (!key) continue;
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key)!.push(p);
+  const keyToIndices = new Map<string, number[]>();
+  for (let i = 0; i < all.length; i++) {
+    const keys = mergeGroupKeysForProduct(all[i].sku);
+    for (const k of keys) {
+      if (!keyToIndices.has(k)) keyToIndices.set(k, []);
+      keyToIndices.get(k)!.push(i);
+    }
   }
+  const dsu = new SkuMergeDsu(all.length);
+  for (const indices of keyToIndices.values()) {
+    if (indices.length < 2) continue;
+    const head = indices[0];
+    for (let j = 1; j < indices.length; j++) dsu.union(head, indices[j]);
+  }
+  const rootToProducts = new Map<number, { id: string; sku: string; name: string }[]>();
+  for (let i = 0; i < all.length; i++) {
+    const r = dsu.find(i);
+    if (!rootToProducts.has(r)) rootToProducts.set(r, []);
+    rootToProducts.get(r)!.push(all[i]);
+  }
+  const groups = [...rootToProducts.values()].filter((list) => list.length > 1);
 
-  const groups = [...byKey.entries()].filter(([, list]) => list.length > 1);
+  const groupLabel = (list: { sku: string }[]): string => {
+    const dcs = list.map((p) => digitCore(p.sku)).filter((d) => d.length > 0);
+    const withPre = dcs.filter((d) => d.length >= 6);
+    if (withPre.length >= 2) {
+      const pres = new Set(withPre.map((d) => d.slice(0, -2)));
+      if (pres.size === 1) return `dpre:${[...pres][0]}`;
+    }
+    const uniqD = new Set(dcs);
+    if (uniqD.size === 1) return `d:${[...uniqD][0]}`;
+    return `grp:${list.map((p) => p.sku).sort().join('|')}`;
+  };
 
   if (dryRun) {
-    for (const [groupKey, list] of groups) {
+    for (const list of groups) {
+      const groupKey = groupLabel(list);
       const keeper = pickKeeper(list);
       const removed = list.filter((p) => p.id !== keeper.id).map((p) => p.sku);
       details.push({ groupKey, keeperSku: keeper.sku, keeperId: keeper.id, removedSkus: removed });
@@ -358,7 +415,8 @@ export async function runMergeDuplicateProductsBySku(
     };
   }
 
-  for (const [groupKey, list] of groups) {
+  for (const list of groups) {
+    const groupKey = groupLabel(list);
     const keeper = pickKeeper(list);
     const duplicates = list.filter((p) => p.id !== keeper.id);
     const removedSkus: string[] = [];

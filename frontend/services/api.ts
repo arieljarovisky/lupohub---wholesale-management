@@ -240,22 +240,35 @@ export const api = {
     }, MOCK_PRODUCTS, 'getProducts');
   },
 
-  /** Trae todos los productos sin límite: pide página por página hasta completar. */
+  /** Trae todas las variantes: usa páginas grandes y descarga en paralelo para reducir tiempo total. */
   getProductsAll: async (options?: { priceListId?: string | null }): Promise<Product[]> => {
-    const PER_PAGE = 1000;
-    const params = new URLSearchParams({ per_page: String(PER_PAGE), page: '1' });
-    if (options?.priceListId) params.set('price_list_id', options.priceListId);
-    const res = await request<any>(`/products?${params.toString()}`, 'GET');
+    const PER_PAGE = 5000;
+    const buildParams = (page: number) => {
+      const p = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
+      if (options?.priceListId) p.set('price_list_id', options.priceListId);
+      return p;
+    };
+    const res = await request<any>(`/products?${buildParams(1).toString()}`, 'GET');
     const items = Array.isArray(res) ? res : (res?.items ?? []);
     const total = typeof res?.total === 'number' ? res.total : items.length;
     const all: Product[] = items.map((r: any) => api.mapProductRow(r));
     const totalPages = Math.ceil(total / PER_PAGE) || 1;
-    for (let page = 2; page <= totalPages; page++) {
-      const nextParams = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
-      if (options?.priceListId) nextParams.set('price_list_id', options.priceListId);
-      const nextRes = await request<any>(`/products?${nextParams.toString()}`, 'GET');
-      const nextItems = Array.isArray(nextRes) ? nextRes : (nextRes?.items ?? []);
-      all.push(...nextItems.map((r: any) => api.mapProductRow(r)));
+    if (totalPages <= 1) return all;
+
+    const CONCURRENCY = 6;
+    for (let start = 2; start <= totalPages; start += CONCURRENCY) {
+      const end = Math.min(start + CONCURRENCY - 1, totalPages);
+      const pageNums: number[] = [];
+      for (let p = start; p <= end; p++) pageNums.push(p);
+      const chunks = await Promise.all(
+        pageNums.map((page) =>
+          request<any>(`/products?${buildParams(page).toString()}`, 'GET').then((nextRes: any) => {
+            const nextItems = Array.isArray(nextRes) ? nextRes : (nextRes?.items ?? []);
+            return nextItems.map((r: any) => api.mapProductRow(r));
+          })
+        )
+      );
+      for (const chunk of chunks) all.push(...chunk);
     }
     return all;
   },

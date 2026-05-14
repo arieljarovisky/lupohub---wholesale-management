@@ -1568,6 +1568,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
  *   - El nombre del producto se repite (normalizado a UPPER + TRIM, ignorando espacios múltiples).
  *   - Y/o el "núcleo numérico" del SKU coincide (sirve para detectar pares "Q05875" vs "058750"
  *     donde uno tiene un prefijo letra y el otro no).
+ *   - Y/o comparten prefijo numérico sin los últimos 2 dígitos (`duplicateBySkuDigitPrefix`, mismo criterio
+ *     que merge por SKU: p. ej. `0127501` ↔ `1275-11`).
  *
  * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products` o
  * `npm run merge-duplicate-products` / POST `/products/merge-duplicate-by-sku`.
@@ -1616,6 +1618,23 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
       return digits.slice(0, 5);
     };
 
+    /** Núcleo sin ceros a la izquierda (igual que merge duplicados). */
+    const digitCoreNorm = (s: string) => {
+      const d = String(s || '').replace(/\D/g, '');
+      return d.replace(/^0+/, '') || '';
+    };
+    const byDpre = new Map<string, any[]>();
+    for (const r of rows as any[]) {
+      const dc = digitCoreNorm(r.sku);
+      if (dc.length >= 6) {
+        const pre = dc.slice(0, -2);
+        if (pre.length >= 4) {
+          if (!byDpre.has(pre)) byDpre.set(pre, []);
+          byDpre.get(pre)!.push(r);
+        }
+      }
+    }
+
     for (const r of rows as any[]) {
       const nameKey = normalizeName(r.name);
       if (nameKey) {
@@ -1629,7 +1648,7 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
       }
     }
 
-    const buildGroup = (kind: 'name' | 'sku_core', key: string, list: any[]) => ({
+    const buildGroup = (kind: 'name' | 'sku_core' | 'sku_digit_prefix', key: string, list: any[]) => ({
       kind,
       key,
       productCount: list.length,
@@ -1657,11 +1676,21 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
       })
       .map(([k, list]) => buildGroup('sku_core', k, list));
 
+    /** Mismo criterio `dpre:` que merge-duplicate-by-sku (p. ej. 0127501 vs 1275-11). */
+    const dpreGroups = Array.from(byDpre.entries())
+      .filter(([, list]) => {
+        if (list.length < 2) return false;
+        const baseSkus = new Set(list.map((p: any) => String(p.sku)));
+        return baseSkus.size > 1;
+      })
+      .map(([k, list]) => buildGroup('sku_digit_prefix', `dpre:${k}`, list));
+
     return res.json({
       filter: q || null,
       totalProducts: (rows as any[]).length,
       duplicateByName: nameGroups.slice(0, limit),
-      duplicateBySkuCore: coreGroups.slice(0, limit)
+      duplicateBySkuCore: coreGroups.slice(0, limit),
+      duplicateBySkuDigitPrefix: dpreGroups.slice(0, limit)
     });
   } catch (error: any) {
     console.error('getDuplicateProducts:', error);

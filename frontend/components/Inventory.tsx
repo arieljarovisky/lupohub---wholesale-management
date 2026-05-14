@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
@@ -223,18 +223,24 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     });
   }, [searchTerm, currentPage, inventorySubView, hideZeroStock, filterSize, filterCategory, filterColor]);
 
-  const availableSizes = attributes.filter(a => a.type === 'size');
-  
+  const availableSizes = useMemo(
+    () => attributes.filter(a => a.type === 'size'),
+    [attributes]
+  );
+
   // Use only colors from the database (attributes loaded from API /colors)
-   // But ensure they are sorted numerically/alphabetically
-   const availableColors = attributes.filter(a => a.type === 'color').sort((a, b) => {
-      const valA = ((a as any).code || a.name || '').toString();
-      const valB = ((b as any).code || b.name || '').toString();
-      const na = parseInt(valA);
-      const nb = parseInt(valB);
-      if (!isNaN(na) && !isNaN(nb)) return na - nb;
-      return valA.localeCompare(valB);
-   });
+  const availableColors = useMemo(() => {
+    return attributes
+      .filter(a => a.type === 'color')
+      .sort((a, b) => {
+        const valA = ((a as any).code || a.name || '').toString();
+        const valB = ((b as any).code || b.name || '').toString();
+        const na = parseInt(valA);
+        const nb = parseInt(valB);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return valA.localeCompare(valB);
+      });
+  }, [attributes]);
 
   // Talles sin duplicados para el modal "Generar Inventario" (P y 130 - P son el mismo talle)
   const SIZE_ORDER_MODAL = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG', 'S', 'L', 'XL', 'XXL', 'XXXL', 'XS'];
@@ -281,40 +287,32 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   }, [products]);
 
-  // Helper function to check color match, extracted to be reusable
-  function checkColorMatch(p: Product, filterColor: string) {
-    if (filterColor === 'ALL') return true;
-    
-    const filterColorLower = filterColor.toString().trim().toLowerCase();
-    
-    // Find the selected attribute to get both code and name
-    const selectedAttr = availableColors.find(c => ((c as any).code || c.name) === filterColor);
-    const targetCode = (selectedAttr ? ((selectedAttr as any).code || '') : filterColor).toString().trim().toLowerCase();
-    const targetName = (selectedAttr ? (selectedAttr.name || '') : filterColor).toString().trim().toLowerCase();
+  const checkColorMatch = useCallback((p: Product, colorKey: string) => {
+    if (colorKey === 'ALL') return true;
 
-    // Get color from product's explicit color property (set when loading variants)
+    const filterColorLower = colorKey.toString().trim().toLowerCase();
+
+    const selectedAttr = availableColors.find(c => ((c as any).code || c.name) === colorKey);
+    const targetCode = (selectedAttr ? ((selectedAttr as any).code || '') : colorKey).toString().trim().toLowerCase();
+    const targetName = (selectedAttr ? (selectedAttr.name || '') : colorKey).toString().trim().toLowerCase();
+
     const explicitColor = ((p as any).color || '').toString().trim().toLowerCase();
-    // Get colorCode if available (from loaded variants)
     const explicitColorCode = ((p as any).colorCode || '').toString().trim().toLowerCase();
-    
-    // Get color from SKU (last segment)
+
     const sku = (p.sku || '').toString();
     const skuParts = sku.split('-');
     const skuColorPart = skuParts.length >= 1 ? skuParts[skuParts.length - 1].toLowerCase() : '';
-    
-    // Match by explicit colorCode (most reliable for loaded variants)
+
     if (explicitColorCode) {
       if (explicitColorCode === targetCode || explicitColorCode === filterColorLower) {
         return true;
       }
     }
-    
-    // Match by explicit color name
+
     if (explicitColor) {
       if (explicitColor === targetName || explicitColor === targetCode || explicitColor === filterColorLower) {
         return true;
       }
-      // Partial match for color names (e.g., "Negro" matches "negro")
       if (targetName && explicitColor.includes(targetName)) {
         return true;
       }
@@ -322,42 +320,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         return true;
       }
     }
-    
-    // Match by SKU color segment
+
     if (skuColorPart) {
       if (skuColorPart === targetCode || skuColorPart === targetName || skuColorPart === filterColorLower) {
         return true;
       }
-      // Check if any SKU part matches the target code
       if (targetCode && skuParts.some(part => part.toLowerCase() === targetCode)) {
         return true;
       }
     }
-    
-    // Numeric comparison for codes like "03" vs "3"
+
     const numExplicit = parseInt(explicitColor);
     const numExplicitCode = parseInt(explicitColorCode);
     const numSkuColor = parseInt(skuColorPart);
     const numTarget = parseInt(targetCode);
     const numFilter = parseInt(filterColorLower);
-    
+
     if (!isNaN(numTarget)) {
       if ((!isNaN(numExplicitCode) && numExplicitCode === numTarget) ||
-          (!isNaN(numExplicit) && numExplicit === numTarget) || 
+          (!isNaN(numExplicit) && numExplicit === numTarget) ||
           (!isNaN(numSkuColor) && numSkuColor === numTarget)) {
         return true;
       }
     }
     if (!isNaN(numFilter)) {
       if ((!isNaN(numExplicitCode) && numExplicitCode === numFilter) ||
-          (!isNaN(numExplicit) && numExplicit === numFilter) || 
+          (!isNaN(numExplicit) && numExplicit === numFilter) ||
           (!isNaN(numSkuColor) && numSkuColor === numFilter)) {
         return true;
       }
     }
-    
+
     return false;
-  }
+  }, [availableColors]);
 
   // Cargar despachos para el modal
   const loadDespachos = async () => {
@@ -473,9 +468,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return baseRef || '—';
   };
 
-  // 1. Server: cargar todos los productos (en páginas de 100) para que el paginado sea solo de vista
-  const FETCH_PAGE_SIZE = 100;
-  const MAX_PRODUCTS = 2000;
+  // Server: menos requests (páginas grandes) y lotes paralelos acotados para no saturar red ni MySQL.
+  const FETCH_PAGE_SIZE = 2500;
+  const MAX_PRODUCTS = 50000;
+  const FETCH_PAGE_CONCURRENCY = 5;
   const loadIdRef = useRef(0);
   useEffect(() => {
     if (!serverMode) return;
@@ -490,39 +486,56 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         if (first.total <= FETCH_PAGE_SIZE) return;
         const totalToLoad = Math.min(first.total, MAX_PRODUCTS);
         const totalPages = Math.ceil(totalToLoad / FETCH_PAGE_SIZE);
-        const restPages = await Promise.all(
-          Array.from({ length: totalPages - 1 }, (_, i) =>
-            api.getProductsPaged(i + 2, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync, { skipTotal: true })
-          )
-        );
-        if (loadId !== loadIdRef.current) return;
-        setServerItems(prev => [...prev, ...restPages.flatMap(r => r.items)]);
+        for (let start = 2; start <= totalPages; start += FETCH_PAGE_CONCURRENCY) {
+          const end = Math.min(start + FETCH_PAGE_CONCURRENCY - 1, totalPages);
+          const pageNums: number[] = [];
+          for (let p = start; p <= end; p++) pageNums.push(p);
+          const restPages = await Promise.all(
+            pageNums.map((page) =>
+              api.getProductsPaged(page, FETCH_PAGE_SIZE, searchTerm || undefined, sortMap[sortKey] || 'sku', sortDir, filterSync, { skipTotal: true })
+            )
+          );
+          if (loadId !== loadIdRef.current) return;
+          setServerItems((prev) => [...prev, ...restPages.flatMap((r) => r.items)]);
+        }
       } catch {
         if (loadId === loadIdRef.current) setServerMode(false);
       }
     })();
   }, [serverMode, searchTerm, sortKey, sortDir, filterSync, serverListRefreshKey]);
 
-  // 2. Filter individual products first (incluye padres para poder evaluar variantes)
-  const filteredProducts = (serverMode ? serverItems : products).filter(p => {
-    const sku = (p.sku || '').toString().toLowerCase();
-    const name = (p.name || '').toString().toLowerCase();
-    const searchLower = searchTerm.toLowerCase();
-    const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
-    const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
-    const sizeCode = getProductSizeCode(p);
-    const matchesSize = matchesSizeFilter(sizeCode, filterSize);
-    
-    const isParent = sku.split('-').length <= 1;
-    const matchesColor = filterColor === 'ALL' ? true : (checkColorMatch(p, filterColor) || isParent);
-    
-    let matchesStock = true;
-    const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
-    if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
-    if (filterStockLevel === 'OUT') matchesStock = stockValue <= 0;
-    
-    return matchesSearch && matchesCategory && matchesSize && matchesColor && matchesStock;
-  });
+  const filteredProducts = useMemo(() => {
+    const source = serverMode ? serverItems : products;
+    return source.filter((p) => {
+      const sku = (p.sku || '').toString().toLowerCase();
+      const name = (p.name || '').toString().toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
+      const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
+      const sizeCode = getProductSizeCode(p);
+      const matchesSize = matchesSizeFilter(sizeCode, filterSize);
+
+      const isParent = sku.split('-').length <= 1;
+      const matchesColor = filterColor === 'ALL' ? true : checkColorMatch(p, filterColor) || isParent;
+
+      let matchesStock = true;
+      const stockValue = (p as any).stock_total ?? (p as any).stock ?? 0;
+      if (filterStockLevel === 'LOW') matchesStock = stockValue > 0 && stockValue < 20;
+      if (filterStockLevel === 'OUT') matchesStock = stockValue <= 0;
+
+      return matchesSearch && matchesCategory && matchesSize && matchesColor && matchesStock;
+    });
+  }, [
+    serverMode,
+    serverItems,
+    products,
+    searchTerm,
+    filterCategory,
+    filterSize,
+    filterStockLevel,
+    filterColor,
+    checkColorMatch,
+  ]);
 
     // 2. Group filtered products by BASE SKU (prefix before size/color suffix)
   // When color filter is active, we still need to respect search and other filters
