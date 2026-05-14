@@ -42,13 +42,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const talles_tango_1 = require("../talles-tango");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const stock_controller_1 = require("./stock.controller");
+const mergeDuplicateProductsBySku_1 = require("../services/mergeDuplicateProductsBySku");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query;
@@ -1519,6 +1520,20 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getDuplicateProducts = getDuplicateProducts;
+/** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
+const mergeDuplicateProductsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const dryRun = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.dryRun) === true || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.dryRun) === 'true' || ((_c = req.query) === null || _c === void 0 ? void 0 : _c.dryRun) === '1';
+        const result = yield (0, mergeDuplicateProductsBySku_1.runMergeDuplicateProductsBySku)({ dryRun });
+        res.json(result);
+    }
+    catch (error) {
+        console.error('mergeDuplicateProductsBySku:', error);
+        return res.status(500).json({ message: 'Error fusionando duplicados', error: error === null || error === void 0 ? void 0 : error.message });
+    }
+});
+exports.mergeDuplicateProductsBySku = mergeDuplicateProductsBySku;
 /** Exportar inventario completo: productos + variantes + stock (para Excel en frontend). */
 const exportInventory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {

@@ -10,6 +10,8 @@
     "init-db": "ts-node src/database/init.ts",
     "merge-trifil": "ts-node scripts/merge-trifil-products.ts",
     "merge-trifil:prod": "cross-env NODE_ENV=production ts-node scripts/merge-trifil-products.ts",
+    "merge-duplicate-products": "ts-node scripts/merge-duplicate-products-by-sku.ts",
+    "merge-duplicate-products:prod": "cross-env NODE_ENV=production ts-node scripts/merge-duplicate-products-by-sku.ts",
     "parse-tango": "node scripts/parse-tango-articulos.js",
     "create-cert-prod": "ts-node scripts/create-cert-prod.ts",
     "auth-web-service-prod": "ts-node scripts/auth-web-service-prod.ts",

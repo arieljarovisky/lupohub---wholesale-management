@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, getDuplicateProducts } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -18,6 +18,7 @@ router.delete('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware,
 router.delete('/all', authMiddleware, adminOrDepositoMiddleware, deleteAllProducts);
 router.post('/import-tango', authMiddleware, adminOrDepositoMiddleware, importTangoArticles);
 router.get('/duplicates', authMiddleware, adminOrDepositoMiddleware, getDuplicateProducts);
+router.post('/merge-duplicate-by-sku', authMiddleware, adminOrDepositoMiddleware, mergeDuplicateProductsBySku);
 router.get('/export-inventory', authMiddleware, exportInventory);
 router.get('/', authMiddleware, getProducts);
 router.get('/by-id/:id', authMiddleware, getProductById);

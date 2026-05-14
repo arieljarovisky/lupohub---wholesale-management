@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
+import { runMergeDuplicateProductsBySku } from '../services/mergeDuplicateProductsBySku';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -1568,7 +1569,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
  *   - Y/o el "núcleo numérico" del SKU coincide (sirve para detectar pares "Q05875" vs "058750"
  *     donde uno tiene un prefijo letra y el otro no).
  *
- * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products`.
+ * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products` o
+ * `npm run merge-duplicate-products` / POST `/products/merge-duplicate-by-sku`.
  *
  * Query params opcionales:
  *   - q: filtra por substring en el nombre (case-insensitive). Ej.: ?q=trifil
@@ -1664,6 +1666,19 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('getDuplicateProducts:', error);
     return res.status(500).json({ message: 'Error obteniendo duplicados', error: error?.message });
+  }
+};
+
+/** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
+export const mergeDuplicateProductsBySku = async (req: Request, res: Response) => {
+  try {
+    const dryRun =
+      req.body?.dryRun === true || req.query?.dryRun === 'true' || req.query?.dryRun === '1';
+    const result = await runMergeDuplicateProductsBySku({ dryRun });
+    res.json(result);
+  } catch (error: any) {
+    console.error('mergeDuplicateProductsBySku:', error);
+    return res.status(500).json({ message: 'Error fusionando duplicados', error: error?.message });
   }
 };
 
