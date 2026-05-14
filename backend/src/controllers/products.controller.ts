@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
-import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode } from '../services/mergeDuplicateProductsBySku';
+import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper } from '../services/mergeDuplicateProductsBySku';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -1699,6 +1699,36 @@ export const getDuplicateProducts = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('getDuplicateProducts:', error);
     return res.status(500).json({ message: 'Error obteniendo duplicados', error: error?.message });
+  }
+};
+
+/** Fusiona artículos elegidos manualmente en un “principal”. Body: { keeperProductId, duplicateProductIds: string[], dryRun?: boolean }. Solo ADMIN o DEPÓSITO. */
+export const mergeManualProducts = async (req: Request, res: Response) => {
+  try {
+    const keeperProductId = String(req.body?.keeperProductId || '').trim();
+    const raw = req.body?.duplicateProductIds;
+    const duplicateProductIds = Array.isArray(raw)
+      ? raw.map((x: unknown) => String(x ?? '').trim()).filter(Boolean)
+      : [];
+    const dryRun =
+      req.body?.dryRun === true || req.query?.dryRun === 'true' || req.query?.dryRun === '1';
+    if (!keeperProductId) {
+      return res.status(400).json({ message: 'Indicá el artículo principal (keeperProductId).' });
+    }
+    if (duplicateProductIds.length === 0) {
+      return res.status(400).json({ message: 'Indicá al menos un artículo a absorber (duplicateProductIds).' });
+    }
+    const result = await mergeManualIntoKeeper(keeperProductId, duplicateProductIds, { dryRun });
+    if (result.errors.length && result.productsRemoved === 0 && !dryRun) {
+      return res.status(422).json({
+        message: 'No se pudo fusionar ningún artículo. Revisá los errores.',
+        ...result,
+      });
+    }
+    res.json(result);
+  } catch (error: any) {
+    console.error('mergeManualProducts:', error);
+    return res.status(500).json({ message: 'Error en fusión manual', error: error?.message });
   }
 };
 

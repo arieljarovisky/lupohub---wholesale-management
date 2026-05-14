@@ -550,6 +550,22 @@ export const api = {
     await request<void>(`/products/${encodeURIComponent(productId)}`, 'DELETE');
   },
 
+  /** Fusiona varios artículos (padre) en uno principal: suma stock, mueve variantes y borra duplicados. Solo admin/deposito. */
+  mergeManualProducts: async (payload: {
+    keeperProductId: string;
+    duplicateProductIds: string[];
+    dryRun?: boolean;
+  }): Promise<{
+    dryRun: boolean;
+    keeperProductId: string;
+    variantsMerged: number;
+    productsRemoved: number;
+    errors: string[];
+    message?: string;
+  }> => {
+    return request('/products/merge-manual', 'POST', payload, undefined, 120000);
+  },
+
   // --- CUSTOMERS ACCESS / USERS ---
 
   /** Asigna o crea un usuario (rol CUSTOMER) para un cliente existente. Solo ADMIN. */

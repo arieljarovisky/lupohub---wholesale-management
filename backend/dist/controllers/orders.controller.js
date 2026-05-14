@@ -332,29 +332,30 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             whereArchived = '';
         const whereUserScope = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? ' AND c.seller_id = ?' : '';
         const ordersParams = (user === null || user === void 0 ? void 0 : user.role) === 'SELLER' ? [user.id] : [];
-        let ordersRow = yield (0, db_1.query)(`SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
+        let whereCustomer = '';
+        if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
+            const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
+            const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+            if (!(customer === null || customer === void 0 ? void 0 : customer.id)) {
+                return res.json([]);
+            }
+            whereCustomer = ' AND o.customer_id = ?';
+            ordersParams.push(customer.id);
+        }
+        const orderId = req.query.orderId;
+        if (orderId) {
+            ordersParams.push(orderId);
+        }
+        const whereOrderId = orderId ? ' AND o.id = ?' : '';
+        const ordersRow = yield (0, db_1.query)(`SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
               cu.name AS created_by_name, cu.role AS created_by_role,
               su.name AS seller_name
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
-       WHERE 1=1 ${whereArchived}${whereUserScope}
+       WHERE 1=1 ${whereArchived}${whereUserScope}${whereCustomer}${whereOrderId}
        ORDER BY o.date DESC`, ordersParams);
-        if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
-            const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
-            const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
-            if (customer === null || customer === void 0 ? void 0 : customer.id) {
-                ordersRow = ordersRow.filter((o) => o.customer_id === customer.id);
-            }
-            else {
-                ordersRow = [];
-            }
-        }
-        const orderId = req.query.orderId;
-        if (orderId) {
-            ordersRow = ordersRow.filter((o) => o.id === orderId);
-        }
         if (ordersRow.length === 0) {
             return res.json([]);
         }
@@ -423,6 +424,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         // Fallback para facturas antiguas sin retención guardada:
         // recalcular con padrón AGIP del período del pedido para no perder la línea en impresión.
+        const agipRecalcInputs = [];
         for (const o of ordersRow) {
             const inv = invoiceByOrderId[o.id];
             if (!inv)
@@ -439,11 +441,19 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             }
             netFromItems = Math.round(netFromItems * 100) / 100;
             const netAmount = netFromItems > 0 ? netFromItems : Number(o.total || 0);
-            const calc = yield getAgipRetentionForOrder({
+            agipRecalcInputs.push({
+                inv,
                 orderDate: o.date,
                 customerCuit: o.customer_cuit,
                 netAmount,
             });
+        }
+        const agipResults = yield Promise.all(agipRecalcInputs.map((row) => getAgipRetentionForOrder({
+            orderDate: row.orderDate,
+            customerCuit: row.customerCuit,
+            netAmount: row.netAmount,
+        }).then((calc) => ({ inv: row.inv, calc }))));
+        for (const { inv, calc } of agipResults) {
             if (calc) {
                 inv.agipAlicuota = Number(calc.alicuota || 0);
                 inv.agipRetPer = Number(calc.amount || 0);

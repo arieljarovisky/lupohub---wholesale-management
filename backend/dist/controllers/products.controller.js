@@ -42,7 +42,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
@@ -1427,8 +1427,11 @@ exports.importTangoArticles = importTangoArticles;
  *   - El nombre del producto se repite (normalizado a UPPER + TRIM, ignorando espacios múltiples).
  *   - Y/o el "núcleo numérico" del SKU coincide (sirve para detectar pares "Q05875" vs "058750"
  *     donde uno tiene un prefijo letra y el otro no).
+ *   - Y/o comparten prefijo numérico sin los últimos 2 dígitos (`duplicateBySkuDigitPrefix`, mismo criterio
+ *     que merge por SKU: p. ej. `0322389` ↔ `3223-89` **solo si** el nombre incluye el código de cada SKU).
  *
- * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products`.
+ * Pensado para verificar a mano antes de fusionar duplicados con `merge-trifil-products` o
+ * `npm run merge-duplicate-products` / POST `/products/merge-duplicate-by-sku`.
  *
  * Query params opcionales:
  *   - q: filtra por substring en el nombre (case-insensitive). Ej.: ?q=trifil
@@ -1467,6 +1470,23 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
             // 5 dígitos como núcleo "fuerte"; suficiente para hermanar 058750 con Q058750 (ambos comparten 05875).
             return digits.slice(0, 5);
         };
+        /** Núcleo sin ceros a la izquierda (igual que merge duplicados). */
+        const digitCoreNorm = (s) => {
+            const d = String(s || '').replace(/\D/g, '');
+            return d.replace(/^0+/, '') || '';
+        };
+        const byDpre = new Map();
+        for (const r of rows) {
+            const dc = digitCoreNorm(r.sku);
+            if (dc.length >= 6) {
+                const pre = dc.slice(0, -2);
+                if (pre.length >= 4) {
+                    if (!byDpre.has(pre))
+                        byDpre.set(pre, []);
+                    byDpre.get(pre).push(r);
+                }
+            }
+        }
         for (const r of rows) {
             const nameKey = normalizeName(r.name);
             if (nameKey) {
@@ -1507,11 +1527,25 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
             return baseSkus.size > 1;
         })
             .map(([k, list]) => buildGroup('sku_core', k, list));
+        /** Mismo criterio `dpre:` que merge-duplicate-by-sku; solo filas cuyo nombre incluye el código del SKU. */
+        const dpreGroups = Array.from(byDpre.entries())
+            .map(([k, list]) => {
+            const filtered = list.filter((p) => (0, mergeDuplicateProductsBySku_1.nameEmbedsOwnSkuCode)(p.name, p.sku));
+            return [k, filtered];
+        })
+            .filter(([, list]) => {
+            if (list.length < 2)
+                return false;
+            const baseSkus = new Set(list.map((p) => String(p.sku)));
+            return baseSkus.size > 1;
+        })
+            .map(([k, list]) => buildGroup('sku_digit_prefix', `dpre:${k}`, list));
         return res.json({
             filter: q || null,
             totalProducts: rows.length,
             duplicateByName: nameGroups.slice(0, limit),
-            duplicateBySkuCore: coreGroups.slice(0, limit)
+            duplicateBySkuCore: coreGroups.slice(0, limit),
+            duplicateBySkuDigitPrefix: dpreGroups.slice(0, limit)
         });
     }
     catch (error) {
@@ -1520,6 +1554,34 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getDuplicateProducts = getDuplicateProducts;
+/** Fusiona artículos elegidos manualmente en un “principal”. Body: { keeperProductId, duplicateProductIds: string[], dryRun?: boolean }. Solo ADMIN o DEPÓSITO. */
+const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    try {
+        const keeperProductId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperProductId) || '').trim();
+        const raw = (_b = req.body) === null || _b === void 0 ? void 0 : _b.duplicateProductIds;
+        const duplicateProductIds = Array.isArray(raw)
+            ? raw.map((x) => String(x !== null && x !== void 0 ? x : '').trim()).filter(Boolean)
+            : [];
+        const dryRun = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.dryRun) === true || ((_d = req.query) === null || _d === void 0 ? void 0 : _d.dryRun) === 'true' || ((_e = req.query) === null || _e === void 0 ? void 0 : _e.dryRun) === '1';
+        if (!keeperProductId) {
+            return res.status(400).json({ message: 'Indicá el artículo principal (keeperProductId).' });
+        }
+        if (duplicateProductIds.length === 0) {
+            return res.status(400).json({ message: 'Indicá al menos un artículo a absorber (duplicateProductIds).' });
+        }
+        const result = yield (0, mergeDuplicateProductsBySku_1.mergeManualIntoKeeper)(keeperProductId, duplicateProductIds, { dryRun });
+        if (result.errors.length && result.productsRemoved === 0 && !dryRun) {
+            return res.status(422).json(Object.assign({ message: 'No se pudo fusionar ningún artículo. Revisá los errores.' }, result));
+        }
+        res.json(result);
+    }
+    catch (error) {
+        console.error('mergeManualProducts:', error);
+        return res.status(500).json({ message: 'Error en fusión manual', error: error === null || error === void 0 ? void 0 : error.message });
+    }
+});
+exports.mergeManualProducts = mergeManualProducts;
 /** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
 const mergeDuplicateProductsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;

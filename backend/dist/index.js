@@ -68,6 +68,7 @@ const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
+const add_orders_performance_indexes_1 = require("./database/add_orders_performance_indexes");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -188,6 +189,7 @@ function initDatabase() {
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
+                yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

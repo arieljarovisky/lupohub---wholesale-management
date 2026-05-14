@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History, GitMerge } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -147,6 +147,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [bulkLinkSaving, setBulkLinkSaving] = useState(false);
   const [bulkLinkMlSearch, setBulkLinkMlSearch] = useState('');
   const [bulkLinkTnSearch, setBulkLinkTnSearch] = useState('');
+
+  /** Fusión manual: varios productos padre → uno (stock y variantes). */
+  const [showMergeManualModal, setShowMergeManualModal] = useState(false);
+  const [mergePickSearch, setMergePickSearch] = useState('');
+  const [mergePickLoading, setMergePickLoading] = useState(false);
+  const [mergePickResults, setMergePickResults] = useState<Array<{ productId: string; baseSku: string; name: string }>>([]);
+  const [mergeSelected, setMergeSelected] = useState<Array<{ productId: string; baseSku: string; name: string }>>([]);
+  const [mergeKeeperProductId, setMergeKeeperProductId] = useState<string | null>(null);
+  const [mergeSaving, setMergeSaving] = useState(false);
+  const mergeSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Editar producto (artículo)
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1449,6 +1459,130 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setBulkLinkTnSearch('');
   };
 
+  const openMergeManualModal = useCallback(() => {
+    setShowMergeManualModal(true);
+    setMergePickSearch('');
+    setMergePickResults([]);
+    setMergeSelected([]);
+    setMergeKeeperProductId(null);
+    setMergeSaving(false);
+  }, []);
+
+  useEffect(() => {
+    if (!showMergeManualModal) return;
+    if (mergeSearchTimerRef.current) clearTimeout(mergeSearchTimerRef.current);
+    mergeSearchTimerRef.current = setTimeout(async () => {
+      const q = mergePickSearch.trim();
+      if (!q) {
+        setMergePickResults([]);
+        setMergePickLoading(false);
+        return;
+      }
+      setMergePickLoading(true);
+      try {
+        const r = await api.getProductsPaged(1, 50, q, 'sku', 'asc', 'ALL', { skipTotal: true });
+        const map = new Map<string, { productId: string; baseSku: string; name: string }>();
+        for (const p of r.items) {
+          const pid = String((p as any).product_id || '').trim();
+          if (!pid) continue;
+          const baseSku =
+            String((p as any).base_sku || '')
+              .trim()
+              .replace(/\s+/g, ' ') ||
+            (String(p.sku || '').includes('-')
+              ? String(p.sku || '')
+                  .split('-')
+                  .slice(0, -2)
+                  .join('-')
+              : String(p.sku || ''));
+          const name = String(p.name || '').trim();
+          if (!map.has(pid)) map.set(pid, { productId: pid, baseSku: baseSku || String(p.sku || ''), name });
+        }
+        setMergePickResults([...map.values()].slice(0, 40));
+      } catch {
+        setMergePickResults([]);
+      } finally {
+        setMergePickLoading(false);
+      }
+    }, 320);
+    return () => {
+      if (mergeSearchTimerRef.current) clearTimeout(mergeSearchTimerRef.current);
+    };
+  }, [mergePickSearch, showMergeManualModal]);
+
+  const addMergeCandidate = (row: { productId: string; baseSku: string; name: string }) => {
+    setMergeSelected((prev) => {
+      if (prev.some((x) => x.productId === row.productId)) return prev;
+      const next = [...prev, row];
+      setMergeKeeperProductId((curr) => {
+        if (!curr || !next.some((x) => x.productId === curr)) {
+          const sorted = [...next].sort((a, b) => b.name.length - a.name.length);
+          return sorted[0]?.productId ?? null;
+        }
+        return curr;
+      });
+      return next;
+    });
+  };
+
+  const removeMergeCandidate = (productId: string) => {
+    setMergeSelected((prev) => {
+      const next = prev.filter((p) => p.productId !== productId);
+      setMergeKeeperProductId((curr) => {
+        if (curr !== productId) return curr;
+        if (next.length === 0) return null;
+        return [...next].sort((a, b) => b.name.length - a.name.length)[0]!.productId;
+      });
+      return next;
+    });
+  };
+
+  const runManualMerge = () => {
+    if (!mergeKeeperProductId || mergeSelected.length < 2) {
+      showToast('error', 'Agregá al menos dos artículos y elegí cuál queda como principal.');
+      return;
+    }
+    const others = mergeSelected.filter((p) => p.productId !== mergeKeeperProductId).map((p) => p.productId);
+    if (others.length === 0) {
+      showToast('error', 'Tenés que marcar otro artículo además del principal para absorber.');
+      return;
+    }
+    const keeperLabel =
+      mergeSelected.find((p) => p.productId === mergeKeeperProductId)?.baseSku || 'principal';
+    showConfirm({
+      title: 'Unificar artículos',
+      message: `Se fusionarán ${others.length} artículo(s) en el código "${keeperLabel}". El stock y las variantes pasan al artículo principal y los duplicados se eliminan. No se puede deshacer.`,
+      confirmLabel: 'Unificar',
+      onConfirm: async () => {
+        setMergeSaving(true);
+        try {
+          const res = await api.mergeManualProducts({
+            keeperProductId: mergeKeeperProductId,
+            duplicateProductIds: others,
+          });
+          if (res.errors?.length && !res.productsRemoved) {
+            showToast('error', (res as any).message || res.errors.join(' ') || 'Error al fusionar');
+          } else {
+            showToast(
+              'success',
+              `Fusión lista: ${res.productsRemoved} artículo(s) absorbido(s), ${res.variantsMerged} variante(s) unificada(s).`
+            );
+            if (res.errors?.length) showToast('info', res.errors.slice(0, 4).join(' · '));
+            setShowMergeManualModal(false);
+            setServerListRefreshKey((k) => k + 1);
+            onImportComplete?.();
+          }
+        } catch (e: any) {
+          const msg = e?.response?.data?.message || e?.message || 'Error al fusionar';
+          const errs = e?.response?.data?.errors;
+          showToast('error', Array.isArray(errs) && errs.length ? `${msg}: ${errs.join(' ')}` : msg);
+        } finally {
+          setMergeSaving(false);
+        }
+      },
+    });
+  };
+
   const handleDeleteVariant = (variantId: string, skuLabel: string, groupKey?: string) => {
     showConfirm({
       title: 'Eliminar variante',
@@ -2508,6 +2642,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     </button>
                   </>
                 )}
+                {isAdminOrWarehouse && (
+                  <button type="button" onClick={() => { setTopDotsOpen(false); openMergeManualModal(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/15 rounded-lg border-b border-slate-700/50">
+                    <GitMerge size={18} className="text-violet-400 shrink-0" />
+                    Unificar artículos
+                  </button>
+                )}
                 <button type="button" onClick={() => { setTopDotsOpen(false); tangoFileInputRef.current?.click(); }} disabled={importingTango} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
                   {importingTango ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <Upload size={18} className="text-amber-400" />}
                   Importar Tango
@@ -2651,6 +2791,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           {exportingExcel ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
           <span className="text-sm font-semibold hidden sm:inline">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
         </button>
+
+        {isAdminOrWarehouse && (
+          <button
+            type="button"
+            onClick={() => openMergeManualModal()}
+            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-violet-300 px-3 sm:px-4 py-2.5 rounded-xl border border-violet-900/40 active:bg-slate-700 shadow-sm min-h-[44px]"
+          >
+            <GitMerge size={18} />
+            <span className="text-sm font-semibold hidden sm:inline">Unificar artículos</span>
+          </button>
+        )}
 
         {isAdminOrWarehouse && (
           <button 
@@ -3432,6 +3583,135 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMergeManualModal && (
+        <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] flex flex-col shadow-2xl">
+            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="p-2 rounded-xl bg-violet-600/30 text-violet-300 shrink-0">
+                  <GitMerge size={22} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-white font-bold text-base truncate">Unificar artículos</h3>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Buscá por código o nombre, agregá los duplicados y elegí cuál queda como principal.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !mergeSaving && setShowMergeManualModal(false)}
+                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 shrink-0"
+                aria-label="Cerrar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Buscar artículo</label>
+                <input
+                  type="text"
+                  value={mergePickSearch}
+                  onChange={(e) => setMergePickSearch(e.target.value)}
+                  placeholder="Ej: 40600, Cola less…"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-slate-700 divide-y divide-slate-800">
+                  {mergePickLoading ? (
+                    <div className="p-3 text-slate-500 text-sm flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" /> Buscando…
+                    </div>
+                  ) : mergePickSearch.trim() && mergePickResults.length === 0 ? (
+                    <div className="p-3 text-slate-500 text-sm">Sin resultados.</div>
+                  ) : (
+                    mergePickResults.map((row) => (
+                      <div key={row.productId} className="flex items-center gap-2 p-2 hover:bg-slate-800/80">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-white font-medium truncate">{row.baseSku}</p>
+                          <p className="text-xs text-slate-400 truncate">{row.name || '—'}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addMergeCandidate(row)}
+                          disabled={mergeSelected.some((s) => s.productId === row.productId)}
+                          className="shrink-0 px-2 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Agregar
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  A fusionar ({mergeSelected.length}) — principal
+                </p>
+                {mergeSelected.length === 0 ? (
+                  <p className="text-sm text-slate-500 py-2">Todavía no agregaste artículos.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {mergeSelected.map((row) => (
+                      <li
+                        key={row.productId}
+                        className={`flex items-start gap-2 p-2 rounded-xl border ${
+                          mergeKeeperProductId === row.productId
+                            ? 'border-violet-500/60 bg-violet-950/30'
+                            : 'border-slate-700 bg-slate-800/40'
+                        }`}
+                      >
+                        <label className="flex items-start gap-2 min-w-0 flex-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="mergeKeeper"
+                            className="mt-1 accent-violet-500"
+                            checked={mergeKeeperProductId === row.productId}
+                            onChange={() => setMergeKeeperProductId(row.productId)}
+                          />
+                          <span className="min-w-0">
+                            <span className="text-sm font-mono text-white block">{row.baseSku}</span>
+                            <span className="text-xs text-slate-400 block truncate">{row.name || '—'}</span>
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => removeMergeCandidate(row.productId)}
+                          className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:bg-red-900/40 hover:text-red-300"
+                          aria-label="Quitar"
+                        >
+                          <X size={16} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowMergeManualModal(false)}
+                disabled={mergeSaving}
+                className="flex-1 py-2.5 rounded-xl border border-slate-600 text-slate-300 text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={runManualMerge}
+                disabled={mergeSaving || mergeSelected.length < 2 || !mergeKeeperProductId}
+                className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {mergeSaving ? <Loader2 size={16} className="animate-spin" /> : <GitMerge size={16} />}
+                Unificar ahora
+              </button>
             </div>
           </div>
         </div>

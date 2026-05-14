@@ -352,6 +352,72 @@ async function mergeOneDuplicateProduct(
   return { variantsMerged };
 }
 
+export type MergeManualIntoKeeperResult = {
+  dryRun: boolean;
+  keeperProductId: string;
+  variantsMerged: number;
+  productsRemoved: number;
+  errors: string[];
+};
+
+/**
+ * Fusiona uno o más artículos (productos padre) en un keeper elegido por el usuario.
+ * Reutiliza la misma lógica que el merge automático por SKU (stock, pedidos, publicaciones, etc.).
+ */
+export async function mergeManualIntoKeeper(
+  keeperProductId: string,
+  duplicateProductIds: string[],
+  opts?: { dryRun?: boolean }
+): Promise<MergeManualIntoKeeperResult> {
+  const dryRun = opts?.dryRun === true;
+  const errors: string[] = [];
+  let variantsMerged = 0;
+  let productsRemoved = 0;
+
+  const keeperRow = (await get(`SELECT id, sku, name FROM products WHERE id = ?`, [keeperProductId])) as
+    | { id: string; sku: string; name: string }
+    | undefined;
+  if (!keeperRow?.id) {
+    return {
+      dryRun,
+      keeperProductId,
+      variantsMerged: 0,
+      productsRemoved: 0,
+      errors: ['El artículo principal no existe.'],
+    };
+  }
+  const keeper: { id: string; sku: string; name: string } = { ...keeperRow };
+
+  const seen = new Set<string>();
+  const dups = duplicateProductIds
+    .map((id) => String(id || '').trim())
+    .filter((id) => {
+      if (!id || id === keeperProductId) return false;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+  for (const dupId of dups) {
+    const dupRow = (await get(`SELECT id, sku, name FROM products WHERE id = ?`, [dupId])) as
+      | { id: string; sku: string; name: string }
+      | undefined;
+    if (!dupRow?.id) {
+      errors.push(`Artículo no encontrado (${dupId}).`);
+      continue;
+    }
+    try {
+      const r = await mergeOneDuplicateProduct(keeper, dupRow, dryRun);
+      variantsMerged += r.variantsMerged;
+      if (!dryRun) productsRemoved++;
+    } catch (e: any) {
+      errors.push(`${dupRow.sku}: ${e?.message || String(e)}`);
+    }
+  }
+
+  return { dryRun, keeperProductId: keeper.id, variantsMerged, productsRemoved, errors };
+}
+
 function pickKeeper(products: { id: string; sku: string; name: string }[]): { id: string; sku: string; name: string } {
   const sorted = [...products].sort((a, b) => {
     const ta = isTrivialProductName(a);

@@ -18,6 +18,7 @@ router.delete('/all', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, p
 router.post('/import-tango', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.importTangoArticles);
 router.get('/duplicates', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.getDuplicateProducts);
 router.post('/merge-duplicate-by-sku', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.mergeDuplicateProductsBySku);
+router.post('/merge-manual', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, products_controller_1.mergeManualProducts);
 router.get('/export-inventory', auth_1.authMiddleware, products_controller_1.exportInventory);
 router.get('/', auth_1.authMiddleware, products_controller_1.getProducts);
 router.get('/by-id/:id', auth_1.authMiddleware, products_controller_1.getProductById);

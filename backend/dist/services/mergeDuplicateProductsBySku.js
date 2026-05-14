@@ -9,11 +9,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.nameEmbedsOwnSkuCode = nameEmbedsOwnSkuCode;
 exports.mergeTwoVariants = mergeTwoVariants;
+exports.mergeManualIntoKeeper = mergeManualIntoKeeper;
 exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
 /**
  * Fusiona productos duplicados que representan el mismo artículo (mismo “núcleo” de SKU:
- * guiones/espacios distintos, ceros a la izquierda, etc.).
+ * guiones/espacios distintos, ceros a la izquierda, prefijo numérico común sin los últimos 2 dígitos
+ * cuando el núcleo tiene ≥6 dígitos — p. ej. 0322389 y 3223-89 comparten 32238 **solo si** en cada artículo
+ * el nombre/descripción incluye el código del propio SKU (no se fusionan solo por coincidencia de dígitos).
  *
  * Uso: script `npm run merge-duplicate-products` o POST /products/merge-duplicate-by-sku
  */
@@ -32,15 +36,68 @@ function digitCore(s) {
         return '';
     return d.replace(/^0+/, '') || '0';
 }
+/**
+ * True si el nombre/descripción del artículo incluye el código del propio SKU (núcleo numérico o forma compacta).
+ * Requisito para fusionar candidatos por prefijo `dpre:` (evita unir dos artículos que solo comparten dígitos al azar).
+ */
+function nameEmbedsOwnSkuCode(name, sku) {
+    const skuDc = digitCore(sku);
+    if (skuDc.length < 4 || skuDc === '0')
+        return false;
+    const nameDigits = String(name !== null && name !== void 0 ? name : '').replace(/\D/g, '');
+    const nameDc = nameDigits.replace(/^0+/, '') || '';
+    if (!nameDc)
+        return false;
+    if (nameDc === skuDc)
+        return true;
+    if (nameDc.includes(skuDc) || skuDc.includes(nameDc))
+        return true;
+    const nc = skuNormCompactKey(name);
+    const sc = skuNormCompactKey(sku);
+    if (sc.length >= 4 && (nc.includes(sc) || sc.includes(nc)))
+        return true;
+    return false;
+}
 /** Misma lógica que el import Tango: agrupa por núcleo numérico o por SKU compacto. */
 function mergeGroupKey(sku) {
+    const keys = mergeGroupKeysForProduct(sku);
+    return keys.length ? keys[0] : null;
+}
+/**
+ * Varias claves por producto; si dos artículos comparten cualquiera, van al mismo grupo (union-find).
+ * Incluye `dpre:` = núcleo sin los últimos 2 dígitos (mín. 4 dígitos en el prefijo) para casos tipo
+ * `0127501` → 127501 y `1275-11` → 127511 (mismo artículo, sufijos distintos).
+ */
+function mergeGroupKeysForProduct(sku) {
+    const out = new Set();
     const dc = digitCore(sku);
     if (dc.length >= 4)
-        return `d:${dc}`;
+        out.add(`d:${dc}`);
+    if (dc.length >= 6) {
+        const pre = dc.slice(0, -2);
+        if (pre.length >= 4)
+            out.add(`dpre:${pre}`);
+    }
     const c = skuNormCompactKey(sku);
     if (c.length >= 4)
-        return `c:${c}`;
-    return null;
+        out.add(`c:${c}`);
+    return [...out];
+}
+class SkuMergeDsu {
+    constructor(n) {
+        this.parent = Array.from({ length: n }, (_, i) => i);
+    }
+    find(i) {
+        if (this.parent[i] !== i)
+            this.parent[i] = this.find(this.parent[i]);
+        return this.parent[i];
+    }
+    union(a, b) {
+        const ra = this.find(a);
+        const rb = this.find(b);
+        if (ra !== rb)
+            this.parent[ra] = rb;
+    }
 }
 function isTrivialProductName(p) {
     const nn = skuNormCompactKey(p.name || '');
@@ -244,6 +301,57 @@ function mergeOneDuplicateProduct(keeper, duplicate, dryRun) {
         return { variantsMerged };
     });
 }
+/**
+ * Fusiona uno o más artículos (productos padre) en un keeper elegido por el usuario.
+ * Reutiliza la misma lógica que el merge automático por SKU (stock, pedidos, publicaciones, etc.).
+ */
+function mergeManualIntoKeeper(keeperProductId, duplicateProductIds, opts) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const dryRun = (opts === null || opts === void 0 ? void 0 : opts.dryRun) === true;
+        const errors = [];
+        let variantsMerged = 0;
+        let productsRemoved = 0;
+        const keeperRow = (yield (0, db_1.get)(`SELECT id, sku, name FROM products WHERE id = ?`, [keeperProductId]));
+        if (!(keeperRow === null || keeperRow === void 0 ? void 0 : keeperRow.id)) {
+            return {
+                dryRun,
+                keeperProductId,
+                variantsMerged: 0,
+                productsRemoved: 0,
+                errors: ['El artículo principal no existe.'],
+            };
+        }
+        const keeper = Object.assign({}, keeperRow);
+        const seen = new Set();
+        const dups = duplicateProductIds
+            .map((id) => String(id || '').trim())
+            .filter((id) => {
+            if (!id || id === keeperProductId)
+                return false;
+            if (seen.has(id))
+                return false;
+            seen.add(id);
+            return true;
+        });
+        for (const dupId of dups) {
+            const dupRow = (yield (0, db_1.get)(`SELECT id, sku, name FROM products WHERE id = ?`, [dupId]));
+            if (!(dupRow === null || dupRow === void 0 ? void 0 : dupRow.id)) {
+                errors.push(`Artículo no encontrado (${dupId}).`);
+                continue;
+            }
+            try {
+                const r = yield mergeOneDuplicateProduct(keeper, dupRow, dryRun);
+                variantsMerged += r.variantsMerged;
+                if (!dryRun)
+                    productsRemoved++;
+            }
+            catch (e) {
+                errors.push(`${dupRow.sku}: ${(e === null || e === void 0 ? void 0 : e.message) || String(e)}`);
+            }
+        }
+        return { dryRun, keeperProductId: keeper.id, variantsMerged, productsRemoved, errors };
+    });
+}
 function pickKeeper(products) {
     const sorted = [...products].sort((a, b) => {
         const ta = isTrivialProductName(a);
@@ -266,18 +374,62 @@ function runMergeDuplicateProductsBySku() {
         let productsRemoved = 0;
         let variantsMerged = 0;
         const all = (yield (0, db_1.query)(`SELECT id, sku, name FROM products`));
-        const byKey = new Map();
-        for (const p of all) {
-            const key = mergeGroupKey(p.sku);
-            if (!key)
-                continue;
-            if (!byKey.has(key))
-                byKey.set(key, []);
-            byKey.get(key).push(p);
+        const keyToIndices = new Map();
+        for (let i = 0; i < all.length; i++) {
+            const keys = mergeGroupKeysForProduct(all[i].sku);
+            for (const k of keys) {
+                if (!keyToIndices.has(k))
+                    keyToIndices.set(k, []);
+                keyToIndices.get(k).push(i);
+            }
         }
-        const groups = [...byKey.entries()].filter(([, list]) => list.length > 1);
+        const dsu = new SkuMergeDsu(all.length);
+        for (const [key, indices] of keyToIndices.entries()) {
+            if (indices.length < 2)
+                continue;
+            if (key.startsWith('dpre:')) {
+                for (let a = 0; a < indices.length; a++) {
+                    for (let b = a + 1; b < indices.length; b++) {
+                        const ia = indices[a];
+                        const ib = indices[b];
+                        const pa = all[ia];
+                        const pb = all[ib];
+                        if (!nameEmbedsOwnSkuCode(pa.name, pa.sku) || !nameEmbedsOwnSkuCode(pb.name, pb.sku))
+                            continue;
+                        dsu.union(ia, ib);
+                    }
+                }
+            }
+            else {
+                const head = indices[0];
+                for (let j = 1; j < indices.length; j++)
+                    dsu.union(head, indices[j]);
+            }
+        }
+        const rootToProducts = new Map();
+        for (let i = 0; i < all.length; i++) {
+            const r = dsu.find(i);
+            if (!rootToProducts.has(r))
+                rootToProducts.set(r, []);
+            rootToProducts.get(r).push(all[i]);
+        }
+        const groups = [...rootToProducts.values()].filter((list) => list.length > 1);
+        const groupLabel = (list) => {
+            const dcs = list.map((p) => digitCore(p.sku)).filter((d) => d.length > 0);
+            const withPre = dcs.filter((d) => d.length >= 6);
+            if (withPre.length >= 2) {
+                const pres = new Set(withPre.map((d) => d.slice(0, -2)));
+                if (pres.size === 1)
+                    return `dpre:${[...pres][0]}`;
+            }
+            const uniqD = new Set(dcs);
+            if (uniqD.size === 1)
+                return `d:${[...uniqD][0]}`;
+            return `grp:${list.map((p) => p.sku).sort().join('|')}`;
+        };
         if (dryRun) {
-            for (const [groupKey, list] of groups) {
+            for (const list of groups) {
+                const groupKey = groupLabel(list);
                 const keeper = pickKeeper(list);
                 const removed = list.filter((p) => p.id !== keeper.id).map((p) => p.sku);
                 details.push({ groupKey, keeperSku: keeper.sku, keeperId: keeper.id, removedSkus: removed });
@@ -296,7 +448,8 @@ function runMergeDuplicateProductsBySku() {
                 errors,
             };
         }
-        for (const [groupKey, list] of groups) {
+        for (const list of groups) {
+            const groupKey = groupLabel(list);
             const keeper = pickKeeper(list);
             const duplicates = list.filter((p) => p.id !== keeper.id);
             const removedSkus = [];
