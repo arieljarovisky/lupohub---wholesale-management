@@ -169,7 +169,7 @@ const Settings: React.FC<SettingsProps> = ({
   transportes = [], onCreateTransporte, onUpdateTransporte, onDeleteTransporte,
   initialTab
 }) => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
   const [activeTab, setActiveTab] = useState<'sizes' | 'colors' | 'integrations' | 'users' | 'pricelists' | 'transportes' | 'facturacion'>(initialTab ?? (role === Role.WAREHOUSE ? 'sizes' : 'users'));
   useEffect(() => {
     if (initialTab) setActiveTab(initialTab);
@@ -181,6 +181,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [editingColorHex, setEditingColorHex] = useState('#000000');
   const [savingColor, setSavingColor] = useState(false);
   const [importingStandardColors, setImportingStandardColors] = useState(false);
+  const [mergingFourDigitColors, setMergingFourDigitColors] = useState(false);
 
   // Integration State
   const [apiConfig, setApiConfig] = useState<ApiConfig>({
@@ -922,6 +923,37 @@ const Settings: React.FC<SettingsProps> = ({
     } finally {
       setImportingStandardColors(false);
     }
+  };
+
+  const handleMergeFourDigitColors = () => {
+    showConfirm({
+      title: 'Fusionar colores 4 dígitos',
+      message:
+        'Se unirán colores cuyo código es solo números y tiene 4 o más cifras al color de 3 dígitos formado por los primeros 3 (ej. 2021 → 202), moviendo variantes. Si no existe el de 3 dígitos, se renombra el code. ¿Continuar?',
+      confirmLabel: 'Fusionar',
+      onConfirm: async () => {
+        setMergingFourDigitColors(true);
+        try {
+          const r = await api.mergeFourDigitColorCodes();
+          const parts = [
+            `Revisados: ${r.examined}.`,
+            `Fusionados a color existente: ${r.mergedIntoExisting}.`,
+            `Renombrados a 3 dígitos: ${r.renamedCodeOnly}.`,
+          ];
+          if (r.skipped?.length) parts.push(`Omitidos: ${r.skipped.length}.`);
+          if (r.errors?.length) parts.push(`Errores: ${r.errors.length}.`);
+          showToast(r.errors?.length ? 'warning' : 'success', parts.join(' '));
+          if (r.skipped?.length) {
+            showToast('info', r.skipped.slice(0, 5).join(' · ') + (r.skipped.length > 5 ? '…' : ''));
+          }
+          onRefreshData?.();
+        } catch (e: any) {
+          showToast('error', e?.response?.data?.message || e?.message || 'No se pudo fusionar.');
+        } finally {
+          setMergingFourDigitColors(false);
+        }
+      },
+    });
   };
 
   const handleSaveConfig = () => {
@@ -2872,25 +2904,44 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           )}
           {activeTab === 'colors' && (
-            <div className="flex flex-col sm:flex-row sm:items-start gap-3 mb-6">
-              <button
-                type="button"
-                onClick={handleImportStandardColorCatalog}
-                disabled={importingStandardColors}
-                className="self-start px-5 py-3 rounded-xl font-bold text-sm bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 disabled:opacity-50 transition flex items-center gap-2"
-              >
-                {importingStandardColors ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Palette size={18} />
-                )}
-                {importingStandardColors ? 'Importando…' : 'Catálogo estándar (111–999)'}
-              </button>
+            <div className="flex flex-col gap-3 mb-6">
+              <div className="flex flex-col sm:flex-row flex-wrap sm:items-start gap-3">
+                <button
+                  type="button"
+                  onClick={handleImportStandardColorCatalog}
+                  disabled={importingStandardColors || mergingFourDigitColors}
+                  className="self-start px-5 py-3 rounded-xl font-bold text-sm bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 disabled:opacity-50 transition flex items-center gap-2"
+                >
+                  {importingStandardColors ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Palette size={18} />
+                  )}
+                  {importingStandardColors ? 'Importando…' : 'Catálogo estándar (111–999)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleMergeFourDigitColors}
+                  disabled={mergingFourDigitColors || importingStandardColors}
+                  className="self-start px-5 py-3 rounded-xl font-bold text-sm bg-amber-900/50 hover:bg-amber-800/60 text-amber-100 border border-amber-700/60 disabled:opacity-50 transition flex items-center gap-2"
+                >
+                  {mergingFourDigitColors ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Palette size={18} />
+                  )}
+                  {mergingFourDigitColors ? 'Fusionando…' : 'Fusionar códigos 4 dígitos → 3'}
+                </button>
+              </div>
               <div className="text-xs text-slate-500 space-y-1">
                 <p>
                   Carga en bloque los colores de la tabla maestra (Blanco 111, Arena 614, Negro 999, etc.) con nombre y
                   color en pantalla (RGB → hex). <strong className="text-slate-400">Solo crea</strong> códigos que todavía
                   no existan; no pisa colores que ya cargaste.
+                </p>
+                <p>
+                  Si importaste códigos ERP de <strong className="text-slate-400">4 números</strong> (ej. 2021) y ya tenés
+                  el color de <strong className="text-slate-400">3</strong> (202), usá <strong className="text-slate-300">Fusionar códigos 4 dígitos</strong>: mueve variantes al color correcto. Las importaciones nuevas ya toman solo los primeros 3 dígitos.
                 </p>
                 <p>Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá Agregar.</p>
               </div>

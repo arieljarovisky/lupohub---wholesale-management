@@ -436,6 +436,18 @@ export const api = {
     return request<any>('/colors/import-standard-catalog', 'POST');
   },
 
+  /** Une colores con code 4+ dígitos al color de 3 dígitos (primeros 3) o renombra code a 3 dígitos. */
+  mergeFourDigitColorCodes: async (): Promise<{
+    message: string;
+    examined: number;
+    mergedIntoExisting: number;
+    renamedCodeOnly: number;
+    skipped: string[];
+    errors: string[];
+  }> => {
+    return request<any>('/colors/merge-four-digit-codes', 'POST');
+  },
+
   updateColor: async (id: string, payload: { code?: string; name?: string; hex?: string | null }): Promise<{ id: string; code: string; name: string; hex?: string | null }> => {
     return request<any>(`/colors/${encodeURIComponent(id)}`, 'PUT', payload);
   },

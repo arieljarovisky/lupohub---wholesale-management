@@ -146,6 +146,141 @@ export const importStandardColorCatalog = async (req: Request, res: Response) =>
   }
 };
 
+/**
+ * Une colores duplicados: `code` solo con dígitos y longitud ≥ 4 se trata como variante ERP del color de 3 dígitos
+ * dado por los primeros 3 caracteres (ej. 2021 → 202). Mueve `product_colors` / variantes hacia el color canónico.
+ */
+export const mergeFourDigitColorCodes = async (req: Request, res: Response) => {
+  try {
+    const tblCheck = await query(`
+      SELECT COUNT(*) AS cnt FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'colors'
+    `);
+    if (Number(tblCheck?.[0]?.cnt || 0) === 0) {
+      return res.status(400).json({ message: 'La tabla colors no existe.' });
+    }
+
+    const badRows = (await query(
+      `SELECT id, TRIM(CAST(code AS CHAR)) AS c FROM colors WHERE TRIM(CAST(code AS CHAR)) REGEXP '^[0-9]{4,}$' ORDER BY LENGTH(TRIM(CAST(code AS CHAR))) DESC, id ASC`
+    )) as { id: string; c: string }[];
+
+    let merged = 0;
+    let renamedInPlace = 0;
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    for (const row of badRows) {
+      const badId = row.id;
+      const badCode = String(row.c || '').trim();
+      if (!/^\d{4,}$/.test(badCode)) continue;
+      const prefix = badCode.slice(0, 3);
+
+      const good = (await get(
+        `SELECT id FROM colors WHERE TRIM(CAST(code AS CHAR)) = ? AND TRIM(CAST(code AS CHAR)) REGEXP '^[0-9]{1,3}$' AND id <> ? ORDER BY id ASC LIMIT 1`,
+        [prefix, badId]
+      )) as { id: string } | null;
+
+      if (!good) {
+        try {
+          await execute(`UPDATE colors SET code = ? WHERE id = ?`, [prefix, badId]);
+          renamedInPlace++;
+        } catch (e: any) {
+          errors.push(`${badCode} → ${prefix}: ${e?.message || e}`);
+        }
+        continue;
+      }
+
+      const goodId = good.id;
+      if (goodId === badId) continue;
+
+      try {
+        const pcsBad = (await query(`SELECT id, product_id FROM product_colors WHERE color_id = ?`, [
+          badId,
+        ])) as { id: string; product_id: string }[];
+
+        for (const pcb of pcsBad) {
+          const pcGood = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [
+            pcb.product_id,
+            goodId,
+          ])) as { id: string } | null;
+
+          if (!pcGood) {
+            await execute(`UPDATE product_colors SET color_id = ? WHERE id = ?`, [goodId, pcb.id]);
+            continue;
+          }
+
+          const vBadList = (await query(`SELECT id, size_id FROM product_variants WHERE product_color_id = ?`, [
+            pcb.id,
+          ])) as { id: string; size_id: string }[];
+
+          for (const vb of vBadList) {
+            const vGood = (await get(
+              `SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ? LIMIT 1`,
+              [pcGood.id, vb.size_id]
+            )) as { id: string } | null;
+
+            const ordBad = await get(`SELECT COUNT(*) AS n FROM order_items WHERE variant_id = ?`, [vb.id]);
+            const nBad = Number((ordBad as any)?.n || 0);
+
+            if (!vGood) {
+              if (nBad > 0) {
+                skipped.push(`Variante ${vb.id} (${badCode}) tiene pedidos; no se movió de product_color.`);
+                continue;
+              }
+              await execute(`UPDATE product_variants SET product_color_id = ? WHERE id = ?`, [pcGood.id, vb.id]);
+              continue;
+            }
+
+            const ordGood = await get(`SELECT COUNT(*) AS n FROM order_items WHERE variant_id = ?`, [vGood.id]);
+            const nGood = Number((ordGood as any)?.n || 0);
+            if (nBad > 0 || nGood > 0) {
+              skipped.push(
+                `Variante duplicada talle ${vb.size_id}: ambas tienen historial de pedidos; no se fusionó ${vb.id} con ${vGood.id}.`
+              );
+              continue;
+            }
+
+            const sb = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [vb.id]);
+            const sg = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [vGood.id]);
+            const sum = (Number((sb as any)?.stock) || 0) + (Number((sg as any)?.stock) || 0);
+            await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [sum, vGood.id]);
+            await execute(`DELETE FROM stocks WHERE variant_id = ?`, [vb.id]);
+            await execute(`DELETE FROM product_variants WHERE id = ?`, [vb.id]);
+          }
+
+          const left = await get(`SELECT COUNT(*) AS n FROM product_variants WHERE product_color_id = ?`, [pcb.id]);
+          if (Number((left as any)?.n || 0) === 0) {
+            await execute(`DELETE FROM product_colors WHERE id = ?`, [pcb.id]);
+          }
+        }
+
+        const restPc = await get(`SELECT COUNT(*) AS n FROM product_colors WHERE color_id = ?`, [badId]);
+        if (Number((restPc as any)?.n || 0) === 0) {
+          await execute(`DELETE FROM colors WHERE id = ?`, [badId]);
+          merged++;
+        } else {
+          errors.push(`Color ${badCode} (${badId}): quedan filas en product_colors; no se eliminó el duplicado.`);
+        }
+      } catch (e: any) {
+        errors.push(`Color ${badCode} (${badId}): ${e?.message || e}`);
+      }
+    }
+
+    res.json({
+      message:
+        'Fusión aplicada: colores con code de 4+ dígitos se unieron al color de 3 dígitos (primeros 3) cuando existía, o se renombró el code a 3 dígitos si no había duplicado.',
+      examined: badRows.length,
+      mergedIntoExisting: merged,
+      renamedCodeOnly: renamedInPlace,
+      skipped: skipped.slice(0, 80),
+      errors: errors.slice(0, 40),
+    });
+  } catch (error: any) {
+    console.error('mergeFourDigitColorCodes:', error);
+    res.status(500).json({ message: 'Error fusionando colores', detail: error?.message });
+  }
+};
+
 export const updateColor = async (req: Request, res: Response) => {
   try {
     const colorId = (req.params as any).id;

@@ -4,6 +4,7 @@ import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
+import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
@@ -1032,14 +1033,10 @@ function findColumnExact(headers: string[], ...targets: string[]): number {
 }
 
 /**
- * Color: solo dígitos (ej. 614, 2021, 9990). Si la celda mezcla texto, se toman los dígitos.
+ * Color numérico: catálogo 3 dígitos; si el Excel trae 4+ dígitos (ej. 2021 → 202), se usan los primeros 3.
  */
 function normalizeColorCodeForImport(val: unknown): string {
-  const raw = String(val ?? '').trim();
-  if (!raw) return '';
-  const digits = raw.replace(/\D/g, '');
-  if (!digits) return '';
-  return digits.length > 12 ? digits.slice(0, 12) : digits;
+  return normalizeColorCodeForImportValue(val);
 }
 
 /** Talle Tango numérico o letra (P, M, G, GG, XG…). */
