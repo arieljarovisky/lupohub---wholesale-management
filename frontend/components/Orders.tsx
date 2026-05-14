@@ -155,6 +155,23 @@ function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: n
   return { alicuota, retPer };
 }
 
+/** Filtros de lista: AFIP + si en la factura guardada figura percepción de ingresos brutos. */
+type OrdersInvoiceListFilter =
+  | 'all'
+  | 'uninvoiced'
+  | 'invoiced'
+  | 'invoiced_with_iibb'
+  | 'invoiced_no_iibb';
+
+function orderMatchesInvoiceListFilter(order: Order, f: OrdersInvoiceListFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'uninvoiced') return !order.invoice;
+  if (f === 'invoiced') return !!order.invoice;
+  if (f === 'invoiced_with_iibb') return !!order.invoice && orderInvoiceApplicableAgip(order) != null;
+  if (f === 'invoiced_no_iibb') return !!order.invoice && orderInvoiceApplicableAgip(order) == null;
+  return true;
+}
+
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
@@ -163,8 +180,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 }) => {
   const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
-  /** Filtro por comprobante AFIP guardado en el pedido. */
-  const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'invoiced' | 'uninvoiced'>('all');
+  /** Filtro por comprobante AFIP y por percepción IIBB persistida en la factura. */
+  const [invoiceFilter, setInvoiceFilter] = useState<OrdersInvoiceListFilter>('all');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
@@ -319,8 +336,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const needle = customerSearchQuery.trim().toLowerCase();
     return orders.filter((o) => {
       if (filterStatus !== 'ALL' && o.status !== filterStatus) return false;
-      if (invoiceFilter === 'invoiced' && !o.invoice) return false;
-      if (invoiceFilter === 'uninvoiced' && o.invoice) return false;
+      if (!orderMatchesInvoiceListFilter(o, invoiceFilter)) return false;
       if (!needle) return true;
       const c = customers.find((x) => x.id === o.customerId);
       const hay = [
@@ -1386,6 +1402,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
             = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado;
             <strong className="text-orange-300/90"> naranja intenso (doble señal)</strong> = hay <strong className="text-slate-300">nota de crédito por el total</strong> (la factura quedó anulada fiscalmente en AFIP).
+            En la fila de chips, <strong className="text-amber-200/90">ámbar “Con IIBB”</strong> indica que en la factura guardada figura percepción de ingresos brutos; <strong className="text-slate-400">gris “Sin percepción IIBB”</strong> = facturado AFIP pero sin ese importe en el comprobante (0 o no cargado).
             Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
           </p>
         </div>
@@ -1452,22 +1469,52 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs font-semibold text-slate-500 uppercase">Facturación AFIP:</span>
-          {(['all', 'invoiced', 'uninvoiced'] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setInvoiceFilter(key)}
-              className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
-                invoiceFilter === key
-                  ? 'bg-emerald-800/90 text-white border-emerald-600 shadow-md shadow-emerald-950/30'
-                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
-              }`}
-            >
-              {key === 'all' ? 'Todos' : key === 'invoiced' ? 'Solo facturados' : 'Sin facturar'}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Comprobante AFIP:</span>
+            {(
+              [
+                { key: 'all' as const, label: 'Todos' },
+                { key: 'uninvoiced' as const, label: 'Sin facturar' },
+                { key: 'invoiced' as const, label: 'Facturados' },
+              ] as const
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setInvoiceFilter(key)}
+                className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
+                  invoiceFilter === key
+                    ? 'bg-emerald-800/90 text-white border-emerald-600 shadow-md shadow-emerald-950/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Ingresos brutos (solo ya facturados):</span>
+            {(
+              [
+                { key: 'invoiced_with_iibb' as const, label: 'Con percepción IIBB' },
+                { key: 'invoiced_no_iibb' as const, label: 'Sin percepción IIBB' },
+              ] as const
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setInvoiceFilter(key)}
+                className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
+                  invoiceFilter === key
+                    ? 'bg-amber-900/85 text-amber-50 border-amber-600 shadow-md shadow-amber-950/25'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
@@ -1521,6 +1568,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
           const ncTotalAnnulled = Number(order.creditNotesTotalCount || 0) > 0;
+          const agipOnInvoice = order.invoice ? orderInvoiceApplicableAgip(order) : null;
           const cardAccentClass = ncTotalAnnulled ? 'border-l-[5px] border-orange-500' : stockImpact.cardAccentClass;
 
           return (
@@ -1565,6 +1613,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           order.invoice
                             ? `Comprobante original: CAE ${order.invoice.cae} (${order.invoice.puntoVta != null ? `${order.invoice.puntoVta}-` : ''}${order.invoice.cbteDesde}).`
                             : '',
+                          agipOnInvoice
+                            ? `Ese comprobante registraba percepción IIBB: ${agipOnInvoice.alicuota.toFixed(2)}% ($${formatMoneyAr(agipOnInvoice.retPer)}).`
+                            : '',
                         ]
                           .filter(Boolean)
                           .join(' ')}
@@ -1573,23 +1624,49 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         Anulado fiscal · NC total ({order.creditNotesTotalCount})
                       </span>
                     ) : order.invoice ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-emerald-700/50 bg-emerald-950/65 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-100 cursor-help"
-                        title={
-                          [
-                            'Factura AFIP emitida.',
-                            `CAE: ${order.invoice.cae}`,
-                            order.invoice.puntoVta != null ? `Nº: ${order.invoice.puntoVta}-${order.invoice.cbteDesde}` : `Nº: ${order.invoice.cbteDesde}`,
-                            order.invoice.caeFchVto ? `Vto. CAE: ${new Date(order.invoice.caeFchVto).toLocaleDateString('es-AR')}` : '',
-                            'Consultá en ARCA/AFIP con tu CUIT y este CAE.',
-                          ]
-                            .filter(Boolean)
-                            .join('\n')
-                        }
-                      >
-                        <Receipt size={12} className="shrink-0 text-emerald-300" aria-hidden />
-                        Facturado AFIP
-                      </span>
+                      <>
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-emerald-700/50 bg-emerald-950/65 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-100 cursor-help"
+                          title={
+                            [
+                              'Factura AFIP emitida.',
+                              `CAE: ${order.invoice.cae}`,
+                              order.invoice.puntoVta != null ? `Nº: ${order.invoice.puntoVta}-${order.invoice.cbteDesde}` : `Nº: ${order.invoice.cbteDesde}`,
+                              order.invoice.caeFchVto ? `Vto. CAE: ${new Date(order.invoice.caeFchVto).toLocaleDateString('es-AR')}` : '',
+                              'Consultá en ARCA/AFIP con tu CUIT y este CAE.',
+                            ]
+                              .filter(Boolean)
+                              .join('\n')
+                          }
+                        >
+                          <Receipt size={12} className="shrink-0 text-emerald-300" aria-hidden />
+                          Facturado AFIP
+                        </span>
+                        {(() => {
+                          const agip = agipOnInvoice;
+                          if (agip) {
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full border border-amber-700/50 bg-amber-950/60 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-100 cursor-help"
+                                title={`Percepción de ingresos brutos en el comprobante guardado: alícuota ${agip.alicuota.toFixed(2)}%, importe $${formatMoneyAr(agip.retPer)}.`}
+                              >
+                                <Percent size={12} className="shrink-0 text-amber-300" aria-hidden />
+                                Con IIBB
+                                {agip.alicuota > 0.005 ? ` (${agip.alicuota.toFixed(2)}%)` : ''}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-600/75 bg-slate-900/70 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 cursor-help"
+                              title="Factura AFIP sin percepción de ingresos brutos en los datos guardados (importe 0 o no informado). Si el cliente debe retención según AGIP, recalculá IIBB o reemití con IIBB desde las acciones de la tarjeta."
+                            >
+                              <Percent size={12} className="shrink-0 text-slate-500 opacity-80" aria-hidden />
+                              Sin percepción IIBB
+                            </span>
+                          );
+                        })()}
+                      </>
                     ) : (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-slate-600/80 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"
