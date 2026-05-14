@@ -23,6 +23,34 @@ export type MergeDuplicateProductsResult = {
   errors: string[];
 };
 
+/** Texto de color comparable: minúsculas, sin acentos, espacios colapsados. */
+function normalizeColorNameForMatch(raw: string | null | undefined): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Mismo color “de catálogo”: coincide nombre o código entre ambos registros
+ * (ej. name "Blanco" con name "BLANCO", o code "111" con name "111").
+ */
+function colorLabelsMatch(
+  a: { name: string | null | undefined; code: string | null | undefined },
+  b: { name: string | null | undefined; code: string | null | undefined }
+): boolean {
+  const tokensA = [normalizeColorNameForMatch(a.name), normalizeColorNameForMatch(a.code)].filter((t) => t.length > 0);
+  const tokensB = [normalizeColorNameForMatch(b.name), normalizeColorNameForMatch(b.code)].filter((t) => t.length > 0);
+  for (const ta of tokensA) {
+    for (const tb of tokensB) {
+      if (ta === tb) return true;
+    }
+  }
+  return false;
+}
+
 function skuNormCompactKey(s: string): string {
   return String(s ?? '')
     .trim()
@@ -242,27 +270,38 @@ export async function mergeTwoVariants(
 }
 
 /**
- * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle/size_id).
- * Útil cuando hay dos códigos de color (ej. 111 y 112) para el mismo Blanco + GG.
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle, mismo color por nombre/código/id).
  */
 export async function mergeManualVariantPair(keeperVariantId: string, absorbVariantId: string): Promise<void> {
   if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
     throw new Error('Indicá dos variantes distintas.');
   }
-  const k = (await get(
-    `SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+  const rowSql = `SELECT pv.id AS variant_id, pc.product_id, pv.size_id, pc.color_id,
+         c.name AS color_name, c.code AS color_code
      FROM product_variants pv
      JOIN product_colors pc ON pc.id = pv.product_color_id
-     WHERE pv.id = ?`,
-    [keeperVariantId]
-  )) as { variant_id: string; product_id: string; size_id: string } | undefined;
-  const a = (await get(
-    `SELECT pv.id AS variant_id, pc.product_id, pv.size_id
-     FROM product_variants pv
-     JOIN product_colors pc ON pc.id = pv.product_color_id
-     WHERE pv.id = ?`,
-    [absorbVariantId]
-  )) as { variant_id: string; product_id: string; size_id: string } | undefined;
+     JOIN colors c ON c.id = pc.color_id
+     WHERE pv.id = ?`;
+  const k = (await get(rowSql, [keeperVariantId])) as
+    | {
+        variant_id: string;
+        product_id: string;
+        size_id: string;
+        color_id: string;
+        color_name: string | null;
+        color_code: string | null;
+      }
+    | undefined;
+  const a = (await get(rowSql, [absorbVariantId])) as
+    | {
+        variant_id: string;
+        product_id: string;
+        size_id: string;
+        color_id: string;
+        color_name: string | null;
+        color_code: string | null;
+      }
+    | undefined;
   if (!k?.product_id) throw new Error('Variante destino no encontrada.');
   if (!a?.product_id) throw new Error('Variante a absorber no encontrada.');
   if (String(k.product_id) !== String(a.product_id)) {
@@ -270,6 +309,20 @@ export async function mergeManualVariantPair(keeperVariantId: string, absorbVari
   }
   if (String(k.size_id) !== String(a.size_id)) {
     throw new Error('Los talles deben coincidir para unificar variantes.');
+  }
+  if (String(k.color_id) !== String(a.color_id)) {
+    const kc = { name: k.color_name, code: k.color_code };
+    const ac = { name: a.color_name, code: a.color_code };
+    const canonK = normalizeColorCodeForImportValue(k.color_code ?? k.color_name ?? '');
+    const canonA = normalizeColorCodeForImportValue(a.color_code ?? a.color_name ?? '');
+    const sameCanon = Boolean(canonK && canonA && canonK === canonA);
+    if (!colorLabelsMatch(kc, ac) && !sameCanon) {
+      const kn = normalizeColorNameForMatch(k.color_name) || String(k.color_code || '').trim() || '?';
+      const an = normalizeColorNameForMatch(a.color_name) || String(a.color_code || '').trim() || '?';
+      throw new Error(
+        `Los colores no coinciden (“${kn}” vs “${an}”). Solo se unifica si es el mismo color (mismo nombre o código equivalente).`
+      );
+    }
   }
   await mergeTwoVariants(absorbVariantId, keeperVariantId, k.product_id);
 }
@@ -292,7 +345,7 @@ async function mergePriceListItems(keeperId: string, duplicateId: string): Promi
   }
 }
 
-/** Color equivalente en el keeper (mismo id, mismo nombre o mismo código canónico de 3 dígitos). */
+/** Color equivalente en el keeper: mismo color_id, mismo nombre/código cruzado (name↔code), o código canónico 3 dígitos. */
 async function findKeeperProductColorSemMatch(
   keeperProductId: string,
   dupColorId: string
@@ -308,11 +361,6 @@ async function findKeeperProductColorSemMatch(
     | undefined;
   if (!dupC) return undefined;
 
-  const dupName = String(dupC.name ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
   const dupCodeCanon = normalizeColorCodeForImportValue(dupC.code ?? dupC.name ?? '');
 
   const rows = (await query(
@@ -322,15 +370,8 @@ async function findKeeperProductColorSemMatch(
     [keeperProductId]
   )) as { id: string; code: string | null; name: string | null }[];
 
-  if (dupName) {
-    for (const row of rows) {
-      const n = String(row.name ?? '')
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
-      if (n && n === dupName) return { id: row.id };
-    }
+  for (const row of rows) {
+    if (colorLabelsMatch(dupC, row)) return { id: row.id };
   }
   if (dupCodeCanon) {
     for (const row of rows) {

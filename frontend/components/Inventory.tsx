@@ -69,6 +69,36 @@ function formatSizeForLink(size: string | undefined | null): string {
   return code && code !== s ? `${code} - ${s}` : s;
 }
 
+function normColorTokenForUnify(s: string): string {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function variantColorTokensForUnify(p: Product): string[] {
+  const s = new Set<string>();
+  const c = normColorTokenForUnify(String(p.color || ''));
+  const code = normColorTokenForUnify(String(getProductColorCode(p) || ''));
+  if (c) s.add(c);
+  if (code) s.add(code);
+  return [...s];
+}
+
+/** Mismo color visible (nombre o código cruzados), alineado con la validación del backend. */
+function variantsColorFamilyMatch(a: Product, b: Product): boolean {
+  const ta = variantColorTokensForUnify(a);
+  const tb = variantColorTokensForUnify(b);
+  for (const x of ta) {
+    for (const y of tb) {
+      if (x && y && x === y) return true;
+    }
+  }
+  return false;
+}
+
 const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
@@ -158,15 +188,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [mergeSaving, setMergeSaving] = useState(false);
   const mergeSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Unificar dos variantes del mismo artículo con el mismo talle (ej. color 111 vs 112). */
+  /** Unificar dos variantes del mismo talle: elegís cuál se absorbe y cuál queda (colores compatibles). */
   const [variantUnifyModal, setVariantUnifyModal] = useState<{
-    source: Product;
     groupKey: string;
-    targets: Product[];
+    sameSizeVariants: Product[];
     articleName: string;
     articleCategory: string;
     articlePrice: number;
   } | null>(null);
+  const [variantUnifyAbsorbId, setVariantUnifyAbsorbId] = useState<string | null>(null);
   const [variantUnifyKeeperId, setVariantUnifyKeeperId] = useState<string | null>(null);
   const [variantUnifySaving, setVariantUnifySaving] = useState(false);
 
@@ -1602,46 +1632,80 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     variantsToShow: Product[]
   ) => {
     const sz = getProductSizeCode(product);
-    const targets = variantsToShow.filter(
-      (p) => p.id !== product.id && getProductSizeCode(p) === sz
+    const sameSizeVariants = variantsToShow.filter((p) => getProductSizeCode(p) === sz);
+    if (sameSizeVariants.length < 2) {
+      showToast('info', 'Hace falta al menos dos variantes con este talle en la lista expandida.');
+      return;
+    }
+    const hasCompatible = sameSizeVariants.some(
+      (v) => v.id !== product.id && variantsColorFamilyMatch(product, v)
     );
-    if (targets.length === 0) {
-      showToast('info', 'No hay otra variante con el mismo talle en este artículo.');
+    if (!hasCompatible) {
+      showToast(
+        'info',
+        'No hay otra variante con color compatible (mismo nombre o código) para unificar con esta.'
+      );
       return;
     }
     const gv0 = groupVariants[0];
     setVariantUnifyModal({
-      source: product,
       groupKey,
-      targets,
+      sameSizeVariants,
       articleName: String(gv0?.name || ''),
       articleCategory: String(gv0?.category || 'General'),
       articlePrice: Number((gv0 as any)?.price || 0),
     });
-    setVariantUnifyKeeperId(targets[0]?.id ?? null);
+    setVariantUnifyAbsorbId(product.id);
+    const firstKeeper = sameSizeVariants.find(
+      (v) => v.id !== product.id && variantsColorFamilyMatch(product, v)
+    );
+    setVariantUnifyKeeperId(firstKeeper?.id ?? null);
+  };
+
+  const handleVariantUnifyAbsorbChange = (absorbId: string) => {
+    if (!variantUnifyModal) return;
+    const ap = variantUnifyModal.sameSizeVariants.find((x) => x.id === absorbId);
+    setVariantUnifyAbsorbId(absorbId);
+    if (!ap) {
+      setVariantUnifyKeeperId(null);
+      return;
+    }
+    const cand = variantUnifyModal.sameSizeVariants.filter(
+      (v) => v.id !== absorbId && variantsColorFamilyMatch(ap, v)
+    );
+    setVariantUnifyKeeperId((prev) =>
+      prev && cand.some((c) => c.id === prev) ? prev : cand[0]?.id ?? null
+    );
   };
 
   const confirmVariantUnify = () => {
-    if (!variantUnifyModal || !variantUnifyKeeperId) return;
-    const srcId = variantUnifyModal.source.id;
-    if (variantUnifyKeeperId === srcId) {
-      showToast('error', 'Elegí otra variante como destino (la que queda con su SKU).');
+    if (!variantUnifyModal || !variantUnifyKeeperId || !variantUnifyAbsorbId) return;
+    if (variantUnifyKeeperId === variantUnifyAbsorbId) {
+      showToast('error', 'La variante que absorbés y la que queda tienen que ser distintas.');
+      return;
+    }
+    const absorbProd = variantUnifyModal.sameSizeVariants.find((v) => v.id === variantUnifyAbsorbId);
+    const keeperProd = variantUnifyModal.sameSizeVariants.find((v) => v.id === variantUnifyKeeperId);
+    if (!absorbProd || !keeperProd || !variantsColorFamilyMatch(absorbProd, keeperProd)) {
+      showToast('error', 'Elegí combinaciones con el mismo color (nombre o código).');
       return;
     }
     const { groupKey, articleName, articleCategory, articlePrice } = variantUnifyModal;
     showConfirm({
-      title: 'Unificar variantes (mismo talle)',
-      message: `Se absorberá la variante ${variantUnifyModal.source.sku || srcId} en la elegida: el stock se suma y los vínculos ML/TN se combinan en la que queda. ¿Continuar?`,
+      title: 'Unificar variantes',
+      message: `Se absorberá ${absorbProd.sku || variantUnifyAbsorbId} en ${keeperProd.sku || variantUnifyKeeperId} (stock y vínculos ML/TN en la que queda). ¿Continuar?`,
       confirmLabel: 'Unificar',
       onConfirm: async () => {
         setVariantUnifySaving(true);
         try {
           await api.mergeManualVariantsPair({
             keeperVariantId: variantUnifyKeeperId,
-            absorbVariantId: srcId,
+            absorbVariantId: variantUnifyAbsorbId,
           });
           showToast('success', 'Variantes unificadas.');
           setVariantUnifyModal(null);
+          setVariantUnifyAbsorbId(null);
+          setVariantUnifyKeeperId(null);
           setServerListRefreshKey((k) => k + 1);
           try {
             const variants = await api.getVariantsBySku(groupKey);
@@ -3493,7 +3557,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        type="button"
                                        onClick={() => openVariantUnifyModal(product, groupKey, groupVariants, variantsToShow)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-violet-300 border border-slate-700 transition-colors touch-manipulation"
-                                       title="Unificar con otra variante del mismo talle (ej. color duplicado)"
+                                       title="Unificar con otra variante del mismo talle y mismo color (nombre)"
                                       >
                                        <GitMerge size={16} />
                                       </button>
@@ -3828,53 +3892,86 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       )}
 
-      {variantUnifyModal && (
+      {variantUnifyModal && (() => {
+        const absorbProd = variantUnifyModal.sameSizeVariants.find((v) => v.id === variantUnifyAbsorbId);
+        const keeperOptions = absorbProd
+          ? variantUnifyModal.sameSizeVariants.filter(
+              (v) => v.id !== absorbProd.id && variantsColorFamilyMatch(absorbProd, v)
+            )
+          : [];
+        const szLabel = absorbProd ? formatSizeForLink(getProductSizeCode(absorbProd)) : '';
+        return (
         <div className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] flex flex-col shadow-2xl">
             <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-2 shrink-0">
               <div className="min-w-0">
-                <h3 className="text-white font-bold text-base">Unificar variantes (mismo talle)</h3>
+                <h3 className="text-white font-bold text-base">Unificar variantes</h3>
                 <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                  Se elimina <span className="font-mono text-violet-300">{variantUnifyModal.source.sku}</span> y su stock pasa a la variante destino.
+                  Mismo talle{szLabel ? ` (${szLabel})` : ''}. Elegí qué variante se absorbe (se elimina) y cuál queda; los colores tienen que coincidir por nombre o código.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => !variantUnifySaving && setVariantUnifyModal(null)}
+                onClick={() => {
+                  if (variantUnifySaving) return;
+                  setVariantUnifyModal(null);
+                  setVariantUnifyAbsorbId(null);
+                  setVariantUnifyKeeperId(null);
+                }}
                 className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 shrink-0"
                 aria-label="Cerrar"
               >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-4 space-y-3 overflow-y-auto flex-1 min-h-0">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Destino (queda esta fila)</p>
-              <ul className="space-y-2">
-                {variantUnifyModal.targets.map((t) => (
-                  <li key={t.id}>
-                    <label className="flex items-start gap-2 p-2 rounded-xl border border-slate-700 bg-slate-800/50 cursor-pointer hover:border-violet-600/50">
-                      <input
-                        type="radio"
-                        name="variantUnifyKeeper"
-                        className="mt-1 accent-violet-500"
-                        checked={variantUnifyKeeperId === t.id}
-                        onChange={() => setVariantUnifyKeeperId(t.id)}
-                      />
-                      <span className="min-w-0">
-                        <span className="text-xs font-mono text-blue-300 block truncate">{t.sku}</span>
-                        <span className="text-xs text-slate-400">
-                          Color: {t.color || (t.sku || '').split('-').pop()} · Stock: {t.stock}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Variante a absorber (se elimina)
+                </label>
+                <select
+                  className="w-full rounded-xl border border-slate-600 bg-slate-800 text-slate-100 text-sm px-3 py-2.5"
+                  value={variantUnifyAbsorbId ?? ''}
+                  onChange={(e) => handleVariantUnifyAbsorbChange(e.target.value)}
+                  disabled={variantUnifySaving}
+                >
+                  {variantUnifyModal.sameSizeVariants.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {(v.sku || v.id).slice(0, 48)} — {v.color || getProductColorCode(v) || '?'} — stock {v.stock ?? 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Variante destino (queda)
+                </label>
+                <select
+                  className="w-full rounded-xl border border-slate-600 bg-slate-800 text-slate-100 text-sm px-3 py-2.5 disabled:opacity-50"
+                  value={variantUnifyKeeperId ?? ''}
+                  onChange={(e) => setVariantUnifyKeeperId(e.target.value || null)}
+                  disabled={variantUnifySaving || keeperOptions.length === 0}
+                >
+                  {keeperOptions.length === 0 ? (
+                    <option value="">Sin par compatible para este color</option>
+                  ) : (
+                    keeperOptions.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {(v.sku || v.id).slice(0, 48)} — {v.color || getProductColorCode(v) || '?'} — stock {v.stock ?? 0}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
             </div>
             <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => setVariantUnifyModal(null)}
+                onClick={() => {
+                  setVariantUnifyModal(null);
+                  setVariantUnifyAbsorbId(null);
+                  setVariantUnifyKeeperId(null);
+                }}
                 disabled={variantUnifySaving}
                 className="flex-1 py-2.5 rounded-xl border border-slate-600 text-slate-300 text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
               >
@@ -3883,7 +3980,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               <button
                 type="button"
                 onClick={confirmVariantUnify}
-                disabled={variantUnifySaving || !variantUnifyKeeperId}
+                disabled={
+                  variantUnifySaving ||
+                  !variantUnifyKeeperId ||
+                  !variantUnifyAbsorbId ||
+                  variantUnifyKeeperId === variantUnifyAbsorbId ||
+                  keeperOptions.length === 0
+                }
                 className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {variantUnifySaving ? <Loader2 size={16} className="animate-spin" /> : <GitMerge size={16} />}
@@ -3892,7 +3995,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* CREATE PRODUCT MODAL */}
       {isCreating && (

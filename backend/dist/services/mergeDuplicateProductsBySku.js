@@ -24,6 +24,30 @@ exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
  */
 const db_1 = require("../database/db");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
+/** Texto de color comparable: minúsculas, sin acentos, espacios colapsados. */
+function normalizeColorNameForMatch(raw) {
+    return String(raw !== null && raw !== void 0 ? raw : '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+}
+/**
+ * Mismo color “de catálogo”: coincide nombre o código entre ambos registros
+ * (ej. name "Blanco" con name "BLANCO", o code "111" con name "111").
+ */
+function colorLabelsMatch(a, b) {
+    const tokensA = [normalizeColorNameForMatch(a.name), normalizeColorNameForMatch(a.code)].filter((t) => t.length > 0);
+    const tokensB = [normalizeColorNameForMatch(b.name), normalizeColorNameForMatch(b.code)].filter((t) => t.length > 0);
+    for (const ta of tokensA) {
+        for (const tb of tokensB) {
+            if (ta === tb)
+                return true;
+        }
+    }
+    return false;
+}
 function skuNormCompactKey(s) {
     return String(s !== null && s !== void 0 ? s : '')
         .trim()
@@ -223,22 +247,22 @@ function mergeTwoVariants(fromVariantId, toVariantId, keeperProductId) {
     });
 }
 /**
- * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle/size_id).
- * Útil cuando hay dos códigos de color (ej. 111 y 112) para el mismo Blanco + GG.
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle, mismo color por nombre/código/id).
  */
 function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
             throw new Error('Indicá dos variantes distintas.');
         }
-        const k = (yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id, pv.size_id
+        const rowSql = `SELECT pv.id AS variant_id, pc.product_id, pv.size_id, pc.color_id,
+         c.name AS color_name, c.code AS color_code
      FROM product_variants pv
      JOIN product_colors pc ON pc.id = pv.product_color_id
-     WHERE pv.id = ?`, [keeperVariantId]));
-        const a = (yield (0, db_1.get)(`SELECT pv.id AS variant_id, pc.product_id, pv.size_id
-     FROM product_variants pv
-     JOIN product_colors pc ON pc.id = pv.product_color_id
-     WHERE pv.id = ?`, [absorbVariantId]));
+     JOIN colors c ON c.id = pc.color_id
+     WHERE pv.id = ?`;
+        const k = (yield (0, db_1.get)(rowSql, [keeperVariantId]));
+        const a = (yield (0, db_1.get)(rowSql, [absorbVariantId]));
         if (!(k === null || k === void 0 ? void 0 : k.product_id))
             throw new Error('Variante destino no encontrada.');
         if (!(a === null || a === void 0 ? void 0 : a.product_id))
@@ -248,6 +272,18 @@ function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
         }
         if (String(k.size_id) !== String(a.size_id)) {
             throw new Error('Los talles deben coincidir para unificar variantes.');
+        }
+        if (String(k.color_id) !== String(a.color_id)) {
+            const kc = { name: k.color_name, code: k.color_code };
+            const ac = { name: a.color_name, code: a.color_code };
+            const canonK = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_b = (_a = k.color_code) !== null && _a !== void 0 ? _a : k.color_name) !== null && _b !== void 0 ? _b : '');
+            const canonA = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_d = (_c = a.color_code) !== null && _c !== void 0 ? _c : a.color_name) !== null && _d !== void 0 ? _d : '');
+            const sameCanon = Boolean(canonK && canonA && canonK === canonA);
+            if (!colorLabelsMatch(kc, ac) && !sameCanon) {
+                const kn = normalizeColorNameForMatch(k.color_name) || String(k.color_code || '').trim() || '?';
+                const an = normalizeColorNameForMatch(a.color_name) || String(a.color_code || '').trim() || '?';
+                throw new Error(`Los colores no coinciden (“${kn}” vs “${an}”). Solo se unifica si es el mismo color (mismo nombre o código equivalente).`);
+            }
         }
         yield mergeTwoVariants(absorbVariantId, keeperVariantId, k.product_id);
     });
@@ -270,10 +306,10 @@ function mergePriceListItems(keeperId, duplicateId) {
         }
     });
 }
-/** Color equivalente en el keeper (mismo id, mismo nombre o mismo código canónico de 3 dígitos). */
+/** Color equivalente en el keeper: mismo color_id, mismo nombre/código cruzado (name↔code), o código canónico 3 dígitos. */
 function findKeeperProductColorSemMatch(keeperProductId, dupColorId) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f;
+        var _a, _b, _c, _d;
         const exact = yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [
             keeperProductId,
             dupColorId,
@@ -283,29 +319,17 @@ function findKeeperProductColorSemMatch(keeperProductId, dupColorId) {
         const dupC = (yield (0, db_1.get)(`SELECT id, code, name FROM colors WHERE id = ?`, [dupColorId]));
         if (!dupC)
             return undefined;
-        const dupName = String((_a = dupC.name) !== null && _a !== void 0 ? _a : '')
-            .trim()
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '');
-        const dupCodeCanon = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_c = (_b = dupC.code) !== null && _b !== void 0 ? _b : dupC.name) !== null && _c !== void 0 ? _c : '');
+        const dupCodeCanon = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_b = (_a = dupC.code) !== null && _a !== void 0 ? _a : dupC.name) !== null && _b !== void 0 ? _b : '');
         const rows = (yield (0, db_1.query)(`SELECT pc.id, c.code, c.name FROM product_colors pc
      JOIN colors c ON c.id = pc.color_id
      WHERE pc.product_id = ?`, [keeperProductId]));
-        if (dupName) {
-            for (const row of rows) {
-                const n = String((_d = row.name) !== null && _d !== void 0 ? _d : '')
-                    .trim()
-                    .toLowerCase()
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '');
-                if (n && n === dupName)
-                    return { id: row.id };
-            }
+        for (const row of rows) {
+            if (colorLabelsMatch(dupC, row))
+                return { id: row.id };
         }
         if (dupCodeCanon) {
             for (const row of rows) {
-                const cc = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_f = (_e = row.code) !== null && _e !== void 0 ? _e : row.name) !== null && _f !== void 0 ? _f : '');
+                const cc = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)((_d = (_c = row.code) !== null && _c !== void 0 ? _c : row.name) !== null && _d !== void 0 ? _d : '');
                 if (cc && cc === dupCodeCanon)
                     return { id: row.id };
             }
