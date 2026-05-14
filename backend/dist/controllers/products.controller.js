@@ -1104,8 +1104,120 @@ function parseCodigoTango(codigo) {
     // `codigo13` se mantiene para compatibilidad: sigue siendo el "ancho" del SKU concatenado.
     return { articulo, talle, color, codigo13: codigoCompleto, codigoCompleto };
 }
+/** Dígitos del código base; relleno a 7 como en inventario/stock (solo si aplica). */
+function padArticleDigitsTo7FromArticulo(articulo) {
+    const digits = String(articulo !== null && articulo !== void 0 ? articulo : '').replace(/\D/g, '');
+    if (!digits)
+        return '';
+    return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+/** Minúsculas, sin espacios/guiones/guiones bajos (para emparejar "18403-03" con export reimportado). */
+function skuNormCompactKey(s) {
+    return String(s !== null && s !== void 0 ? s : '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[\s_-]/g, '');
+}
+/**
+ * Variantes de SKU base para encontrar un producto ya cargado (evita duplicar el mismo artículo
+ * por distinto formato: 058750 vs 0058750, 18403-03 vs 1840303, Q05875…).
+ */
+function buildProductSkuLookupCandidates(articulo) {
+    const out = new Set();
+    const t = String(articulo !== null && articulo !== void 0 ? articulo : '').trim();
+    if (!t)
+        return [];
+    out.add(t);
+    const noHyphen = t.replace(/-/g, '').trim();
+    if (noHyphen && noHyphen !== t)
+        out.add(noHyphen);
+    const digits = t.replace(/\D/g, '');
+    if (digits) {
+        out.add(digits);
+        const p7 = padArticleDigitsTo7FromArticulo(t);
+        if (p7)
+            out.add(p7);
+        const trimmed = digits.replace(/^0+/, '') || '0';
+        if (trimmed !== digits) {
+            out.add(trimmed);
+            out.add(trimmed.length <= 7 ? trimmed.padStart(7, '0') : trimmed);
+        }
+    }
+    const m = t.match(/^([A-Za-z]+)(\d[\d\s-]*)$/);
+    if (m) {
+        const numOnly = m[2].replace(/\D/g, '');
+        if (numOnly) {
+            out.add(numOnly.length <= 7 ? numOnly.padStart(7, '0') : numOnly);
+            out.add(m[1].toUpperCase() + numOnly);
+            out.add(m[1].toLowerCase() + numOnly);
+        }
+    }
+    return [...out].filter((x) => x.length > 0 && x.length <= 120);
+}
+function isTrivialImportProductName(name, sku, articuloRow) {
+    const nn = skuNormCompactKey(name || '');
+    if (!nn)
+        return true;
+    const sn = skuNormCompactKey(sku || '');
+    const an = skuNormCompactKey(articuloRow || '');
+    return nn === sn || nn === an;
+}
+function findExistingProductForImportArticulo(articulo) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const uniq = [...new Set(buildProductSkuLookupCandidates(articulo))].slice(0, 40);
+        const coreKey = skuNormCompactKey(articulo);
+        const parts = [];
+        const params = [];
+        if (uniq.length > 0) {
+            parts.push(`sku IN (${uniq.map(() => '?').join(',')})`);
+            params.push(...uniq);
+        }
+        if (coreKey.length >= 4) {
+            parts.push(`REPLACE(REPLACE(REPLACE(LOWER(TRIM(sku)), '-', ''), '_', ''), ' ', '') = ?`);
+            params.push(coreKey);
+        }
+        if (parts.length === 0)
+            return null;
+        const rows = (yield (0, db_1.query)(`SELECT id, sku, name FROM products WHERE ${parts.join(' OR ')}`, params));
+        if (!(rows === null || rows === void 0 ? void 0 : rows.length))
+            return null;
+        const byId = new Map();
+        for (const r of rows)
+            byId.set(String(r.id), r);
+        const list = [...byId.values()];
+        if (list.length === 1)
+            return list[0];
+        list.sort((a, b) => {
+            var _a, _b;
+            const ta = isTrivialImportProductName(a.name, a.sku, articulo);
+            const tb = isTrivialImportProductName(b.name, b.sku, articulo);
+            if (ta !== tb)
+                return ta ? 1 : -1;
+            return String((_a = b.name) !== null && _a !== void 0 ? _a : '').trim().length - String((_b = a.name) !== null && _b !== void 0 ? _b : '').trim().length;
+        });
+        return list[0];
+    });
+}
+function maybeUpgradeTrivialProductNameFromImport(productId, sku, currentName, descripcion, articuloRow) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const desc = String(descripcion !== null && descripcion !== void 0 ? descripcion : '').trim();
+        if (!desc)
+            return;
+        if (!isTrivialImportProductName(currentName, sku, articuloRow))
+            return;
+        const sn = skuNormCompactKey(sku);
+        const dn = skuNormCompactKey(desc);
+        if (dn === sn || dn === skuNormCompactKey(articuloRow))
+            return;
+        if (desc.length < 3)
+            return;
+        yield (0, db_1.execute)(`UPDATE products SET name = ? WHERE id = ?`, [desc, productId]);
+    });
+}
 const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const body = req.body;
         const { rows: rawRows, onlyComplete = true } = body;
@@ -1199,27 +1311,31 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 if (!productNamesByArticulo[r.articulo] && r.descripcion) {
                     productNamesByArticulo[r.articulo] = r.descripcion;
                 }
-                let productId = ((_d = (yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [r.articulo]))) === null || _d === void 0 ? void 0 : _d.id) || null;
+                const existingProduct = yield findExistingProductForImportArticulo(r.articulo);
+                let productId = (existingProduct === null || existingProduct === void 0 ? void 0 : existingProduct.id) || null;
+                if (productId && existingProduct) {
+                    yield maybeUpgradeTrivialProductNameFromImport(productId, existingProduct.sku, existingProduct.name, r.descripcion, r.articulo);
+                }
                 if (!productId) {
                     productId = (0, uuid_1.v4)();
                     const name = productNamesByArticulo[r.articulo] || r.articulo;
                     yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`, [productId, r.articulo, name, 'General', 0, null]);
                     productsCreated++;
                 }
-                let sizeId = (_e = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _e === void 0 ? void 0 : _e.id;
+                let sizeId = (_d = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _d === void 0 ? void 0 : _d.id;
                 if (!sizeId) {
                     sizeId = (0, uuid_1.v4)();
                     const talleNombre = (0, talles_tango_1.nombreTalleDesdeCodigo)(r.talle);
                     yield (0, db_1.execute)(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, talleNombre]);
                 }
-                let colorId = (_f = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _f === void 0 ? void 0 : _f.id;
+                let colorId = (_e = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _e === void 0 ? void 0 : _e.id;
                 if (!colorId) {
                     colorId = (0, uuid_1.v4)();
                     const name = (r.colorName && r.colorName.trim()) || r.color;
                     const hex = r.colorHex || '#000000';
                     yield (0, db_1.execute)(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, name, r.color, hex]);
                 }
-                let productColorId = (_g = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _g === void 0 ? void 0 : _g.id;
+                let productColorId = (_f = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _f === void 0 ? void 0 : _f.id;
                 if (!productColorId) {
                     productColorId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
@@ -1229,7 +1345,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 if (!existingVariant) {
                     variantId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, r.codigo13]);
-                    const qty = (_h = r.initialStock) !== null && _h !== void 0 ? _h : 0;
+                    const qty = (_g = r.initialStock) !== null && _g !== void 0 ? _g : 0;
                     yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
                     variantsCreated++;
                 }

@@ -1203,6 +1203,114 @@ function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; c
   return { articulo, talle, color, codigo13: codigoCompleto, codigoCompleto };
 }
 
+/** Dígitos del código base; relleno a 7 como en inventario/stock (solo si aplica). */
+function padArticleDigitsTo7FromArticulo(articulo: string): string {
+  const digits = String(articulo ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+
+/** Minúsculas, sin espacios/guiones/guiones bajos (para emparejar "18403-03" con export reimportado). */
+function skuNormCompactKey(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]/g, '');
+}
+
+/**
+ * Variantes de SKU base para encontrar un producto ya cargado (evita duplicar el mismo artículo
+ * por distinto formato: 058750 vs 0058750, 18403-03 vs 1840303, Q05875…).
+ */
+function buildProductSkuLookupCandidates(articulo: string): string[] {
+  const out = new Set<string>();
+  const t = String(articulo ?? '').trim();
+  if (!t) return [];
+  out.add(t);
+  const noHyphen = t.replace(/-/g, '').trim();
+  if (noHyphen && noHyphen !== t) out.add(noHyphen);
+
+  const digits = t.replace(/\D/g, '');
+  if (digits) {
+    out.add(digits);
+    const p7 = padArticleDigitsTo7FromArticulo(t);
+    if (p7) out.add(p7);
+    const trimmed = digits.replace(/^0+/, '') || '0';
+    if (trimmed !== digits) {
+      out.add(trimmed);
+      out.add(trimmed.length <= 7 ? trimmed.padStart(7, '0') : trimmed);
+    }
+  }
+  const m = t.match(/^([A-Za-z]+)(\d[\d\s-]*)$/);
+  if (m) {
+    const numOnly = m[2].replace(/\D/g, '');
+    if (numOnly) {
+      out.add(numOnly.length <= 7 ? numOnly.padStart(7, '0') : numOnly);
+      out.add(m[1].toUpperCase() + numOnly);
+      out.add(m[1].toLowerCase() + numOnly);
+    }
+  }
+  return [...out].filter((x) => x.length > 0 && x.length <= 120);
+}
+
+function isTrivialImportProductName(name: string | null | undefined, sku: string, articuloRow: string): boolean {
+  const nn = skuNormCompactKey(name || '');
+  if (!nn) return true;
+  const sn = skuNormCompactKey(sku || '');
+  const an = skuNormCompactKey(articuloRow || '');
+  return nn === sn || nn === an;
+}
+
+async function findExistingProductForImportArticulo(
+  articulo: string
+): Promise<{ id: string; sku: string; name: string } | null> {
+  const uniq = [...new Set(buildProductSkuLookupCandidates(articulo))].slice(0, 40);
+  const coreKey = skuNormCompactKey(articulo);
+  const parts: string[] = [];
+  const params: string[] = [];
+  if (uniq.length > 0) {
+    parts.push(`sku IN (${uniq.map(() => '?').join(',')})`);
+    params.push(...uniq);
+  }
+  if (coreKey.length >= 4) {
+    parts.push(`REPLACE(REPLACE(REPLACE(LOWER(TRIM(sku)), '-', ''), '_', ''), ' ', '') = ?`);
+    params.push(coreKey);
+  }
+  if (parts.length === 0) return null;
+  const rows = (await query(`SELECT id, sku, name FROM products WHERE ${parts.join(' OR ')}`, params)) as any[];
+  if (!rows?.length) return null;
+  const byId = new Map<string, any>();
+  for (const r of rows) byId.set(String(r.id), r);
+  const list = [...byId.values()];
+  if (list.length === 1) return list[0];
+  list.sort((a: any, b: any) => {
+    const ta = isTrivialImportProductName(a.name, a.sku, articulo);
+    const tb = isTrivialImportProductName(b.name, b.sku, articulo);
+    if (ta !== tb) return ta ? 1 : -1;
+    return String(b.name ?? '').trim().length - String(a.name ?? '').trim().length;
+  });
+  return list[0];
+}
+
+async function maybeUpgradeTrivialProductNameFromImport(
+  productId: string,
+  sku: string,
+  currentName: string,
+  descripcion: string | undefined,
+  articuloRow: string
+): Promise<void> {
+  const desc = String(descripcion ?? '').trim();
+  if (!desc) return;
+  if (!isTrivialImportProductName(currentName, sku, articuloRow)) return;
+  const sn = skuNormCompactKey(sku);
+  const dn = skuNormCompactKey(desc);
+  if (dn === sn || dn === skuNormCompactKey(articuloRow)) return;
+  if (desc.length < 3) return;
+  await execute(`UPDATE products SET name = ? WHERE id = ?`, [desc, productId]);
+}
+
 export const importTangoArticles = async (req: Request, res: Response) => {
   try {
     const body = req.body as {
@@ -1318,7 +1426,17 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           productNamesByArticulo[r.articulo] = r.descripcion;
         }
 
-        let productId: string | null = (await get(`SELECT id FROM products WHERE sku = ?`, [r.articulo]))?.id || null;
+        const existingProduct = await findExistingProductForImportArticulo(r.articulo);
+        let productId: string | null = existingProduct?.id || null;
+        if (productId && existingProduct) {
+          await maybeUpgradeTrivialProductNameFromImport(
+            productId,
+            existingProduct.sku,
+            existingProduct.name,
+            r.descripcion,
+            r.articulo
+          );
+        }
         if (!productId) {
           productId = uuidv4();
           const name = productNamesByArticulo[r.articulo] || r.articulo;
