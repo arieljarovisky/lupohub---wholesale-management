@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
@@ -16,6 +16,37 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
+
+/** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
+function OrderCardActionButton(props: {
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  disabled?: boolean;
+  title: string;
+  icon: React.ReactNode;
+  label: string;
+  variant?: 'default' | 'danger';
+}) {
+  const { onClick, disabled, title, icon, label, variant = 'default' } = props;
+  const tone =
+    variant === 'danger'
+      ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/25'
+      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-700/55';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={`${title}. ${label}`}
+      className={`group flex flex-col items-center justify-center gap-0.5 min-w-[48px] max-w-[76px] shrink-0 rounded-xl py-1 px-0.5 transition disabled:pointer-events-none disabled:opacity-35 ${tone}`}
+    >
+      <span className="flex h-[22px] w-[22px] items-center justify-center shrink-0 [&_svg]:shrink-0">{icon}</span>
+      <span className="text-[9px] font-semibold leading-[1.15] text-center text-slate-500 group-hover:text-slate-300 line-clamp-2 px-0.5">
+        {label}
+      </span>
+    </button>
+  );
+}
 
 /** Lista para factura/remito: transportes del cliente o, si no tiene, el catálogo global. */
 function transporteOptionsForCustomer(customer: Customer | undefined, allTransportes: Transporte[]): Transporte[] {
@@ -132,7 +163,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 }) => {
   const { showConfirm, showToast } = useNotification();
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
-  const [filterCustomer, setFilterCustomer] = useState<string>('ALL');
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
   const [remitoEntregaId, setRemitoEntregaId] = useState<string>(REMITO_ENTREGA_PRINCIPAL);
@@ -282,10 +313,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
-  const filteredOrders = orders.filter(o =>
-    (filterStatus === 'ALL' || o.status === filterStatus) &&
-    (filterCustomer === 'ALL' || o.customerId === filterCustomer)
-  );
+  const filteredOrders = useMemo(() => {
+    const needle = customerSearchQuery.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (filterStatus !== 'ALL' && o.status !== filterStatus) return false;
+      if (!needle) return true;
+      const c = customers.find((x) => x.id === o.customerId);
+      const hay = [
+        (o.customerBusinessName || '').trim(),
+        (c?.businessName || '').trim(),
+        (c?.name || '').trim(),
+        String(o.id || '').toLowerCase(),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [orders, customers, filterStatus, customerSearchQuery]);
 
   const statusesCancelables = [OrderStatus.PENDING_ADMIN_CONFIRMATION, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.PENDING_CONTROL, OrderStatus.CONTROLLED];
   const canCancelOrder = (order: Order) =>
@@ -1378,16 +1423,28 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
 
         <div className="relative">
-          <select
-            value={filterCustomer}
-            onChange={(e) => setFilterCustomer(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-xl p-3 outline-none appearance-none cursor-pointer"
-          >
-            <option value="ALL">Todos los Clientes</option>
-            {customers.map(c => (
-              <option key={c.id} value={c.id}>{c.businessName || c.name || 'Cliente'}</option>
-            ))}
-          </select>
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden />
+          <input
+            type="search"
+            enterKeyHint="search"
+            value={customerSearchQuery}
+            onChange={(e) => setCustomerSearchQuery(e.target.value)}
+            placeholder="Buscar por cliente o nº de pedido…"
+            autoComplete="off"
+            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-xl py-3 pl-10 pr-10 outline-none placeholder:text-slate-500 focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+            aria-label="Buscar pedidos por cliente o número de pedido"
+          />
+          {customerSearchQuery.trim() !== '' && (
+            <button
+              type="button"
+              onClick={() => setCustomerSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+              title="Limpiar búsqueda"
+              aria-label="Limpiar búsqueda"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
@@ -1458,36 +1515,46 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       {order.status}
                     </span>
                     {hasBackorders && (
-                       <span className="bg-red-900/30 text-red-400 border border-red-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1">
-                         <AlertCircle size={10} /> PENDIENTES
-                       </span>
+                      <span className="bg-red-950/45 text-red-300 border border-red-800/45 px-2 py-0.5 rounded-lg text-[10px] font-bold inline-flex items-center gap-1">
+                        <AlertCircle size={10} aria-hidden />
+                        Pendientes stock
+                      </span>
                     )}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
                     {order.invoice && (
                       <span
-                        className="bg-emerald-900/30 text-emerald-300 border border-emerald-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help"
+                        className="inline-flex items-center gap-1 cursor-help text-slate-400"
                         title={
                           [
-                            'Factura real AFIP.',
+                            'Factura AFIP emitida.',
                             `CAE: ${order.invoice.cae}`,
                             order.invoice.puntoVta != null ? `Nº: ${order.invoice.puntoVta}-${order.invoice.cbteDesde}` : `Nº: ${order.invoice.cbteDesde}`,
                             order.invoice.caeFchVto ? `Vto. CAE: ${new Date(order.invoice.caeFchVto).toLocaleDateString('es-AR')}` : '',
-                            'Verificá en afip.gob.ar (Consulta de CUIT / comprobantes) con tu CUIT y este CAE.'
-                          ].filter(Boolean).join('\n')
+                            'Consultá en ARCA/AFIP con tu CUIT y este CAE.',
+                          ]
+                            .filter(Boolean)
+                            .join('\n')
                         }
                       >
-                        <Receipt size={10} /> FACTURADO
+                        <Receipt size={12} className="shrink-0 text-slate-500" aria-hidden />
+                        <span className="font-medium text-slate-300">Factura AFIP</span>
                       </span>
                     )}
                     {stockImpact.label && (
                       <span
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-help border ${stockImpact.badgeClassName}`}
+                        className={`inline-flex items-center gap-1 cursor-help ${
+                          stockImpact.variant === 'pending' || stockImpact.variant === 'not_applied'
+                            ? 'text-amber-200/95'
+                            : 'text-slate-400'
+                        }`}
                         title={stockImpact.title}
                       >
-                        {stockImpact.variant === 'no_impact' && <Package size={10} />}
-                        {stockImpact.variant === 'pending' && <Clock size={10} />}
-                        {stockImpact.variant === 'deducted' && <PackageCheck size={10} />}
-                        {stockImpact.variant === 'not_applied' && <AlertTriangle size={10} />}
-                        {stockImpact.label}
+                        {stockImpact.variant === 'no_impact' && <Package size={12} className="shrink-0 opacity-70" aria-hidden />}
+                        {stockImpact.variant === 'pending' && <Clock size={12} className="shrink-0 opacity-70" aria-hidden />}
+                        {stockImpact.variant === 'deducted' && <PackageCheck size={12} className="shrink-0 opacity-70" aria-hidden />}
+                        {stockImpact.variant === 'not_applied' && <AlertTriangle size={12} className="shrink-0 opacity-70" aria-hidden />}
+                        <span className="font-medium">{stockImpact.label}</span>
                       </span>
                     )}
                     {role !== Role.CUSTOMER && (
@@ -1508,32 +1575,35 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               api
                                 .patchOrderPaymentStatus(order.id, next)
                                 .then(() => {
-                                  showToast('success', next === 'pagado' ? 'Pedido marcado como cobrado.' : 'Pedido marcado como pendiente de cobro.');
+                                  showToast(
+                                    'success',
+                                    next === 'pagado' ? 'Pedido marcado como cobrado.' : 'Pedido marcado como pendiente de cobro.'
+                                  );
                                   refreshOrders?.();
                                 })
                                 .catch((err: any) => showToast('error', err?.message || 'No se pudo actualizar el cobro.'));
-                            }
+                            },
                           });
                         }}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 border transition touch-manipulation ${
-                          (order.paymentStatus ?? 'pagado') === 'pendiente'
-                            ? 'bg-amber-900/40 text-amber-200 border-amber-700/50 hover:bg-amber-900/60'
-                            : 'bg-emerald-900/25 text-emerald-300/90 border-emerald-800/40 hover:bg-emerald-900/40'
+                        className={`inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left font-medium transition touch-manipulation hover:bg-slate-700/45 ${
+                          (order.paymentStatus ?? 'pagado') === 'pendiente' ? 'text-amber-200' : 'text-slate-400'
                         }`}
-                        title="Tocá para cambiar pendiente / cobrado (cuenta corriente)"
+                        title="Cuenta corriente: tocá para alternar cobro pendiente / cobrado"
                       >
-                        <Wallet size={10} />
-                        {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'PENDIENTE COBRO' : 'COBRADO'}
+                        <Wallet size={12} className="shrink-0 opacity-80" aria-hidden />
+                        {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'Cobro pendiente' : 'Cobro registrado'}
                       </button>
                     )}
                     {Number(order.creditNotesTotalCount || 0) > 0 && (
-                      <span className="bg-violet-900/30 text-violet-300 border border-violet-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                        <FileMinus size={10} /> N.C. TOTAL ({order.creditNotesTotalCount})
+                      <span className="inline-flex items-center gap-1 text-violet-300/90">
+                        <FileMinus size={12} className="shrink-0 opacity-80" aria-hidden />
+                        <span className="font-medium">NC total ({order.creditNotesTotalCount})</span>
                       </span>
                     )}
                     {Number(order.creditNotesTotalCount || 0) === 0 && Number(order.creditNotesItemCount || 0) > 0 && (
-                      <span className="bg-amber-900/30 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                        <FileMinus size={10} /> N.C. PARCIAL ({order.creditNotesItemCount})
+                      <span className="inline-flex items-center gap-1 text-slate-400">
+                        <FileMinus size={12} className="shrink-0 opacity-80" aria-hidden />
+                        <span className="font-medium">NC parcial ({order.creditNotesItemCount})</span>
                       </span>
                     )}
                   </div>
@@ -1566,14 +1636,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     </div>
                   )}
                 </div>
-                <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 self-end sm:self-auto max-w-full [&>button]:min-w-[40px] [&>button]:min-h-[40px]">
+                <div className="flex flex-wrap items-end justify-end gap-y-1 gap-x-0.5 self-end sm:self-auto max-w-full sm:max-w-[min(100%,560px)] border-t border-slate-700/40 sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0">
                   {afipConfigured && canEmitirFactura && !order.invoice && (() => {
-                    const customer = customers.find(c => c.id === order.customerId);
                     const tipoFactura = getTipoFacturaParaCliente(order);
-                    const condicionIva = customer?.condicionIva || 'No informada';
                     return (
                     <>
-                      <button
+                      <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
                           setOrderToEmitFactura(order);
@@ -1586,12 +1654,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           setShowEmitirFacturaModal(true);
                         }}
                         disabled={!!emitiendoFacturaId}
-                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                        title={`Emitir factura electrónica AFIP (se emitirá Factura ${tipoFactura} según condición IVA del cliente)`}
-                      >
-                        {emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
-                      </button>
-                      <button
+                        title={`Emitir factura AFIP (Factura ${tipoFactura} según el cliente)`}
+                        icon={emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
+                        label="Emitir AFIP"
+                      />
+                      <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
                           showConfirm({
@@ -1620,37 +1687,35 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           });
                         }}
                         disabled={!!emitiendoFacturaId}
-                        className="p-2 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700/50 transition disabled:opacity-50"
-                        title="Emitir factura sin descontar stock"
-                      >
-                        <Package size={16} />
-                      </button>
+                        title="Emitir factura sin descontar stock en el pedido"
+                        icon={<Package size={16} />}
+                        label="Sin stock"
+                      />
                     </>
                     );
                   })()}
-                  <button
+                  <OrderCardActionButton
                     onClick={(e) => openRemitoModal(order, e)}
-                    className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
-                    title="Generar remito (hoja de despacho) en PDF"
-                  >
-                    <FileText size={16} />
-                  </button>
+                    title="Generar remito (despacho) en PDF"
+                    icon={<FileText size={16} />}
+                    label="Remito"
+                  />
                   {(order.items || []).some((it: any) => !it?.despachoId) && (
-                    <button
-                      onClick={(e) => openAssignDespachosModal(order, e)}
-                      className="p-2 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition relative"
-                      title="Hay ítems sin número de despacho asignado. Asignalos para que aparezcan en remito/factura."
-                    >
-                      <Ship size={16} />
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" aria-hidden />
-                    </button>
+                    <div className="relative shrink-0">
+                      <OrderCardActionButton
+                        onClick={(e) => openAssignDespachosModal(order, e)}
+                        title="Hay artículos sin despacho asignado"
+                        icon={<Ship size={16} />}
+                        label="Despacho"
+                      />
+                      <span className="pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+                    </div>
                   )}
                   {role !== Role.CUSTOMER &&
                     !order.noStockImpact &&
                     order.status !== OrderStatus.CANCELLED &&
                     order.mayoristaStockApplied !== true && (
-                      <button
-                        type="button"
+                      <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
                           setApplyingMayoristaStockId(order.id);
@@ -1672,36 +1737,27 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                             .finally(() => setApplyingMayoristaStockId(null));
                         }}
                         disabled={applyingMayoristaStockId === order.id}
-                        className="p-2 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-700/50 transition disabled:opacity-50"
-                        title="Descontar stock ahora: en borrador pasa a confirmado y aplica; si ya estaba confirmado, solo registra el movimiento de inventario si aún faltaba."
-                      >
-                        {applyingMayoristaStockId === order.id ? (
-                          <Loader2 size={16} className="animate-spin text-cyan-400" />
-                        ) : (
-                          <ArrowDownToLine size={16} />
-                        )}
-                      </button>
+                        title="Descontar stock del pedido en inventario"
+                        icon={
+                          applyingMayoristaStockId === order.id ? (
+                            <Loader2 size={16} className="animate-spin text-cyan-400" />
+                          ) : (
+                            <ArrowDownToLine size={16} />
+                          )
+                        }
+                        label="Descontar"
+                      />
                     )}
                   {order.invoice && (
                     <>
-                      <button
+                      <OrderCardActionButton
                         onClick={(e) => openFactura(order, e)}
-                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
-                        title="Completar datos y abrir factura (PDF)"
-                      >
-                        <Receipt size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => openFactura(order, e)}
-                        className="px-2 py-1 rounded-lg text-[11px] font-bold text-emerald-400/95 hover:text-emerald-300 hover:bg-slate-700/60 transition whitespace-nowrap"
-                        title="Abrir el mismo modal para vista previa de la factura"
-                      >
-                        Vista previa
-                      </button>
+                        title="Datos de transporte y abrir factura en PDF"
+                        icon={<Receipt size={16} />}
+                        label="Factura PDF"
+                      />
                       {canEmitirFactura && orderInvoiceApplicableAgip(order) && (
-                        <button
-                          type="button"
+                        <OrderCardActionButton
                           onClick={(e) => {
                             e.stopPropagation();
                             showConfirm({
@@ -1725,21 +1781,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                             });
                           }}
                           disabled={recalculatingAgipOrderId === order.id}
-                          className="p-2 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-700/50 transition disabled:opacity-50"
-                          title="Recalcular percepción IIBB (padrón AGIP) y guardarla para el PDF de esta factura"
-                        >
-                          {recalculatingAgipOrderId === order.id ? (
-                            <Loader2 size={16} className="animate-spin text-amber-400" />
-                          ) : (
-                            <Percent size={16} />
-                          )}
-                        </button>
+                          title="Guardar percepción IIBB en el PDF (no cambia el CAE en AFIP)"
+                          icon={
+                            recalculatingAgipOrderId === order.id ? (
+                              <Loader2 size={16} className="animate-spin text-amber-400" />
+                            ) : (
+                              <Percent size={16} />
+                            )
+                          }
+                          label="IIBB PDF"
+                        />
                       )}
                       {canEmitirFactura &&
                         orderInvoiceApplicableAgip(order) &&
                         Number(order.creditNotesCount || 0) === 0 && (
-                        <button
-                          type="button"
+                        <OrderCardActionButton
                           onClick={(e) => {
                             e.stopPropagation();
                             showConfirm({
@@ -1784,29 +1840,29 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                             });
                           }}
                           disabled={reemittingInvoiceOrderId === order.id}
-                          className="p-2 rounded-lg text-slate-400 hover:text-sky-300 hover:bg-slate-700/50 transition disabled:opacity-50"
-                          title="Nota de crédito total + nueva factura AFIP con percepción IIBB (nuevo CAE). Sin cambios de stock."
-                        >
-                          {reemittingInvoiceOrderId === order.id ? (
-                            <Loader2 size={16} className="animate-spin text-sky-400" />
-                          ) : (
-                            <RefreshCcw size={16} />
-                          )}
-                        </button>
+                          title="NC total + nueva factura con IIBB (nuevo CAE). Sin tocar stock."
+                          icon={
+                            reemittingInvoiceOrderId === order.id ? (
+                              <Loader2 size={16} className="animate-spin text-sky-400" />
+                            ) : (
+                              <RefreshCcw size={16} />
+                            )
+                          }
+                          label="Reemitir"
+                        />
                       )}
                     </>
                   )}
                   {Number(order.creditNotesCount || 0) > 0 && (
-                    <button
+                    <OrderCardActionButton
                       onClick={(e) => openNotaCredito(order, e)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-violet-400 hover:bg-slate-700/50 transition"
-                      title="Ver nota(s) de crédito / Descargar PDF"
-                    >
-                      <FileMinus size={16} />
-                    </button>
+                      title="Ver notas de crédito y descargar PDF"
+                      icon={<FileMinus size={16} />}
+                      label="Ver NC"
+                    />
                   )}
                   {order.invoice && afipConfigured && (
-                    <button
+                    <OrderCardActionButton
                       onClick={(e) => {
                         e.stopPropagation();
                         const inv = order.invoice!;
@@ -1827,18 +1883,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           .finally(() => setVerificandoAfipOrderId(null));
                       }}
                       disabled={verificandoAfipOrderId === order.id}
-                      className="p-2 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-700/50 transition"
-                      title="Verificar en AFIP que el comprobante existe (FECompConsultar)"
-                    >
-                      {verificandoAfipOrderId === order.id ? (
-                        <span className="text-xs">...</span>
-                      ) : (
-                        <CheckCircle size={16} />
-                      )}
-                    </button>
+                      title="Consultar en AFIP si el comprobante existe"
+                      icon={
+                        verificandoAfipOrderId === order.id ? (
+                          <Loader2 size={14} className="animate-spin text-sky-400" />
+                        ) : (
+                          <CheckCircle size={16} />
+                        )
+                      }
+                      label="Verificar"
+                    />
                   )}
                   {order.invoice && afipConfigured && canEmitirFactura && (
-                    <button
+                    <OrderCardActionButton
                       onClick={(e) => {
                         e.stopPropagation();
                         setNcOrder(order);
@@ -1847,67 +1904,98 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         setNcQuantity(order.items[0]?.quantity ?? 1);
                         setNcItemsQuantities({});
                       }}
-                      className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition"
                       title="Emitir nota de crédito AFIP (total o por artículo)"
-                    >
-                      <FileMinus size={16} />
-                    </button>
+                      icon={<FileMinus size={16} />}
+                      label="Emitir NC"
+                    />
                   )}
-                  <button
+                  <OrderCardActionButton
                     onClick={(e) => exportOneOrderToExcel(order, e)}
-                    className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition"
-                    title="Exportar este pedido a Excel (planilla)"
-                  >
-                    <FileSpreadsheet size={16} />
-                  </button>
+                    title="Exportar pedido a Excel"
+                    icon={<FileSpreadsheet size={16} />}
+                    label="Excel"
+                  />
                   {canCancelOrder(order) && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Cancelar pedido', message: '¿Cancelar este pedido? Se restaurará el stock.', confirmLabel: 'Cancelar pedido', onConfirm: () => onUpdateStatus(order.id, OrderStatus.CANCELLED) }); }}
-                      className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
-                      title="Cancelar pedido (restaura stock)"
-                    >
-                      <XCircle size={16} />
-                    </button>
+                    <OrderCardActionButton
+                      variant="danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showConfirm({
+                          title: 'Cancelar pedido',
+                          message: '¿Cancelar este pedido? Se restaurará el stock.',
+                          confirmLabel: 'Cancelar pedido',
+                          onConfirm: () => onUpdateStatus(order.id, OrderStatus.CANCELLED),
+                        });
+                      }}
+                      title="Cancelar pedido y restaurar stock"
+                      icon={<XCircle size={16} />}
+                      label="Anular"
+                    />
                   )}
                   {role === Role.ADMIN && !order.invoice && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); showConfirm({ title: 'Eliminar pedido', message: '¿Eliminar pedido? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', onConfirm: () => onDeleteOrder?.(order.id) }); }}
-                      className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-900/20 transition"
+                    <OrderCardActionButton
+                      variant="danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showConfirm({
+                          title: 'Eliminar pedido',
+                          message: '¿Eliminar pedido? Esta acción no se puede deshacer.',
+                          confirmLabel: 'Eliminar',
+                          onConfirm: () => onDeleteOrder?.(order.id),
+                        });
+                      }}
                       title="Eliminar pedido definitivamente"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                      icon={<Trash2 size={16} />}
+                      label="Borrar"
+                    />
                   )}
                   {refreshOrders && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
                     order.archived ? (
-                      <button
+                      <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
                           setArchivingOrderId(order.id);
-                          api.archiveOrder(order.id, false).then(() => { refreshOrders(); showToast('success', 'Pedido desarchivado'); }).catch((err: any) => showToast('error', err?.message || 'Error')).finally(() => setArchivingOrderId(null));
+                          api
+                            .archiveOrder(order.id, false)
+                            .then(() => {
+                              refreshOrders();
+                              showToast('success', 'Pedido desarchivado');
+                            })
+                            .catch((err: any) => showToast('error', err?.message || 'Error'))
+                            .finally(() => setArchivingOrderId(null));
                         }}
                         disabled={!!archivingOrderId}
-                        className="p-2 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                        title="Desarchivar (mostrar en lista activa)"
-                      >
-                        {archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <ArchiveRestore size={16} />}
-                      </button>
+                        title="Volver a mostrar el pedido en la lista activa"
+                        icon={archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <ArchiveRestore size={16} />}
+                        label="Desarchivar"
+                      />
                     ) : (
-                      <button
+                      <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
                           setArchivingOrderId(order.id);
-                          api.archiveOrder(order.id, true).then(() => { refreshOrders(); showToast('success', 'Pedido archivado'); }).catch((err: any) => showToast('error', err?.message || 'Error')).finally(() => setArchivingOrderId(null));
+                          api
+                            .archiveOrder(order.id, true)
+                            .then(() => {
+                              refreshOrders();
+                              showToast('success', 'Pedido archivado');
+                            })
+                            .catch((err: any) => showToast('error', err?.message || 'Error'))
+                            .finally(() => setArchivingOrderId(null));
                         }}
                         disabled={!!archivingOrderId}
-                        className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition disabled:opacity-50"
-                        title="Archivar (ocultar de la lista activa)"
-                      >
-                        {archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <Archive size={16} />}
-                      </button>
+                        title="Ocultar el pedido de la lista principal"
+                        icon={archivingOrderId === order.id ? <Clock size={16} className="animate-pulse" /> : <Archive size={16} />}
+                        label="Archivar"
+                      />
                     )
                   )}
-                  {canOpenOrder && <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-colors" />}
+                  {canOpenOrder && (
+                    <div className="flex flex-col items-center justify-center pl-1 text-slate-600" title="Abrir pedido">
+                      <ChevronRight size={20} className="group-hover:text-blue-400 transition-colors" />
+                      <span className="text-[9px] font-semibold text-slate-600 group-hover:text-slate-400 mt-0.5">Abrir</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
