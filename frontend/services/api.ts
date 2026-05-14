@@ -2,6 +2,9 @@ import { Product, Order, OrderStatus, User, Customer, CustomerDeliveryAddress, T
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob, postFormDataBlob } from './httpClient';
 
+/** GET /products con muchas variantes puede tardar >15s (COUNT + JOIN en Railway). */
+const PRODUCTS_LIST_TIMEOUT_MS = 120000;
+
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
   try {
@@ -234,7 +237,7 @@ export const api = {
       const perPage = options?.perPage ?? 5000;
       const params = new URLSearchParams({ per_page: String(perPage) });
       if (options?.priceListId) params.set('price_list_id', options.priceListId);
-      const res = await request<any>(`/products?${params.toString()}`, 'GET');
+      const res = await request<any>(`/products?${params.toString()}`, 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
       const rows = Array.isArray(res) ? res : res.items;
       return rows.map((r: any) => api.mapProductRow(r));
     }, MOCK_PRODUCTS, 'getProducts');
@@ -248,7 +251,7 @@ export const api = {
       if (options?.priceListId) p.set('price_list_id', options.priceListId);
       return p;
     };
-    const res = await request<any>(`/products?${buildParams(1).toString()}`, 'GET');
+    const res = await request<any>(`/products?${buildParams(1).toString()}`, 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
     const items = Array.isArray(res) ? res : (res?.items ?? []);
     const total = typeof res?.total === 'number' ? res.total : items.length;
     const all: Product[] = items.map((r: any) => api.mapProductRow(r));
@@ -262,7 +265,7 @@ export const api = {
       for (let p = start; p <= end; p++) pageNums.push(p);
       const chunks = await Promise.all(
         pageNums.map((page) =>
-          request<any>(`/products?${buildParams(page).toString()}`, 'GET').then((nextRes: any) => {
+          request<any>(`/products?${buildParams(page).toString()}`, 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS).then((nextRes: any) => {
             const nextItems = Array.isArray(nextRes) ? nextRes : (nextRes?.items ?? []);
             return nextItems.map((r: any) => api.mapProductRow(r));
           })
@@ -278,7 +281,7 @@ export const api = {
     const perPage = options?.perPage ?? 5000;
     const params = new URLSearchParams({ per_page: String(perPage) });
     if (options?.priceListId) params.set('price_list_id', options.priceListId);
-    const res = await request<any>(`/products?${params.toString()}`, 'GET');
+    const res = await request<any>(`/products?${params.toString()}`, 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
     const rows = Array.isArray(res) ? res : (res && res.items) || [];
     return rows.map((r: any) => api.mapProductRow(r));
   },
@@ -300,7 +303,7 @@ export const api = {
         ...(syncNone ? { sync_none: '1' } : {}),
         ...(options?.skipTotal ? { skip_total: '1' } : {})
       });
-      const res = await request<any>(`/products?${params.toString()}`, 'GET');
+      const res = await request<any>(`/products?${params.toString()}`, 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
       const items = (res.items || []).map((r: any) => {
         const parts = (r.sku || '').toString().split('-');
         const sizeDerived = parts.length >= 2 ? parts[parts.length - 2] : '';
@@ -338,7 +341,7 @@ export const api = {
     stock: number;
     talle_display?: string;
   }>> => {
-    const res = await request<{ rows: any[] }>('/products/export-inventory', 'GET');
+    const res = await request<{ rows: any[] }>('/products/export-inventory', 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
     return res?.rows ?? [];
   },
 
