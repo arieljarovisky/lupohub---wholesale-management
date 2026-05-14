@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
-import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
+import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, mergeServerInvoiceIntoOrder, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
@@ -438,6 +438,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         return;
       }
 
+      let orderForFactura: Order = order;
+      try {
+        const latestInv = await api.getOrderInvoice(order.id);
+        if (latestInv) {
+          orderForFactura = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+        }
+      } catch {
+        /* seguir con datos del listado */
+      }
+
       let manualFromLs: ManualFacturaFields | undefined;
       try {
         const raw = localStorage.getItem(FACTURA_MANUAL_DATA_KEY);
@@ -458,7 +468,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         } as const);
 
       const html = buildWholesaleFacturaHtml({
-        order,
+        order: orderForFactura,
         customer,
         products,
         remitente: mergedRemitenteForFactura() as any,

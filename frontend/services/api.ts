@@ -665,7 +665,21 @@ export const api = {
   },
 
   /** Obtiene los datos de la factura AFIP asociada a un pedido (si existe). */
-  getOrderInvoice: async (orderId: string): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta?: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; createdAt?: string } | null> => {
+  getOrderInvoice: async (
+    orderId: string
+  ): Promise<{
+    id: string;
+    orderId: string;
+    cae: string;
+    caeFchVto?: string;
+    puntoVta?: number;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+    createdAt?: string;
+    agipAlicuota?: number;
+    agipRetPer?: number;
+  } | null> => {
     try {
       return await request<any>(`/orders/${orderId}/invoice`, 'GET');
     } catch {

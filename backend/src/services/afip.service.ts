@@ -232,16 +232,16 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const impIva = Math.round(impNeto * 0.21 * 100) / 100;
 
   const perc = order.iibbPercepcion;
+  const rawTrib =
+    perc != null && perc !== undefined ? Number((perc as { importe?: unknown }).importe) : 0;
   const impTributo =
-    perc && Number(perc.importe) > 0.005
-      ? Math.round(Number(perc.importe) * 100) / 100
-      : 0;
+    Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+  const rawBase = perc != null ? Number((perc as { baseImp?: unknown }).baseImp) : 0;
   const baseIibb =
-    perc && Number(perc.baseImp) > 0
-      ? Math.round(Number(perc.baseImp) * 100) / 100
-      : impNeto;
+    Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
+  const rawAlic = perc != null ? Number((perc as { alicuota?: unknown }).alicuota) : 0;
   const alicuotaIibb =
-    perc && impTributo > 0 ? Math.round(Number(perc.alicuota || 0) * 100) / 100 : 0;
+    impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
   const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
 
   // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
@@ -303,15 +303,19 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   };
 
   if (impTributo > 0) {
+    // Id 99 = otros / percepción IIBB (ejemplo oficial AfipSDK). Descripción en castellano sin caracteres raros.
     data.Tributos = [
       {
         Id: TRIBUTO_OTROS_IIBB,
-        Desc: 'Percepción IIBB',
+        Desc: 'Ingresos Brutos',
         BaseImp: baseIibb,
         Alic: alicuotaIibb,
         Importe: impTributo
       }
     ];
+    console.log(
+      `[AFIP] Factura con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`
+    );
   }
 
   const res = await afip.ElectronicBilling.createVoucher(data);

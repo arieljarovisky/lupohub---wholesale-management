@@ -12,6 +12,7 @@ import {
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   normalizeSkuForPrint,
+  mergeServerInvoiceIntoOrder,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
@@ -1080,7 +1081,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     setFacturaTransporteId(pickInitialTransporteId(prev, transporteOpts));
   };
 
-  const confirmOpenFactura = () => {
+  const confirmOpenFactura = async () => {
     if (!facturaPreviewOrder) return;
     const cust = customers.find((c) => c.id === facturaPreviewOrder.customerId);
     const transporteOpts = transporteOptionsForCustomer(cust, transportes);
@@ -1098,7 +1099,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       }
     }
     setManualFacturaDataByOrder(prevMap => ({ ...prevMap, [facturaPreviewOrder.id]: manual }));
-    const html = buildFacturaHtml(facturaPreviewOrder, manual);
+    let orderForPdf: Order = facturaPreviewOrder;
+    try {
+      const latestInv = await api.getOrderInvoice(facturaPreviewOrder.id);
+      if (latestInv) {
+        orderForPdf = mergeServerInvoiceIntoOrder(facturaPreviewOrder, latestInv as Record<string, unknown>);
+      }
+    } catch {
+      /* usar factura en memoria */
+    }
+    const html = buildFacturaHtml(orderForPdf, manual);
     if (html) {
       const w = window.open('', '_blank');
       if (w) {

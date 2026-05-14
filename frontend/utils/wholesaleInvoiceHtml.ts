@@ -85,6 +85,28 @@ export type ManualFacturaFields = {
   transporteId?: string;
 };
 
+/** Une el snapshot de `GET /orders/:id/invoice` al pedido antes de armar el PDF (IIBB/CAE al día). */
+export function mergeServerInvoiceIntoOrder(order: Order, latest: Record<string, unknown> | null | undefined): Order {
+  if (!order.invoice || !latest) return order;
+  const inv = latest;
+  const base = order.invoice;
+  return {
+    ...order,
+    invoice: {
+      ...base,
+      cae: String(inv.cae ?? base.cae),
+      caeFchVto: (inv.caeFchVto as string | undefined) ?? base.caeFchVto,
+      puntoVta: (inv.puntoVta as number | undefined) ?? base.puntoVta,
+      cbteTipo: Number(inv.cbteTipo ?? base.cbteTipo),
+      cbteDesde: Number(inv.cbteDesde ?? base.cbteDesde),
+      cbteHasta: Number(inv.cbteHasta ?? base.cbteHasta),
+      createdAt: (inv.createdAt as string | undefined) ?? base.createdAt,
+      agipAlicuota: Number(inv.agipAlicuota ?? (base as any).agipAlicuota ?? (base as any).agip_alicuota ?? 0),
+      agipRetPer: Number(inv.agipRetPer ?? (base as any).agipRetPer ?? (base as any).agip_ret_per ?? 0),
+    },
+  };
+}
+
 function escapeHtmlText(s: string): string {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -373,8 +395,8 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
               <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoGravado)}</span></div>
-              ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+              ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
               <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
             </div>
           </div>
