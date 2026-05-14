@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw } from 'lucide-react';
+import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -170,6 +170,13 @@ function orderMatchesInvoiceListFilter(order: Order, f: OrdersInvoiceListFilter)
   if (f === 'invoiced_with_iibb') return !!order.invoice && orderInvoiceApplicableAgip(order) != null;
   if (f === 'invoiced_no_iibb') return !!order.invoice && orderInvoiceApplicableAgip(order) == null;
   return true;
+}
+
+/** Una línea legible tipo AFIP: PV — nº comprobante (tipo). */
+function formatAfipDocLine(puntoVta?: number | null, cbteDesde?: number | null, cbteTipo?: number | null): string {
+  if (puntoVta == null || cbteDesde == null) return '—';
+  const t = cbteTipo != null ? ` · tipo ${cbteTipo}` : '';
+  return `${puntoVta}-${cbteDesde}${t}`;
 }
 
 const Orders: React.FC<OrdersProps> = React.memo(({ 
@@ -1401,7 +1408,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
             Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
             = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado;
-            <strong className="text-orange-300/90"> naranja intenso (doble señal)</strong> = hay <strong className="text-slate-300">nota de crédito por el total</strong> (la factura quedó anulada fiscalmente en AFIP).
+            <strong className="text-orange-300/90"> naranja intenso (doble señal)</strong> = el comprobante AFIP del pedido sigue anulado por una <strong className="text-slate-300">NC por el total</strong> sin factura nueva registrada (o datos viejos sin migración).
+            Si ya reemitiste con IIBB y sigue en naranja, en MySQL podés marcar la NC como reemplazada: <code className="text-slate-400 bg-slate-900/80 px-1 rounded">UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE order_id = '…' AND scope = 'total' LIMIT 1;</code>.
             En la fila de chips, <strong className="text-amber-200/90">ámbar “Con IIBB”</strong> indica que en la factura guardada figura percepción de ingresos brutos; <strong className="text-slate-400">gris “Sin percepción IIBB”</strong> = facturado AFIP pero sin ese importe en el comprobante (0 o no cargado).
             Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
           </p>
@@ -1567,7 +1575,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
-          const ncTotalAnnulled = Number(order.creditNotesTotalCount || 0) > 0;
+          const activeTotalVoid =
+            order.creditNotesActiveTotalVoidCount != null
+              ? Number(order.creditNotesActiveTotalVoidCount)
+              : Number(order.creditNotesTotalCount || 0);
+          const ncTotalAnnulled = activeTotalVoid > 0;
           const agipOnInvoice = order.invoice ? orderInvoiceApplicableAgip(order) : null;
           const cardAccentClass = ncTotalAnnulled ? 'border-l-[5px] border-orange-500' : stockImpact.cardAccentClass;
 
@@ -1736,6 +1748,61 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       </span>
                     )}
                   </div>
+                  {!ncTotalAnnulled &&
+                    Number(order.creditNotesTotalCount || 0) > 0 &&
+                    order.lastTotalCreditNoteFiscal && (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 rounded-xl border border-slate-700/80 bg-slate-900/40 px-2.5 py-2 text-[10px] text-slate-300">
+                        <span className="font-bold text-slate-500 uppercase tracking-wide shrink-0">
+                          Secuencia fiscal
+                        </span>
+                        {order.lastTotalCreditNoteFiscal.voidedInvoice && (
+                          <>
+                            <span
+                              className="rounded-md border border-slate-600/70 bg-slate-800/80 px-2 py-0.5 font-mono"
+                              title={`Factura anulada en AFIP por la NC. CAE ${order.lastTotalCreditNoteFiscal.voidedInvoice.cae}`}
+                            >
+                              Fact. previa{' '}
+                              {formatAfipDocLine(
+                                order.lastTotalCreditNoteFiscal.voidedInvoice.puntoVta,
+                                order.lastTotalCreditNoteFiscal.voidedInvoice.cbteDesde,
+                                order.lastTotalCreditNoteFiscal.voidedInvoice.cbteTipo
+                              )}
+                            </span>
+                            <ArrowRight size={12} className="shrink-0 text-slate-600" aria-hidden />
+                          </>
+                        )}
+                        <span
+                          className="rounded-md border border-violet-800/50 bg-violet-950/50 px-2 py-0.5 font-mono text-violet-100"
+                          title={`Nota de crédito AFIP. CAE ${order.lastTotalCreditNoteFiscal.creditNote.cae}`}
+                        >
+                          NC{' '}
+                          {formatAfipDocLine(
+                            order.lastTotalCreditNoteFiscal.creditNote.puntoVta,
+                            order.lastTotalCreditNoteFiscal.creditNote.cbteDesde,
+                            order.lastTotalCreditNoteFiscal.creditNote.cbteTipo
+                          )}
+                        </span>
+                        <ArrowRight size={12} className="shrink-0 text-slate-600" aria-hidden />
+                        <span
+                          className="rounded-md border border-emerald-800/45 bg-emerald-950/40 px-2 py-0.5 font-mono text-emerald-100"
+                          title={
+                            order.invoice
+                              ? `Comprobante vigente en el pedido. CAE ${order.invoice.cae}`
+                              : 'Sin factura en el pedido'
+                          }
+                        >
+                          Fact. vigente{' '}
+                          {order.invoice
+                            ? formatAfipDocLine(order.invoice.puntoVta, order.invoice.cbteDesde, order.invoice.cbteTipo)
+                            : '—'}
+                        </span>
+                        {order.lastTotalCreditNoteFiscal.supersededByReinvoice && (
+                          <span className="text-[9px] font-medium text-slate-500 normal-case">
+                            (NC + nueva factura con IIBB)
+                          </span>
+                        )}
+                      </div>
+                    )}
                   {(order.createdByName || showSellerLine) && (
                     <div className="text-xs text-slate-500 space-y-0.5 mt-1">
                       {order.createdByName && (

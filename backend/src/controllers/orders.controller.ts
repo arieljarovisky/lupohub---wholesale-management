@@ -22,6 +22,81 @@ async function getProductIdForVariant(variantId: string): Promise<string | null>
   return (row?.product_id as string) || null;
 }
 
+/** ¿La factura vigente del pedido sigue siendo la misma que anuló esta NC total? (snapshot voided_* = invoice actual). */
+function totalCreditNoteStillVoidsCurrentInvoice(invoice: any | undefined, cn: any): boolean {
+  if (!cn?.voided_invoice_cae) return true;
+  if (!invoice) return true;
+  const pvInv = Number(invoice.puntoVta ?? 0);
+  const pvV = Number(cn.voided_invoice_punto_venta ?? 0);
+  return (
+    String(cn.voided_invoice_cae) === String(invoice.cae) &&
+    Number(cn.voided_invoice_cbte_desde) === Number(invoice.cbteDesde) &&
+    pvInv === pvV &&
+    Number(cn.voided_invoice_cbte_tipo) === Number(invoice.cbteTipo)
+  );
+}
+
+/** NC totales que siguen “anulando” el comprobante actual (sin reemplazo o datos legacy sin snapshot). */
+function countActiveTotalCreditNoteVoid(invoice: any | undefined, totalCnList: any[]): number {
+  let n = 0;
+  for (const cn of totalCnList) {
+    if (Number(cn.superseded_by_reinvoice)) continue;
+    if (!cn.voided_invoice_cae) {
+      n++;
+      continue;
+    }
+    if (totalCreditNoteStillVoidsCurrentInvoice(invoice, cn)) n++;
+  }
+  return n;
+}
+
+function buildLastTotalCreditNoteFiscalPayload(lastCn: any | undefined) {
+  if (!lastCn) return undefined;
+  return {
+    voidedInvoice: lastCn.voided_invoice_cae
+      ? {
+          cae: String(lastCn.voided_invoice_cae),
+          puntoVta:
+            lastCn.voided_invoice_punto_venta != null ? Number(lastCn.voided_invoice_punto_venta) : undefined,
+          cbteTipo:
+            lastCn.voided_invoice_cbte_tipo != null ? Number(lastCn.voided_invoice_cbte_tipo) : undefined,
+          cbteDesde: Number(lastCn.voided_invoice_cbte_desde),
+        }
+      : undefined,
+    creditNote: {
+      cae: String(lastCn.cae),
+      puntoVta: Number(lastCn.punto_venta),
+      cbteTipo: Number(lastCn.cbte_tipo),
+      cbteDesde: Number(lastCn.cbte_desde),
+    },
+    supersededByReinvoice: !!Number(lastCn.superseded_by_reinvoice),
+  };
+}
+
+/**
+ * Percepción IIBB para la NC en AFIP según `invoices.agip_*` (misma lógica que la factura).
+ * En NC parcial se prorratea el importe de percepción según neto creditado / neto total del pedido.
+ */
+function iibbPercepcionForOrderCreditNote(
+  invAgipAlicuota: number,
+  invAgipRetPer: number,
+  netAmountCredited: number,
+  invoiceFullNet: number
+): { baseImp: number; alicuota: number; importe: number } | undefined {
+  const retFull = Math.round((Number(invAgipRetPer) || 0) * 100) / 100;
+  if (!(retFull > 0.005)) return undefined;
+  const full = Math.max(Math.round((Number(invoiceFullNet) || 0) * 100) / 100, 0.01);
+  const netCred = Math.round((Number(netAmountCredited) || 0) * 100) / 100;
+  const ratio = Math.min(1, Math.max(0, netCred / full));
+  const importe = Math.round(retFull * ratio * 100) / 100;
+  if (!(importe > 0.005)) return undefined;
+  return {
+    baseImp: netCred,
+    alicuota: Math.round((Number(invAgipAlicuota) || 0) * 100) / 100,
+    importe,
+  };
+}
+
 async function allocateOldestDespachosForVariant(variantId: string, requestedQty: number): Promise<Array<{ despachoId: string | null; quantity: number }>> {
   const qty = Math.max(0, Math.floor(Number(requestedQty) || 0));
   if (qty <= 0) return [];
@@ -381,6 +456,26 @@ export const getOrders = async (req: any, res: any) => {
       // Tabla credit_notes puede no existir en DB antiguas
     }
 
+    let totalCnsByOrderId: Record<string, any[]> = {};
+    try {
+      const cnTotalDetailRows = await query(
+        `SELECT order_id, id, cae, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+                voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde,
+                COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
+                created_at
+         FROM credit_notes
+         WHERE order_id IN (${placeholders}) AND scope = 'total'
+         ORDER BY created_at ASC, id ASC`,
+        orderIds
+      );
+      for (const r of cnTotalDetailRows as any[]) {
+        if (!totalCnsByOrderId[r.order_id]) totalCnsByOrderId[r.order_id] = [];
+        totalCnsByOrderId[r.order_id].push(r);
+      }
+    } catch (_) {
+      totalCnsByOrderId = {};
+    }
+
     let mayoristaStockLoaded = false;
     let mayoristaStockAppliedByOrder: Record<string, boolean> = {};
     try {
@@ -402,7 +497,13 @@ export const getOrders = async (req: any, res: any) => {
       // stock_movements puede no existir en DB antiguas
     }
 
-    const ordersFull = ordersRow.map((order: any) => ({
+    const ordersFull = ordersRow.map((order: any) => {
+      const inv = invoiceByOrderId[order.id];
+      const totalCnList = totalCnsByOrderId[order.id] || [];
+      const activeTotalVoid = countActiveTotalCreditNoteVoid(inv, totalCnList);
+      const lastTotalCn = totalCnList.length ? totalCnList[totalCnList.length - 1] : undefined;
+      const totalCnt = creditNotesTotalByOrderId[order.id] ?? 0;
+      return {
       id: order.id,
       customerId: order.customer_id,
       customerBusinessName: order.customer_business_name ?? order.customer_name ?? undefined,
@@ -419,10 +520,14 @@ export const getOrders = async (req: any, res: any) => {
       archived: !!(order.archived),
       remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
       items: itemsByOrderId[order.id] || [],
-      invoice: invoiceByOrderId[order.id] ?? undefined,
+      invoice: inv ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
-      creditNotesTotalCount: creditNotesTotalByOrderId[order.id] ?? 0,
+      creditNotesTotalCount: totalCnt,
       creditNotesItemCount: creditNotesItemByOrderId[order.id] ?? 0,
+      /** NC total que sigue anulando el CAE actual del pedido (0 si ya hay factura nueva tras reemisión). */
+      creditNotesActiveTotalVoidCount: activeTotalVoid,
+      /** Última NC por el total: comprobante anulado + NC (para UI de secuencia fiscal). */
+      lastTotalCreditNoteFiscal: totalCnt > 0 ? buildLastTotalCreditNoteFiscalPayload(lastTotalCn) : undefined,
       /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
       creditNotesNetoCredited: creditNotesNetoCreditedByOrderId[order.id] ?? 0,
       paymentStatus: mapPaymentStatus(order),
@@ -430,7 +535,8 @@ export const getOrders = async (req: any, res: any) => {
       mayoristaStockApplied: mayoristaStockLoaded
         ? mayoristaStockAppliedByOrder[order.id] === true
         : undefined
-    }));
+    };
+    });
 
     res.json(ordersFull);
   } catch (error) {
@@ -1007,7 +1113,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
   try {
     const invRow = await get(
-      'SELECT id, order_id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?',
+      `SELECT id, order_id, punto_venta, cbte_tipo, cbte_desde, cae, agip_alicuota, agip_ret_per FROM invoices WHERE order_id = ?`,
       [id]
     );
     if (!invRow) {
@@ -1073,13 +1179,21 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         cuit: customerRow.cuit,
         condicionIva: customerRow.condicion_iva ?? undefined
       },
-      totalForAfip
+      totalForAfip,
+      Number(invRow.agip_ret_per || 0) > 0.005
+        ? {
+            baseImp: totalForAfip,
+            alicuota: Number(invRow.agip_alicuota || 0),
+            importe: Number(invRow.agip_ret_per || 0)
+          }
+        : undefined
     );
 
     const creditNoteId = uuidv4();
     await execute(
-      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+        voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         creditNoteId,
         id,
@@ -1092,7 +1206,12 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         ncResult.cbteHasta,
         totalForAfip,
         'total',
-        null
+        null,
+        invRow.cae,
+        invRow.punto_venta,
+        invRow.cbte_tipo,
+        invRow.cbte_desde,
+        0,
       ]
     );
 
@@ -1135,6 +1254,8 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           id
         ]
       );
+
+      await execute(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
 
       res.status(201).json({
         message:
@@ -1342,7 +1463,9 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
     const rows = (await query(
-      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
+      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at,
+              voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde,
+              COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice
        FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC, id ASC`,
       [id]
     )) as any[];
@@ -1372,6 +1495,13 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
       amountByItemIndex: Record<number, number>;
       quantityByItemIndex: Record<number, number>;
       createdAt: string | null;
+      voidedInvoice?: {
+        cae: string;
+        puntoVta?: number;
+        cbteTipo?: number;
+        cbteDesde: number;
+      };
+      supersededByReinvoice?: boolean;
     };
 
     const groups = new Map<string, Grouped>();
@@ -1396,6 +1526,17 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
           amountByItemIndex: {},
           quantityByItemIndex: {},
           createdAt: r.created_at ?? null,
+          voidedInvoice: r.voided_invoice_cae
+            ? {
+                cae: String(r.voided_invoice_cae),
+                puntoVta:
+                  r.voided_invoice_punto_venta != null ? Number(r.voided_invoice_punto_venta) : undefined,
+                cbteTipo:
+                  r.voided_invoice_cbte_tipo != null ? Number(r.voided_invoice_cbte_tipo) : undefined,
+                cbteDesde: Number(r.voided_invoice_cbte_desde),
+              }
+            : undefined,
+          supersededByReinvoice: !!Number(r.superseded_by_reinvoice),
         };
         groups.set(key, g);
       }
@@ -1448,7 +1589,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
 
     const invRow = await get(
-      'SELECT id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?',
+      'SELECT id, punto_venta, cbte_tipo, cbte_desde, cae, agip_alicuota, agip_ret_per FROM invoices WHERE order_id = ?',
       [id]
     );
     if (!invRow) return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
@@ -1563,11 +1704,21 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       }
     }
 
+    const netFromOrder = await getOrderNetFromLineItems(id);
+    const netOrderTotal = netFromOrder > 0 ? netFromOrder : Number(orderRow.total) || 0;
+    const iibbNc = iibbPercepcionForOrderCreditNote(
+      Number(invRow.agip_alicuota || 0),
+      Number(invRow.agip_ret_per || 0),
+      amountToCredit,
+      netOrderTotal
+    );
+
     const { emitirNotaCredito: emitirNCAfip } = await import('../services/afip.service');
     const result = await emitirNCAfip(
       { puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde },
       { id: customerRow.id, businessName: customerRow.business_name ?? '', cuit: customerRow.cuit, condicionIva: customerRow.condicion_iva ?? undefined },
-      amountToCredit
+      amountToCredit,
+      iibbNc
     );
 
     const scope = tipo === 'items' ? 'item' : tipo;
@@ -1577,17 +1728,72 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       for (let i = 0; i < itemsToCredit.length; i++) {
         const it = itemsToCredit[i];
         await execute(
-          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [i === 0 ? firstCreditNoteId : uuidv4(), id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, it.amount, 'item', it.itemIndex]
+          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`,
+          [
+            i === 0 ? firstCreditNoteId : uuidv4(),
+            id,
+            invRow.id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            it.amount,
+            'item',
+            it.itemIndex,
+          ]
         );
       }
     } else {
-      await execute(
-        `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [firstCreditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]
-      );
+      if (tipo === 'total') {
+        await execute(
+          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            firstCreditNoteId,
+            id,
+            invRow.id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            amountToCredit,
+            scope,
+            itemIndexVal,
+            invRow.cae,
+            invRow.punto_venta,
+            invRow.cbte_tipo,
+            invRow.cbte_desde,
+            0,
+          ]
+        );
+      } else {
+        await execute(
+          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`,
+          [
+            firstCreditNoteId,
+            id,
+            invRow.id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            amountToCredit,
+            scope,
+            itemIndexVal,
+          ]
+        );
+      }
     }
 
     if (scope === 'total') {

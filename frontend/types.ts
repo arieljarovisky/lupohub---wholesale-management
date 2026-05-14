@@ -209,6 +209,17 @@ export interface Order {
   creditNotesItemCount?: number;
   /** Suma de montos netos creditados por NC del pedido (sin IVA), todas las filas `credit_notes` del pedido. */
   creditNotesNetoCredited?: number;
+  /**
+   * NC por el total que **sigue** anulando el CAE actual del pedido (0 tras NC + nueva factura / reemisión con IIBB).
+   * Si el backend no lo envía, el front asume el comportamiento antiguo (`creditNotesTotalCount`).
+   */
+  creditNotesActiveTotalVoidCount?: number;
+  /** Última NC total: comprobante anulado + datos de la NC (para la franja “Secuencia fiscal”). */
+  lastTotalCreditNoteFiscal?: {
+    voidedInvoice?: { cae: string; puntoVta?: number; cbteTipo?: number; cbteDesde: number };
+    creditNote: { cae: string; puntoVta: number; cbteTipo: number; cbteDesde: number };
+    supersededByReinvoice?: boolean;
+  };
   /** Si está archivado (oculto de la lista por defecto) */
   archived?: boolean;
   /** Cobro del pedido mayorista (cuenta corriente / saldos pendientes) */
@@ -246,6 +257,10 @@ export interface CreditNote {
   /** Cantidad creditada por índice de ítem (calculada por backend). */
   quantityByItemIndex?: Record<number, number>;
   createdAt?: string;
+  /** Comprobante de factura que esta NC anuló (snapshot al emitir). */
+  voidedInvoice?: { cae: string; puntoVta?: number; cbteTipo?: number; cbteDesde: number };
+  /** True si esta NC total quedó seguida de una nueva factura en el mismo pedido (reemisión con IIBB). */
+  supersededByReinvoice?: boolean;
 }
 
 export interface Visit {

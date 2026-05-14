@@ -753,6 +753,17 @@ export const api = {
         amountByItemIndex: sanitizeNumMap(r.amountByItemIndex),
         quantityByItemIndex: sanitizeNumMap(r.quantityByItemIndex),
         createdAt: r.createdAt,
+        voidedInvoice: r.voidedInvoice
+          ? {
+              cae: String((r.voidedInvoice as any).cae ?? ''),
+              puntoVta:
+                (r.voidedInvoice as any).puntoVta != null ? Number((r.voidedInvoice as any).puntoVta) : undefined,
+              cbteTipo:
+                (r.voidedInvoice as any).cbteTipo != null ? Number((r.voidedInvoice as any).cbteTipo) : undefined,
+              cbteDesde: Number((r.voidedInvoice as any).cbteDesde),
+            }
+          : undefined,
+        supersededByReinvoice: !!r.supersededByReinvoice,
       } as import('../types').CreditNote;
     });
   },
