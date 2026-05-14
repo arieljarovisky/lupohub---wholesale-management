@@ -5,6 +5,8 @@ const colors_controller_1 = require("../controllers/colors.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/', colors_controller_1.getColors);
+router.post('/import-standard-catalog', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.importStandardColorCatalog);
+router.post('/merge-four-digit-codes', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.mergeFourDigitColorCodes);
 router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.createColor);
 router.put('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, colors_controller_1.updateColor);
 exports.default = router;

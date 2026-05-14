@@ -17,7 +17,8 @@ import {
   exportTopWholesaleProductsMetricsXlsx,
   getOrderItemsMissingDespacho,
   assignDespachosToOrderItems,
-  assignRemitoNumber
+  assignRemitoNumber,
+  importOrdersFromMatrix,
 } from '../controllers/orders.controller';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
@@ -25,6 +26,7 @@ const router = Router();
 router.use(optionalAuthMiddleware);
 
 router.get('/', getOrders);
+router.post('/import-matrix', authMiddleware, importOrdersFromMatrix);
 router.post('/', createOrder);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
 router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDeduction);

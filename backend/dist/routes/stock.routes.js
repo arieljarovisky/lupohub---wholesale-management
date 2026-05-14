@@ -18,4 +18,6 @@ router.delete('/snapshot', stock_controller_1.deleteStockSnapshot);
 router.post('/import-history', stock_controller_1.importSalesHistory);
 // Importar stock desde Excel (CODIGO, COLOR, columnas P, M, G, GG, XG, XXG, XXXG)
 router.post('/import-excel', auth_1.authMiddleware, stock_controller_1.importStockFromExcel);
+// Planilla CODIGO + COLOR + talles dinámicos → stock + ítems del despacho
+router.post('/import-grid-to-despacho', auth_1.authMiddleware, stock_controller_1.importStockGridToDespacho);
 exports.default = router;

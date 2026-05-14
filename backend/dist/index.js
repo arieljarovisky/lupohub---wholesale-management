@@ -49,6 +49,7 @@ const add_customer_phone_iva_1 = require("./database/add_customer_phone_iva");
 const add_transportes_tables_1 = require("./database/add_transportes_tables");
 const add_invoices_table_1 = require("./database/add_invoices_table");
 const add_credit_notes_table_1 = require("./database/add_credit_notes_table");
+const add_credit_notes_voided_invoice_snapshot_1 = require("./database/add_credit_notes_voided_invoice_snapshot");
 const add_orders_archived_1 = require("./database/add_orders_archived");
 const add_price_lists_1 = require("./database/add_price_lists");
 const add_catalogs_table_1 = require("./database/add_catalogs_table");
@@ -168,6 +169,7 @@ function initDatabase() {
                 yield (0, add_transportes_tables_1.addTransportesTables)();
                 yield (0, add_invoices_table_1.addInvoicesTable)();
                 yield (0, add_credit_notes_table_1.addCreditNotesTable)();
+                yield (0, add_credit_notes_voided_invoice_snapshot_1.addCreditNotesVoidedInvoiceSnapshot)();
                 yield (0, add_orders_archived_1.addOrdersArchived)();
                 yield (0, add_price_lists_1.addPriceLists)();
                 yield (0, add_catalogs_table_1.addCatalogsTable)();

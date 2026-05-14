@@ -1,12 +1,13 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
-import { Order, OrderItem } from '../types';
+import { Order, OrderStatus } from '../types';
 import ExcelJS from 'exceljs';
 import {
   restoreStockForOrder,
   restoreStockForOrderItem,
   deductStockForOrder,
   isMayoristaStockDeductedForWholesale,
+  resolveVariantIdForGridCell,
 } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -545,155 +546,321 @@ export const getOrders = async (req: any, res: any) => {
   }
 };
 
-export const createOrder = async (req: any, res: any) => {
-  const newOrder: Order = req.body;
-  
-  if (!newOrder.customerId || !newOrder.items.length) {
-    return res.status(400).json({ message: "Datos de pedido inválidos" });
+async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrderId?: string): Promise<any> {
+  if (!newOrder.customerId || !newOrder.items?.length) {
+    const err: any = new Error('Datos de pedido inválidos');
+    err.statusCode = 400;
+    throw err;
   }
 
-  const user = req.user;
   let sellerId = newOrder.sellerId ?? null;
   if (user?.role === 'CUSTOMER') {
-    const { get } = await import('../database/db');
     const customer = await get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
     if (!customer || customer.id !== newOrder.customerId) {
-      return res.status(403).json({ message: 'Como cliente directo solo podés crear pedidos para tu propio perfil' });
+      const err: any = new Error('Como cliente directo solo podés crear pedidos para tu propio perfil');
+      err.statusCode = 403;
+      throw err;
     }
     sellerId = null;
   }
 
-  const orderId = newOrder.id || uuidv4();
+  const orderId = explicitOrderId || newOrder.id || uuidv4();
 
-  try {
-    const despachoWarnings: string[] = [];
-    const toSqlDate = (d: string) => {
-      try {
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) return new Date().toISOString().slice(0, 10);
-        return dt.toISOString().slice(0, 10);
-      } catch {
-        return new Date().toISOString().slice(0, 10);
-      }
-    };
-    const sqlDate = toSqlDate(newOrder.date);
-    const paymentStatus =
-      (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
-    const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
-    const createdBy = user?.id ?? null;
-    const requestedStatus = String(newOrder.status || 'Borrador');
-    const shouldStayPendingAdmin =
-      requestedStatus === 'Confirmado' && (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
-    const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
-    await execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]
-    );
+  const despachoWarnings: string[] = [];
+  const toSqlDate = (d: string) => {
+    try {
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return new Date().toISOString().slice(0, 10);
+      return dt.toISOString().slice(0, 10);
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  };
+  const sqlDate = toSqlDate(newOrder.date);
+  const paymentStatus =
+    (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+  const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
+  const createdBy = user?.id ?? null;
+  const requestedStatus = String(newOrder.status || 'Borrador');
+  const shouldStayPendingAdmin =
+    requestedStatus === 'Confirmado' && (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
+  const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+  await execute(
+    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]
+  );
 
-    for (const item of newOrder.items as any[]) {
-      let variantId = item.variantId;
-      if (!variantId && item.sku && item.colorCode && item.sizeCode) {
-        const row = await get(
-          `SELECT pv.id AS variant_id 
+  for (const item of newOrder.items as any[]) {
+    let variantId = item.variantId;
+    if (!variantId && item.sku && item.colorCode && item.sizeCode) {
+      const row = await get(
+        `SELECT pv.id AS variant_id 
            FROM products p 
            JOIN product_colors pc ON pc.product_id = p.id 
            JOIN colors c ON c.id = pc.color_id 
            JOIN product_variants pv ON pv.product_color_id = pc.id 
            JOIN sizes s ON s.id = pv.size_id 
            WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`,
-          [item.sku, item.colorCode, item.sizeCode]
-        );
-        variantId = row?.variant_id;
+        [item.sku, item.colorCode, item.sizeCode]
+      );
+      variantId = row?.variant_id;
+    }
+    if (!variantId && item.sku && item.colorCode && item.sizeCode) {
+      variantId =
+        (await resolveVariantIdForGridCell(
+          String(item.sku).trim(),
+          String(item.colorCode).trim(),
+          String(item.sizeCode).trim()
+        )) || undefined;
+    }
+    if (!variantId) {
+      const err: any = new Error('Falta variantId o sku+colorCode+sizeCode válidos en item');
+      err.statusCode = 400;
+      throw err;
+    }
+    const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
+    const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
+    const allocations = explicitDespachoId
+      ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
+      : await allocateOldestDespachosForVariant(variantId, item.quantity);
+    const unassignedQty = allocations
+      .filter((a) => !a.despachoId)
+      .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+    if (unassignedQty > 0) {
+      const itemLabel = await getItemLabelForWarning(item, variantId);
+      despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
+    }
+    for (const alloc of allocations) {
+      if (!alloc.quantity || alloc.quantity <= 0) continue;
+      await execute(
+        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uuidv4(), orderId, variantId, alloc.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, alloc.despachoId]
+      );
+    }
+  }
+
+  // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
+
+  const created = await get(
+    `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+            o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+     FROM orders o
+     LEFT JOIN users cu ON cu.id = o.created_by
+     LEFT JOIN users su ON su.id = o.seller_id
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (!created) {
+    return {
+      ...newOrder,
+      id: orderId,
+      paymentStatus,
+      despachoWarnings,
+      items: newOrder.items,
+    } as any;
+  }
+  const items = await query(
+    `
+    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+           pc.product_id AS productId,
+           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
+    FROM order_items i
+    JOIN product_variants pv ON pv.id = i.variant_id
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN sizes s ON s.id = pv.size_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
+    WHERE i.order_id = ?
+  `,
+    [orderId]
+  );
+  const itemsMapped = (items as any[]).map((row: any) => ({
+    variantId: row.variantId,
+    productId: row.productId,
+    despachoId: row.despachoId ?? undefined,
+    quantity: row.quantity,
+    picked: row.picked ?? 0,
+    priceAtMoment: Number(row.priceAtMoment),
+    sellAsPack: !!(row.sellAsPack),
+    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
+    sku: row.sku ?? undefined,
+    productName: row.productName ?? undefined,
+    sizeCode: row.sizeCode ?? undefined,
+    colorName: row.colorName ?? undefined,
+    numeroDespacho: row.numeroDespacho ?? undefined,
+  }));
+  return {
+    id: created.id,
+    customerId: created.customer_id,
+    sellerId: created.seller_id,
+    createdBy: (created as any).created_by ?? undefined,
+    createdByName: (created as any).created_by_name ?? undefined,
+    createdByRole: (created as any).created_by_role ?? undefined,
+    sellerName: (created as any).seller_name ?? undefined,
+    date: created.date,
+    status: created.status,
+    total: Number(created.total),
+    pickedBy: created.picked_by ?? undefined,
+    dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
+    items: itemsMapped,
+    paymentStatus: mapPaymentStatus(created),
+    noStockImpact: !!created.no_stock_impact,
+    despachoWarnings,
+  };
+}
+
+export const createOrder = async (req: any, res: any) => {
+  const newOrder: Order = req.body;
+  const user = req.user;
+  try {
+    const orderResponse = await persistNewWholesaleOrder(newOrder, user);
+    res.status(201).json(orderResponse);
+  } catch (error: any) {
+    console.error(error);
+    const code = error?.statusCode;
+    if (code === 400) return res.status(400).json({ message: error.message || 'Solicitud inválida' });
+    if (code === 403) return res.status(403).json({ message: error.message || 'Prohibido' });
+    res.status(500).json({ message: 'Error creating order' });
+  }
+};
+
+export interface MatrixImportLineInput {
+  customerRef: string;
+  codigo: string;
+  color: string;
+  sizeCode: string;
+  quantity: number;
+  unitPrice?: number | null;
+}
+
+/** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
+export const importOrdersFromMatrix = async (req: any, res: any) => {
+  const user = req.user;
+  if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
+  }
+
+  const padSku = (s: string) => {
+    const digits = String(s ?? '').replace(/\D/g, '');
+    if (!digits) return String(s ?? '').trim();
+    return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+  };
+
+  const resolvePrice = async (skuPad: string, excelPrice: unknown): Promise<number> => {
+    const ep = Number(excelPrice);
+    if (Number.isFinite(ep) && ep > 0) return ep;
+    const stripped = skuPad.replace(/^0+/, '') || skuPad;
+    const row = await get(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+    return Math.max(0, Number((row as any)?.base_price) || 0);
+  };
+
+  const findCustomer = async (customerRef: string): Promise<{ id: string; seller_id: string | null } | null> => {
+    const ref = String(customerRef ?? '').trim();
+    if (!ref) return null;
+    const lower = ref.toLowerCase();
+    const params: any[] = [lower, lower];
+    let sql = `SELECT id, seller_id FROM customers 
+      WHERE LOWER(TRIM(COALESCE(business_name,''))) = ? 
+         OR LOWER(TRIM(COALESCE(name,''))) = ?`;
+    if (user.role === 'SELLER') {
+      sql += ` AND seller_id = ?`;
+      params.push(user.id);
+    }
+    sql += ` LIMIT 1`;
+    let c = await get(sql, params);
+    if (!c && ref.length >= 2) {
+      const safe = ref.replace(/%/g, '').replace(/_/g, '');
+      const needle = `%${safe}%`;
+      const p2: any[] = [needle, needle];
+      let sql2 = `SELECT id, seller_id FROM customers WHERE business_name LIKE ? OR name LIKE ?`;
+      if (user.role === 'SELLER') {
+        sql2 += ` AND seller_id = ?`;
+        p2.push(user.id);
       }
-      if (!variantId) {
-        return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
-      }
-      const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
-      const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
-      const allocations = explicitDespachoId
-        ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
-        : await allocateOldestDespachosForVariant(variantId, item.quantity);
-      const unassignedQty = allocations
-        .filter((a) => !a.despachoId)
-        .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
-      if (unassignedQty > 0) {
-        const itemLabel = await getItemLabelForWarning(item, variantId);
-        despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
-      }
-      for (const alloc of allocations) {
-        if (!alloc.quantity || alloc.quantity <= 0) continue;
-        await execute(
-          `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), orderId, variantId, alloc.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, alloc.despachoId]
-        );
+      sql2 += ` LIMIT 1`;
+      c = await get(sql2, p2);
+    }
+    return c ? { id: (c as any).id, seller_id: (c as any).seller_id ?? null } : null;
+  };
+
+  try {
+    const body = req.body || {};
+    const linesRaw = body.lines as MatrixImportLineInput[] | undefined;
+    const dateStr =
+      typeof body.date === 'string' && body.date.trim() ? body.date.trim() : new Date().toISOString().slice(0, 10);
+    if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
+      return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
+    }
+
+    const byCustomer = new Map<string, MatrixImportLineInput[]>();
+    for (const ln of linesRaw) {
+      const ref = String(ln.customerRef ?? '').trim();
+      if (!ref) continue;
+      const key = ref.toLowerCase();
+      if (!byCustomer.has(key)) byCustomer.set(key, []);
+      byCustomer.get(key)!.push({ ...ln, customerRef: ref });
+    }
+
+    const created: any[] = [];
+    const errors: { customerRef: string; message: string }[] = [];
+
+    for (const [, groupLines] of byCustomer) {
+      const customerRef = groupLines[0]?.customerRef || '';
+      try {
+        const customer = await findCustomer(customerRef);
+        if (!customer) {
+          errors.push({ customerRef, message: 'Cliente no encontrado' });
+          continue;
+        }
+        const items: any[] = [];
+        for (const ln of groupLines) {
+          const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
+          if (qty <= 0) continue;
+          const codigo = padSku(String(ln.codigo ?? '').trim());
+          const color = String(ln.color ?? '').trim();
+          const sizeCode = String(ln.sizeCode ?? '').trim();
+          if (!codigo || !color || !sizeCode) continue;
+          const priceAtMoment = await resolvePrice(codigo, ln.unitPrice);
+          items.push({ sku: codigo, colorCode: color, sizeCode, quantity: qty, priceAtMoment });
+        }
+        if (items.length === 0) {
+          errors.push({ customerRef, message: 'Sin líneas con cantidad > 0' });
+          continue;
+        }
+        let total = 0;
+        for (const it of items) total += it.quantity * it.priceAtMoment;
+        const newOrder: Order = {
+          id: uuidv4(),
+          customerId: customer.id,
+          sellerId: customer.seller_id,
+          items: items as any,
+          total,
+          status: OrderStatus.DRAFT,
+          date: dateStr,
+        };
+        const saved = await persistNewWholesaleOrder(newOrder, user, newOrder.id);
+        created.push(saved);
+      } catch (e: any) {
+        console.error(e);
+        errors.push({
+          customerRef,
+          message: e?.statusCode === 400 ? e.message : e?.message || 'Error al crear pedido',
+        });
       }
     }
 
-    // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
-
-    const created = await get(
-      `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
-       FROM orders o
-       LEFT JOIN users cu ON cu.id = o.created_by
-       LEFT JOIN users su ON su.id = o.seller_id
-       WHERE o.id = ?`,
-      [orderId]
-    );
-    if (!created) return res.status(201).json({ ...newOrder, id: orderId, paymentStatus, despachoWarnings });
-    const items = await query(`
-      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
-             pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
-             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
-      FROM order_items i
-      JOIN product_variants pv ON pv.id = i.variant_id
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN sizes s ON s.id = pv.size_id
-      LEFT JOIN colors c ON c.id = pc.color_id
-      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
-      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
-      WHERE i.order_id = ?
-    `, [orderId]);
-    const itemsMapped = (items as any[]).map((row: any) => ({
-      variantId: row.variantId,
-      productId: row.productId,
-      despachoId: row.despachoId ?? undefined,
-      quantity: row.quantity,
-      picked: row.picked ?? 0,
-      priceAtMoment: Number(row.priceAtMoment),
-      sellAsPack: !!(row.sellAsPack),
-      mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-      sku: row.sku ?? undefined,
-      productName: row.productName ?? undefined,
-      sizeCode: row.sizeCode ?? undefined,
-      colorName: row.colorName ?? undefined,
-      numeroDespacho: row.numeroDespacho ?? undefined
-    }));
-    const orderResponse = {
-      id: created.id,
-      customerId: created.customer_id,
-      sellerId: created.seller_id,
-      createdBy: (created as any).created_by ?? undefined,
-      createdByName: (created as any).created_by_name ?? undefined,
-      createdByRole: (created as any).created_by_role ?? undefined,
-      sellerName: (created as any).seller_name ?? undefined,
-      date: created.date,
-      status: created.status,
-      total: Number(created.total),
-      pickedBy: created.picked_by ?? undefined,
-      dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-      items: itemsMapped,
-      paymentStatus: mapPaymentStatus(created),
-      noStockImpact: !!created.no_stock_impact,
-      despachoWarnings
-    };
-    res.status(201).json(orderResponse);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error creating order" });
+    res.status(201).json({
+      created,
+      errors,
+      counts: { created: created.length, errors: errors.length },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Error importando pedidos' });
   }
 };
 

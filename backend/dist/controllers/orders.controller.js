@@ -45,8 +45,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.recalculateStoredInvoiceAgip = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.createOrder = exports.getOrders = void 0;
+exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.reemitirFacturaConAgip = exports.recalculateStoredInvoiceAgip = exports.deleteOrder = exports.archiveOrder = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.updateOrder = exports.updateOrderStatus = exports.importOrdersFromMatrix = exports.createOrder = exports.getOrders = void 0;
 const db_1 = require("../database/db");
+const types_1 = require("../types");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
@@ -59,6 +60,76 @@ function getProductIdForVariant(variantId) {
      LIMIT 1`, [variantId]);
         return (row === null || row === void 0 ? void 0 : row.product_id) || null;
     });
+}
+/** ¿La factura vigente del pedido sigue siendo la misma que anuló esta NC total? (snapshot voided_* = invoice actual). */
+function totalCreditNoteStillVoidsCurrentInvoice(invoice, cn) {
+    var _a, _b;
+    if (!(cn === null || cn === void 0 ? void 0 : cn.voided_invoice_cae))
+        return true;
+    if (!invoice)
+        return true;
+    const pvInv = Number((_a = invoice.puntoVta) !== null && _a !== void 0 ? _a : 0);
+    const pvV = Number((_b = cn.voided_invoice_punto_venta) !== null && _b !== void 0 ? _b : 0);
+    return (String(cn.voided_invoice_cae) === String(invoice.cae) &&
+        Number(cn.voided_invoice_cbte_desde) === Number(invoice.cbteDesde) &&
+        pvInv === pvV &&
+        Number(cn.voided_invoice_cbte_tipo) === Number(invoice.cbteTipo));
+}
+/** NC totales que siguen “anulando” el comprobante actual (sin reemplazo o datos legacy sin snapshot). */
+function countActiveTotalCreditNoteVoid(invoice, totalCnList) {
+    let n = 0;
+    for (const cn of totalCnList) {
+        if (Number(cn.superseded_by_reinvoice))
+            continue;
+        if (!cn.voided_invoice_cae) {
+            n++;
+            continue;
+        }
+        if (totalCreditNoteStillVoidsCurrentInvoice(invoice, cn))
+            n++;
+    }
+    return n;
+}
+function buildLastTotalCreditNoteFiscalPayload(lastCn) {
+    if (!lastCn)
+        return undefined;
+    return {
+        voidedInvoice: lastCn.voided_invoice_cae
+            ? {
+                cae: String(lastCn.voided_invoice_cae),
+                puntoVta: lastCn.voided_invoice_punto_venta != null ? Number(lastCn.voided_invoice_punto_venta) : undefined,
+                cbteTipo: lastCn.voided_invoice_cbte_tipo != null ? Number(lastCn.voided_invoice_cbte_tipo) : undefined,
+                cbteDesde: Number(lastCn.voided_invoice_cbte_desde),
+            }
+            : undefined,
+        creditNote: {
+            cae: String(lastCn.cae),
+            puntoVta: Number(lastCn.punto_venta),
+            cbteTipo: Number(lastCn.cbte_tipo),
+            cbteDesde: Number(lastCn.cbte_desde),
+        },
+        supersededByReinvoice: !!Number(lastCn.superseded_by_reinvoice),
+    };
+}
+/**
+ * Percepción IIBB para la NC en AFIP según `invoices.agip_*` (misma lógica que la factura).
+ * En NC parcial se prorratea el importe de percepción según neto creditado / neto total del pedido.
+ */
+function iibbPercepcionForOrderCreditNote(invAgipAlicuota, invAgipRetPer, netAmountCredited, invoiceFullNet) {
+    const retFull = Math.round((Number(invAgipRetPer) || 0) * 100) / 100;
+    if (!(retFull > 0.005))
+        return undefined;
+    const full = Math.max(Math.round((Number(invoiceFullNet) || 0) * 100) / 100, 0.01);
+    const netCred = Math.round((Number(netAmountCredited) || 0) * 100) / 100;
+    const ratio = Math.min(1, Math.max(0, netCred / full));
+    const importe = Math.round(retFull * ratio * 100) / 100;
+    if (!(importe > 0.005))
+        return undefined;
+    return {
+        baseImp: netCred,
+        alicuota: Math.round((Number(invAgipAlicuota) || 0) * 100) / 100,
+        importe,
+    };
 }
 function allocateOldestDespachosForVariant(variantId, requestedQty) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -401,6 +472,24 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         catch (_) {
             // Tabla credit_notes puede no existir en DB antiguas
         }
+        let totalCnsByOrderId = {};
+        try {
+            const cnTotalDetailRows = yield (0, db_1.query)(`SELECT order_id, id, cae, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+                voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde,
+                COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
+                created_at
+         FROM credit_notes
+         WHERE order_id IN (${placeholders}) AND scope = 'total'
+         ORDER BY created_at ASC, id ASC`, orderIds);
+            for (const r of cnTotalDetailRows) {
+                if (!totalCnsByOrderId[r.order_id])
+                    totalCnsByOrderId[r.order_id] = [];
+                totalCnsByOrderId[r.order_id].push(r);
+            }
+        }
+        catch (_) {
+            totalCnsByOrderId = {};
+        }
         let mayoristaStockLoaded = false;
         let mayoristaStockAppliedByOrder = {};
         try {
@@ -420,36 +509,45 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             // stock_movements puede no existir en DB antiguas
         }
         const ordersFull = ordersRow.map((order) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
-            return ({
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+            const inv = invoiceByOrderId[order.id];
+            const totalCnList = totalCnsByOrderId[order.id] || [];
+            const activeTotalVoid = countActiveTotalCreditNoteVoid(inv, totalCnList);
+            const lastTotalCn = totalCnList.length ? totalCnList[totalCnList.length - 1] : undefined;
+            const totalCnt = (_a = creditNotesTotalByOrderId[order.id]) !== null && _a !== void 0 ? _a : 0;
+            return {
                 id: order.id,
                 customerId: order.customer_id,
-                customerBusinessName: (_b = (_a = order.customer_business_name) !== null && _a !== void 0 ? _a : order.customer_name) !== null && _b !== void 0 ? _b : undefined,
+                customerBusinessName: (_c = (_b = order.customer_business_name) !== null && _b !== void 0 ? _b : order.customer_name) !== null && _c !== void 0 ? _c : undefined,
                 sellerId: order.seller_id,
-                createdBy: (_c = order.created_by) !== null && _c !== void 0 ? _c : undefined,
-                createdByName: (_d = order.created_by_name) !== null && _d !== void 0 ? _d : undefined,
-                createdByRole: (_e = order.created_by_role) !== null && _e !== void 0 ? _e : undefined,
-                sellerName: (_f = order.seller_name) !== null && _f !== void 0 ? _f : undefined,
+                createdBy: (_d = order.created_by) !== null && _d !== void 0 ? _d : undefined,
+                createdByName: (_e = order.created_by_name) !== null && _e !== void 0 ? _e : undefined,
+                createdByRole: (_f = order.created_by_role) !== null && _f !== void 0 ? _f : undefined,
+                sellerName: (_g = order.seller_name) !== null && _g !== void 0 ? _g : undefined,
                 date: order.date,
                 status: order.status,
                 total: Number(order.total),
-                pickedBy: (_g = order.picked_by) !== null && _g !== void 0 ? _g : undefined,
+                pickedBy: (_h = order.picked_by) !== null && _h !== void 0 ? _h : undefined,
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 archived: !!(order.archived),
                 remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
                 items: itemsByOrderId[order.id] || [],
-                invoice: (_h = invoiceByOrderId[order.id]) !== null && _h !== void 0 ? _h : undefined,
+                invoice: inv !== null && inv !== void 0 ? inv : undefined,
                 creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
-                creditNotesTotalCount: (_k = creditNotesTotalByOrderId[order.id]) !== null && _k !== void 0 ? _k : 0,
-                creditNotesItemCount: (_l = creditNotesItemByOrderId[order.id]) !== null && _l !== void 0 ? _l : 0,
+                creditNotesTotalCount: totalCnt,
+                creditNotesItemCount: (_k = creditNotesItemByOrderId[order.id]) !== null && _k !== void 0 ? _k : 0,
+                /** NC total que sigue anulando el CAE actual del pedido (0 si ya hay factura nueva tras reemisión). */
+                creditNotesActiveTotalVoidCount: activeTotalVoid,
+                /** Última NC por el total: comprobante anulado + NC (para UI de secuencia fiscal). */
+                lastTotalCreditNoteFiscal: totalCnt > 0 ? buildLastTotalCreditNoteFiscalPayload(lastTotalCn) : undefined,
                 /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
-                creditNotesNetoCredited: (_m = creditNotesNetoCreditedByOrderId[order.id]) !== null && _m !== void 0 ? _m : 0,
+                creditNotesNetoCredited: (_l = creditNotesNetoCreditedByOrderId[order.id]) !== null && _l !== void 0 ? _l : 0,
                 paymentStatus: mapPaymentStatus(order),
                 noStockImpact: !!order.no_stock_impact,
                 mayoristaStockApplied: mayoristaStockLoaded
                     ? mayoristaStockAppliedByOrder[order.id] === true
                     : undefined
-            });
+            };
         });
         res.json(ordersFull);
     }
@@ -459,24 +557,25 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
 });
 exports.getOrders = getOrders;
-const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
-    const newOrder = req.body;
-    if (!newOrder.customerId || !newOrder.items.length) {
-        return res.status(400).json({ message: "Datos de pedido inválidos" });
-    }
-    const user = req.user;
-    let sellerId = (_a = newOrder.sellerId) !== null && _a !== void 0 ? _a : null;
-    if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
-        const { get } = yield Promise.resolve().then(() => __importStar(require('../database/db')));
-        const customer = yield get('SELECT id FROM customers WHERE user_id = ?', [user.id]);
-        if (!customer || customer.id !== newOrder.customerId) {
-            return res.status(403).json({ message: 'Como cliente directo solo podés crear pedidos para tu propio perfil' });
+function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        if (!newOrder.customerId || !((_a = newOrder.items) === null || _a === void 0 ? void 0 : _a.length)) {
+            const err = new Error('Datos de pedido inválidos');
+            err.statusCode = 400;
+            throw err;
         }
-        sellerId = null;
-    }
-    const orderId = newOrder.id || (0, uuid_1.v4)();
-    try {
+        let sellerId = (_b = newOrder.sellerId) !== null && _b !== void 0 ? _b : null;
+        if ((user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER') {
+            const customer = yield (0, db_1.get)('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+            if (!customer || customer.id !== newOrder.customerId) {
+                const err = new Error('Como cliente directo solo podés crear pedidos para tu propio perfil');
+                err.statusCode = 403;
+                throw err;
+            }
+            sellerId = null;
+        }
+        const orderId = explicitOrderId || newOrder.id || (0, uuid_1.v4)();
         const despachoWarnings = [];
         const toSqlDate = (d) => {
             try {
@@ -492,7 +591,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sqlDate = toSqlDate(newOrder.date);
         const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
-        const createdBy = (_b = user === null || user === void 0 ? void 0 : user.id) !== null && _b !== void 0 ? _b : null;
+        const createdBy = (_c = user === null || user === void 0 ? void 0 : user.id) !== null && _c !== void 0 ? _c : null;
         const requestedStatus = String(newOrder.status || 'Borrador');
         const shouldStayPendingAdmin = requestedStatus === 'Confirmado' && ((user === null || user === void 0 ? void 0 : user.role) === 'SELLER' || (user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER');
         const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
@@ -509,8 +608,14 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
            WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [item.sku, item.colorCode, item.sizeCode]);
                 variantId = row === null || row === void 0 ? void 0 : row.variant_id;
             }
+            if (!variantId && item.sku && item.colorCode && item.sizeCode) {
+                variantId =
+                    (yield (0, stock_controller_1.resolveVariantIdForGridCell)(String(item.sku).trim(), String(item.colorCode).trim(), String(item.sizeCode).trim())) || undefined;
+            }
             if (!variantId) {
-                return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
+                const err = new Error('Falta variantId o sku+colorCode+sizeCode válidos en item');
+                err.statusCode = 400;
+                throw err;
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const explicitDespachoId = yield resolveDespachoIdForItem(item, variantId);
@@ -527,34 +632,36 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             for (const alloc of allocations) {
                 if (!alloc.quantity || alloc.quantity <= 0)
                     continue;
-                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_c = item.priceAtMoment) !== null && _c !== void 0 ? _c : 0, sellAsPack, alloc.despachoId]);
+                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_d = item.priceAtMoment) !== null && _d !== void 0 ? _d : 0, sellAsPack, alloc.despachoId]);
             }
         }
         // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
-       FROM orders o
-       LEFT JOIN users cu ON cu.id = o.created_by
-       LEFT JOIN users su ON su.id = o.seller_id
-       WHERE o.id = ?`, [orderId]);
-        if (!created)
-            return res.status(201).json(Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus, despachoWarnings }));
+            o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+     FROM orders o
+     LEFT JOIN users cu ON cu.id = o.created_by
+     LEFT JOIN users su ON su.id = o.seller_id
+     WHERE o.id = ?`, [orderId]);
+        if (!created) {
+            return Object.assign(Object.assign({}, newOrder), { id: orderId, paymentStatus,
+                despachoWarnings, items: newOrder.items });
+        }
         const items = yield (0, db_1.query)(`
-      SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-             COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
-             pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
-             COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
-      FROM order_items i
-      JOIN product_variants pv ON pv.id = i.variant_id
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN sizes s ON s.id = pv.size_id
-      LEFT JOIN colors c ON c.id = pc.color_id
-      LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
-      LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
-      WHERE i.order_id = ?
-    `, [orderId]);
+    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+           pc.product_id AS productId,
+           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
+    FROM order_items i
+    JOIN product_variants pv ON pv.id = i.variant_id
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN sizes s ON s.id = pv.size_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
+    WHERE i.order_id = ?
+  `, [orderId]);
         const itemsMapped = items.map((row) => {
             var _a, _b, _c, _d, _e, _f, _g;
             return ({
@@ -570,35 +677,177 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 productName: (_d = row.productName) !== null && _d !== void 0 ? _d : undefined,
                 sizeCode: (_e = row.sizeCode) !== null && _e !== void 0 ? _e : undefined,
                 colorName: (_f = row.colorName) !== null && _f !== void 0 ? _f : undefined,
-                numeroDespacho: (_g = row.numeroDespacho) !== null && _g !== void 0 ? _g : undefined
+                numeroDespacho: (_g = row.numeroDespacho) !== null && _g !== void 0 ? _g : undefined,
             });
         });
-        const orderResponse = {
+        return {
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            createdBy: (_d = created.created_by) !== null && _d !== void 0 ? _d : undefined,
-            createdByName: (_e = created.created_by_name) !== null && _e !== void 0 ? _e : undefined,
-            createdByRole: (_f = created.created_by_role) !== null && _f !== void 0 ? _f : undefined,
-            sellerName: (_g = created.seller_name) !== null && _g !== void 0 ? _g : undefined,
+            createdBy: (_e = created.created_by) !== null && _e !== void 0 ? _e : undefined,
+            createdByName: (_f = created.created_by_name) !== null && _f !== void 0 ? _f : undefined,
+            createdByRole: (_g = created.created_by_role) !== null && _g !== void 0 ? _g : undefined,
+            sellerName: (_h = created.seller_name) !== null && _h !== void 0 ? _h : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_h = created.picked_by) !== null && _h !== void 0 ? _h : undefined,
+            pickedBy: (_j = created.picked_by) !== null && _j !== void 0 ? _j : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
             noStockImpact: !!created.no_stock_impact,
-            despachoWarnings
+            despachoWarnings,
         };
+    });
+}
+const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const newOrder = req.body;
+    const user = req.user;
+    try {
+        const orderResponse = yield persistNewWholesaleOrder(newOrder, user);
         res.status(201).json(orderResponse);
     }
     catch (error) {
         console.error(error);
-        res.status(500).json({ message: "Error creating order" });
+        const code = error === null || error === void 0 ? void 0 : error.statusCode;
+        if (code === 400)
+            return res.status(400).json({ message: error.message || 'Solicitud inválida' });
+        if (code === 403)
+            return res.status(403).json({ message: error.message || 'Prohibido' });
+        res.status(500).json({ message: 'Error creating order' });
     }
 });
 exports.createOrder = createOrder;
+/** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
+const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    const user = req.user;
+    if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
+        return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
+    }
+    const padSku = (s) => {
+        const digits = String(s !== null && s !== void 0 ? s : '').replace(/\D/g, '');
+        if (!digits)
+            return String(s !== null && s !== void 0 ? s : '').trim();
+        return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+    };
+    const resolvePrice = (skuPad, excelPrice) => __awaiter(void 0, void 0, void 0, function* () {
+        const ep = Number(excelPrice);
+        if (Number.isFinite(ep) && ep > 0)
+            return ep;
+        const stripped = skuPad.replace(/^0+/, '') || skuPad;
+        const row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+        return Math.max(0, Number(row === null || row === void 0 ? void 0 : row.base_price) || 0);
+    });
+    const findCustomer = (customerRef) => __awaiter(void 0, void 0, void 0, function* () {
+        var _a;
+        const ref = String(customerRef !== null && customerRef !== void 0 ? customerRef : '').trim();
+        if (!ref)
+            return null;
+        const lower = ref.toLowerCase();
+        const params = [lower, lower];
+        let sql = `SELECT id, seller_id FROM customers 
+      WHERE LOWER(TRIM(COALESCE(business_name,''))) = ? 
+         OR LOWER(TRIM(COALESCE(name,''))) = ?`;
+        if (user.role === 'SELLER') {
+            sql += ` AND seller_id = ?`;
+            params.push(user.id);
+        }
+        sql += ` LIMIT 1`;
+        let c = yield (0, db_1.get)(sql, params);
+        if (!c && ref.length >= 2) {
+            const safe = ref.replace(/%/g, '').replace(/_/g, '');
+            const needle = `%${safe}%`;
+            const p2 = [needle, needle];
+            let sql2 = `SELECT id, seller_id FROM customers WHERE business_name LIKE ? OR name LIKE ?`;
+            if (user.role === 'SELLER') {
+                sql2 += ` AND seller_id = ?`;
+                p2.push(user.id);
+            }
+            sql2 += ` LIMIT 1`;
+            c = yield (0, db_1.get)(sql2, p2);
+        }
+        return c ? { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null } : null;
+    });
+    try {
+        const body = req.body || {};
+        const linesRaw = body.lines;
+        const dateStr = typeof body.date === 'string' && body.date.trim() ? body.date.trim() : new Date().toISOString().slice(0, 10);
+        if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
+            return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
+        }
+        const byCustomer = new Map();
+        for (const ln of linesRaw) {
+            const ref = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
+            if (!ref)
+                continue;
+            const key = ref.toLowerCase();
+            if (!byCustomer.has(key))
+                byCustomer.set(key, []);
+            byCustomer.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: ref }));
+        }
+        const created = [];
+        const errors = [];
+        for (const [, groupLines] of byCustomer) {
+            const customerRef = ((_b = groupLines[0]) === null || _b === void 0 ? void 0 : _b.customerRef) || '';
+            try {
+                const customer = yield findCustomer(customerRef);
+                if (!customer) {
+                    errors.push({ customerRef, message: 'Cliente no encontrado' });
+                    continue;
+                }
+                const items = [];
+                for (const ln of groupLines) {
+                    const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
+                    if (qty <= 0)
+                        continue;
+                    const codigo = padSku(String((_c = ln.codigo) !== null && _c !== void 0 ? _c : '').trim());
+                    const color = String((_d = ln.color) !== null && _d !== void 0 ? _d : '').trim();
+                    const sizeCode = String((_e = ln.sizeCode) !== null && _e !== void 0 ? _e : '').trim();
+                    if (!codigo || !color || !sizeCode)
+                        continue;
+                    const priceAtMoment = yield resolvePrice(codigo, ln.unitPrice);
+                    items.push({ sku: codigo, colorCode: color, sizeCode, quantity: qty, priceAtMoment });
+                }
+                if (items.length === 0) {
+                    errors.push({ customerRef, message: 'Sin líneas con cantidad > 0' });
+                    continue;
+                }
+                let total = 0;
+                for (const it of items)
+                    total += it.quantity * it.priceAtMoment;
+                const newOrder = {
+                    id: (0, uuid_1.v4)(),
+                    customerId: customer.id,
+                    sellerId: customer.seller_id,
+                    items: items,
+                    total,
+                    status: types_1.OrderStatus.DRAFT,
+                    date: dateStr,
+                };
+                const saved = yield persistNewWholesaleOrder(newOrder, user, newOrder.id);
+                created.push(saved);
+            }
+            catch (e) {
+                console.error(e);
+                errors.push({
+                    customerRef,
+                    message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',
+                });
+            }
+        }
+        res.status(201).json({
+            created,
+            errors,
+            counts: { created: created.length, errors: errors.length },
+        });
+    }
+    catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Error importando pedidos' });
+    }
+});
+exports.importOrdersFromMatrix = importOrdersFromMatrix;
 const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const { status, pickedBy } = req.body;
@@ -981,6 +1230,173 @@ const recalculateStoredInvoiceAgip = (req, res) => __awaiter(void 0, void 0, voi
     }
 });
 exports.recalculateStoredInvoiceAgip = recalculateStoredInvoiceAgip;
+/**
+ * Anula la factura actual en AFIP con una **NC total** solo con neto + IVA (sin percepción IIBB en la NC; sin tocar stock)
+ * y emite una **nueva factura** con percepción IIBB informada en WSFE. Actualiza la fila `invoices` con el nuevo CAE.
+ *
+ * Requisitos: el pedido tiene factura, **no** tiene notas de crédito previas, y el padrón AGIP
+ * devuelve percepción > 0 para el neto del pedido.
+ */
+const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e;
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+        return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden reemitir la factura con IIBB' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const invRow = yield (0, db_1.get)(`SELECT id, order_id, punto_venta, cbte_tipo, cbte_desde, cae, agip_alicuota, agip_ret_per FROM invoices WHERE order_id = ?`, [id]);
+        if (!invRow) {
+            return res.status(400).json({ message: 'Este pedido no tiene factura emitida.' });
+        }
+        const cnCountRow = yield (0, db_1.get)(`SELECT COUNT(*) AS c FROM credit_notes WHERE order_id = ?`, [id]);
+        if (Number((cnCountRow === null || cnCountRow === void 0 ? void 0 : cnCountRow.c) || 0) > 0) {
+            return res.status(400).json({
+                message: 'No se puede reemitir: el pedido ya tiene notas de crédito. Si necesitás corregir la facturación, coordiná con el contador o emití manualmente en AFIP.'
+            });
+        }
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
+        if (!orderRow)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
+        if (!customerRow)
+            return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+        const netFromItems = yield getOrderNetFromLineItems(id);
+        const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
+        if (totalForAfip <= 0) {
+            return res.status(400).json({ message: 'El neto del pedido debe ser mayor a 0 para reemitir.' });
+        }
+        const agip = yield getAgipRetentionForOrder({
+            orderDate: orderRow.date,
+            customerCuit: customerRow.cuit,
+            netAmount: totalForAfip
+        });
+        if (!agip || !(agip.amount > 0.005)) {
+            return res.status(400).json({
+                message: 'No hay percepción IIBB calculable para reemitir (padrón AGIP en cero o CUIT incompleto). Si solo querés actualizar el PDF sin nuevo CAE, usá “Guardar IIBB”.'
+            });
+        }
+        const cbteTipoFromBody = (_a = req.body) === null || _a === void 0 ? void 0 : _a.cbteTipo;
+        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
+        const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        // NC total de reemisión: solo neto + IVA en AFIP (sin percepción IIBB). El IIBB se informa en la factura nueva.
+        const ncResult = yield emitirNCAfip({
+            puntoVta: invRow.punto_venta,
+            cbteTipo: invRow.cbte_tipo,
+            cbteDesde: invRow.cbte_desde
+        }, {
+            id: customerRow.id,
+            businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '',
+            cuit: customerRow.cuit,
+            condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined
+        }, totalForAfip, undefined);
+        const creditNoteId = (0, uuid_1.v4)();
+        yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+        voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            creditNoteId,
+            id,
+            invRow.id,
+            ncResult.cae,
+            ncResult.caeFchVto || null,
+            ncResult.puntoVta,
+            ncResult.cbteTipo,
+            ncResult.cbteDesde,
+            ncResult.cbteHasta,
+            totalForAfip,
+            'total',
+            null,
+            invRow.cae,
+            invRow.punto_venta,
+            invRow.cbte_tipo,
+            invRow.cbte_desde,
+            0,
+        ]);
+        const iibbPercepcion = {
+            baseImp: totalForAfip,
+            alicuota: agip.alicuota,
+            importe: agip.amount
+        };
+        try {
+            const faResult = yield emitirAfip({
+                id: orderRow.id,
+                date: orderRow.date,
+                total: totalForAfip,
+                customerId: orderRow.customer_id,
+                iibbPercepcion
+            }, {
+                id: customerRow.id,
+                businessName: (_d = customerRow.business_name) !== null && _d !== void 0 ? _d : '',
+                cuit: customerRow.cuit,
+                condicionIva: (_e = customerRow.condicion_iva) !== null && _e !== void 0 ? _e : null
+            }, forceCbteTipo);
+            yield (0, db_1.execute)(`UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?
+         WHERE order_id = ?`, [
+                faResult.cae,
+                faResult.caeFchVto || null,
+                faResult.puntoVta,
+                faResult.cbteTipo,
+                faResult.cbteDesde,
+                faResult.cbteHasta,
+                agip.alicuota,
+                agip.amount,
+                id
+            ]);
+            yield (0, db_1.execute)(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
+            res.status(201).json({
+                message: 'Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
+                creditNote: {
+                    id: creditNoteId,
+                    orderId: id,
+                    cae: ncResult.cae,
+                    caeFchVto: ncResult.caeFchVto,
+                    puntoVta: ncResult.puntoVta,
+                    cbteTipo: ncResult.cbteTipo,
+                    cbteDesde: ncResult.cbteDesde,
+                    cbteHasta: ncResult.cbteHasta,
+                    amountCredited: totalForAfip
+                },
+                invoice: {
+                    id: invRow.id,
+                    orderId: id,
+                    cae: faResult.cae,
+                    caeFchVto: faResult.caeFchVto,
+                    puntoVta: faResult.puntoVta,
+                    cbteTipo: faResult.cbteTipo,
+                    cbteDesde: faResult.cbteDesde,
+                    cbteHasta: faResult.cbteHasta,
+                    agipAlicuota: agip.alicuota,
+                    agipRetPer: agip.amount
+                }
+            });
+        }
+        catch (faErr) {
+            console.error('reemitirFacturaConAgip: nueva factura falló tras NC:', faErr);
+            res.status(500).json({
+                message: 'Se emitió la nota de crédito en AFIP pero falló la nueva factura. Completá la factura en AFIP con percepción IIBB y actualizá manualmente la fila en `invoices`, o contactá soporte con el CAE de la NC.',
+                creditNoteEmitted: true,
+                creditNote: {
+                    id: creditNoteId,
+                    cae: ncResult.cae,
+                    puntoVta: ncResult.puntoVta,
+                    cbteTipo: ncResult.cbteTipo,
+                    cbteDesde: ncResult.cbteDesde,
+                    cbteHasta: ncResult.cbteHasta
+                },
+                detail: (faErr === null || faErr === void 0 ? void 0 : faErr.message) || String(faErr)
+            });
+        }
+    }
+    catch (error) {
+        console.error('reemitirFacturaConAgip:', error);
+        const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error reemitiendo factura con IIBB';
+        const status = msg.includes('no configurado') ? 503 : 500;
+        res.status(status).json({ message: msg });
+    }
+});
+exports.reemitirFacturaConAgip = reemitirFacturaConAgip;
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
@@ -1126,7 +1542,9 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const rows = (yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at
+        const rows = (yield (0, db_1.query)(`SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at,
+              voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde,
+              COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice
        FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC, id ASC`, [id]));
         // Necesitamos los precios de los ítems para inferir cantidades por línea.
         const itemRows = (yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id ASC`, [id]));
@@ -1154,6 +1572,15 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
                     amountByItemIndex: {},
                     quantityByItemIndex: {},
                     createdAt: (_k = r.created_at) !== null && _k !== void 0 ? _k : null,
+                    voidedInvoice: r.voided_invoice_cae
+                        ? {
+                            cae: String(r.voided_invoice_cae),
+                            puntoVta: r.voided_invoice_punto_venta != null ? Number(r.voided_invoice_punto_venta) : undefined,
+                            cbteTipo: r.voided_invoice_cbte_tipo != null ? Number(r.voided_invoice_cbte_tipo) : undefined,
+                            cbteDesde: Number(r.voided_invoice_cbte_desde),
+                        }
+                        : undefined,
+                    supersededByReinvoice: !!Number(r.superseded_by_reinvoice),
                 };
                 groups.set(key, g);
             }
@@ -1207,7 +1634,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const orderRow = yield (0, db_1.get)('SELECT id, customer_id, total FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
-        const invRow = yield (0, db_1.get)('SELECT id, punto_venta, cbte_tipo, cbte_desde FROM invoices WHERE order_id = ?', [id]);
+        const invRow = yield (0, db_1.get)('SELECT id, punto_venta, cbte_tipo, cbte_desde, cae, agip_alicuota, agip_ret_per FROM invoices WHERE order_id = ?', [id]);
         if (!invRow)
             return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
         const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
@@ -1308,21 +1735,77 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 return res.status(400).json({ message: 'El monto total a creditar debe ser mayor a 0.' });
             }
         }
+        const netFromOrder = yield getOrderNetFromLineItems(id);
+        const netOrderTotal = netFromOrder > 0 ? netFromOrder : Number(orderRow.total) || 0;
+        const iibbNc = iibbPercepcionForOrderCreditNote(Number(invRow.agip_alicuota || 0), Number(invRow.agip_ret_per || 0), amountToCredit, netOrderTotal);
         const { emitirNotaCredito: emitirNCAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '', cuit: customerRow.cuit, condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined }, amountToCredit);
+        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '', cuit: customerRow.cuit, condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined }, amountToCredit, iibbNc);
         const scope = tipo === 'items' ? 'item' : tipo;
         const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
         const firstCreditNoteId = (0, uuid_1.v4)();
         if (tipo === 'items') {
             for (let i = 0; i < itemsToCredit.length; i++) {
                 const it = itemsToCredit[i];
-                yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [i === 0 ? firstCreditNoteId : (0, uuid_1.v4)(), id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, it.amount, 'item', it.itemIndex]);
+                yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`, [
+                    i === 0 ? firstCreditNoteId : (0, uuid_1.v4)(),
+                    id,
+                    invRow.id,
+                    result.cae,
+                    result.caeFchVto || null,
+                    result.puntoVta,
+                    result.cbteTipo,
+                    result.cbteDesde,
+                    result.cbteHasta,
+                    it.amount,
+                    'item',
+                    it.itemIndex,
+                ]);
             }
         }
         else {
-            yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [firstCreditNoteId, id, invRow.id, result.cae, result.caeFchVto || null, result.puntoVta, result.cbteTipo, result.cbteDesde, result.cbteHasta, amountToCredit, scope, itemIndexVal]);
+            if (tipo === 'total') {
+                yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                    firstCreditNoteId,
+                    id,
+                    invRow.id,
+                    result.cae,
+                    result.caeFchVto || null,
+                    result.puntoVta,
+                    result.cbteTipo,
+                    result.cbteDesde,
+                    result.cbteHasta,
+                    amountToCredit,
+                    scope,
+                    itemIndexVal,
+                    invRow.cae,
+                    invRow.punto_venta,
+                    invRow.cbte_tipo,
+                    invRow.cbte_desde,
+                    0,
+                ]);
+            }
+            else {
+                yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+            voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`, [
+                    firstCreditNoteId,
+                    id,
+                    invRow.id,
+                    result.cae,
+                    result.caeFchVto || null,
+                    result.puntoVta,
+                    result.cbteTipo,
+                    result.cbteDesde,
+                    result.cbteHasta,
+                    amountToCredit,
+                    scope,
+                    itemIndexVal,
+                ]);
+            }
         }
         if (scope === 'total') {
             const stockResult = yield (0, stock_controller_1.restoreStockForOrder)(id);

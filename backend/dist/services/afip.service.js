@@ -238,13 +238,12 @@ function emitirFactura(order, customer, forceCbteTipo) {
         }
         const impIva = Math.round(impNeto * 0.21 * 100) / 100;
         const perc = order.iibbPercepcion;
-        const impTributo = perc && Number(perc.importe) > 0.005
-            ? Math.round(Number(perc.importe) * 100) / 100
-            : 0;
-        const baseIibb = perc && Number(perc.baseImp) > 0
-            ? Math.round(Number(perc.baseImp) * 100) / 100
-            : impNeto;
-        const alicuotaIibb = perc && impTributo > 0 ? Math.round(Number(perc.alicuota || 0) * 100) / 100 : 0;
+        const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
+        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const rawBase = perc != null ? Number(perc.baseImp) : 0;
+        const baseIibb = Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
+        const rawAlic = perc != null ? Number(perc.alicuota) : 0;
+        const alicuotaIibb = impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
         const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
         // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
         const dateStr = new Date().toISOString().split('T')[0];
@@ -302,15 +301,17 @@ function emitirFactura(order, customer, forceCbteTipo) {
             ]
         };
         if (impTributo > 0) {
+            // Id 99 = otros / percepción IIBB (ejemplo oficial AfipSDK). Descripción en castellano sin caracteres raros.
             data.Tributos = [
                 {
                     Id: TRIBUTO_OTROS_IIBB,
-                    Desc: 'Percepción IIBB',
+                    Desc: 'Ingresos Brutos',
                     BaseImp: baseIibb,
                     Alic: alicuotaIibb,
                     Importe: impTributo
                 }
             ];
+            console.log(`[AFIP] Factura con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
         const res = yield afip.ElectronicBilling.createVoucher(data);
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
@@ -333,8 +334,9 @@ function emitirFactura(order, customer, forceCbteTipo) {
  * @param facturaOriginal - Factura que se está creditando (Pto.Vta, Tipo, Nro)
  * @param customer - Cliente (mismo que la factura)
  * @param amountToCredit - Monto neto a creditar (sin IVA). Se calcula IVA 21% internamente.
+ * @param iibbPercepcion - Si la factura original tenía percepción IIBB en AFIP (`invoices.agip_*`), debe informarse igual en la NC (ImpTrib + Tributos Id 99).
  */
-function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
+function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercepcion) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d;
         const config = getConfig();
@@ -400,7 +402,14 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             throw new Error(`El monto neto de la nota de crédito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
         }
         const impIva = Math.round(impNeto * 0.21 * 100) / 100;
-        const total = Math.round((impNeto + impIva) * 100) / 100;
+        const perc = iibbPercepcion;
+        const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
+        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const rawBase = perc != null ? Number(perc.baseImp) : 0;
+        const baseIibb = Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
+        const rawAlic = perc != null ? Number(perc.alicuota) : 0;
+        const alicuotaIibb = impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
+        const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
         const dateStr = new Date().toISOString().split('T')[0];
         const fecha = dateStr.replace(/-/g, '');
         const cbteFch = parseInt(fecha, 10);
@@ -444,7 +453,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
             ImpNeto: impNeto,
             ImpOpEx: 0,
             ImpIVA: impIva,
-            ImpTrib: 0,
+            ImpTrib: impTributo,
             MonId: 'PES',
             MonCotiz: 1,
             CondicionIVAReceptorId: condicionIva,
@@ -460,6 +469,18 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit) {
                 { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
             ]
         };
+        if (impTributo > 0) {
+            data.Tributos = [
+                {
+                    Id: TRIBUTO_OTROS_IIBB,
+                    Desc: 'Ingresos Brutos',
+                    BaseImp: baseIibb,
+                    Alic: alicuotaIibb,
+                    Importe: impTributo
+                }
+            ];
+            console.log(`[AFIP] Nota de crédito con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
+        }
         const res = yield afip.ElectronicBilling.createVoucher(data);
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';

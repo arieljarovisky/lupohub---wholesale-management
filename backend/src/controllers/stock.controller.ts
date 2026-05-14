@@ -1289,7 +1289,7 @@ function sizeCandidatesFromGridKey(gridKey: string): string[] {
   return [...out];
 }
 
-async function resolveVariantIdForGridCell(
+export async function resolveVariantIdForGridCell(
   codigo: string,
   colorStr: string,
   gridSizeKey: string

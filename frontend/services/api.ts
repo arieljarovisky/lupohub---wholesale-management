@@ -599,6 +599,24 @@ export const api = {
       return await request<Order>('/orders', 'POST', order);
     }, order, 'createOrder');
   },
+
+  importOrdersFromMatrix: async (payload: {
+    date?: string;
+    lines: Array<{
+      customerRef: string;
+      codigo: string;
+      color: string;
+      sizeCode: string;
+      quantity: number;
+      unitPrice?: number | null;
+    }>;
+  }): Promise<{
+    created: Order[];
+    errors: { customerRef: string; message: string }[];
+    counts: { created: number; errors: number };
+  }> => {
+    return await request('/orders/import-matrix', 'POST', payload);
+  },
   
   updateOrder: async (order: Order): Promise<Order> => {
     return handleRequest(async () => {

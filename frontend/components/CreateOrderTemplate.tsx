@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List, Upload } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
-import { useNotification } from '../context/NotificationContext';
+import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
 
@@ -25,6 +25,10 @@ interface CreateOrderTemplateProps {
    * facturados sin que el usuario pueda modificarlos.
    */
   readOnly?: boolean;
+  /**
+   * Tras importar pedidos desde Excel (varios clientes), opcionalmente refrescar lista y volver a pedidos.
+   */
+  onMatrixImportDone?: () => void | Promise<void>;
 }
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
@@ -94,12 +98,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   priceLists = [],
   selectedPriceListId = null,
   onPriceListChange,
-  readOnly = false
+  readOnly = false,
+  onMatrixImportDone
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
+  const matrixFileRef = useRef<HTMLInputElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
@@ -112,15 +118,71 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [addingColorsForCode, setAddingColorsForCode] = useState<string | null>(null);
   /** Códigos de artículo colapsados (solo se muestra resumen). */
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [matrixImporting, setMatrixImporting] = useState(false);
 
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
+  const canMatrixImport = useMemo(() => {
+    if (readOnly || initialOrder) return false;
+    if (!role || role === Role.CUSTOMER) return false;
+    return (
+      role === Role.ADMIN ||
+      role === Role.WAREHOUSE ||
+      role === Role.DEPOSITO ||
+      role === Role.SELLER
+    );
+  }, [readOnly, initialOrder, role]);
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const draftRestoredRef = useRef(false);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
   }, [customers, onPriceListChange]);
+
+  const onMatrixImportExcel = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file || matrixImporting) return;
+      setMatrixImporting(true);
+      try {
+        const lines = await parseOrderMatrixExcel(file);
+        if (!lines.length) {
+          showToast(
+            'error',
+            'No se encontraron filas válidas. Revisá columnas Cliente (o nombre de hoja), Código, Color y talles.'
+          );
+          return;
+        }
+        const res = await api.importOrdersFromMatrix({ date: orderDate, lines });
+        const { errors, counts } = res;
+        if (counts.created > 0) {
+          showToast('success', `Se crearon ${counts.created} pedido(s) en borrador.`);
+        }
+        if (errors.length > 0) {
+          const sample = errors
+            .slice(0, 5)
+            .map((x) => `${x.customerRef}: ${x.message}`)
+            .join(' · ');
+          showToast(
+            'error',
+            errors.length <= 5
+              ? sample
+              : `${errors.length} grupos con error. Ej.: ${sample}`
+          );
+        }
+        if (counts.created > 0 && onMatrixImportDone) {
+          await Promise.resolve(onMatrixImportDone());
+        }
+      } catch (err: any) {
+        const msg = err?.response?.data?.message || err?.message || 'Error al importar';
+        showToast('error', msg);
+      } finally {
+        setMatrixImporting(false);
+      }
+    },
+    [matrixImporting, orderDate, onMatrixImportDone, showToast]
+  );
 
   const isEditing = !!initialOrder;
   const sizeColumns = useMemo(() => {
@@ -861,13 +923,36 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <span className="mx-1.5">·</span>
           <span className="font-semibold text-slate-300">{totalUnits}</span> unidades
         </p>
-        <button
-          type="button"
-          onClick={() => setShowAddModal(true)}
-          className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/30 active:scale-[0.98] transition touch-manipulation"
-        >
-          <Plus size={22} strokeWidth={2.5} /> Agregar artículo
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
+          {canMatrixImport && (
+            <>
+              <input
+                ref={matrixFileRef}
+                type="file"
+                accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                className="hidden"
+                onChange={onMatrixImportExcel}
+              />
+              <button
+                type="button"
+                onClick={() => matrixFileRef.current?.click()}
+                disabled={matrixImporting || savingOrder}
+                className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
+                title="Una hoja o varias: columnas Cliente/Ref., Código, Color, talles (U, P, G…) y Precio opcional. Sin columna cliente se usa el nombre de la hoja."
+              >
+                <Upload size={20} strokeWidth={2.5} />
+                {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/30 active:scale-[0.98] transition touch-manipulation"
+          >
+            <Plus size={22} strokeWidth={2.5} /> Agregar artículo
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">

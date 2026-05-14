@@ -448,6 +448,18 @@ const App: React.FC = () => {
     }
   };
 
+  const handleMatrixImportDone = useCallback(async () => {
+    try {
+      const list = await api.getOrders();
+      setOrders(list);
+    } catch {
+      showToast('error', 'No se pudo actualizar la lista de pedidos');
+    }
+    setEditingOrder(null);
+    editingOrderIdRef.current = null;
+    setCurrentView('orders');
+  }, [showToast]);
+
   const handleEditOrder = (order: Order) => {
     editingOrderIdRef.current = order.id;
     setEditingOrder(order);
@@ -1054,6 +1066,7 @@ const App: React.FC = () => {
                 selectedPriceListId={createOrderPriceListId}
                 onPriceListChange={setCreateOrderPriceListId}
                 readOnly={!!editingOrder?.invoice}
+                onMatrixImportDone={handleMatrixImportDone}
               />
             </Suspense>
           ) : null}

@@ -225,7 +225,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           c.name AS customer_name,
           i.cae,
           i.cae_fch_vto AS cae_fch_vto,
-          i.created_at
+          i.created_at,
+          i.agip_alicuota,
+          i.agip_ret_per,
+          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -250,7 +253,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           c.name AS customer_name,
           cn.cae,
           cn.cae_fch_vto AS cae_fch_vto,
-          MIN(cn.created_at) AS created_at
+          MIN(cn.created_at) AS created_at,
+          0 AS agip_alicuota,
+          0 AS agip_ret_per,
+          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -277,7 +283,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 customerBusinessName: (_b = (_a = r.customer_business_name) !== null && _a !== void 0 ? _a : r.customer_name) !== null && _b !== void 0 ? _b : '',
                 cae: r.cae,
                 caeFchVto: (_c = r.cae_fch_vto) !== null && _c !== void 0 ? _c : null,
-                createdAt: r.created_at
+                createdAt: r.created_at,
+                creditNotesCount: Number(r.credit_notes_count) || 0,
+                agipAlicuota: Number(r.agip_alicuota) || 0,
+                agipRetPer: Number(r.agip_ret_per) || 0
             });
         });
         // Integrar facturas importadas desde Tango/Multimedias en la misma vista de facturación.
@@ -351,7 +360,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         customerBusinessName: (_c = (_b = r.customer_business_name) !== null && _b !== void 0 ? _b : r.customer_name) !== null && _c !== void 0 ? _c : '',
                         cae: null,
                         caeFchVto: null,
-                        createdAt: null
+                        createdAt: null,
+                        creditNotesCount: 0,
+                        agipAlicuota: 0,
+                        agipRetPer: 0
                     }
                 };
             })

@@ -47,6 +47,7 @@ exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const talles_tango_1 = require("../talles-tango");
+const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const stock_controller_1 = require("./stock.controller");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -949,6 +950,114 @@ function findColumn(headers, name) {
     }
     return -1;
 }
+/** Coincidencia exacta del encabezado normalizado (sin acentos, minúsculas). */
+function findColumnExact(headers, ...targets) {
+    for (const t of targets) {
+        const want = normalizeHeader(t);
+        for (let i = 0; i < headers.length; i++) {
+            if (normalizeHeader(headers[i]) === want)
+                return i;
+        }
+    }
+    return -1;
+}
+/**
+ * Color numérico: catálogo 3 dígitos; si el Excel trae 4+ dígitos (ej. 2021 → 202), se usan los primeros 3.
+ */
+function normalizeColorCodeForImport(val) {
+    return (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)(val);
+}
+/** Talle Tango numérico o letra (P, M, G, GG, XG…). */
+function normalizeTalleForImport(val) {
+    const s = String(val !== null && val !== void 0 ? val : '').trim();
+    if (!s)
+        return '';
+    return (0, talles_tango_1.codigoTalleParaSku)(s);
+}
+function parseRgbToHex(val) {
+    const s = String(val !== null && val !== void 0 ? val : '').trim();
+    if (!s)
+        return null;
+    const m = s.replace(/\s/g, '').match(/^(\d{1,3}),(\d{1,3}),(\d{1,3})$/);
+    if (!m)
+        return null;
+    const r = Math.min(255, parseInt(m[1], 10));
+    const g = Math.min(255, parseInt(m[2], 10));
+    const b = Math.min(255, parseInt(m[3], 10));
+    if ([r, g, b].some((x) => Number.isNaN(x)))
+        return null;
+    return ('#' +
+        [r, g, b]
+            .map((x) => x.toString(16).padStart(2, '0'))
+            .join('')
+            .toUpperCase());
+}
+function parseCantidadCell(val) {
+    if (val == null || val === '')
+        return undefined;
+    const n = typeof val === 'number' && Number.isFinite(val) ? Math.trunc(val) : parseInt(String(val).trim(), 10);
+    if (!Number.isFinite(n) || n < 0)
+        return undefined;
+    return Math.min(n, 9999999);
+}
+function resolveTangoImportLayout(headers) {
+    const descIdx = findColumn(headers, 'descripcion');
+    const descKey = descIdx >= 0 ? headers[descIdx] : null;
+    const talleIdx = findColumnExact(headers, 'talle', 'talla', 'size');
+    const colorCodeIdx = findColumnExact(headers, 'codigo color', 'codigocolor', 'codigo co', 'codigo col', 'codigo colo', 'codcolor');
+    const colorNameIdx = findColumnExact(headers, 'color', 'nombre color');
+    let colorKey = null;
+    let colorNameKey = null;
+    if (colorCodeIdx >= 0) {
+        colorKey = headers[colorCodeIdx];
+        if (colorNameIdx >= 0 && colorNameIdx !== colorCodeIdx)
+            colorNameKey = headers[colorNameIdx];
+    }
+    else if (colorNameIdx >= 0) {
+        colorKey = headers[colorNameIdx];
+    }
+    if (talleIdx >= 0 && colorKey) {
+        const used = new Set([talleIdx, colorCodeIdx >= 0 ? colorCodeIdx : -1, colorNameIdx >= 0 ? colorNameIdx : -1].filter((i) => i >= 0));
+        let articuloIdx = findColumnExact(headers, 'articulo', 'artículo', 'sku');
+        if (articuloIdx < 0 || used.has(articuloIdx)) {
+            const skuCol = findColumn(headers, 'sku');
+            if (skuCol >= 0 && !used.has(skuCol))
+                articuloIdx = skuCol;
+        }
+        if (articuloIdx < 0 || used.has(articuloIdx)) {
+            articuloIdx = findColumnExact(headers, 'codigo articulo', 'codigoarticulo');
+        }
+        if (articuloIdx < 0 || used.has(articuloIdx)) {
+            articuloIdx = findColumnExact(headers, 'codigo', 'código');
+        }
+        if (articuloIdx < 0 || used.has(articuloIdx)) {
+            return {
+                error: 'Con columnas Talle y Color/Código color hace falta también una columna de artículo (Articulo, Codigo, SKU o Codigo articulo).',
+            };
+        }
+        const modeloIdx = findColumnExact(headers, 'modelo', 'model');
+        const cantidadIdx = findColumnExact(headers, 'cantidad', 'qty', 'quantity');
+        const rgbIdx = findColumnExact(headers, 'rgb');
+        return {
+            mode: 'triple',
+            articuloKey: headers[articuloIdx],
+            talleKey: headers[talleIdx],
+            colorKey,
+            descKey,
+            colorNameKey,
+            modeloKey: modeloIdx >= 0 ? headers[modeloIdx] : null,
+            cantidadKey: cantidadIdx >= 0 ? headers[cantidadIdx] : null,
+            rgbKey: rgbIdx >= 0 ? headers[rgbIdx] : null,
+        };
+    }
+    const codigoCol = findColumn(headers, 'codigo');
+    if (codigoCol < 0) {
+        return {
+            error: 'No se encontró columna Código. Usá un código Tango completo en una columna "Código", o columnas: Código/Articulo/SKU + Talle + Código color (o Color) — opcional Modelo, Descripción, Cantidad, RGB.',
+        };
+    }
+    return { mode: 'single', codigoKey: headers[codigoCol], descKey };
+}
 /**
  * Parsea un código Tango respetando los caracteres no numéricos del prefijo (ej.: "Q05875", "C01303").
  *
@@ -996,42 +1105,93 @@ function parseCodigoTango(codigo) {
     return { articulo, talle, color, codigo13: codigoCompleto, codigoCompleto };
 }
 const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
-        const { rows: rawRows, onlyComplete = true } = req.body;
+        const body = req.body;
+        const { rows: rawRows, onlyComplete = true } = body;
+        const keepStockOnExistingVariants = body.keepStockOnExistingVariants !== false;
+        const despachoIdRaw = body.despachoId != null ? String(body.despachoId).trim() : '';
+        let despachoLink = null;
+        if (despachoIdRaw) {
+            const dRow = yield (0, db_1.get)(`SELECT id, pais_origen FROM despachos WHERE id = ? LIMIT 1`, [despachoIdRaw]);
+            if (!(dRow === null || dRow === void 0 ? void 0 : dRow.id)) {
+                return res.status(400).json({ message: 'despachoId no válido: no existe ese despacho.' });
+            }
+            despachoLink = { id: dRow.id, pais_origen: (_a = dRow.pais_origen) !== null && _a !== void 0 ? _a : null };
+        }
         if (!Array.isArray(rawRows) || rawRows.length === 0) {
-            return res.status(400).json({ message: 'Se requiere un array "rows" con las filas del Excel (con columna C?digo y opcional Descripci?n).' });
+            return res.status(400).json({
+                message: 'Se requiere un array "rows" con filas del Excel: columna "Código" (Tango completo) o columnas Código/Articulo + Talle + Código color (o solo Color numérico); opcional Modelo, Descripción, Cantidad, RGB.',
+            });
         }
         const headers = Object.keys(rawRows[0] || {});
-        const codigoCol = findColumn(headers, 'codigo');
-        if (codigoCol < 0) {
-            return res.status(400).json({ message: 'No se encontr? la columna "C?digo" en las filas enviadas.' });
+        const layout = resolveTangoImportLayout(headers);
+        if ('error' in layout) {
+            return res.status(400).json({ message: layout.error });
         }
-        const descCol = findColumn(headers, 'descripcion');
-        const codigoKey = headers[codigoCol];
-        const descKey = descCol >= 0 ? headers[descCol] : null;
         const rows = [];
-        for (const row of rawRows) {
-            const codigo = row[codigoKey];
-            const parsed = parseCodigoTango(codigo);
-            // Una variante es "completa" cuando trae artículo + talle + color (la fila "Es base" no los tiene).
-            const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
-            if (!isCompleta && onlyComplete)
-                continue;
-            const descripcion = (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
-            rows.push({
-                articulo: parsed.articulo,
-                talle: parsed.talle,
-                color: parsed.color,
-                codigo13: parsed.codigoCompleto,
-                descripcion,
-            });
+        if (layout.mode === 'triple') {
+            const { articuloKey, talleKey, colorKey, descKey, colorNameKey, modeloKey, cantidadKey, rgbKey } = layout;
+            for (const row of rawRows) {
+                const articulo = String((_b = row[articuloKey]) !== null && _b !== void 0 ? _b : '').trim();
+                const talle = normalizeTalleForImport(row[talleKey]);
+                const color = normalizeColorCodeForImport(row[colorKey]);
+                const parsed = { articulo, talle, color, codigoCompleto: `${articulo}${talle}${color}` };
+                const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
+                if (!isCompleta && onlyComplete)
+                    continue;
+                const descripcion = (descKey && row[descKey] != null && String(row[descKey]).trim()) ||
+                    (modeloKey && row[modeloKey] != null && String(row[modeloKey]).trim()) ||
+                    parsed.articulo;
+                const colorName = colorNameKey ? String((_c = row[colorNameKey]) !== null && _c !== void 0 ? _c : '').trim() : '';
+                const initialStock = cantidadKey ? parseCantidadCell(row[cantidadKey]) : undefined;
+                const colorHex = rgbKey ? parseRgbToHex(row[rgbKey]) : null;
+                const rec = {
+                    articulo: parsed.articulo,
+                    talle: parsed.talle,
+                    color: parsed.color,
+                    codigo13: parsed.codigoCompleto,
+                    descripcion,
+                };
+                if (colorName)
+                    rec.colorName = colorName;
+                if (initialStock !== undefined)
+                    rec.initialStock = initialStock;
+                if (colorHex)
+                    rec.colorHex = colorHex;
+                rows.push(rec);
+            }
+        }
+        else {
+            const { codigoKey, descKey } = layout;
+            for (const row of rawRows) {
+                const codigo = row[codigoKey];
+                const parsed = parseCodigoTango(codigo);
+                const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
+                if (!isCompleta && onlyComplete)
+                    continue;
+                const descripcion = (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
+                rows.push({
+                    articulo: parsed.articulo,
+                    talle: parsed.talle,
+                    color: parsed.color,
+                    codigo13: parsed.codigoCompleto,
+                    descripcion,
+                });
+            }
         }
         let productsCreated = 0;
         let variantsCreated = 0;
         let variantsUpdated = 0;
+        let stockUpdatesSkipped = 0;
+        let despachoItemsInserted = 0;
+        let despachoItemsUpdated = 0;
+        let despachoProductsTagged = 0;
         const errors = [];
         const productNamesByArticulo = {};
+        const paisForProductUpdate = (despachoLink === null || despachoLink === void 0 ? void 0 : despachoLink.pais_origen) && String(despachoLink.pais_origen).trim()
+            ? String(despachoLink.pais_origen).trim()
+            : 'Brasil';
         for (const r of rows) {
             try {
                 if (!r.articulo || !r.talle || !r.color)
@@ -1039,39 +1199,83 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 if (!productNamesByArticulo[r.articulo] && r.descripcion) {
                     productNamesByArticulo[r.articulo] = r.descripcion;
                 }
-                let productId = ((_a = (yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [r.articulo]))) === null || _a === void 0 ? void 0 : _a.id) || null;
+                let productId = ((_d = (yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [r.articulo]))) === null || _d === void 0 ? void 0 : _d.id) || null;
                 if (!productId) {
                     productId = (0, uuid_1.v4)();
                     const name = productNamesByArticulo[r.articulo] || r.articulo;
                     yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`, [productId, r.articulo, name, 'General', 0, null]);
                     productsCreated++;
                 }
-                let sizeId = (_b = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _b === void 0 ? void 0 : _b.id;
+                let sizeId = (_e = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _e === void 0 ? void 0 : _e.id;
                 if (!sizeId) {
                     sizeId = (0, uuid_1.v4)();
                     const talleNombre = (0, talles_tango_1.nombreTalleDesdeCodigo)(r.talle);
                     yield (0, db_1.execute)(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, talleNombre]);
                 }
-                let colorId = (_c = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _c === void 0 ? void 0 : _c.id;
+                let colorId = (_f = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _f === void 0 ? void 0 : _f.id;
                 if (!colorId) {
                     colorId = (0, uuid_1.v4)();
-                    yield (0, db_1.execute)(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, r.color, r.color, '#000000']);
+                    const name = (r.colorName && r.colorName.trim()) || r.color;
+                    const hex = r.colorHex || '#000000';
+                    yield (0, db_1.execute)(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, name, r.color, hex]);
                 }
-                let productColorId = (_d = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _d === void 0 ? void 0 : _d.id;
+                let productColorId = (_g = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _g === void 0 ? void 0 : _g.id;
                 if (!productColorId) {
                     productColorId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
                 }
                 const existingVariant = yield (0, db_1.get)(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+                let variantId;
                 if (!existingVariant) {
-                    const variantId = (0, uuid_1.v4)();
+                    variantId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, r.codigo13]);
-                    yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, 0) ON DUPLICATE KEY UPDATE stock = stock`, [variantId]);
+                    const qty = (_h = r.initialStock) !== null && _h !== void 0 ? _h : 0;
+                    yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
                     variantsCreated++;
                 }
                 else {
-                    yield (0, db_1.execute)(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, existingVariant.id]);
+                    variantId = existingVariant.id;
+                    yield (0, db_1.execute)(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, variantId]);
                     variantsUpdated++;
+                    if (r.initialStock !== undefined) {
+                        if (keepStockOnExistingVariants) {
+                            stockUpdatesSkipped++;
+                        }
+                        else {
+                            yield (0, db_1.execute)(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, variantId]);
+                        }
+                    }
+                }
+                if (despachoLink) {
+                    let qtyDespacho;
+                    if (r.initialStock !== undefined) {
+                        qtyDespacho = Math.max(0, Math.floor(Number(r.initialStock) || 0));
+                    }
+                    else {
+                        const stRow = yield (0, db_1.get)(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
+                        qtyDespacho = Math.max(0, Math.floor(Number(stRow === null || stRow === void 0 ? void 0 : stRow.stock) || 0));
+                    }
+                    const prodRow = yield (0, db_1.get)(`SELECT name FROM products WHERE id = ?`, [productId]);
+                    const prodName = String((prodRow === null || prodRow === void 0 ? void 0 : prodRow.name) || r.articulo || '').trim();
+                    const descripcionItem = `${prodName} - ${r.codigo13}`.trim();
+                    if (qtyDespacho > 0) {
+                        const di = yield (0, db_1.get)(`SELECT id FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`, [despachoLink.id, variantId]);
+                        if (di === null || di === void 0 ? void 0 : di.id) {
+                            yield (0, db_1.execute)(`UPDATE despacho_items SET cantidad = ?, product_id = ?, descripcion_item = ? WHERE id = ?`, [qtyDespacho, productId, descripcionItem, di.id]);
+                            despachoItemsUpdated++;
+                        }
+                        else {
+                            const diId = (0, uuid_1.v4)();
+                            yield (0, db_1.execute)(`INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item) VALUES (?, ?, ?, ?, ?, NULL, ?)`, [diId, despachoLink.id, productId, variantId, qtyDespacho, descripcionItem]);
+                            despachoItemsInserted++;
+                        }
+                    }
+                    yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
+                        despachoLink.id,
+                        paisForProductUpdate,
+                        productId
+                    ]);
+                    despachoProductsTagged++;
                 }
             }
             catch (err) {
@@ -1079,17 +1283,23 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         }
         res.json({
-            message: 'Importaci?n Tango finalizada',
+            message: 'Importación Tango finalizada',
             productsCreated,
             variantsCreated,
             variantsUpdated,
             totalProcessed: rows.filter((r) => r.articulo && r.talle && r.color).length,
+            keepStockOnExistingVariants,
+            stockUpdatesSkipped: keepStockOnExistingVariants ? stockUpdatesSkipped : 0,
+            despachoId: despachoLink === null || despachoLink === void 0 ? void 0 : despachoLink.id,
+            despachoItemsInserted,
+            despachoItemsUpdated,
+            despachoProductsTagged,
             errors: errors.slice(0, 50),
         });
     }
     catch (error) {
         console.error('Import Tango:', error);
-        res.status(500).json({ message: 'Error importando art?culos Tango', error: error === null || error === void 0 ? void 0 : error.message });
+        res.status(500).json({ message: 'Error importando artículos Tango', error: error === null || error === void 0 ? void 0 : error.message });
     }
 });
 exports.importTangoArticles = importTangoArticles;

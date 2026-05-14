@@ -45,12 +45,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importStockGridToDespacho = exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.resolveVariantIdForGridCell = resolveVariantIdForGridCell;
 const db_1 = require("../database/db");
 const axios_1 = __importDefault(require("axios"));
+const uuid_1 = require("uuid");
 const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const lupoStockWebhook_service_1 = require("../services/lupoStockWebhook.service");
+const talles_tango_1 = require("../talles-tango");
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant = {};
 /** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
@@ -1025,7 +1028,7 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
      JOIN colors c ON c.id = pc.color_id
      JOIN product_variants pv ON pv.product_color_id = pc.id
      JOIN sizes s ON s.id = pv.size_id
-     WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [codigoTrim, colorStr, sizeStr]);
+     WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [codigoTrim, colorStr, colorStr, sizeStr]);
         if (row === null || row === void 0 ? void 0 : row.variant_id)
             return row.variant_id;
         const padded = padArticleCodeTo7(codigoTrim);
@@ -1036,7 +1039,7 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
        JOIN colors c ON c.id = pc.color_id
        JOIN product_variants pv ON pv.product_color_id = pc.id
        JOIN sizes s ON s.id = pv.size_id
-       WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [padded, colorStr, sizeStr]);
+       WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [padded, colorStr, colorStr, sizeStr]);
             if (row === null || row === void 0 ? void 0 : row.variant_id)
                 return row.variant_id;
         }
@@ -1049,7 +1052,7 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
      JOIN colors c ON c.id = pc.color_id
      JOIN product_variants pv ON pv.product_color_id = pc.id
      JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND c.code = ? AND s.size_code = ?`, [normalized, colorStr, sizeStr]);
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [normalized, colorStr, colorStr, sizeStr]);
         if (row === null || row === void 0 ? void 0 : row.variant_id)
             return row.variant_id;
         const pattern = escapeLike(normalized) + '%';
@@ -1059,12 +1062,90 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
      JOIN colors c ON c.id = pc.color_id
      JOIN product_variants pv ON pv.product_color_id = pc.id
      JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND c.code = ? AND s.size_code = ?
-     LIMIT 1`, [pattern, colorStr, sizeStr]);
+     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?
+     LIMIT 1`, [pattern, colorStr, colorStr, sizeStr]);
         return (row === null || row === void 0 ? void 0 : row.variant_id) || null;
     });
 }
-const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
+const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG'];
+function sizeCandidatesFromGridKey(gridKey) {
+    const raw = String(gridKey !== null && gridKey !== void 0 ? gridKey : '').trim();
+    if (!raw)
+        return [];
+    const u = raw.toUpperCase().replace(/\s+/g, ' ');
+    const out = new Set();
+    const add = (x) => {
+        const t = String(x).trim();
+        if (t)
+            out.add(t);
+    };
+    add(raw);
+    add(u);
+    const dash = u.match(/^(\d{2,4})\s*[-–]\s*(.+)$/);
+    if (dash) {
+        add(dash[1]);
+        add((0, talles_tango_1.codigoTalleParaSku)(dash[1]));
+        add(dash[2].trim());
+        add((0, talles_tango_1.codigoTalleParaSku)(dash[2].trim()));
+    }
+    add((0, talles_tango_1.codigoTalleParaSku)(u));
+    add((0, talles_tango_1.codigoTalleParaSku)(raw));
+    return [...out];
+}
+function resolveVariantIdForGridCell(codigo, colorStr, gridSizeKey) {
+    return __awaiter(this, void 0, void 0, function* () {
+        for (const sc of sizeCandidatesFromGridKey(gridSizeKey)) {
+            const id = yield getVariantIdByCodigoColorSize(codigo, colorStr, sc);
+            if (id)
+                return id;
+        }
+        return null;
+    });
+}
+const GRID_RESERVED_KEYS = new Set([
+    'codigo',
+    'código',
+    'color',
+    'col',
+    'descripcion',
+    'descripción',
+    'modelo',
+    'precio',
+    'total',
+    'subtotal',
+    'importe',
+    'sku',
+    'articulo',
+    'artículo',
+    'nombre',
+    'producto',
+    'stock',
+    'deposito',
+    'depósito',
+    'categoria',
+    'categoría',
+    'proveedor',
+    'cod',
+    'notas',
+    'obs',
+    'observaciones',
+    'marca',
+    'cantidad',
+].map((k) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '')));
+function isGridReservedKey(key) {
+    const k = key
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    if (!k)
+        return true;
+    if (GRID_RESERVED_KEYS.has(k))
+        return true;
+    if (k.startsWith('_'))
+        return true;
+    return false;
+}
 function parseStockValue(v) {
     if (v === null || v === undefined || v === '')
         return 0;
@@ -1125,3 +1206,111 @@ const importStockFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.importStockFromExcel = importStockFromExcel;
+/**
+ * Planilla tipo inventario Lupo (CODIGO + COLOR + columnas de talles: P, 10, 130 - P, etc.):
+ * actualiza stock del depósito y vincula ítems al despacho indicado.
+ */
+const importStockGridToDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    try {
+        const { despachoId, rows: rawRows, updateDepotStock = true } = req.body;
+        const despId = despachoId != null ? String(despachoId).trim() : '';
+        if (!despId) {
+            return res.status(400).json({ message: 'despachoId es requerido' });
+        }
+        if (!Array.isArray(rawRows) || rawRows.length === 0) {
+            return res.status(400).json({
+                message: 'Se requiere un array "rows" (planilla CODIGO + COLOR + columnas de talles).',
+            });
+        }
+        const despacho = yield (0, db_1.get)(`SELECT id, pais_origen, numero_despacho FROM despachos WHERE id = ?`, [despId]);
+        if (!(despacho === null || despacho === void 0 ? void 0 : despacho.id)) {
+            return res.status(400).json({ message: 'Despacho no encontrado' });
+        }
+        const pais = despacho.pais_origen && String(despacho.pais_origen).trim()
+            ? String(despacho.pais_origen).trim()
+            : 'Brasil';
+        const ref = `Despacho ${despacho.numero_despacho || despacho.id}`;
+        let updatedStock = 0;
+        let despachoItemsInserted = 0;
+        let despachoItemsUpdated = 0;
+        const notFound = [];
+        const errors = [];
+        const taggedProducts = new Set();
+        const doStock = updateDepotStock !== false;
+        for (const row of rawRows) {
+            const codigoRaw = ((_g = (_f = (_e = (_d = (_c = (_b = (_a = row.codigo) !== null && _a !== void 0 ? _a : row.CODIGO) !== null && _b !== void 0 ? _b : row.Codigo) !== null && _c !== void 0 ? _c : row.articulo) !== null && _d !== void 0 ? _d : row.ARTICULO) !== null && _e !== void 0 ? _e : row.MODELO) !== null && _f !== void 0 ? _f : row.modelo) !== null && _g !== void 0 ? _g : '')
+                .toString()
+                .trim();
+            const colorRaw = (_l = (_k = (_j = (_h = row.color) !== null && _h !== void 0 ? _h : row.COLOR) !== null && _j !== void 0 ? _j : row.Color) !== null && _k !== void 0 ? _k : row['CODIGO COLOR']) !== null && _l !== void 0 ? _l : row['COD. COLOR'];
+            const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+            const codigo = padArticleCodeTo7(codigoRaw) || codigoRaw;
+            if (!codigo || !colorStr)
+                continue;
+            for (const [gridKey, val] of Object.entries(row)) {
+                if (isGridReservedKey(gridKey))
+                    continue;
+                const qty = parseStockValue(val);
+                const variantId = yield resolveVariantIdForGridCell(codigo, colorStr, gridKey);
+                if (!variantId) {
+                    const key = `${codigo}-${colorStr}-${gridKey}`;
+                    if (!notFound.includes(key))
+                        notFound.push(key);
+                    continue;
+                }
+                const productRow = yield (0, db_1.get)(`SELECT pc.product_id AS product_id, p.name AS name, pv.sku AS sku
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           WHERE pv.id = ?`, [variantId]);
+                const productId = productRow === null || productRow === void 0 ? void 0 : productRow.product_id;
+                if (!productId) {
+                    errors.push(`Sin producto para variante ${variantId}`);
+                    continue;
+                }
+                const prodName = String((_m = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _m !== void 0 ? _m : '').trim();
+                const varSku = String((_o = productRow === null || productRow === void 0 ? void 0 : productRow.sku) !== null && _o !== void 0 ? _o : '').trim();
+                const descripcionItem = `${prodName || codigo} - ${varSku || gridKey}`.trim();
+                if (doStock) {
+                    const ok = yield (0, exports.updateVariantStock)(variantId, qty, 'IMPORTACION_DESPACHO_GRID', ref, true);
+                    if (ok)
+                        updatedStock++;
+                    else
+                        errors.push(`Stock ${codigo} ${gridKey}`);
+                }
+                if (qty > 0) {
+                    const di = yield (0, db_1.get)(`SELECT id FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`, [despacho.id, variantId]);
+                    if (di === null || di === void 0 ? void 0 : di.id) {
+                        yield (0, db_1.execute)(`UPDATE despacho_items SET cantidad = ?, product_id = ?, descripcion_item = ? WHERE id = ?`, [qty, productId, descripcionItem, di.id]);
+                        despachoItemsUpdated++;
+                    }
+                    else {
+                        yield (0, db_1.execute)(`INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item) VALUES (?, ?, ?, ?, ?, NULL, ?)`, [(0, uuid_1.v4)(), despacho.id, productId, variantId, qty, descripcionItem]);
+                        despachoItemsInserted++;
+                    }
+                }
+                yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
+                    despacho.id,
+                    pais,
+                    productId,
+                ]);
+                taggedProducts.add(productId);
+            }
+        }
+        res.json({
+            message: 'Importación de planilla al despacho completada',
+            updatedStock,
+            despachoItemsInserted,
+            despachoItemsUpdated,
+            productsTagged: taggedProducts.size,
+            notFound: notFound.slice(0, 200),
+            notFoundCount: notFound.length,
+            errors: errors.length > 0 ? errors.slice(0, 50) : undefined,
+        });
+    }
+    catch (error) {
+        console.error('importStockGridToDespacho:', error);
+        res.status(500).json({ message: 'Error importando planilla al despacho', error: error.message });
+    }
+});
+exports.importStockGridToDespacho = importStockGridToDespacho;

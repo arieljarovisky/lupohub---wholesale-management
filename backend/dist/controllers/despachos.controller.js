@@ -26,6 +26,15 @@ const getAssignedTotalByProductId = (productId) => __awaiter(void 0, void 0, voi
      WHERE product_id = ?`, [productId]);
     return Number(assignedRow === null || assignedRow === void 0 ? void 0 : assignedRow.total_asignado) || 0;
 });
+/** Suma cantidad al stock de depósito de una variante (ingreso por despacho). */
+function incrementVariantDepotStock(variantId, cantidadNum) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+        const currentStock = Number((stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) || 0);
+        yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE stock = ?`, [variantId, currentStock + cantidadNum, currentStock + cantidadNum]);
+    });
+}
 // Obtener todos los despachos
 const getDespachos = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -103,7 +112,9 @@ exports.getDespachoById = getDespachoById;
 // Crear nuevo despacho
 const createDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { numero_despacho, fecha_despacho, pais_origen = 'Brasil', proveedor, descripcion, valor_fob, valor_cif, moneda = 'USD', estado = 'despachado', notas, items = [] } = req.body;
+        const { numero_despacho, fecha_despacho, pais_origen = 'Brasil', proveedor, descripcion, valor_fob, valor_cif, moneda = 'USD', estado = 'despachado', notas, items = [], 
+        /** Si es true, al crear ítems con variant_id suma esa cantidad al stock (por defecto no, para no cambiar integraciones existentes). */
+        incrementStockForItems = false } = req.body;
         if (!numero_despacho || !fecha_despacho) {
             return res.status(400).json({ message: 'Número de despacho y fecha son requeridos' });
         }
@@ -117,13 +128,18 @@ const createDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function*
       INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [despachoId, numero_despacho, fecha_despacho, pais_origen, proveedor, descripcion, valor_fob, valor_cif, moneda, estado, notas]);
+        const doStock = incrementStockForItems === true;
         // Agregar items si se proporcionaron
         for (const item of items) {
             const itemId = (0, uuid_1.v4)();
+            const qty = Math.floor(Number(item.cantidad) || 0);
             yield (0, db_1.execute)(`
         INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [itemId, despachoId, item.product_id || null, item.variant_id || null, item.cantidad || 0, item.costo_unitario || null, item.descripcion_item || null]);
+      `, [itemId, despachoId, item.product_id || null, item.variant_id || null, qty, item.costo_unitario || null, item.descripcion_item || null]);
+            if (doStock && item.variant_id && qty > 0) {
+                yield incrementVariantDepotStock(String(item.variant_id), qty);
+            }
             // Actualizar el último despacho del producto
             if (item.product_id) {
                 yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, item.product_id]);
@@ -131,7 +147,8 @@ const createDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         res.status(201).json({
             message: 'Despacho creado exitosamente',
-            id: despachoId
+            id: despachoId,
+            incrementStockForItems: doStock
         });
     }
     catch (error) {
@@ -200,7 +217,9 @@ exports.deleteDespacho = deleteDespacho;
 const addDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { product_id, variant_id, cantidad, costo_unitario, descripcion_item } = req.body;
+        const { product_id, variant_id, cantidad, costo_unitario, descripcion_item, incrementStock } = req.body;
+        /** Por defecto true: agregar al depósito al cargar mercadería al despacho. Pasar false si el stock ya se cargó (ej. Tango) y solo querés trazabilidad. */
+        const shouldIncrementStock = incrementStock !== false;
         const despacho = yield (0, db_1.get)(`SELECT id, pais_origen FROM despachos WHERE id = ?`, [id]);
         if (!despacho) {
             return res.status(404).json({ message: 'Despacho no encontrado' });
@@ -226,18 +245,17 @@ const addDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, function
       INSERT INTO despacho_items (id, despacho_id, product_id, variant_id, cantidad, costo_unitario, descripcion_item)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [itemId, id, resolvedProductId || null, variant_id || null, cantidadNum, costo_unitario || null, descripcion_item || null]);
-        // Al cargar mercadería al despacho, sumar al stock de la variante
-        const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variant_id]);
-        const currentStock = Number((stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) || 0);
-        yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE stock = ?`, [variant_id, currentStock + cantidadNum, currentStock + cantidadNum]);
+        if (shouldIncrementStock) {
+            yield incrementVariantDepotStock(variant_id, cantidadNum);
+        }
         // Actualizar el último despacho del producto
         if (resolvedProductId) {
             yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, resolvedProductId]);
         }
         res.status(201).json({
             message: 'Item agregado al despacho',
-            id: itemId
+            id: itemId,
+            stockIncremented: shouldIncrementStock
         });
     }
     catch (error) {

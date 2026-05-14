@@ -6,6 +6,7 @@ const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.optionalAuthMiddleware);
 router.get('/', orders_controller_1.getOrders);
+router.post('/import-matrix', auth_1.authMiddleware, orders_controller_1.importOrdersFromMatrix);
 router.post('/', orders_controller_1.createOrder);
 router.patch('/:id/payment-status', auth_1.authMiddleware, orders_controller_1.patchOrderPaymentStatus);
 router.post('/:id/apply-mayorista-stock', auth_1.authMiddleware, orders_controller_1.applyMayoristaStockDeduction);
@@ -15,6 +16,7 @@ router.patch('/:id/archive', auth_1.authMiddleware, orders_controller_1.archiveO
 router.delete('/:id', orders_controller_1.deleteOrder);
 router.get('/:id/invoice', orders_controller_1.getOrderInvoice);
 router.post('/:id/invoice/recalculate-agip', auth_1.authMiddleware, orders_controller_1.recalculateStoredInvoiceAgip);
+router.post('/:id/invoice/reemitir-con-agip', auth_1.authMiddleware, orders_controller_1.reemitirFacturaConAgip);
 router.get('/:id/credit-notes', orders_controller_1.getOrderCreditNotes);
 router.post('/:id/emitir-factura', auth_1.authMiddleware, orders_controller_1.emitirFactura);
 router.post('/:id/emitir-nota-credito', auth_1.authMiddleware, orders_controller_1.emitirNotaCredito);
