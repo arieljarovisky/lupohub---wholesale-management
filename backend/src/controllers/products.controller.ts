@@ -3,7 +3,7 @@ import axios from 'axios';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
 
 export const getProducts = async (req: Request, res: Response) => {
@@ -1032,29 +1032,88 @@ function findColumnExact(headers: string[], ...targets: string[]): number {
 }
 
 /**
- * Talle y color como códigos numéricos (1–3 dígitos), alineado a `parseCodigoTango`.
+ * Color: solo dígitos (ej. 614, 2021, 9990). Si la celda mezcla texto, se toman los dígitos.
  */
-function normalizeTalleColorCell(val: unknown): string {
+function normalizeColorCodeForImport(val: unknown): string {
+  const raw = String(val ?? '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length > 12 ? digits.slice(0, 12) : digits;
+}
+
+/** Talle Tango numérico o letra (P, M, G, GG, XG…). */
+function normalizeTalleForImport(val: unknown): string {
   const s = String(val ?? '').trim();
   if (!s) return '';
-  const digits = s.replace(/\D/g, '');
-  if (!digits) return '';
-  const n = digits.length > 3 ? digits.slice(-3) : digits;
-  return /^\d{1,3}$/.test(n) ? n : '';
+  return codigoTalleParaSku(s);
+}
+
+function parseRgbToHex(val: unknown): string | null {
+  const s = String(val ?? '').trim();
+  if (!s) return null;
+  const m = s.replace(/\s/g, '').match(/^(\d{1,3}),(\d{1,3}),(\d{1,3})$/);
+  if (!m) return null;
+  const r = Math.min(255, parseInt(m[1], 10));
+  const g = Math.min(255, parseInt(m[2], 10));
+  const b = Math.min(255, parseInt(m[3], 10));
+  if ([r, g, b].some((x) => Number.isNaN(x))) return null;
+  return (
+    '#' +
+    [r, g, b]
+      .map((x) => x.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase()
+  );
+}
+
+function parseCantidadCell(val: unknown): number | undefined {
+  if (val == null || val === '') return undefined;
+  const n = typeof val === 'number' && Number.isFinite(val) ? Math.trunc(val) : parseInt(String(val).trim(), 10);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.min(n, 9999999);
 }
 
 type TangoImportLayout =
   | { mode: 'single'; codigoKey: string; descKey: string | null }
-  | { mode: 'triple'; articuloKey: string; talleKey: string; colorKey: string; descKey: string | null };
+  | {
+      mode: 'triple';
+      articuloKey: string;
+      talleKey: string;
+      colorKey: string;
+      descKey: string | null;
+      colorNameKey?: string | null;
+      modeloKey?: string | null;
+      cantidadKey?: string | null;
+      rgbKey?: string | null;
+    };
 
 function resolveTangoImportLayout(headers: string[]): TangoImportLayout | { error: string } {
   const descIdx = findColumn(headers, 'descripcion');
   const descKey = descIdx >= 0 ? headers[descIdx] : null;
 
   const talleIdx = findColumnExact(headers, 'talle', 'talla', 'size');
-  const colorIdx = findColumnExact(headers, 'color');
-  if (talleIdx >= 0 && colorIdx >= 0) {
-    const used = new Set([talleIdx, colorIdx]);
+  const colorCodeIdx = findColumnExact(
+    headers,
+    'codigo color',
+    'codigocolor',
+    'codigo co',
+    'codigo col',
+    'codigo colo',
+    'codcolor'
+  );
+  const colorNameIdx = findColumnExact(headers, 'color', 'nombre color');
+  let colorKey: string | null = null;
+  let colorNameKey: string | null = null;
+  if (colorCodeIdx >= 0) {
+    colorKey = headers[colorCodeIdx];
+    if (colorNameIdx >= 0 && colorNameIdx !== colorCodeIdx) colorNameKey = headers[colorNameIdx];
+  } else if (colorNameIdx >= 0) {
+    colorKey = headers[colorNameIdx];
+  }
+
+  if (talleIdx >= 0 && colorKey) {
+    const used = new Set([talleIdx, colorCodeIdx >= 0 ? colorCodeIdx : -1, colorNameIdx >= 0 ? colorNameIdx : -1].filter((i) => i >= 0));
     let articuloIdx = findColumnExact(headers, 'articulo', 'artículo', 'sku');
     if (articuloIdx < 0 || used.has(articuloIdx)) {
       const skuCol = findColumn(headers, 'sku');
@@ -1069,15 +1128,24 @@ function resolveTangoImportLayout(headers: string[]): TangoImportLayout | { erro
     if (articuloIdx < 0 || used.has(articuloIdx)) {
       return {
         error:
-          'Con columnas Talle y Color hace falta también una columna de artículo (Articulo, Codigo, SKU o Codigo articulo).',
+          'Con columnas Talle y Color/Código color hace falta también una columna de artículo (Articulo, Codigo, SKU o Codigo articulo).',
       };
     }
+
+    const modeloIdx = findColumnExact(headers, 'modelo', 'model');
+    const cantidadIdx = findColumnExact(headers, 'cantidad', 'qty', 'quantity');
+    const rgbIdx = findColumnExact(headers, 'rgb');
+
     return {
       mode: 'triple',
       articuloKey: headers[articuloIdx],
       talleKey: headers[talleIdx],
-      colorKey: headers[colorIdx],
+      colorKey,
       descKey,
+      colorNameKey,
+      modeloKey: modeloIdx >= 0 ? headers[modeloIdx] : null,
+      cantidadKey: cantidadIdx >= 0 ? headers[cantidadIdx] : null,
+      rgbKey: rgbIdx >= 0 ? headers[rgbIdx] : null,
     };
   }
 
@@ -1085,7 +1153,7 @@ function resolveTangoImportLayout(headers: string[]): TangoImportLayout | { erro
   if (codigoCol < 0) {
     return {
       error:
-        'No se encontró columna Código. Usá un código Tango completo en una columna "Código", o columnas separadas: Código/Articulo/SKU + Talle + Color.',
+        'No se encontró columna Código. Usá un código Tango completo en una columna "Código", o columnas: Código/Articulo/SKU + Talle + Código color (o Color) — opcional Modelo, Descripción, Cantidad, RGB.',
     };
   }
   return { mode: 'single', codigoKey: headers[codigoCol], descKey };
@@ -1147,7 +1215,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({
         message:
-          'Se requiere un array "rows" con filas del Excel: columna "Código" (Tango completo) o columnas "Código"/Articulo/SKU + Talle + Color, y opcional "Descripción".',
+          'Se requiere un array "rows" con filas del Excel: columna "Código" (Tango completo) o columnas Código/Articulo + Talle + Código color (o solo Color numérico); opcional Modelo, Descripción, Cantidad, RGB.',
       });
     }
     const headers = Object.keys(rawRows[0] || {});
@@ -1156,26 +1224,45 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       return res.status(400).json({ message: layout.error });
     }
 
-    const rows: { articulo: string; talle: string; color: string; codigo13: string; descripcion: string }[] = [];
+    type TangoImportRow = {
+      articulo: string;
+      talle: string;
+      color: string;
+      codigo13: string;
+      descripcion: string;
+      colorName?: string;
+      initialStock?: number;
+      colorHex?: string | null;
+    };
+    const rows: TangoImportRow[] = [];
 
     if (layout.mode === 'triple') {
-      const { articuloKey, talleKey, colorKey, descKey } = layout;
+      const { articuloKey, talleKey, colorKey, descKey, colorNameKey, modeloKey, cantidadKey, rgbKey } = layout;
       for (const row of rawRows) {
         const articulo = String(row[articuloKey] ?? '').trim();
-        const talle = normalizeTalleColorCell(row[talleKey]);
-        const color = normalizeTalleColorCell(row[colorKey]);
+        const talle = normalizeTalleForImport(row[talleKey]);
+        const color = normalizeColorCodeForImport(row[colorKey]);
         const parsed = { articulo, talle, color, codigoCompleto: `${articulo}${talle}${color}` };
         const isCompleta = !!(parsed.articulo && parsed.talle && parsed.color);
         if (!isCompleta && onlyComplete) continue;
         const descripcion =
-          (descKey && row[descKey] != null ? String(row[descKey]).trim() : '') || parsed.articulo;
-        rows.push({
+          (descKey && row[descKey] != null && String(row[descKey]).trim()) ||
+          (modeloKey && row[modeloKey] != null && String(row[modeloKey]).trim()) ||
+          parsed.articulo;
+        const colorName = colorNameKey ? String(row[colorNameKey] ?? '').trim() : '';
+        const initialStock = cantidadKey ? parseCantidadCell(row[cantidadKey]) : undefined;
+        const colorHex = rgbKey ? parseRgbToHex(row[rgbKey]) : null;
+        const rec: TangoImportRow = {
           articulo: parsed.articulo,
           talle: parsed.talle,
           color: parsed.color,
           codigo13: parsed.codigoCompleto,
           descripcion,
-        });
+        };
+        if (colorName) rec.colorName = colorName;
+        if (initialStock !== undefined) rec.initialStock = initialStock;
+        if (colorHex) rec.colorHex = colorHex;
+        rows.push(rec);
       }
     } else {
       const { codigoKey, descKey } = layout;
@@ -1231,7 +1318,9 @@ export const importTangoArticles = async (req: Request, res: Response) => {
         let colorId = (await get(`SELECT id FROM colors WHERE code = ?`, [r.color]))?.id;
         if (!colorId) {
           colorId = uuidv4();
-          await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, r.color, r.color, '#000000']);
+          const name = (r.colorName && r.colorName.trim()) || r.color;
+          const hex = r.colorHex || '#000000';
+          await execute(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, name, r.color, hex]);
         }
 
         let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
@@ -1250,11 +1339,15 @@ export const importTangoArticles = async (req: Request, res: Response) => {
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
             [variantId, productColorId, sizeId, r.codigo13]
           );
-          await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, 0) ON DUPLICATE KEY UPDATE stock = stock`, [variantId]);
+          const qty = r.initialStock ?? 0;
+          await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
           await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, existingVariant.id]);
           variantsUpdated++;
+          if (r.initialStock !== undefined) {
+            await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, existingVariant.id]);
+          }
         }
       } catch (err: any) {
         errors.push(`Fila ${r.codigo13}: ${err?.message || 'Error'}`);

@@ -451,7 +451,7 @@ export const api = {
     return request<Product>('/products', 'POST', product);
   },
 
-  /** Importar artículos desde Excel Tango: columna Código (concatenado) o columnas Código/Articulo/SKU + Talle + Color + opcional Descripción. */
+  /** Importar artículos desde Excel: Código Tango completo, o Codigo + Talle (letra o num.) + Codigo color + opcional Modelo/Cantidad/RGB. */
   importTangoArticles: async (
     rows: Record<string, unknown>[],
     onlyComplete = true

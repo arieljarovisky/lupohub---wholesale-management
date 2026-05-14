@@ -18,3 +18,31 @@ export function nombreTalleDesdeCodigo(codigo: string): string {
   const c = (codigo || '').trim();
   return TALLE_CODIGO_A_NOMBRE[c] ?? c;
 }
+
+/** Letra o código numérico → código Tango de 3 dígitos (para SKU / sizes). */
+const TALLE_NOMBRE_A_CODIGO: Record<string, string> = {
+  P: '130',
+  M: '140',
+  G: '150',
+  GG: '160',
+  U: '170',
+  XG: '180',
+  XXG: '200',
+  XXXG: '250',
+  '130': '130',
+  '140': '140',
+  '150': '150',
+  '160': '160',
+  '170': '170',
+  '180': '180',
+  '200': '200',
+  '240': '240',
+  '250': '250',
+};
+
+export function codigoTalleParaSku(nameOrCode: string | undefined | null): string {
+  if (nameOrCode == null) return '';
+  const s = String(nameOrCode).trim().toUpperCase();
+  if (/^\d{1,3}$/.test(s)) return s;
+  return TALLE_NOMBRE_A_CODIGO[s] ?? s;
+}
