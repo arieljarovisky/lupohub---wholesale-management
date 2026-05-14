@@ -44,6 +44,25 @@ interface TemplateRow {
   price: number;
 }
 
+/** Código de color + nombre en la grilla (ej. `614 · Blanco`). */
+function formatColorCell(colorCode: string, colorName: string): React.ReactNode {
+  const code = String(colorCode ?? '').trim();
+  const name = String(colorName ?? '').trim();
+  if (!code && !name) return '—';
+  if (code && name && name !== code) {
+    return (
+      <>
+        <span className="font-mono text-slate-300 tabular-nums" title={`Código ${code}`}>
+          {code}
+        </span>
+        <span className="text-slate-500 mx-1">·</span>
+        <span>{name}</span>
+      </>
+    );
+  }
+  return <span title={code ? `Código ${code}` : undefined}>{name || code}</span>;
+}
+
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
   const directRaw = String(value ?? '').trim();
   const direct = codigoTalleParaSku(directRaw) || directRaw;
@@ -973,7 +992,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </button>
                               ) : null}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-200 text-sm">{row.colorName}</td>
+                            <td className="py-2.5 px-3 text-slate-200 text-sm">{formatColorCell(row.colorCode, row.colorName)}</td>
                             <td className="py-2 px-2">
                               <div className="flex items-center gap-1.5 justify-center">
                                 <input
