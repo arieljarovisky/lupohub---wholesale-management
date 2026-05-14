@@ -776,7 +776,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     try {
       const rows = await parseStockExcel(file);
       if (rows.length === 0) {
-        showToast('warning', 'El Excel no tiene filas válidas. Necesitá columnas CODIGO, COLOR y tallas (P, M, G, GG, XG, XXG, XXXG).');
+        showToast('warning', 'El Excel no tiene filas válidas. Primera fila: CODIGO/Código, COLOR y columnas de talles (P, M, G, GG, U, XG, XXG, XXXG o 10, 12, 130 - P, etc.).');
         return;
       }
       const res = await api.importStockFromExcel(rows);

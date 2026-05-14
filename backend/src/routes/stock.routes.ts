@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel } from '../controllers/stock.controller';
+import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel, importStockGridToDespacho } from '../controllers/stock.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -23,5 +23,8 @@ router.post('/import-history', importSalesHistory);
 
 // Importar stock desde Excel (CODIGO, COLOR, columnas P, M, G, GG, XG, XXG, XXXG)
 router.post('/import-excel', authMiddleware, importStockFromExcel);
+
+// Planilla CODIGO + COLOR + talles dinámicos → stock + ítems del despacho
+router.post('/import-grid-to-despacho', authMiddleware, importStockGridToDespacho);
 
 export default router;

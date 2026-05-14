@@ -92,7 +92,7 @@ export function padArticleCodeTo7(s: string): string {
   return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
 
-/** Parsea Excel de stock: columna CODIGO, COLOR, y columnas P, M, G, GG, XG, XXG, XXXG. */
+/** Parsea Excel de stock: CODIGO + COLOR + columnas de talles (P, M, G… y/o 10, 12, 130 - P, etc.). */
 export async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
   const data = new Uint8Array(await file.arrayBuffer());
   const workbook = XLSX.read(data, { type: 'array' });
@@ -101,16 +101,91 @@ export async function parseStockExcel(file: File): Promise<Array<Record<string, 
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
   if (rows.length < 2) return [];
-  const headers = (rows[0] || []).map(h => String(h ?? '').trim().toUpperCase());
-  const codigoCol = headers.findIndex(h => h === 'CODIGO' || h === 'CÓDIGO' || h === 'COD');
-  const colorCol = headers.findIndex(h => h === 'COLOR' || h === 'COL');
-  const sizeCols: { key: string; index: number }[] = [];
-  const sizeNames = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'];
-  for (const name of sizeNames) {
-    const idx = headers.findIndex(h => h === name);
-    if (idx >= 0) sizeCols.push({ key: name, index: idx });
+
+  const originalHeaders = (rows[0] || []).map((h) => String(h ?? '').trim());
+  const normHeaders = originalHeaders.map((h) =>
+    h
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+
+  const codigoCandidates = ['CODIGO', 'COD', 'ARTICULO', 'MODELO', 'SKU BASE', 'SKU'];
+  let codigoCol = -1;
+  for (const cand of codigoCandidates) {
+    const idx = normHeaders.findIndex((h) => h === cand);
+    if (idx >= 0) {
+      codigoCol = idx;
+      break;
+    }
   }
-  if (codigoCol < 0 || colorCol < 0 || sizeCols.length === 0) return [];
+
+  const colorCandidates = ['COLOR', 'COL', 'CODIGO COLOR', 'COD. COLOR', 'COD COLOR'];
+  let colorCol = -1;
+  for (const cand of colorCandidates) {
+    const idx = normHeaders.findIndex((h) => h === cand || h.startsWith(cand + ' '));
+    if (idx >= 0) {
+      colorCol = idx;
+      break;
+    }
+  }
+
+  if (codigoCol < 0 || colorCol < 0) return [];
+
+  const metaExclude = new Set(
+    [
+      'DESCRIPCION',
+      'MODELO',
+      'PRECIO',
+      'TOTAL',
+      'SUBTOTAL',
+      'IMPORTE',
+      'STOCK',
+      'DEPOSITO',
+      'NOTAS',
+      'OBSERVACIONES',
+      'CATEGORIA',
+      'PROVEEDOR',
+      'MARCA',
+      'FECHA',
+      'DESPACHO',
+      'NOMBRE',
+      'PRODUCTO',
+      'ARTICULO',
+      'CODIGO',
+      'COLOR',
+      'COL',
+      'COD',
+      'CANTIDAD',
+    ].map((x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+  );
+
+  const legacySizeNames = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG'];
+  const sizeColsDynamic: { header: string; index: number }[] = [];
+  for (let i = 0; i < originalHeaders.length; i++) {
+    if (i === codigoCol || i === colorCol) continue;
+    const orig = originalHeaders[i];
+    if (!orig) continue;
+    const nh = normHeaders[i];
+    if (!nh) continue;
+    if (metaExclude.has(nh) || nh.startsWith('PRECIO') || nh.startsWith('OBS')) continue;
+    sizeColsDynamic.push({ header: orig, index: i });
+  }
+
+  let sizeCols: { key: string; index: number }[] = [];
+  if (sizeColsDynamic.length > 0) {
+    sizeCols = sizeColsDynamic.map((s) => ({ key: s.header, index: s.index }));
+  } else {
+    for (const name of legacySizeNames) {
+      const idx = normHeaders.findIndex((h) => h === name);
+      if (idx >= 0) sizeCols.push({ key: name, index: idx });
+    }
+  }
+
+  if (sizeCols.length === 0) return [];
+
   let lastCodigo = '';
   const out: Array<Record<string, unknown>> = [];
   for (let i = 1; i < rows.length; i++) {
@@ -125,7 +200,7 @@ export async function parseStockExcel(file: File): Promise<Array<Record<string, 
     for (const { key, index } of sizeCols) {
       const v = row[index];
       if (v === null || v === undefined || v === '') obj[key] = 0;
-      else if (typeof v === 'number') obj[key] = v;
+      else if (typeof v === 'number' && !Number.isNaN(v)) obj[key] = Math.max(0, Math.floor(v));
       else if (String(v).trim().toUpperCase() === 'X') obj[key] = 0;
       else obj[key] = parseInt(String(v).replace(/\D/g, ''), 10) || 0;
     }

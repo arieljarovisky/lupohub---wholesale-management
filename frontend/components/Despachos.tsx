@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { api } from '../services/api';
+import { parseStockExcel } from '../utils/inventoryUtils';
 import { useNotification } from '../context/NotificationContext';
 
 interface Despacho {
@@ -72,9 +73,13 @@ const Despachos: React.FC = () => {
   const [savingProduct, setSavingProduct] = useState(false);
 
   const despachoTangoFileRef = useRef<HTMLInputElement>(null);
+  const despachoGridFileRef = useRef<HTMLInputElement>(null);
   const [tangoImportingForDespacho, setTangoImportingForDespacho] = useState(false);
   /** Misma lógica que Inventario: al reimportar no pisar stock de variantes ya existentes. */
   const [tangoDespachoKeepStockOnExisting, setTangoDespachoKeepStockOnExisting] = useState(true);
+  const [gridStockImporting, setGridStockImporting] = useState(false);
+  /** Al importar planilla matriz: también escribir cantidades en el depósito (desmarcá solo si el stock ya está cargado). */
+  const [despachoGridUpdateDepot, setDespachoGridUpdateDepot] = useState(true);
 
   // Asignar despacho a todos
   const [showAsignarTodosModal, setShowAsignarTodosModal] = useState(false);
@@ -249,6 +254,7 @@ const Despachos: React.FC = () => {
       const detail = await api.getDespachoById(despacho.id);
       setSelectedDespacho(detail);
       setTangoDespachoKeepStockOnExisting(true);
+      setDespachoGridUpdateDepot(true);
       setShowDetailModal(true);
     } catch (error) {
       showToast('error', 'Error cargando detalles');
@@ -388,6 +394,47 @@ const Despachos: React.FC = () => {
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  const handleImportStockGridToDespacho = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedDespacho?.id) return;
+    if (file.name.toLowerCase().endsWith('.numbers')) {
+      showToast(
+        'info',
+        'Los archivos .numbers no se pueden abrir en el navegador. En Numbers: Archivo → Exportar a → Excel (.xlsx), y subí ese archivo.'
+      );
+      e.target.value = '';
+      return;
+    }
+    setGridStockImporting(true);
+    const did = selectedDespacho.id;
+    try {
+      const rows = await parseStockExcel(file);
+      if (rows.length === 0) {
+        showToast(
+          'warning',
+          'Sin filas válidas. La primera fila debe tener CODIGO/Código, COLOR y columnas de talles (P, M, 10, 130 - P, etc.). Si usás Numbers, exportá a .xlsx.'
+        );
+        return;
+      }
+      const res = await api.importStockGridToDespacho(did, rows, { updateDepotStock: despachoGridUpdateDepot });
+      const detail = await api.getDespachoById(did);
+      setSelectedDespacho(detail);
+      fetchDespachos();
+      showToast(
+        'success',
+        `Planilla matriz: ${res.updatedStock ?? 0} celdas de stock, +${res.despachoItemsInserted ?? 0} líneas en despacho, ${res.despachoItemsUpdated ?? 0} cantidades actualizadas, ${res.productsTagged ?? 0} producto(s) con último despacho.`
+      );
+      if ((res.notFoundCount ?? 0) > 0) {
+        showToast('error', `${res.notFoundCount} combinación(es) código/color/talle no encontradas en el sistema.`);
+      }
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.message || err?.message || 'Error importando planilla');
+    } finally {
+      setGridStockImporting(false);
+      e.target.value = '';
+    }
   };
 
   const filteredProductos = productosSinDespacho.filter(p => {
@@ -879,6 +926,13 @@ const Despachos: React.FC = () => {
                   className="hidden"
                   onChange={handleImportTangoToOpenDespacho}
                 />
+                <input
+                  ref={despachoGridFileRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                  className="hidden"
+                  onChange={handleImportStockGridToDespacho}
+                />
                 <div className="flex flex-col gap-3 mb-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-white font-bold flex items-center gap-2">
@@ -889,7 +943,7 @@ const Despachos: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => despachoTangoFileRef.current?.click()}
-                        disabled={tangoImportingForDespacho}
+                        disabled={tangoImportingForDespacho || gridStockImporting}
                         className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm font-bold flex items-center gap-1.5 transition-colors border border-emerald-600/50"
                       >
                         {tangoImportingForDespacho ? (
@@ -898,6 +952,19 @@ const Despachos: React.FC = () => {
                           <Upload size={14} />
                         )}
                         Importar Excel (Tango)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => despachoGridFileRef.current?.click()}
+                        disabled={gridStockImporting || tangoImportingForDespacho}
+                        className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-lg text-white text-sm font-bold flex items-center gap-1.5 transition-colors border border-slate-500/60"
+                      >
+                        {gridStockImporting ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <FileText size={14} />
+                        )}
+                        Planilla CODIGO+COLOR+talles
                       </button>
                       <button
                         type="button"
@@ -923,6 +990,24 @@ const Despachos: React.FC = () => {
                   <p className="text-[11px] text-slate-500 leading-relaxed">
                     Mismo formato que <strong className="text-slate-400">Inventario → Importar Tango</strong>. Si una variante ya tenía línea en este despacho, la cantidad se reemplaza por la del Excel (o stock actual si no hay columna Cantidad).
                   </p>
+                  <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 px-3 py-2.5 space-y-2">
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      <strong className="text-slate-300">Planilla matriz</strong> (como <strong className="text-slate-300">articulos_lupo_normalizados</strong>): misma lógica que{' '}
+                      <strong className="text-slate-300">Inventario → importar stock por Excel</strong>: fila con código de artículo, color (código o nombre) y una columna por talle (P, 10, 130 - P, etc.).{' '}
+                      <span className="text-amber-200/90">Los .numbers no se pueden subir:</span> exportá a <strong className="text-slate-300">.xlsx</strong> desde Numbers.
+                    </p>
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={despachoGridUpdateDepot}
+                        onChange={(e) => setDespachoGridUpdateDepot(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-600 text-slate-400 focus:ring-slate-500 shrink-0"
+                      />
+                      <span className="text-xs text-slate-400 leading-snug">
+                        <strong className="text-slate-300">Actualizar stock del depósito</strong> con las cantidades de la planilla. Desmarcá solo si el depósito ya está cargado y solo querés completar el despacho en el sistema.
+                      </span>
+                    </label>
+                  </div>
                 </div>
                 {selectedDespacho.items && selectedDespacho.items.length > 0 ? (
                   <div className="bg-slate-800/30 rounded-xl overflow-hidden">
@@ -962,7 +1047,7 @@ const Despachos: React.FC = () => {
                     <AlertTriangle className="mx-auto text-yellow-500 mb-2" size={32} />
                     <p className="text-slate-400">No hay productos asignados a este despacho</p>
                     <p className="text-slate-500 text-sm mt-1">
-                      Importá el Excel Tango arriba o usá &quot;Agregar Producto&quot; para cargar variantes una a una.
+                      Importá un Excel (.xlsx) con Tango, la planilla matriz CODIGO+COLOR+talles, o usá &quot;Agregar Producto&quot;.
                     </p>
                   </div>
                 )}

@@ -1290,6 +1290,31 @@ export const api = {
     return request<any>('/stock/import-excel', 'POST', { rows });
   },
 
+  /**
+   * Planilla CODIGO + COLOR + columnas de talles (como inventario / articulos normalizados):
+   * actualiza stock del depósito y carga ítems en el despacho indicado.
+   */
+  importStockGridToDespacho: async (
+    despachoId: string,
+    rows: Array<Record<string, unknown>>,
+    opts?: { updateDepotStock?: boolean }
+  ): Promise<{
+    message: string;
+    updatedStock: number;
+    despachoItemsInserted: number;
+    despachoItemsUpdated: number;
+    productsTagged: number;
+    notFoundCount?: number;
+    notFound?: string[];
+    errors?: string[];
+  }> => {
+    return request<any>('/stock/import-grid-to-despacho', 'POST', {
+      despachoId,
+      rows,
+      updateDepotStock: opts?.updateDepotStock,
+    });
+  },
+
   // --- INTEGRATIONS ---
   getLupoWebhookConfig: async (): Promise<{
     enabled: boolean;
