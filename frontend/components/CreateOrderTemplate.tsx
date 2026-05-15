@@ -164,6 +164,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         }
         const res = await api.importOrdersFromMatrix({
           date: orderDate,
+          priceListId: selectedPriceListId ?? undefined,
           lines,
           splitByInvoiceGreen: matrixSplitByGreen,
         });
@@ -211,7 +212,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         setMatrixImporting(false);
       }
     },
-    [matrixImporting, matrixImportAllSheets, matrixSplitByGreen, orderDate, onMatrixImportDone, showToast]
+    [
+      matrixImporting,
+      matrixImportAllSheets,
+      matrixSplitByGreen,
+      orderDate,
+      selectedPriceListId,
+      onMatrixImportDone,
+      showToast,
+    ]
   );
 
   const isEditing = !!initialOrder;

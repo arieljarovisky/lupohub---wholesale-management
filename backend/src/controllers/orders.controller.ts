@@ -833,6 +833,119 @@ export interface MatrixImportLineInput {
   importGroup?: 'FACTURAR' | 'PENDIENTE';
 }
 
+/** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
+function matrixImportSkuLookupCandidates(raw: string): string[] {
+  const t = String(raw ?? '').trim();
+  if (!t) return [];
+  const out: string[] = [];
+  const add = (x: string) => {
+    const s = String(x ?? '').trim();
+    if (s && !out.includes(s)) out.push(s);
+  };
+  add(t);
+  if (/^\d+$/.test(t)) {
+    const digits = t;
+    const noLead = digits.replace(/^0+/, '') || '0';
+    add(digits);
+    add(noLead);
+    if (noLead.length <= 7) {
+      add(noLead.padStart(7, '0'));
+      add(digits.padStart(7, '0'));
+    }
+    for (let w = Math.max(4, noLead.length); w <= 7; w++) {
+      add(noLead.padStart(w, '0'));
+    }
+    const p7 = noLead.length <= 7 ? noLead.padStart(7, '0') : noLead;
+    for (const pref of ['Q', 'C', 'P'] as const) {
+      add(pref + noLead);
+      add(pref.toLowerCase() + noLead);
+      add(pref + p7);
+      add(pref.toLowerCase() + p7);
+      if (digits !== noLead) {
+        add(pref + digits);
+        add(pref.toLowerCase() + digits);
+      }
+    }
+  } else {
+    const digits = t.replace(/\D/g, '');
+    if (digits) {
+      const noLead = digits.replace(/^0+/, '') || '0';
+      add(noLead);
+      if (noLead.length <= 7) add(noLead.padStart(7, '0'));
+    }
+    const m = t.match(/^([A-Za-z]{1,3})(\d[\d\s-]*)$/);
+    if (m) {
+      const num = m[2].replace(/\D/g, '');
+      if (num) {
+        const nl = num.replace(/^0+/, '') || '0';
+        add(nl);
+        if (nl.length <= 7) add(nl.padStart(7, '0'));
+      }
+    }
+  }
+  return out;
+}
+
+async function resolveMatrixImportLinePrice(
+  priceListId: string | null,
+  skuPad: string,
+  excelUnitPrice: unknown
+): Promise<number> {
+  const ep = Number(excelUnitPrice);
+  if (Number.isFinite(ep) && ep > 0) return Math.round(ep * 100) / 100;
+
+  const tries = matrixImportSkuLookupCandidates(skuPad);
+  const normSet = [...new Set(tries.map((x) => x.replace(/[-/\s]/g, '').toUpperCase()).filter(Boolean))];
+
+  if (priceListId) {
+    const listRow = await get('SELECT id FROM price_lists WHERE id = ? LIMIT 1', [priceListId]);
+    if (listRow?.id) {
+      for (const skuTry of tries) {
+        const pli = await get(
+          `SELECT pli.price FROM price_list_items pli
+           INNER JOIN products p ON p.id = pli.product_id
+           WHERE pli.price_list_id = ? AND TRIM(p.sku) = TRIM(?)
+           LIMIT 1`,
+          [priceListId, skuTry]
+        );
+        if (pli != null && Number((pli as any).price) > 0) {
+          return Math.round(Number((pli as any).price) * 100) / 100;
+        }
+      }
+      for (const norm of normSet) {
+        const pli = await get(
+          `SELECT pli.price FROM price_list_items pli
+           INNER JOIN products p ON p.id = pli.product_id
+           WHERE pli.price_list_id = ?
+             AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+           LIMIT 1`,
+          [priceListId, norm]
+        );
+        if (pli != null && Number((pli as any).price) > 0) {
+          return Math.round(Number((pli as any).price) * 100) / 100;
+        }
+      }
+    }
+  }
+
+  for (const skuTry of tries) {
+    const row = await get(`SELECT base_price FROM products WHERE TRIM(sku) = TRIM(?) LIMIT 1`, [skuTry]);
+    if (row != null && Number((row as any).base_price) > 0) {
+      return Math.round(Number((row as any).base_price) * 100) / 100;
+    }
+  }
+  for (const norm of normSet) {
+    const row = await get(
+      `SELECT base_price FROM products WHERE REPLACE(REPLACE(REPLACE(UPPER(TRIM(sku)), '-', ''), '/', ''), ' ', '') = ? LIMIT 1`,
+      [norm]
+    );
+    if (row != null && Number((row as any).base_price) > 0) {
+      return Math.round(Number((row as any).base_price) * 100) / 100;
+    }
+  }
+  return 0;
+}
+
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 export const importOrdersFromMatrix = async (req: any, res: any) => {
   const user = req.user;
@@ -841,22 +954,6 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
   }
 
   const padSku = (s: string) => normalizeMatrixImportArticleSku(String(s ?? ''));
-
-  const resolvePrice = async (skuPad: string, excelPrice: unknown): Promise<number> => {
-    const ep = Number(excelPrice);
-    if (Number.isFinite(ep) && ep > 0) return ep;
-    const stripped = skuPad.replace(/^0+/, '') || skuPad;
-    const digits = String(skuPad).replace(/\D/g, '');
-    const pad7 =
-      /^\d+$/.test(String(skuPad).trim()) && digits.length > 0 && digits.length <= 7
-        ? digits.padStart(7, '0')
-        : '';
-    let row = await get(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
-    if (!row?.base_price && pad7 && pad7 !== skuPad && pad7 !== stripped) {
-      row = await get(`SELECT base_price FROM products WHERE sku = ? LIMIT 1`, [pad7]);
-    }
-    return Math.max(0, Number((row as any)?.base_price) || 0);
-  };
 
   const findCustomer = async (customerRef: string): Promise<{ id: string; seller_id: string | null } | null> => {
     const ref = String(customerRef ?? '').trim();
@@ -895,6 +992,10 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
       return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
     }
+
+    const bodyPriceListRaw = (body as any).priceListId ?? (body as any).price_list_id;
+    const bodyPriceListId =
+      bodyPriceListRaw != null && String(bodyPriceListRaw).trim() !== '' ? String(bodyPriceListRaw).trim() : null;
 
     /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
     const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
@@ -957,6 +1058,13 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       const customerRef = bucket.displayRef;
       const customer = bucket.customer;
       try {
+        const custPlRow = await get('SELECT price_list_id FROM customers WHERE id = ? LIMIT 1', [customer.id]);
+        const customerListId =
+          custPlRow?.price_list_id != null && String(custPlRow.price_list_id).trim()
+            ? String(custPlRow.price_list_id).trim()
+            : null;
+        const priceListIdForImport = bodyPriceListId || customerListId;
+
         type AggRow = {
           codigo: string;
           color: string;
@@ -988,7 +1096,7 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
         }
         const items: any[] = [];
         for (const row of aggMap.values()) {
-          const priceAtMoment = await resolvePrice(row.codigo, row.unitPrice);
+          const priceAtMoment = await resolveMatrixImportLinePrice(priceListIdForImport, row.codigo, row.unitPrice);
           items.push({
             sku: row.codigo,
             colorCode: row.color,

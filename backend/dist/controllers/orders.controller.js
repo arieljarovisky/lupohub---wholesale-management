@@ -798,29 +798,117 @@ function normalizeMatrixCustomerRefKey(ref) {
         .replace(/\s+/g, ' ')
         .toLowerCase();
 }
+/** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
+function matrixImportSkuLookupCandidates(raw) {
+    const t = String(raw !== null && raw !== void 0 ? raw : '').trim();
+    if (!t)
+        return [];
+    const out = [];
+    const add = (x) => {
+        const s = String(x !== null && x !== void 0 ? x : '').trim();
+        if (s && !out.includes(s))
+            out.push(s);
+    };
+    add(t);
+    if (/^\d+$/.test(t)) {
+        const digits = t;
+        const noLead = digits.replace(/^0+/, '') || '0';
+        add(digits);
+        add(noLead);
+        if (noLead.length <= 7) {
+            add(noLead.padStart(7, '0'));
+            add(digits.padStart(7, '0'));
+        }
+        for (let w = Math.max(4, noLead.length); w <= 7; w++) {
+            add(noLead.padStart(w, '0'));
+        }
+        const p7 = noLead.length <= 7 ? noLead.padStart(7, '0') : noLead;
+        for (const pref of ['Q', 'C', 'P']) {
+            add(pref + noLead);
+            add(pref.toLowerCase() + noLead);
+            add(pref + p7);
+            add(pref.toLowerCase() + p7);
+            if (digits !== noLead) {
+                add(pref + digits);
+                add(pref.toLowerCase() + digits);
+            }
+        }
+    }
+    else {
+        const digits = t.replace(/\D/g, '');
+        if (digits) {
+            const noLead = digits.replace(/^0+/, '') || '0';
+            add(noLead);
+            if (noLead.length <= 7)
+                add(noLead.padStart(7, '0'));
+        }
+        const m = t.match(/^([A-Za-z]{1,3})(\d[\d\s-]*)$/);
+        if (m) {
+            const num = m[2].replace(/\D/g, '');
+            if (num) {
+                const nl = num.replace(/^0+/, '') || '0';
+                add(nl);
+                if (nl.length <= 7)
+                    add(nl.padStart(7, '0'));
+            }
+        }
+    }
+    return out;
+}
+function resolveMatrixImportLinePrice(priceListId, skuPad, excelUnitPrice) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const ep = Number(excelUnitPrice);
+        if (Number.isFinite(ep) && ep > 0)
+            return Math.round(ep * 100) / 100;
+        const tries = matrixImportSkuLookupCandidates(skuPad);
+        const normSet = [...new Set(tries.map((x) => x.replace(/[-/\s]/g, '').toUpperCase()).filter(Boolean))];
+        if (priceListId) {
+            const listRow = yield (0, db_1.get)('SELECT id FROM price_lists WHERE id = ? LIMIT 1', [priceListId]);
+            if (listRow === null || listRow === void 0 ? void 0 : listRow.id) {
+                for (const skuTry of tries) {
+                    const pli = yield (0, db_1.get)(`SELECT pli.price FROM price_list_items pli
+           INNER JOIN products p ON p.id = pli.product_id
+           WHERE pli.price_list_id = ? AND TRIM(p.sku) = TRIM(?)
+           LIMIT 1`, [priceListId, skuTry]);
+                    if (pli != null && Number(pli.price) > 0) {
+                        return Math.round(Number(pli.price) * 100) / 100;
+                    }
+                }
+                for (const norm of normSet) {
+                    const pli = yield (0, db_1.get)(`SELECT pli.price FROM price_list_items pli
+           INNER JOIN products p ON p.id = pli.product_id
+           WHERE pli.price_list_id = ?
+             AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+           LIMIT 1`, [priceListId, norm]);
+                    if (pli != null && Number(pli.price) > 0) {
+                        return Math.round(Number(pli.price) * 100) / 100;
+                    }
+                }
+            }
+        }
+        for (const skuTry of tries) {
+            const row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE TRIM(sku) = TRIM(?) LIMIT 1`, [skuTry]);
+            if (row != null && Number(row.base_price) > 0) {
+                return Math.round(Number(row.base_price) * 100) / 100;
+            }
+        }
+        for (const norm of normSet) {
+            const row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE REPLACE(REPLACE(REPLACE(UPPER(TRIM(sku)), '-', ''), '/', ''), ' ', '') = ? LIMIT 1`, [norm]);
+            if (row != null && Number(row.base_price) > 0) {
+                return Math.round(Number(row.base_price) * 100) / 100;
+            }
+        }
+        return 0;
+    });
+}
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
     }
     const padSku = (s) => (0, matrixImportSku_1.normalizeMatrixImportArticleSku)(String(s !== null && s !== void 0 ? s : ''));
-    const resolvePrice = (skuPad, excelPrice) => __awaiter(void 0, void 0, void 0, function* () {
-        const ep = Number(excelPrice);
-        if (Number.isFinite(ep) && ep > 0)
-            return ep;
-        const stripped = skuPad.replace(/^0+/, '') || skuPad;
-        const digits = String(skuPad).replace(/\D/g, '');
-        const pad7 = /^\d+$/.test(String(skuPad).trim()) && digits.length > 0 && digits.length <= 7
-            ? digits.padStart(7, '0')
-            : '';
-        let row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
-        if (!(row === null || row === void 0 ? void 0 : row.base_price) && pad7 && pad7 !== skuPad && pad7 !== stripped) {
-            row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? LIMIT 1`, [pad7]);
-        }
-        return Math.max(0, Number(row === null || row === void 0 ? void 0 : row.base_price) || 0);
-    });
     const findCustomer = (customerRef) => __awaiter(void 0, void 0, void 0, function* () {
         var _a;
         const ref = String(customerRef !== null && customerRef !== void 0 ? customerRef : '').trim();
@@ -858,6 +946,8 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
             return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
         }
+        const bodyPriceListRaw = (_a = body.priceListId) !== null && _a !== void 0 ? _a : body.price_list_id;
+        const bodyPriceListId = bodyPriceListRaw != null && String(bodyPriceListRaw).trim() !== '' ? String(bodyPriceListRaw).trim() : null;
         /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
         const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
         const linesForImport = splitByInvoiceGreen
@@ -868,7 +958,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             });
         const byRefKey = new Map();
         for (const ln of linesForImport) {
-            const refTrim = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
+            const refTrim = String((_b = ln.customerRef) !== null && _b !== void 0 ? _b : '').trim();
             if (!refTrim)
                 continue;
             const refKey = normalizeMatrixCustomerRefKey(refTrim);
@@ -884,17 +974,17 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         for (const [, refGroupLines] of byRefKey) {
             if (!refGroupLines.length)
                 continue;
-            const ref0 = String((_c = (_b = refGroupLines[0]) === null || _b === void 0 ? void 0 : _b.customerRef) !== null && _c !== void 0 ? _c : '').trim();
+            const ref0 = String((_d = (_c = refGroupLines[0]) === null || _c === void 0 ? void 0 : _c.customerRef) !== null && _d !== void 0 ? _d : '').trim();
             const customer = yield findCustomer(ref0);
             if (!customer) {
-                const ig = (_d = refGroupLines[0]) === null || _d === void 0 ? void 0 : _d.importGroup;
+                const ig = (_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup;
                 errors.push({
                     customerRef: ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${ref0} [${ig}]` : ref0,
                     message: 'Cliente no encontrado',
                 });
                 continue;
             }
-            const ig = ((_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup) === 'FACTURAR' || ((_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup) === 'PENDIENTE'
+            const ig = ((_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup) === 'FACTURAR' || ((_g = refGroupLines[0]) === null || _g === void 0 ? void 0 : _g.importGroup) === 'PENDIENTE'
                 ? refGroupLines[0].importGroup
                 : '';
             const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
@@ -910,14 +1000,19 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             const customerRef = bucket.displayRef;
             const customer = bucket.customer;
             try {
+                const custPlRow = yield (0, db_1.get)('SELECT price_list_id FROM customers WHERE id = ? LIMIT 1', [customer.id]);
+                const customerListId = (custPlRow === null || custPlRow === void 0 ? void 0 : custPlRow.price_list_id) != null && String(custPlRow.price_list_id).trim()
+                    ? String(custPlRow.price_list_id).trim()
+                    : null;
+                const priceListIdForImport = bodyPriceListId || customerListId;
                 const aggMap = new Map();
                 for (const ln of groupLines) {
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_g = ln.codigo) !== null && _g !== void 0 ? _g : '').trim());
-                    const color = String((_h = ln.color) !== null && _h !== void 0 ? _h : '').trim();
-                    const sizeCode = String((_j = ln.sizeCode) !== null && _j !== void 0 ? _j : '').trim();
+                    const codigo = padSku(String((_h = ln.codigo) !== null && _h !== void 0 ? _h : '').trim());
+                    const color = String((_j = ln.color) !== null && _j !== void 0 ? _j : '').trim();
+                    const sizeCode = String((_k = ln.sizeCode) !== null && _k !== void 0 ? _k : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
                     const k = `${codigo}\t${color}\t${sizeCode}`;
@@ -937,7 +1032,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 }
                 const items = [];
                 for (const row of aggMap.values()) {
-                    const priceAtMoment = yield resolvePrice(row.codigo, row.unitPrice);
+                    const priceAtMoment = yield resolveMatrixImportLinePrice(priceListIdForImport, row.codigo, row.unitPrice);
                     items.push({
                         sku: row.codigo,
                         colorCode: row.color,
@@ -953,7 +1048,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 let total = 0;
                 for (const it of items)
                     total += it.quantity * it.priceAtMoment;
-                const importGroup = (_k = groupLines[0]) === null || _k === void 0 ? void 0 : _k.importGroup;
+                const importGroup = (_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup;
                 const matrixImportLabel = importGroup === 'FACTURAR'
                     ? 'A facturar (Excel)'
                     : importGroup === 'PENDIENTE'
@@ -976,7 +1071,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             catch (e) {
                 console.error(e);
                 errors.push({
-                    customerRef: ((_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup) === 'FACTURAR' || ((_m = groupLines[0]) === null || _m === void 0 ? void 0 : _m.importGroup) === 'PENDIENTE'
+                    customerRef: ((_m = groupLines[0]) === null || _m === void 0 ? void 0 : _m.importGroup) === 'FACTURAR' || ((_o = groupLines[0]) === null || _o === void 0 ? void 0 : _o.importGroup) === 'PENDIENTE'
                         ? `${customerRef} [${groupLines[0].importGroup}]`
                         : customerRef,
                     message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',

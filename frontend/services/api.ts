@@ -639,6 +639,8 @@ export const api = {
 
   importOrdersFromMatrix: async (payload: {
     date?: string;
+    /** Lista de precios (id). Si no se envía, el servidor usa la del cliente. */
+    priceListId?: string | null;
     /** Solo si es true: dos borradores por cliente (celdas verdes). El servidor ignora importGroup si es false. */
     splitByInvoiceGreen?: boolean;
     lines: Array<{
