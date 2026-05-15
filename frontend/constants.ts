@@ -105,9 +105,14 @@ export const MOCK_VISITS: Visit[] = [
   { id: 'v2', sellerId: 'u2', customerId: 'c3', date: '2023-10-22', notes: 'Stock alto, pasará pedido el mes que viene.', outcome: 'No Sale' },
 ];
 
-/** Aviso prioritario solo para este usuario; deja de mostrarse cuando pasa esta fecha (ISO, offset Argentina). Ajustá la fecha para renovar la ventana. */
+/**
+ * Aviso prioritario solo para damian@lupo.ar.
+ * Ventana en horario Argentina (UTC−3): desde FROM hasta UNTIL (2 hs).
+ * Para otra fecha/hora, actualizá ambos Date.parse con ISO `YYYY-MM-DDTHH:mm:ss-03:00`.
+ */
 export const DAMIAN_TASKS_BANNER_EMAIL = 'damian@lupo.ar';
-export const DAMIAN_TASKS_BANNER_UNTIL_MS = Date.parse('2026-04-21T23:59:59-03:00');
+export const DAMIAN_TASKS_BANNER_FROM_MS = Date.parse('2026-05-15T09:00:00-03:00');
+export const DAMIAN_TASKS_BANNER_UNTIL_MS = Date.parse('2026-05-15T11:00:00-03:00');
 
 /** Usuario habilitado para asignar tareas con carteles temporales. */
 export const ARIEL_TASKS_OWNER_EMAIL = 'ariel@lupo.ar';

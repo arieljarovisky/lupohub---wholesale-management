@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent } from 'lucide-react';
-import { MOCK_VISITS, MOCK_CUSTOMERS, MOCK_ATTRIBUTES, DAMIAN_TASKS_BANNER_EMAIL, DAMIAN_TASKS_BANNER_UNTIL_MS, ARIEL_TASKS_OWNER_EMAIL } from './constants';
+import {
+  MOCK_VISITS,
+  MOCK_CUSTOMERS,
+  MOCK_ATTRIBUTES,
+  DAMIAN_TASKS_BANNER_EMAIL,
+  DAMIAN_TASKS_BANNER_FROM_MS,
+  DAMIAN_TASKS_BANNER_UNTIL_MS,
+  ARIEL_TASKS_OWNER_EMAIL,
+} from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte, UserTask } from './types';
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
@@ -888,10 +896,12 @@ const App: React.FC = () => {
     ]},
   ];
 
+  const nowMs = Date.now();
   const showDamianTasksBanner =
     !!currentUser.email &&
     currentUser.email.trim().toLowerCase() === DAMIAN_TASKS_BANNER_EMAIL &&
-    Date.now() < DAMIAN_TASKS_BANNER_UNTIL_MS;
+    nowMs >= DAMIAN_TASKS_BANNER_FROM_MS &&
+    nowMs < DAMIAN_TASKS_BANNER_UNTIL_MS;
   const canManageAssignedTasks =
     !!currentUser.email && currentUser.email.trim().toLowerCase() === ARIEL_TASKS_OWNER_EMAIL;
 
@@ -929,16 +939,30 @@ const App: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1 text-center sm:text-left">
                   <p className="text-amber-200/90 text-xs sm:text-sm font-bold uppercase tracking-widest mb-2">
-                    Tareas prioritarias — próximas 24 horas
+                    Recordatorio — proceso de facturación (Argentina)
                   </p>
                   <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-white leading-tight mb-4">
-                    Medias: stock, sincronización y publicaciones
+                    Cómo facturar pedidos mayoristas en LupoHub
                   </h2>
                   <ol className="list-decimal list-inside space-y-3 text-base sm:text-lg md:text-xl text-amber-50 font-semibold leading-relaxed max-w-4xl mx-auto sm:mx-0">
-                    <li>Controlar el stock de medias en Mercado Libre y Tienda Nube.</li>
-                    <li>Sincronizarlos.</li>
-                    <li>Una vez que termine eso, fijarse las que no están publicadas y publicarlas.</li>
+                    <li>
+                      <strong className="text-white">Picking primero:</strong> en Pedidos, abrí el pedido y usá «Picking».
+                      Marcá cuánto sale del depósito por línea (podés parcial). Guardá: el pedido pasa a «Falta controlar» y
+                      el stock se descuenta solo por lo pickeado.
+                    </li>
+                    <li>
+                      <strong className="text-white">Factura AFIP después:</strong> solo se puede emitir con el pedido en
+                      «Falta controlar», «Controlado» o «Despachado». El importe neto en AFIP coincide con lo pickeado; no hay
+                      atajo para facturar sin picking.
+                    </li>
+                    <li>
+                      <strong className="text-white">Control / despacho:</strong> seguí el flujo habitual del depósito hasta
+                      «Despachado» si corresponde, y revisá transporte/datos del cliente antes de emitir si hace falta.
+                    </li>
                   </ol>
+                  <p className="text-sm text-amber-200/85 mt-4 font-medium">
+                    Este aviso solo aparece entre las 9:00 y las 11:00 hs (Argentina) en la fecha configurada en el sistema.
+                  </p>
                 </div>
               </div>
             </div>
