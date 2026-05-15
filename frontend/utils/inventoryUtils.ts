@@ -92,6 +92,22 @@ export function padArticleCodeTo7(s: string): string {
   return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
 
+/**
+ * Importación matriz de pedidos: no rellena a 7 dígitos.
+ * Si la celda es solo números, deja el código “natural” sin ceros a la izquierda (ej. 22684, no 0022684).
+ */
+export function normalizeArticleCodeForMatrixImport(s: string): string {
+  const t = String(s ?? '').trim();
+  if (!t) return '';
+  const digits = t.replace(/\D/g, '');
+  if (!digits) return t;
+  const onlyNum = /^\d+$/.test(t.replace(/\s/g, ''));
+  if (onlyNum) {
+    return digits.replace(/^0+/, '') || '0';
+  }
+  return t;
+}
+
 /** Parsea Excel de stock: CODIGO + COLOR + columnas de talles (P, M, G… y/o 10, 12, 130 - P, etc.). */
 export async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
   const data = new Uint8Array(await file.arrayBuffer());

@@ -10,6 +10,7 @@ import {
   resolveVariantIdForGridCell,
 } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeMatrixImportArticleSku } from '../utils/matrixImportSku';
 
 async function getProductIdForVariant(variantId: string): Promise<string | null> {
   const row = await get(
@@ -760,17 +761,21 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
   }
 
-  const padSku = (s: string) => {
-    const digits = String(s ?? '').replace(/\D/g, '');
-    if (!digits) return String(s ?? '').trim();
-    return digits.length <= 7 ? digits.padStart(7, '0') : digits;
-  };
+  const padSku = (s: string) => normalizeMatrixImportArticleSku(String(s ?? ''));
 
   const resolvePrice = async (skuPad: string, excelPrice: unknown): Promise<number> => {
     const ep = Number(excelPrice);
     if (Number.isFinite(ep) && ep > 0) return ep;
     const stripped = skuPad.replace(/^0+/, '') || skuPad;
-    const row = await get(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+    const digits = String(skuPad).replace(/\D/g, '');
+    const pad7 =
+      /^\d+$/.test(String(skuPad).trim()) && digits.length > 0 && digits.length <= 7
+        ? digits.padStart(7, '0')
+        : '';
+    let row = await get(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+    if (!row?.base_price && pad7 && pad7 !== skuPad && pad7 !== stripped) {
+      row = await get(`SELECT base_price FROM products WHERE sku = ? LIMIT 1`, [pad7]);
+    }
     return Math.max(0, Number((row as any)?.base_price) || 0);
   };
 

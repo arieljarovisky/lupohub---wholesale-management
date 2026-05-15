@@ -51,6 +51,7 @@ const types_1 = require("../types");
 const exceljs_1 = __importDefault(require("exceljs"));
 const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
+const matrixImportSku_1 = require("../utils/matrixImportSku");
 function getProductIdForVariant(variantId) {
     return __awaiter(this, void 0, void 0, function* () {
         const row = yield (0, db_1.get)(`SELECT pc.product_id AS product_id
@@ -733,18 +734,20 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
     }
-    const padSku = (s) => {
-        const digits = String(s !== null && s !== void 0 ? s : '').replace(/\D/g, '');
-        if (!digits)
-            return String(s !== null && s !== void 0 ? s : '').trim();
-        return digits.length <= 7 ? digits.padStart(7, '0') : digits;
-    };
+    const padSku = (s) => (0, matrixImportSku_1.normalizeMatrixImportArticleSku)(String(s !== null && s !== void 0 ? s : ''));
     const resolvePrice = (skuPad, excelPrice) => __awaiter(void 0, void 0, void 0, function* () {
         const ep = Number(excelPrice);
         if (Number.isFinite(ep) && ep > 0)
             return ep;
         const stripped = skuPad.replace(/^0+/, '') || skuPad;
-        const row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+        const digits = String(skuPad).replace(/\D/g, '');
+        const pad7 = /^\d+$/.test(String(skuPad).trim()) && digits.length > 0 && digits.length <= 7
+            ? digits.padStart(7, '0')
+            : '';
+        let row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? OR sku = ? LIMIT 1`, [skuPad, stripped]);
+        if (!(row === null || row === void 0 ? void 0 : row.base_price) && pad7 && pad7 !== skuPad && pad7 !== stripped) {
+            row = yield (0, db_1.get)(`SELECT base_price FROM products WHERE sku = ? LIMIT 1`, [pad7]);
+        }
         return Math.max(0, Number(row === null || row === void 0 ? void 0 : row.base_price) || 0);
     });
     const findCustomer = (customerRef) => __awaiter(void 0, void 0, void 0, function* () {

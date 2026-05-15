@@ -7,7 +7,7 @@
  */
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
-import { padArticleCodeTo7 } from './inventoryUtils';
+import { normalizeArticleCodeForMatrixImport } from './inventoryUtils';
 import { codigoTalleParaSku } from './tallesTango';
 
 export type MatrixImportGroup = 'FACTURAR' | 'PENDIENTE';
@@ -258,7 +258,7 @@ function parseWorksheet(
       }
     }
 
-    const skuPad = padArticleCodeTo7(codigo);
+    const skuPad = normalizeArticleCodeForMatrixImport(codigo);
     for (const { key, index } of sizeCols) {
       const cell = row.getCell(col1(index));
       const qty = parseQtyFromCellValue(cell.value);
@@ -333,7 +333,7 @@ function parseSheetToLinesLegacy(rows: (string | number)[][], sheetName: string)
       }
     }
 
-    const skuPad = padArticleCodeTo7(codigo);
+    const skuPad = normalizeArticleCodeForMatrixImport(codigo);
     for (const { key, index } of sizeCols) {
       const v = row[index];
       let qty = 0;
