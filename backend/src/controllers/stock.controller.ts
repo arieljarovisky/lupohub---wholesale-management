@@ -1196,6 +1196,39 @@ function padArticleCodeTo7(s: string): string {
   return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
 
+/**
+ * Variantes de SKU solo-numérico para cruzar con `products.sku`:
+ * el import suele forzar 7 dígitos (22684 → 0022684) pero el catálogo puede tener 022684, 22684, etc.
+ */
+function articleSkuCandidates(raw: string): string[] {
+  const t = String(raw ?? '').trim();
+  if (!t) return [];
+  const out: string[] = [];
+  const add = (x: string) => {
+    const s = String(x ?? '').trim();
+    if (s && !out.includes(s)) out.push(s);
+  };
+  add(t);
+  if (/^\d+$/.test(t)) {
+    const digits = t;
+    const noLead = digits.replace(/^0+/, '') || '0';
+    add(digits);
+    add(noLead);
+    add(padArticleCodeTo7(digits));
+    add(padArticleCodeTo7(noLead));
+    for (let w = Math.max(4, noLead.length); w <= 7; w++) {
+      add(noLead.padStart(w, '0'));
+    }
+  } else {
+    const digits = t.replace(/\D/g, '');
+    if (digits) {
+      const p = padArticleCodeTo7(digits);
+      if (p) add(p);
+    }
+  }
+  return out;
+}
+
 /** Escapa % y _ para uso en LIKE. */
 function escapeLike(s: string): string {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -1237,6 +1270,8 @@ async function getVariantIdByCodigoColorSize(
   if (!codigoTrim || !sizeStr) return null;
   const colorCandidates = colorLookupCandidates((colorCode ?? '').toString().trim());
   if (!colorCandidates.length) return null;
+  const skuList = articleSkuCandidates(codigoTrim);
+  if (!skuList.length) return null;
 
   const colorMatchSql = `(TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?)))`;
 
@@ -1262,31 +1297,33 @@ async function getVariantIdByCodigoColorSize(
     return null;
   };
 
-  let id = await tryWhere('p.sku = ?', [codigoTrim]);
-  if (id) return id;
-
-  const padded = padArticleCodeTo7(codigoTrim);
-  if (padded && padded !== codigoTrim) {
-    id = await tryWhere('p.sku = ?', [padded]);
+  for (const skuTry of skuList) {
+    const id = await tryWhere('p.sku = ?', [skuTry]);
     if (id) return id;
   }
 
-  const normalized = normalizeCodigo(codigoTrim);
-  if (!normalized) return null;
-
-  id = await tryWhere(
-    `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ?`,
-    [normalized]
-  );
-  if (id) return id;
-
-  const pattern = escapeLike(normalized) + '%';
-  id = await tryWhere(
-    `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ?`,
-    [pattern],
-    { limitOne: true }
-  );
-  return id || null;
+  const normSet = new Set<string>();
+  for (const skuTry of skuList) {
+    const n = normalizeCodigo(skuTry);
+    if (n) normSet.add(n);
+  }
+  for (const norm of normSet) {
+    const id = await tryWhere(
+      `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ?`,
+      [norm]
+    );
+    if (id) return id;
+  }
+  for (const norm of normSet) {
+    const pattern = escapeLike(norm) + '%';
+    const id = await tryWhere(
+      `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ?`,
+      [pattern],
+      { limitOne: true }
+    );
+    if (id) return id;
+  }
+  return null;
 }
 
 const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG'];
