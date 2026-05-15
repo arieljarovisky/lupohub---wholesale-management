@@ -54,6 +54,7 @@ const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const lupoStockWebhook_service_1 = require("../services/lupoStockWebhook.service");
 const talles_tango_1 = require("../talles-tango");
+const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant = {};
 /** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
@@ -1014,57 +1015,80 @@ function padArticleCodeTo7(s) {
 function escapeLike(s) {
     return String(s !== null && s !== void 0 ? s : '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
+/** Candidatos de color para matchear `colors.code` / nombre (Excel 4 dígitos vs catálogo 3, ceros a la izquierda, etc.). */
+function colorLookupCandidates(colorRaw) {
+    const s = String(colorRaw !== null && colorRaw !== void 0 ? colorRaw : '').trim();
+    if (!s)
+        return [];
+    const out = [];
+    const add = (x) => {
+        const t = String(x !== null && x !== void 0 ? x : '').trim();
+        if (t && !out.includes(t))
+            out.push(t);
+    };
+    add(s);
+    const normImp = (0, colorCodeCanonical_1.normalizeColorCodeForImportValue)(s);
+    if (normImp)
+        add(normImp);
+    const digits = (0, colorCodeCanonical_1.digitsOnlyColorCode)(s);
+    if (digits) {
+        add(digits);
+        const stripped = digits.replace(/^0+/, '') || '0';
+        if (stripped !== digits)
+            add(stripped);
+        const canD = (0, colorCodeCanonical_1.canonicalNumericColorCode)(digits);
+        if (canD)
+            add(canD);
+        const canS = (0, colorCodeCanonical_1.canonicalNumericColorCode)(stripped);
+        if (canS)
+            add(canS);
+    }
+    return out;
+}
 /** Resuelve variant_id por código de producto (base SKU), código de color y código de talle. Prueba exacto, normalizado y "empieza con". */
 function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
     return __awaiter(this, void 0, void 0, function* () {
         const codigoTrim = (codigo !== null && codigo !== void 0 ? codigo : '').toString().trim();
-        const colorStr = (colorCode !== null && colorCode !== void 0 ? colorCode : '').toString().trim();
         const sizeStr = (sizeCode !== null && sizeCode !== void 0 ? sizeCode : '').toString().trim();
-        if (!codigoTrim || !colorStr || !sizeStr)
+        if (!codigoTrim || !sizeStr)
             return null;
-        let row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [codigoTrim, colorStr, colorStr, sizeStr]);
-        if (row === null || row === void 0 ? void 0 : row.variant_id)
-            return row.variant_id;
+        const colorCandidates = colorLookupCandidates((colorCode !== null && colorCode !== void 0 ? colorCode : '').toString().trim());
+        if (!colorCandidates.length)
+            return null;
+        const colorMatchSql = `(TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?)))`;
+        const tryWhere = (skuWhereSql, skuParams, opts) => __awaiter(this, void 0, void 0, function* () {
+            const lim = (opts === null || opts === void 0 ? void 0 : opts.limitOne) ? ' LIMIT 1' : '';
+            for (const colorTry of colorCandidates) {
+                const row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN colors c ON c.id = pc.color_id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         JOIN sizes s ON s.id = pv.size_id
+         WHERE ${skuWhereSql} AND ${colorMatchSql} AND s.size_code = ?${lim}`, [...skuParams, colorTry, colorTry, sizeStr]);
+                if (row === null || row === void 0 ? void 0 : row.variant_id)
+                    return row.variant_id;
+            }
+            return null;
+        });
+        let id = yield tryWhere('p.sku = ?', [codigoTrim]);
+        if (id)
+            return id;
         const padded = padArticleCodeTo7(codigoTrim);
         if (padded && padded !== codigoTrim) {
-            row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
-       FROM products p
-       JOIN product_colors pc ON pc.product_id = p.id
-       JOIN colors c ON c.id = pc.color_id
-       JOIN product_variants pv ON pv.product_color_id = pc.id
-       JOIN sizes s ON s.id = pv.size_id
-       WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [padded, colorStr, colorStr, sizeStr]);
-            if (row === null || row === void 0 ? void 0 : row.variant_id)
-                return row.variant_id;
+            id = yield tryWhere('p.sku = ?', [padded]);
+            if (id)
+                return id;
         }
         const normalized = normalizeCodigo(codigoTrim);
         if (!normalized)
             return null;
-        row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`, [normalized, colorStr, colorStr, sizeStr]);
-        if (row === null || row === void 0 ? void 0 : row.variant_id)
-            return row.variant_id;
+        id = yield tryWhere(`REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ?`, [normalized]);
+        if (id)
+            return id;
         const pattern = escapeLike(normalized) + '%';
-        row = yield (0, db_1.get)(`SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?
-     LIMIT 1`, [pattern, colorStr, colorStr, sizeStr]);
-        return (row === null || row === void 0 ? void 0 : row.variant_id) || null;
+        id = yield tryWhere(`REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ?`, [pattern], { limitOne: true });
+        return id || null;
     });
 }
 const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG'];

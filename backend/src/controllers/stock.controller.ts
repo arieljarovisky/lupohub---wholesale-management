@@ -6,6 +6,11 @@ import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
 import { codigoTalleParaSku } from '../talles-tango';
+import {
+  canonicalNumericColorCode,
+  digitsOnlyColorCode,
+  normalizeColorCodeForImportValue,
+} from '../utils/colorCodeCanonical';
 
 const SYNC_DEBOUNCE_MS = 2800;
 const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
@@ -1196,6 +1201,31 @@ function escapeLike(s: string): string {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
+/** Candidatos de color para matchear `colors.code` / nombre (Excel 4 dígitos vs catálogo 3, ceros a la izquierda, etc.). */
+function colorLookupCandidates(colorRaw: string): string[] {
+  const s = String(colorRaw ?? '').trim();
+  if (!s) return [];
+  const out: string[] = [];
+  const add = (x: string) => {
+    const t = String(x ?? '').trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  add(s);
+  const normImp = normalizeColorCodeForImportValue(s);
+  if (normImp) add(normImp);
+  const digits = digitsOnlyColorCode(s);
+  if (digits) {
+    add(digits);
+    const stripped = digits.replace(/^0+/, '') || '0';
+    if (stripped !== digits) add(stripped);
+    const canD = canonicalNumericColorCode(digits);
+    if (canD) add(canD);
+    const canS = canonicalNumericColorCode(stripped);
+    if (canS) add(canS);
+  }
+  return out;
+}
+
 /** Resuelve variant_id por código de producto (base SKU), código de color y código de talle. Prueba exacto, normalizado y "empieza con". */
 async function getVariantIdByCodigoColorSize(
   codigo: string,
@@ -1203,65 +1233,60 @@ async function getVariantIdByCodigoColorSize(
   sizeCode: string
 ): Promise<string | null> {
   const codigoTrim = (codigo ?? '').toString().trim();
-  const colorStr = (colorCode ?? '').toString().trim();
   const sizeStr = (sizeCode ?? '').toString().trim();
-  if (!codigoTrim || !colorStr || !sizeStr) return null;
+  if (!codigoTrim || !sizeStr) return null;
+  const colorCandidates = colorLookupCandidates((colorCode ?? '').toString().trim());
+  if (!colorCandidates.length) return null;
 
-  let row = await get(
-    `SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`,
-    [codigoTrim, colorStr, colorStr, sizeStr]
-  );
-  if (row?.variant_id) return row.variant_id;
+  const colorMatchSql = `(TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?)))`;
+
+  const tryWhere = async (
+    skuWhereSql: string,
+    skuParams: unknown[],
+    opts?: { limitOne?: boolean }
+  ): Promise<string | null> => {
+    const lim = opts?.limitOne ? ' LIMIT 1' : '';
+    for (const colorTry of colorCandidates) {
+      const row = await get(
+        `SELECT pv.id AS variant_id
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN colors c ON c.id = pc.color_id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         JOIN sizes s ON s.id = pv.size_id
+         WHERE ${skuWhereSql} AND ${colorMatchSql} AND s.size_code = ?${lim}`,
+        [...skuParams, colorTry, colorTry, sizeStr]
+      );
+      if (row?.variant_id) return row.variant_id;
+    }
+    return null;
+  };
+
+  let id = await tryWhere('p.sku = ?', [codigoTrim]);
+  if (id) return id;
 
   const padded = padArticleCodeTo7(codigoTrim);
   if (padded && padded !== codigoTrim) {
-    row = await get(
-      `SELECT pv.id AS variant_id
-       FROM products p
-       JOIN product_colors pc ON pc.product_id = p.id
-       JOIN colors c ON c.id = pc.color_id
-       JOIN product_variants pv ON pv.product_color_id = pc.id
-       JOIN sizes s ON s.id = pv.size_id
-       WHERE p.sku = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`,
-      [padded, colorStr, colorStr, sizeStr]
-    );
-    if (row?.variant_id) return row.variant_id;
+    id = await tryWhere('p.sku = ?', [padded]);
+    if (id) return id;
   }
 
   const normalized = normalizeCodigo(codigoTrim);
   if (!normalized) return null;
 
-  row = await get(
-    `SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?`,
-    [normalized, colorStr, colorStr, sizeStr]
+  id = await tryWhere(
+    `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') = ?`,
+    [normalized]
   );
-  if (row?.variant_id) return row.variant_id;
+  if (id) return id;
 
   const pattern = escapeLike(normalized) + '%';
-  row = await get(
-    `SELECT pv.id AS variant_id
-     FROM products p
-     JOIN product_colors pc ON pc.product_id = p.id
-     JOIN colors c ON c.id = pc.color_id
-     JOIN product_variants pv ON pv.product_color_id = pc.id
-     JOIN sizes s ON s.id = pv.size_id
-     WHERE REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ? AND (TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?))) AND s.size_code = ?
-     LIMIT 1`,
-    [pattern, colorStr, colorStr, sizeStr]
+  id = await tryWhere(
+    `REPLACE(REPLACE(REPLACE(p.sku, '-', ''), '/', ''), CHAR(32), '') LIKE ?`,
+    [pattern],
+    { limitOne: true }
   );
-  return row?.variant_id || null;
+  return id || null;
 }
 
 const EXCEL_SIZE_COLUMNS = ['P', 'M', 'G', 'GG', 'U', 'XG', 'XXG', 'XXXG'];

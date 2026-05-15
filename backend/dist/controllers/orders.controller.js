@@ -614,21 +614,11 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
-                const row = yield (0, db_1.get)(`SELECT pv.id AS variant_id 
-           FROM products p 
-           JOIN product_colors pc ON pc.product_id = p.id 
-           JOIN colors c ON c.id = pc.color_id 
-           JOIN product_variants pv ON pv.product_color_id = pc.id 
-           JOIN sizes s ON s.id = pv.size_id 
-           WHERE p.sku = ? AND c.code = ? AND s.size_code = ?`, [item.sku, item.colorCode, item.sizeCode]);
-                variantId = row === null || row === void 0 ? void 0 : row.variant_id;
-            }
-            if (!variantId && item.sku && item.colorCode && item.sizeCode) {
                 variantId =
                     (yield (0, stock_controller_1.resolveVariantIdForGridCell)(String(item.sku).trim(), String(item.colorCode).trim(), String(item.sizeCode).trim())) || undefined;
             }
             if (!variantId) {
-                const err = new Error('Falta variantId o sku+colorCode+sizeCode válidos en item');
+                const err = new Error(`No se encontró variante para código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode}. Revisá el catálogo (SKU, código de color y talle deben coincidir con LupoHub).`);
                 err.statusCode = 400;
                 throw err;
             }
