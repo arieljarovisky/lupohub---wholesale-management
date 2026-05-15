@@ -1158,6 +1158,10 @@ function sizeCandidatesFromGridKey(gridKey) {
     }
     add((0, talles_tango_1.codigoTalleParaSku)(u));
     add((0, talles_tango_1.codigoTalleParaSku)(raw));
+    /** Códigos Tango 130–180 en planilla vs `sizes.size_code` en letra (U, XG, …). */
+    const letterFromTango = talles_tango_1.TALLE_CODIGO_A_NOMBRE[u] || talles_tango_1.TALLE_CODIGO_A_NOMBRE[raw.trim()];
+    if (letterFromTango)
+        add(letterFromTango);
     return [...out];
 }
 function resolveVariantIdForGridCell(codigo, colorStr, gridSizeKey) {

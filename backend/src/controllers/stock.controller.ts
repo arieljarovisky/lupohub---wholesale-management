@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
-import { codigoTalleParaSku } from '../talles-tango';
+import { codigoTalleParaSku, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
   canonicalNumericColorCode,
   digitsOnlyColorCode,
@@ -1348,6 +1348,9 @@ function sizeCandidatesFromGridKey(gridKey: string): string[] {
   }
   add(codigoTalleParaSku(u));
   add(codigoTalleParaSku(raw));
+  /** Códigos Tango 130–180 en planilla vs `sizes.size_code` en letra (U, XG, …). */
+  const letterFromTango = TALLE_CODIGO_A_NOMBRE[u] || TALLE_CODIGO_A_NOMBRE[raw.trim()];
+  if (letterFromTango) add(letterFromTango);
   return [...out];
 }
 
