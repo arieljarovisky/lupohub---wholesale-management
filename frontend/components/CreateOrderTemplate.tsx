@@ -120,6 +120,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   /** Códigos de artículo colapsados (solo se muestra resumen). */
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [matrixImporting, setMatrixImporting] = useState(false);
+  /** false = solo la primera hoja del Excel con filas válidas (evita pedidos duplicados por muchas hojas). */
+  const [matrixImportAllSheets, setMatrixImportAllSheets] = useState(false);
 
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
@@ -147,7 +149,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if (!file || matrixImporting) return;
       setMatrixImporting(true);
       try {
-        const lines = await parseOrderMatrixExcel(file);
+        const lines = await parseOrderMatrixExcel(file, { importAllSheets: matrixImportAllSheets });
         if (!lines.length) {
           showToast(
             'error',
@@ -200,7 +202,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         setMatrixImporting(false);
       }
     },
-    [matrixImporting, orderDate, onMatrixImportDone, showToast]
+    [matrixImporting, matrixImportAllSheets, orderDate, onMatrixImportDone, showToast]
   );
 
   const isEditing = !!initialOrder;
@@ -942,9 +944,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <span className="mx-1.5">·</span>
           <span className="font-semibold text-slate-300">{totalUnits}</span> unidades
         </p>
-        <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:justify-end sm:items-end">
           {canMatrixImport && (
             <>
+              <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer select-none max-w-[min(100%,280px)] sm:mr-1">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500/40 shrink-0"
+                  checked={matrixImportAllSheets}
+                  onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
+                  disabled={matrixImporting || savingOrder}
+                />
+                <span>
+                  Importar <span className="text-slate-300 font-semibold">todas</span> las hojas del libro
+                  <span className="block text-[10px] text-slate-500 font-normal mt-0.5 leading-snug">
+                    Desmarcado: solo la primera hoja con datos (recomendado si el archivo tiene muchas hojas copiadas y se generaban pedidos duplicados).
+                  </span>
+                </span>
+              </label>
               <input
                 ref={matrixFileRef}
                 type="file"
@@ -957,7 +974,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
                 className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Una hoja o varias: columnas Cliente/Ref., Código, Color, talles (U, P, G…) y Precio opcional. Sin columna cliente se usa el nombre de la hoja. Si marcás cantidades con relleno verde (Excel), se crean dos borradores: a facturar (verde) y pendiente de facturación (sin verde)."
+                title="Por defecto solo la primera hoja con filas válidas. Marcá «todas las hojas» si tu pedido está repartido en varias hojas a propósito. Columnas Cliente/Ref., Código, Color, talles. Sin columna cliente se usa el nombre de la hoja. Relleno verde en cantidades: dos borradores (a facturar / pendiente)."
               >
                 <Upload size={20} strokeWidth={2.5} />
                 {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}

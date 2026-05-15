@@ -357,8 +357,28 @@ function parseSheetToLinesLegacy(rows: (string | number)[][], sheetName: string)
   return out;
 }
 
-function parseOrderMatrixExcelLegacy(data: Uint8Array): OrderMatrixImportLine[] {
+export type ParseOrderMatrixExcelOptions = {
+  /**
+   * Si es true, se concatenan todas las hojas (comportamiento antiguo).
+   * Por defecto false: solo la primera hoja que tenga al menos una fila válida,
+   * para no generar decenas de pedidos duplicados cuando el libro trae muchas hojas copiadas.
+   */
+  importAllSheets?: boolean;
+};
+
+function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixExcelOptions): OrderMatrixImportLine[] {
   const workbook = XLSX.read(data, { type: 'array' });
+  const importAllSheets = opts?.importAllSheets === true;
+  if (!importAllSheets) {
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
+      const lines = parseSheetToLinesLegacy(rows, sheetName);
+      if (lines.length > 0) return lines;
+    }
+    return [];
+  }
   const all: OrderMatrixImportLine[] = [];
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -371,22 +391,34 @@ function parseOrderMatrixExcelLegacy(data: Uint8Array): OrderMatrixImportLine[] 
 
 /**
  * Lee .xlsx con ExcelJS (incluye celdas verdes → dos pedidos). .xls o error al cargar: SheetJS sin colores.
+ * @param opts.importAllSheets Por defecto false: solo la primera hoja con datos válidos.
  */
-export async function parseOrderMatrixExcel(file: File): Promise<OrderMatrixImportLine[]> {
+export async function parseOrderMatrixExcel(
+  file: File,
+  opts?: ParseOrderMatrixExcelOptions
+): Promise<OrderMatrixImportLine[]> {
   const buf = await file.arrayBuffer();
   const lower = file.name.toLowerCase();
   if (lower.endsWith('.xls') && !lower.endsWith('.xlsx')) {
-    return parseOrderMatrixExcelLegacy(new Uint8Array(buf));
+    return parseOrderMatrixExcelLegacy(new Uint8Array(buf), opts);
   }
   try {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
+    const importAllSheets = opts?.importAllSheets === true;
+    if (!importAllSheets) {
+      for (const ws of wb.worksheets) {
+        const lines = parseWorksheet(ws, ws.name);
+        if (lines.length > 0) return lines;
+      }
+      return [];
+    }
     const all: OrderMatrixImportLine[] = [];
     wb.eachSheet((ws) => {
       all.push(...parseWorksheet(ws, ws.name));
     });
     return all;
   } catch {
-    return parseOrderMatrixExcelLegacy(new Uint8Array(buf));
+    return parseOrderMatrixExcelLegacy(new Uint8Array(buf), opts);
   }
 }
