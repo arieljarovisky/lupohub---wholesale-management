@@ -1818,9 +1818,12 @@ export const emitirFactura = async (req: any, res: any) => {
       [id]
     );
     if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
-    const noStockImpact = req.body?.noStockImpact === true || req.body?.no_stock_impact === 1;
-    if (noStockImpact && !orderRow.no_stock_impact) {
-      await execute('UPDATE orders SET no_stock_impact = 1 WHERE id = ?', [id]);
+    const wantsNoStockImpact = req.body?.noStockImpact === true || req.body?.no_stock_impact === 1;
+    if (wantsNoStockImpact) {
+      return res.status(400).json({
+        message:
+          'Ya no se puede facturar sin picking. Completá el picking, pasá el pedido a control y emití la factura desde ahí.',
+      });
     }
     const existingInv = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
     if (existingInv) return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
@@ -1835,19 +1838,17 @@ export const emitirFactura = async (req: any, res: any) => {
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
     const netFromItems = await getOrderNetFromLineItems(id);
-    if (!noStockImpact) {
-      if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
-        return res.status(400).json({
-          message:
-            'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
-        });
-      }
-      if (!(netFromItems > 0.005)) {
-        return res.status(400).json({
-          message:
-            'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
-        });
-      }
+    if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
+      return res.status(400).json({
+        message:
+          'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
+      });
+    }
+    if (!(netFromItems > 0.005)) {
+      return res.status(400).json({
+        message:
+          'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
+      });
     }
     const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
 

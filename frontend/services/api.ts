@@ -757,8 +757,8 @@ export const api = {
     return await request<{ existe: boolean; resultado?: any; error?: string }>(`/afip/consultar-comprobante?${params}`, 'GET');
   },
 
-  /** Emite factura electrónica AFIP para un pedido. `noStockImpact` evita descontar stock en el flujo del pedido. */
-  emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6; noStockImpact?: boolean }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number; puntoVta?: number; agipAlicuota?: number; agipRetPer?: number }> => {
+  /** Emite factura electrónica AFIP para un pedido (requiere picking y estado control/despacho). */
+  emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number; puntoVta?: number; agipAlicuota?: number; agipRetPer?: number }> => {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {});
   },
 

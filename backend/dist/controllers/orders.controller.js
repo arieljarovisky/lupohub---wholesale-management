@@ -1690,9 +1690,11 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact, status FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
-        const noStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
-        if (noStockImpact && !orderRow.no_stock_impact) {
-            yield (0, db_1.execute)('UPDATE orders SET no_stock_impact = 1 WHERE id = ?', [id]);
+        const wantsNoStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
+        if (wantsNoStockImpact) {
+            return res.status(400).json({
+                message: 'Ya no se puede facturar sin picking. Completá el picking, pasá el pedido a control y emití la factura desde ahí.',
+            });
         }
         const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
         if (existingInv)
@@ -1703,17 +1705,15 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const netFromItems = yield getOrderNetFromLineItems(id);
-        if (!noStockImpact) {
-            if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
-                return res.status(400).json({
-                    message: 'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
-                });
-            }
-            if (!(netFromItems > 0.005)) {
-                return res.status(400).json({
-                    message: 'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
-                });
-            }
+        if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
+            return res.status(400).json({
+                message: 'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
+            });
+        }
+        if (!(netFromItems > 0.005)) {
+            return res.status(400).json({
+                message: 'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
+            });
         }
         const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
         const agip = yield getAgipRetentionForOrder({

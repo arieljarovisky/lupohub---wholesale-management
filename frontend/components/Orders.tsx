@@ -149,6 +149,17 @@ function orderNetoFromItems(order: Order): number {
   return Math.round(s * 100) / 100;
 }
 
+/** Mismo criterio que el backend al emitir AFIP: solo tras picking (control / despacho). */
+const AFIP_EMIT_ALLOWED_STATUSES = new Set<string>([
+  OrderStatus.PENDING_CONTROL,
+  OrderStatus.CONTROLLED,
+  OrderStatus.DISPATCHED,
+]);
+
+function orderPuedeEmitirFacturaTrasPicking(order: Order): boolean {
+  return AFIP_EMIT_ALLOWED_STATUSES.has(String(order.status || ''));
+}
+
 /** Percepción IIBB (AGIP) que aplica al pedido facturado: viene de `getOrders` (BD o recálculo con padrón). */
 function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: number } | null {
   if (!order.invoice) return null;
@@ -1204,6 +1215,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
   const openFacturaPreviewBeforeEmit = () => {
     if (!orderToEmitFactura) return;
+    if (!orderPuedeEmitirFacturaTrasPicking(orderToEmitFactura)) {
+      showToast('error', 'Completá el picking y pasá el pedido a «Falta controlar» (o posterior) antes de facturar.');
+      return;
+    }
     const cbteTipo = getCbteTipoFromEmitSelection(orderToEmitFactura);
     const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
     const netPreview = orderNetoFromItems(orderToEmitFactura);
@@ -2005,43 +2020,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           setEmitirFacturaTransporteId(pickInitialTransporteId(manualFacturaDataByOrder[order.id], optsEmit));
                           setShowEmitirFacturaModal(true);
                         }}
-                        disabled={!!emitiendoFacturaId}
-                        title={`Emitir factura AFIP (Factura ${tipoFactura} según el cliente)`}
+                        disabled={!!emitiendoFacturaId || !orderPuedeEmitirFacturaTrasPicking(order)}
+                        title={
+                          !orderPuedeEmitirFacturaTrasPicking(order)
+                            ? 'Completá picking y pasá el pedido a control antes de emitir AFIP'
+                            : `Emitir factura AFIP (Factura ${tipoFactura} según el cliente)`
+                        }
                         icon={emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
                         label="Emitir AFIP"
-                      />
-                      <OrderCardActionButton
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          showConfirm({
-                            title: 'Facturar sin stock',
-                            message: `Se emitirá Factura ${tipoFactura} y este pedido quedará marcado como "sin impacto de stock".\n\nUsar solo para facturación administrativa (sin movimiento real de inventario).\n\n¿Continuar?`,
-                            confirmLabel: `Facturar sin stock`,
-                            onConfirm: () => {
-                              setEmitiendoFacturaId(order.id);
-                              api.emitirFactura(order.id, { noStockImpact: true })
-                                .then((res) => {
-                                  onFacturaEmitida?.(order.id, {
-                                    cae: res.cae,
-                                    caeFchVto: res.caeFchVto,
-                                    cbteDesde: res.cbteDesde,
-                                    cbteHasta: res.cbteHasta,
-                                    cbteTipo: res.cbteTipo,
-                                    puntoVta: res.puntoVta,
-                                    agipAlicuota: Number((res as any).agipAlicuota || 0),
-                                    agipRetPer: Number((res as any).agipRetPer || 0)
-                                  });
-                                  showToast('success', `Factura ${tipoFactura} emitida sin impactar stock. CAE ${res.cae}`);
-                                })
-                                .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
-                                .finally(() => setEmitiendoFacturaId(null));
-                            }
-                          });
-                        }}
-                        disabled={!!emitiendoFacturaId}
-                        title="Emitir factura sin descontar stock en el pedido"
-                        icon={<Package size={16} />}
-                        label="Sin stock"
                       />
                     </>
                     );
@@ -2386,6 +2372,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
+            <p className="text-xs text-sky-200/95 mb-3 rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2 leading-snug">
+              Solo podés emitir después del picking: el pedido debe estar en <strong className="text-white">Falta controlar</strong>,{' '}
+              <strong className="text-white">Controlado</strong> o <strong className="text-white">Despachado</strong>. El neto AFIP
+              coincide con lo pickeado.
+            </p>
             <p className="text-sm text-slate-400 mb-4">Pedido #{orderToEmitFactura.id} — {orderToEmitFactura.customerBusinessName || getCustomerName(orderToEmitFactura)}</p>
             <p className="text-xs text-slate-500 mb-4">
               Condición IVA del cliente: {customers.find(c => c.id === orderToEmitFactura.customerId)?.condicionIva || 'No informada'}.
@@ -2456,7 +2447,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <button
                 type="button"
                 onClick={openFacturaPreviewBeforeEmit}
-                disabled={!!emitiendoFacturaId}
+                disabled={!!emitiendoFacturaId || !orderPuedeEmitirFacturaTrasPicking(orderToEmitFactura)}
                 className="px-5 py-2.5 rounded-xl font-bold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-2 transition disabled:opacity-50"
               >
                 <FileText size={18} />
@@ -2466,6 +2457,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 type="button"
                 onClick={() => {
                   if (!orderToEmitFactura) return;
+                  if (!orderPuedeEmitirFacturaTrasPicking(orderToEmitFactura)) {
+                    showToast('error', 'Completá el picking y pasá el pedido a control antes de emitir la factura.');
+                    return;
+                  }
                   const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
                   setEmitiendoFacturaId(orderToEmitFactura.id);
                   const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
@@ -2509,7 +2504,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     .catch((err: any) => showToast('error', err?.message || err?.response?.data?.message || 'Error emitiendo factura'))
                     .finally(() => setEmitiendoFacturaId(null));
                 }}
-                disabled={!!emitiendoFacturaId}
+                disabled={!!emitiendoFacturaId || !orderPuedeEmitirFacturaTrasPicking(orderToEmitFactura)}
                 className="px-5 py-2.5 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 transition disabled:opacity-50"
               >
                 {emitiendoFacturaId === orderToEmitFactura?.id ? <Clock size={18} className="animate-pulse" /> : <Receipt size={18} />}
