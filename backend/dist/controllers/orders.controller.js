@@ -662,21 +662,38 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             }
         }
         totalRecalculated = Math.round(totalRecalculated * 100) / 100;
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
         let insertedItems = 0;
-        for (const pr of preparedRows) {
-            for (const alloc of pr.allocations) {
-                if (!alloc.quantity || alloc.quantity <= 0)
-                    continue;
-                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, pr.variantId, alloc.quantity, 0, (_f = pr.item.priceAtMoment) !== null && _f !== void 0 ? _f : 0, pr.sellAsPack, alloc.despachoId]);
-                insertedItems += 1;
+        const conn = yield db_1.pool.getConnection();
+        try {
+            yield conn.beginTransaction();
+            yield conn.execute(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
+            for (const pr of preparedRows) {
+                for (const alloc of pr.allocations) {
+                    if (!alloc.quantity || alloc.quantity <= 0)
+                        continue;
+                    yield conn.execute(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, pr.variantId, alloc.quantity, 0, (_f = pr.item.priceAtMoment) !== null && _f !== void 0 ? _f : 0, pr.sellAsPack, alloc.despachoId]);
+                    insertedItems += 1;
+                }
             }
+            if (insertedItems === 0) {
+                yield conn.rollback();
+                const err = new Error('No se pudo guardar ninguna línea del pedido (cantidades en cero o error al insertar ítems).');
+                err.statusCode = 400;
+                throw err;
+            }
+            yield conn.commit();
         }
-        if (insertedItems === 0) {
-            yield (0, db_1.execute)('DELETE FROM orders WHERE id = ?', [orderId]);
-            const err = new Error('No se pudo guardar ninguna línea del pedido (cantidades en cero o error al insertar ítems).');
-            err.statusCode = 400;
-            throw err;
+        catch (e) {
+            try {
+                yield conn.rollback();
+            }
+            catch (_m) {
+                // ignore
+            }
+            throw e;
+        }
+        finally {
+            conn.release();
         }
         // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
@@ -764,9 +781,15 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.createOrder = createOrder;
+function normalizeMatrixCustomerRefKey(ref) {
+    return String(ref !== null && ref !== void 0 ? ref : '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
@@ -824,43 +847,85 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
             return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
         }
-        const byCustomer = new Map();
+        const byRefKey = new Map();
         for (const ln of linesRaw) {
-            const ref = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
-            if (!ref)
+            const refTrim = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
+            if (!refTrim)
                 continue;
+            const refKey = normalizeMatrixCustomerRefKey(refTrim);
             const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
-            const key = ig ? `${ref.toLowerCase()}\t${ig}` : ref.toLowerCase();
-            if (!byCustomer.has(key))
-                byCustomer.set(key, []);
-            byCustomer.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: ref }));
+            const key = ig ? `${refKey}\t${ig}` : refKey;
+            if (!byRefKey.has(key))
+                byRefKey.set(key, []);
+            byRefKey.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: refTrim }));
         }
         const created = [];
         const errors = [];
-        for (const [, groupLines] of byCustomer) {
-            const customerRef = ((_b = groupLines[0]) === null || _b === void 0 ? void 0 : _b.customerRef) || '';
+        const byCustomerMerged = new Map();
+        for (const [, refGroupLines] of byRefKey) {
+            if (!refGroupLines.length)
+                continue;
+            const ref0 = String((_c = (_b = refGroupLines[0]) === null || _b === void 0 ? void 0 : _b.customerRef) !== null && _c !== void 0 ? _c : '').trim();
+            const customer = yield findCustomer(ref0);
+            if (!customer) {
+                const ig = (_d = refGroupLines[0]) === null || _d === void 0 ? void 0 : _d.importGroup;
+                errors.push({
+                    customerRef: ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${ref0} [${ig}]` : ref0,
+                    message: 'Cliente no encontrado',
+                });
+                continue;
+            }
+            const ig = ((_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup) === 'FACTURAR' || ((_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup) === 'PENDIENTE'
+                ? refGroupLines[0].importGroup
+                : '';
+            const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
+            let bucket = byCustomerMerged.get(mergeKey);
+            if (!bucket) {
+                bucket = { customer, lines: [], displayRef: ref0 };
+                byCustomerMerged.set(mergeKey, bucket);
+            }
+            bucket.lines.push(...refGroupLines);
+        }
+        for (const [, bucket] of byCustomerMerged) {
+            const groupLines = bucket.lines;
+            const customerRef = bucket.displayRef;
+            const customer = bucket.customer;
             try {
-                const customer = yield findCustomer(customerRef);
-                if (!customer) {
-                    const ig = (_c = groupLines[0]) === null || _c === void 0 ? void 0 : _c.importGroup;
-                    errors.push({
-                        customerRef: ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${customerRef} [${ig}]` : customerRef,
-                        message: 'Cliente no encontrado',
-                    });
-                    continue;
-                }
-                const items = [];
+                const aggMap = new Map();
                 for (const ln of groupLines) {
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_d = ln.codigo) !== null && _d !== void 0 ? _d : '').trim());
-                    const color = String((_e = ln.color) !== null && _e !== void 0 ? _e : '').trim();
-                    const sizeCode = String((_f = ln.sizeCode) !== null && _f !== void 0 ? _f : '').trim();
+                    const codigo = padSku(String((_g = ln.codigo) !== null && _g !== void 0 ? _g : '').trim());
+                    const color = String((_h = ln.color) !== null && _h !== void 0 ? _h : '').trim();
+                    const sizeCode = String((_j = ln.sizeCode) !== null && _j !== void 0 ? _j : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
-                    const priceAtMoment = yield resolvePrice(codigo, ln.unitPrice);
-                    items.push({ sku: codigo, colorCode: color, sizeCode, quantity: qty, priceAtMoment });
+                    const k = `${codigo}\t${color}\t${sizeCode}`;
+                    const prev = aggMap.get(k);
+                    if (!prev) {
+                        aggMap.set(k, { codigo, color, sizeCode, qty, unitPrice: ln.unitPrice });
+                    }
+                    else {
+                        prev.qty += qty;
+                        const ep = Number(ln.unitPrice);
+                        const hasGood = Number.isFinite(ep) && ep > 0;
+                        const prevEp = Number(prev.unitPrice);
+                        if (hasGood && !(Number.isFinite(prevEp) && prevEp > 0)) {
+                            prev.unitPrice = ln.unitPrice;
+                        }
+                    }
+                }
+                const items = [];
+                for (const row of aggMap.values()) {
+                    const priceAtMoment = yield resolvePrice(row.codigo, row.unitPrice);
+                    items.push({
+                        sku: row.codigo,
+                        colorCode: row.color,
+                        sizeCode: row.sizeCode,
+                        quantity: row.qty,
+                        priceAtMoment,
+                    });
                 }
                 if (items.length === 0) {
                     errors.push({ customerRef, message: 'Sin líneas con cantidad > 0' });
@@ -869,7 +934,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 let total = 0;
                 for (const it of items)
                     total += it.quantity * it.priceAtMoment;
-                const importGroup = (_g = groupLines[0]) === null || _g === void 0 ? void 0 : _g.importGroup;
+                const importGroup = (_k = groupLines[0]) === null || _k === void 0 ? void 0 : _k.importGroup;
                 const matrixImportLabel = importGroup === 'FACTURAR'
                     ? 'A facturar (Excel)'
                     : importGroup === 'PENDIENTE'
@@ -892,7 +957,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             catch (e) {
                 console.error(e);
                 errors.push({
-                    customerRef: ((_h = groupLines[0]) === null || _h === void 0 ? void 0 : _h.importGroup) === 'FACTURAR' || ((_j = groupLines[0]) === null || _j === void 0 ? void 0 : _j.importGroup) === 'PENDIENTE'
+                    customerRef: ((_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup) === 'FACTURAR' || ((_m = groupLines[0]) === null || _m === void 0 ? void 0 : _m.importGroup) === 'PENDIENTE'
                         ? `${customerRef} [${groupLines[0].importGroup}]`
                         : customerRef,
                     message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',

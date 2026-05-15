@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testConnection = exports.get = exports.execute = exports.query = void 0;
+exports.testConnection = exports.get = exports.execute = exports.query = exports.pool = void 0;
 const promise_1 = __importDefault(require("mysql2/promise"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
@@ -54,11 +54,11 @@ function getPoolConfig() {
         queueLimit: 0
     };
 }
-const pool = promise_1.default.createPool(getPoolConfig());
+exports.pool = promise_1.default.createPool(getPoolConfig());
 // Wrapper para consultas que retornan filas (SELECT)
 const query = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
     try {
-        const [rows] = yield pool.query(sql, params);
+        const [rows] = yield exports.pool.query(sql, params);
         return rows;
     }
     catch (error) {
@@ -71,7 +71,7 @@ exports.query = query;
 // Retorna el ResultSetHeader (affectedRows, insertId, etc.) para poder comprobar filas afectadas
 const execute = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
     try {
-        const [rows] = yield pool.execute(sql, params);
+        const [rows] = yield exports.pool.execute(sql, params);
         return rows;
     }
     catch (error) {
@@ -83,7 +83,7 @@ exports.execute = execute;
 // Wrapper para obtener un solo registro
 const get = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
     try {
-        const [rows] = yield pool.query(sql, params);
+        const [rows] = yield exports.pool.query(sql, params);
         const result = rows;
         return result.length > 0 ? result[0] : null;
     }
@@ -96,9 +96,10 @@ exports.get = get;
 /** Prueba la conexión; lanza si falla (ej. ECONNREFUSED). */
 const testConnection = () => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
-    const [rows] = yield pool.query('SELECT 1 AS ok');
+    const [rows] = yield exports.pool.query('SELECT 1 AS ok');
     if (!rows || ((_a = rows[0]) === null || _a === void 0 ? void 0 : _a.ok) !== 1)
         throw new Error('DB check failed');
 });
 exports.testConnection = testConnection;
-exports.default = pool;
+/** Misma instancia exportada como default; sirve para transacciones (`pool.getConnection()`). */
+exports.default = exports.pool;

@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
-import { codigoTalleParaSku, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
+import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
   canonicalNumericColorCode,
   digitsOnlyColorCode,
@@ -1196,9 +1196,13 @@ function padArticleCodeTo7(s: string): string {
   return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
 
+/** Prefijos de artículo habituales (Tango/Lupo): planilla "24605" vs catálogo "Q024605". */
+const ARTICLE_SKU_LETTER_PREFIXES: readonly string[] = ['Q', 'C', 'P'];
+
 /**
  * Variantes de SKU solo-numérico para cruzar con `products.sku`:
  * el import suele forzar 7 dígitos (22684 → 0022684) pero el catálogo puede tener 022684, 22684, etc.
+ * Incluye prefijos letra como en `buildProductSkuLookupCandidates` del import Tango.
  */
 function articleSkuCandidates(raw: string): string[] {
   const t = String(raw ?? '').trim();
@@ -1219,12 +1223,82 @@ function articleSkuCandidates(raw: string): string[] {
     for (let w = Math.max(4, noLead.length); w <= 7; w++) {
       add(noLead.padStart(w, '0'));
     }
+    const p7nl = padArticleCodeTo7(noLead);
+    for (const pref of ARTICLE_SKU_LETTER_PREFIXES) {
+      add(pref + noLead);
+      add(pref.toLowerCase() + noLead);
+      if (p7nl) {
+        add(pref + p7nl);
+        add(pref.toLowerCase() + p7nl);
+      }
+      if (digits !== noLead) {
+        add(pref + digits);
+        add(pref.toLowerCase() + digits);
+        const p7d = padArticleCodeTo7(digits);
+        if (p7d && p7d !== p7nl) {
+          add(pref + p7d);
+          add(pref.toLowerCase() + p7d);
+        }
+      }
+    }
   } else {
     const digits = t.replace(/\D/g, '');
     if (digits) {
       const p = padArticleCodeTo7(digits);
       if (p) add(p);
+      const noLead = digits.replace(/^0+/, '') || '0';
+      if (noLead !== digits) {
+        add(noLead);
+        add(padArticleCodeTo7(noLead));
+      }
     }
+    const m = t.match(/^([A-Za-z]{1,3})(\d[\d\s-]*)$/);
+    if (m) {
+      const num = m[2].replace(/\D/g, '');
+      if (num) {
+        const nl = num.replace(/^0+/, '') || '0';
+        add(nl);
+        add(padArticleCodeTo7(nl));
+      }
+    }
+  }
+  return out;
+}
+
+/** Tallas equivalentes: `sizes.size_code` puede ser "170" (Tango) o "U" según origen de datos. */
+function sizeLookupCodes(sizeCode: string): string[] {
+  const s = String(sizeCode ?? '').trim();
+  if (!s) return [];
+  const out: string[] = [];
+  const add = (x: string) => {
+    const t = String(x ?? '').trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  add(s);
+  const u = s.toUpperCase();
+  if (u !== s) add(u);
+  if (/^\d{1,3}$/.test(s)) {
+    const letter = nombreTalleDesdeCodigo(s);
+    if (letter && letter !== s) add(letter);
+  } else if (/^[A-Z]{1,4}$/.test(u)) {
+    const num = codigoTalleParaSku(u);
+    if (num && num !== s) add(num);
+  }
+  return out;
+}
+
+function sizeLookupNameLowerSet(sizeCode: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (x: string) => {
+    const t = String(x ?? '').trim().toLowerCase();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  for (const c of sizeLookupCodes(sizeCode)) {
+    add(c);
+    if (/^\d{1,3}$/.test(c)) add(nombreTalleDesdeCodigo(c));
   }
   return out;
 }
@@ -1273,6 +1347,16 @@ async function getVariantIdByCodigoColorSize(
   const skuList = articleSkuCandidates(codigoTrim);
   if (!skuList.length) return null;
 
+  const sizeInList = sizeLookupCodes(sizeStr);
+  const nameInList = sizeLookupNameLowerSet(sizeStr);
+  const sizePlaceholders = sizeInList.map(() => '?').join(', ');
+  const namePlaceholders = nameInList.map(() => '?').join(', ');
+  const sizeMatchSql = `(
+    TRIM(CAST(s.size_code AS CHAR)) IN (${sizePlaceholders})
+    OR LOWER(TRIM(COALESCE(s.name, ''))) IN (${namePlaceholders})
+  )`;
+  const sizeParamsTail = [...sizeInList, ...nameInList];
+
   const colorMatchSql = `(TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?)))`;
 
   const tryWhere = async (
@@ -1289,8 +1373,8 @@ async function getVariantIdByCodigoColorSize(
          JOIN colors c ON c.id = pc.color_id
          JOIN product_variants pv ON pv.product_color_id = pc.id
          JOIN sizes s ON s.id = pv.size_id
-         WHERE ${skuWhereSql} AND ${colorMatchSql} AND s.size_code = ?${lim}`,
-        [...skuParams, colorTry, colorTry, sizeStr]
+         WHERE ${skuWhereSql} AND ${colorMatchSql} AND ${sizeMatchSql}${lim}`,
+        [...skuParams, colorTry, colorTry, ...sizeParamsTail]
       );
       if (row?.variant_id) return row.variant_id;
     }

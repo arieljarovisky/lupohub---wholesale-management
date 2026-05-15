@@ -1011,9 +1011,12 @@ function padArticleCodeTo7(s) {
         return '';
     return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
+/** Prefijos de artículo habituales (Tango/Lupo): planilla "24605" vs catálogo "Q024605". */
+const ARTICLE_SKU_LETTER_PREFIXES = ['Q', 'C', 'P'];
 /**
  * Variantes de SKU solo-numérico para cruzar con `products.sku`:
  * el import suele forzar 7 dígitos (22684 → 0022684) pero el catálogo puede tener 022684, 22684, etc.
+ * Incluye prefijos letra como en `buildProductSkuLookupCandidates` del import Tango.
  */
 function articleSkuCandidates(raw) {
     const t = String(raw !== null && raw !== void 0 ? raw : '').trim();
@@ -1036,6 +1039,24 @@ function articleSkuCandidates(raw) {
         for (let w = Math.max(4, noLead.length); w <= 7; w++) {
             add(noLead.padStart(w, '0'));
         }
+        const p7nl = padArticleCodeTo7(noLead);
+        for (const pref of ARTICLE_SKU_LETTER_PREFIXES) {
+            add(pref + noLead);
+            add(pref.toLowerCase() + noLead);
+            if (p7nl) {
+                add(pref + p7nl);
+                add(pref.toLowerCase() + p7nl);
+            }
+            if (digits !== noLead) {
+                add(pref + digits);
+                add(pref.toLowerCase() + digits);
+                const p7d = padArticleCodeTo7(digits);
+                if (p7d && p7d !== p7nl) {
+                    add(pref + p7d);
+                    add(pref.toLowerCase() + p7d);
+                }
+            }
+        }
     }
     else {
         const digits = t.replace(/\D/g, '');
@@ -1043,7 +1064,65 @@ function articleSkuCandidates(raw) {
             const p = padArticleCodeTo7(digits);
             if (p)
                 add(p);
+            const noLead = digits.replace(/^0+/, '') || '0';
+            if (noLead !== digits) {
+                add(noLead);
+                add(padArticleCodeTo7(noLead));
+            }
         }
+        const m = t.match(/^([A-Za-z]{1,3})(\d[\d\s-]*)$/);
+        if (m) {
+            const num = m[2].replace(/\D/g, '');
+            if (num) {
+                const nl = num.replace(/^0+/, '') || '0';
+                add(nl);
+                add(padArticleCodeTo7(nl));
+            }
+        }
+    }
+    return out;
+}
+/** Tallas equivalentes: `sizes.size_code` puede ser "170" (Tango) o "U" según origen de datos. */
+function sizeLookupCodes(sizeCode) {
+    const s = String(sizeCode !== null && sizeCode !== void 0 ? sizeCode : '').trim();
+    if (!s)
+        return [];
+    const out = [];
+    const add = (x) => {
+        const t = String(x !== null && x !== void 0 ? x : '').trim();
+        if (t && !out.includes(t))
+            out.push(t);
+    };
+    add(s);
+    const u = s.toUpperCase();
+    if (u !== s)
+        add(u);
+    if (/^\d{1,3}$/.test(s)) {
+        const letter = (0, talles_tango_1.nombreTalleDesdeCodigo)(s);
+        if (letter && letter !== s)
+            add(letter);
+    }
+    else if (/^[A-Z]{1,4}$/.test(u)) {
+        const num = (0, talles_tango_1.codigoTalleParaSku)(u);
+        if (num && num !== s)
+            add(num);
+    }
+    return out;
+}
+function sizeLookupNameLowerSet(sizeCode) {
+    const seen = new Set();
+    const out = [];
+    const add = (x) => {
+        const t = String(x !== null && x !== void 0 ? x : '').trim().toLowerCase();
+        if (!t || seen.has(t))
+            return;
+        seen.add(t);
+        out.push(t);
+    };
+    for (const c of sizeLookupCodes(sizeCode)) {
+        add(c);
+        if (/^\d{1,3}$/.test(c))
+            add((0, talles_tango_1.nombreTalleDesdeCodigo)(c));
     }
     return out;
 }
@@ -1094,6 +1173,15 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
         const skuList = articleSkuCandidates(codigoTrim);
         if (!skuList.length)
             return null;
+        const sizeInList = sizeLookupCodes(sizeStr);
+        const nameInList = sizeLookupNameLowerSet(sizeStr);
+        const sizePlaceholders = sizeInList.map(() => '?').join(', ');
+        const namePlaceholders = nameInList.map(() => '?').join(', ');
+        const sizeMatchSql = `(
+    TRIM(CAST(s.size_code AS CHAR)) IN (${sizePlaceholders})
+    OR LOWER(TRIM(COALESCE(s.name, ''))) IN (${namePlaceholders})
+  )`;
+        const sizeParamsTail = [...sizeInList, ...nameInList];
         const colorMatchSql = `(TRIM(CAST(c.code AS CHAR)) = TRIM(?) OR LOWER(TRIM(COALESCE(c.name, ''))) = LOWER(TRIM(?)))`;
         const tryWhere = (skuWhereSql, skuParams, opts) => __awaiter(this, void 0, void 0, function* () {
             const lim = (opts === null || opts === void 0 ? void 0 : opts.limitOne) ? ' LIMIT 1' : '';
@@ -1104,7 +1192,7 @@ function getVariantIdByCodigoColorSize(codigo, colorCode, sizeCode) {
          JOIN colors c ON c.id = pc.color_id
          JOIN product_variants pv ON pv.product_color_id = pc.id
          JOIN sizes s ON s.id = pv.size_id
-         WHERE ${skuWhereSql} AND ${colorMatchSql} AND s.size_code = ?${lim}`, [...skuParams, colorTry, colorTry, sizeStr]);
+         WHERE ${skuWhereSql} AND ${colorMatchSql} AND ${sizeMatchSql}${lim}`, [...skuParams, colorTry, colorTry, ...sizeParamsTail]);
                 if (row === null || row === void 0 ? void 0 : row.variant_id)
                     return row.variant_id;
             }

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { query, execute, get } from '../database/db';
+import { query, execute, get, pool } from '../database/db';
 import { Order, OrderStatus } from '../types';
 import ExcelJS from 'exceljs';
 import {
@@ -685,30 +685,42 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   }
   totalRecalculated = Math.round(totalRecalculated * 100) / 100;
 
-  await execute(
-    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
-  );
-
   let insertedItems = 0;
-  for (const pr of preparedRows) {
-    for (const alloc of pr.allocations) {
-      if (!alloc.quantity || alloc.quantity <= 0) continue;
-      await execute(
-        `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, pr.variantId, alloc.quantity, 0, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
-      );
-      insertedItems += 1;
-    }
-  }
-
-  if (insertedItems === 0) {
-    await execute('DELETE FROM orders WHERE id = ?', [orderId]);
-    const err: any = new Error(
-      'No se pudo guardar ninguna línea del pedido (cantidades en cero o error al insertar ítems).'
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
     );
-    err.statusCode = 400;
-    throw err;
+    for (const pr of preparedRows) {
+      for (const alloc of pr.allocations) {
+        if (!alloc.quantity || alloc.quantity <= 0) continue;
+        await conn.execute(
+          `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuidv4(), orderId, pr.variantId, alloc.quantity, 0, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
+        );
+        insertedItems += 1;
+      }
+    }
+    if (insertedItems === 0) {
+      await conn.rollback();
+      const err: any = new Error(
+        'No se pudo guardar ninguna línea del pedido (cantidades en cero o error al insertar ítems).'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    await conn.commit();
+  } catch (e) {
+    try {
+      await conn.rollback();
+    } catch {
+      // ignore
+    }
+    throw e;
+  } finally {
+    conn.release();
   }
 
   // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
@@ -803,6 +815,13 @@ export const createOrder = async (req: any, res: any) => {
   }
 };
 
+function normalizeMatrixCustomerRefKey(ref: string): string {
+  return String(ref ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
 export interface MatrixImportLineInput {
   customerRef: string;
   codigo: string;
@@ -877,33 +896,66 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
     }
 
-    const byCustomer = new Map<string, MatrixImportLineInput[]>();
+    const byRefKey = new Map<string, MatrixImportLineInput[]>();
     for (const ln of linesRaw) {
-      const ref = String(ln.customerRef ?? '').trim();
-      if (!ref) continue;
+      const refTrim = String(ln.customerRef ?? '').trim();
+      if (!refTrim) continue;
+      const refKey = normalizeMatrixCustomerRefKey(refTrim);
       const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
-      const key = ig ? `${ref.toLowerCase()}\t${ig}` : ref.toLowerCase();
-      if (!byCustomer.has(key)) byCustomer.set(key, []);
-      byCustomer.get(key)!.push({ ...ln, customerRef: ref });
+      const key = ig ? `${refKey}\t${ig}` : refKey;
+      if (!byRefKey.has(key)) byRefKey.set(key, []);
+      byRefKey.get(key)!.push({ ...ln, customerRef: refTrim });
     }
 
     const created: any[] = [];
     const errors: { customerRef: string; message: string }[] = [];
 
-    for (const [, groupLines] of byCustomer) {
-      const customerRef = groupLines[0]?.customerRef || '';
+    type MatrixImportMergeBucket = {
+      customer: { id: string; seller_id: string | null };
+      lines: MatrixImportLineInput[];
+      displayRef: string;
+    };
+    const byCustomerMerged = new Map<string, MatrixImportMergeBucket>();
+
+    for (const [, refGroupLines] of byRefKey) {
+      if (!refGroupLines.length) continue;
+      const ref0 = String(refGroupLines[0]?.customerRef ?? '').trim();
+      const customer = await findCustomer(ref0);
+      if (!customer) {
+        const ig = refGroupLines[0]?.importGroup;
+        errors.push({
+          customerRef:
+            ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${ref0} [${ig}]` : ref0,
+          message: 'Cliente no encontrado',
+        });
+        continue;
+      }
+      const ig =
+        refGroupLines[0]?.importGroup === 'FACTURAR' || refGroupLines[0]?.importGroup === 'PENDIENTE'
+          ? refGroupLines[0].importGroup
+          : '';
+      const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
+      let bucket = byCustomerMerged.get(mergeKey);
+      if (!bucket) {
+        bucket = { customer, lines: [], displayRef: ref0 };
+        byCustomerMerged.set(mergeKey, bucket);
+      }
+      bucket.lines.push(...refGroupLines);
+    }
+
+    for (const [, bucket] of byCustomerMerged) {
+      const groupLines = bucket.lines;
+      const customerRef = bucket.displayRef;
+      const customer = bucket.customer;
       try {
-        const customer = await findCustomer(customerRef);
-        if (!customer) {
-          const ig = groupLines[0]?.importGroup;
-          errors.push({
-            customerRef:
-              ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${customerRef} [${ig}]` : customerRef,
-            message: 'Cliente no encontrado',
-          });
-          continue;
-        }
-        const items: any[] = [];
+        type AggRow = {
+          codigo: string;
+          color: string;
+          sizeCode: string;
+          qty: number;
+          unitPrice?: number | null;
+        };
+        const aggMap = new Map<string, AggRow>();
         for (const ln of groupLines) {
           const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
           if (qty <= 0) continue;
@@ -911,8 +963,30 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
           const color = String(ln.color ?? '').trim();
           const sizeCode = String(ln.sizeCode ?? '').trim();
           if (!codigo || !color || !sizeCode) continue;
-          const priceAtMoment = await resolvePrice(codigo, ln.unitPrice);
-          items.push({ sku: codigo, colorCode: color, sizeCode, quantity: qty, priceAtMoment });
+          const k = `${codigo}\t${color}\t${sizeCode}`;
+          const prev = aggMap.get(k);
+          if (!prev) {
+            aggMap.set(k, { codigo, color, sizeCode, qty, unitPrice: ln.unitPrice });
+          } else {
+            prev.qty += qty;
+            const ep = Number(ln.unitPrice);
+            const hasGood = Number.isFinite(ep) && ep > 0;
+            const prevEp = Number(prev.unitPrice);
+            if (hasGood && !(Number.isFinite(prevEp) && prevEp > 0)) {
+              prev.unitPrice = ln.unitPrice;
+            }
+          }
+        }
+        const items: any[] = [];
+        for (const row of aggMap.values()) {
+          const priceAtMoment = await resolvePrice(row.codigo, row.unitPrice);
+          items.push({
+            sku: row.codigo,
+            colorCode: row.color,
+            sizeCode: row.sizeCode,
+            quantity: row.qty,
+            priceAtMoment,
+          });
         }
         if (items.length === 0) {
           errors.push({ customerRef, message: 'Sin líneas con cantidad > 0' });

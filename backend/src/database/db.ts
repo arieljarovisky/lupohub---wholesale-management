@@ -41,7 +41,7 @@ function getPoolConfig(): mysql.PoolOptions {
   };
 }
 
-const pool = mysql.createPool(getPoolConfig());
+export const pool = mysql.createPool(getPoolConfig());
 
 // Wrapper para consultas que retornan filas (SELECT)
 export const query = async (sql: string, params: any[] = []): Promise<any[]> => {
@@ -84,4 +84,5 @@ export const testConnection = async (): Promise<void> => {
   if (!rows || (rows as any[])[0]?.ok !== 1) throw new Error('DB check failed');
 };
 
+/** Misma instancia exportada como default; sirve para transacciones (`pool.getConnection()`). */
 export default pool;
