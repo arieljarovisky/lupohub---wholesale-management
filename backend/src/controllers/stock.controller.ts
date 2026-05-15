@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
+import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
@@ -227,6 +228,7 @@ export const updateVariantStock = async (
     );
 
     await logStockMovement(variantId, previousStock, newStock, movementType, reference);
+    await touchProductUpdatedAtByVariantId(variantId);
 
     if (syncExternal) {
       // Ajuste desde inventario: sin debounce de 2,8s (TN parecía no actualizar hasta el 2º cambio).

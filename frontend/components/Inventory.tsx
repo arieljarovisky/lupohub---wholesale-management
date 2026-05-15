@@ -261,8 +261,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [filterColor, setFilterColor] = useState(stored.filterColor ?? 'ALL');
   const [colorQuery, setColorQuery] = useState('');
   const [colorOpen, setColorOpen] = useState(false);
-  const [sortKey, setSortKey] = useState<'SKU' | 'STOCK' | 'VARIANTS'>('SKU');
+  const [sortKey, setSortKey] = useState<'SKU' | 'STOCK' | 'VARIANTS' | 'CREATED' | 'UPDATED'>('SKU');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const productTsMs = (p: Product, field: 'product_created_at' | 'product_updated_at') => {
+    const raw = (p as any)[field];
+    if (!raw) return 0;
+    const t = new Date(raw).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  const groupTsMs = (variants: Product[], field: 'product_created_at' | 'product_updated_at') =>
+    Math.max(0, ...variants.map((v) => productTsMs(v, field)));
   const [currentPage, setCurrentPage] = useState(stored.page);
   const [pageSize, setPageSize] = useState(10);
   const [serverMode, setServerMode] = useState(true);
@@ -533,7 +542,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const loadId = ++loadIdRef.current;
     (async () => {
       try {
-        const sortMap: any = { SKU: 'sku', STOCK: 'stock', VARIANTS: 'sku' };
+        const sortMap: Record<string, 'sku' | 'name' | 'stock' | 'created_at' | 'updated_at'> = {
+          SKU: 'sku',
+          STOCK: 'stock',
+          VARIANTS: 'sku',
+          CREATED: 'created_at',
+          UPDATED: 'updated_at',
+        };
         const q = serverListSearch || undefined;
         const first = await api.getProductsPaged(1, FETCH_PAGE_SIZE, q, sortMap[sortKey] || 'sku', sortDir, filterSync);
         if (loadId !== loadIdRef.current) return;
@@ -1378,6 +1393,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         cmp = sa - sb;
       }
       else if (sortKey === 'VARIANTS') cmp = a.groupVariants.length - b.groupVariants.length;
+      else if (sortKey === 'CREATED') {
+        cmp = groupTsMs(a.groupVariants, 'product_created_at') - groupTsMs(b.groupVariants, 'product_created_at');
+      } else if (sortKey === 'UPDATED') {
+        cmp = groupTsMs(a.groupVariants, 'product_updated_at') - groupTsMs(b.groupVariants, 'product_updated_at');
+      }
       return sortDir === 'asc' ? cmp : -cmp;
     });
     const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
@@ -3640,12 +3660,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:inline">Ordenar</span>
           <select 
             value={sortKey}
-            onChange={(e) => { setSortKey(e.target.value as any); setCurrentPage(1); }}
+            onChange={(e) => {
+              const next = e.target.value as typeof sortKey;
+              setSortKey(next);
+              if (next === 'CREATED' || next === 'UPDATED') setSortDir('desc');
+              setCurrentPage(1);
+            }}
             className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-xs text-white outline-none appearance-none min-h-[44px] touch-manipulation"
           >
             <option value="SKU">Código</option>
             <option value="STOCK">Stock Total</option>
             <option value="VARIANTS">Variantes</option>
+            <option value="UPDATED">Última modificación</option>
+            <option value="CREATED">Última creación</option>
           </select>
           <button 
             onClick={() => { setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'); setCurrentPage(1); }}

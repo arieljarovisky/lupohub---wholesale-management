@@ -7,6 +7,7 @@ import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
 import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper, mergeManualVariantPair } from '../services/mergeDuplicateProductsBySku';
+import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -14,7 +15,13 @@ export const getProducts = async (req: Request, res: Response) => {
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page as string, 10) || 20));
     const offset = (pageNum - 1) * perPageNum;
-    const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'p.name' : 'pv.sku');
+    const sortKey = String(sort || 'sku').toLowerCase();
+    const sortCol =
+      sortKey === 'stock' ? 'stock_total' :
+      sortKey === 'name' ? 'p.name' :
+      sortKey === 'created_at' || sortKey === 'created' ? 'p.created_at' :
+      sortKey === 'updated_at' || sortKey === 'updated' ? 'p.updated_at' :
+      'pv.sku';
     const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
     const search = (q || '').toString().trim();
     const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
@@ -69,6 +76,7 @@ export const getProducts = async (req: Request, res: Response) => {
       `
       SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
+             p.created_at AS product_created_at, p.updated_at AS product_updated_at,
              p.tienda_nube_id, p.mercado_libre_id,
              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
@@ -82,7 +90,7 @@ export const getProducts = async (req: Request, res: Response) => {
       LEFT JOIN stocks st ON st.variant_id = pv.id
       ${priceJoin}
       ${whereClause}
-      ORDER BY ${sortCol} ${sortDir}
+      ORDER BY ${sortCol} ${sortDir}, pv.sku ASC
       LIMIT ? OFFSET ?
       `,
       [...priceParams, ...params, perPageNum, offset]
@@ -93,6 +101,8 @@ export const getProducts = async (req: Request, res: Response) => {
       sku: r.sku,
       base_sku: r.base_sku,
       product_id: r.product_id,
+      product_created_at: r.product_created_at ?? null,
+      product_updated_at: r.product_updated_at ?? null,
       name: r.name,
       category: r.category,
       base_price: Number(r.base_price ?? 0),
@@ -937,6 +947,7 @@ export const updateVariant = async (req: Request, res: Response) => {
       `UPDATE product_variants SET ${updates.join(', ')} WHERE id = ?`,
       values
     );
+    await touchProductUpdatedAtByVariantId(variantId);
     const updated = await get(
       `SELECT pv.id, pv.sku, pv.external_sku, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
        FROM product_variants pv

@@ -56,7 +56,12 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const perPageNum = Math.min(5000, Math.max(1, parseInt(per_page, 10) || 20));
         const offset = (pageNum - 1) * perPageNum;
-        const sortCol = (sort === 'stock' ? 'stock_total' : sort === 'name' ? 'p.name' : 'pv.sku');
+        const sortKey = String(sort || 'sku').toLowerCase();
+        const sortCol = sortKey === 'stock' ? 'stock_total' :
+            sortKey === 'name' ? 'p.name' :
+                sortKey === 'created_at' || sortKey === 'created' ? 'p.created_at' :
+                    sortKey === 'updated_at' || sortKey === 'updated' ? 'p.updated_at' :
+                        'pv.sku';
         const sortDir = (dir === 'desc' ? 'DESC' : 'ASC');
         const search = (q || '').toString().trim();
         const filterSyncMl = sync_ml === '1' || sync_ml === 'true';
@@ -104,6 +109,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const rows = yield (0, db_1.query)(`
       SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
+             p.created_at AS product_created_at, p.updated_at AS product_updated_at,
              p.tienda_nube_id, p.mercado_libre_id,
              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
@@ -117,24 +123,26 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
       LEFT JOIN stocks st ON st.variant_id = pv.id
       ${priceJoin}
       ${whereClause}
-      ORDER BY ${sortCol} ${sortDir}
+      ORDER BY ${sortCol} ${sortDir}, pv.sku ASC
       LIMIT ? OFFSET ?
       `, [...priceParams, ...params, perPageNum, offset]);
         const mapped = (rows || []).map((r) => {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d, _e, _f, _g;
             return ({
                 id: r.id,
                 sku: r.sku,
                 base_sku: r.base_sku,
                 product_id: r.product_id,
+                product_created_at: (_a = r.product_created_at) !== null && _a !== void 0 ? _a : null,
+                product_updated_at: (_b = r.product_updated_at) !== null && _b !== void 0 ? _b : null,
                 name: r.name,
                 category: r.category,
-                base_price: Number((_a = r.base_price) !== null && _a !== void 0 ? _a : 0),
-                stock_total: Number((_b = r.stock_total) !== null && _b !== void 0 ? _b : 0),
+                base_price: Number((_c = r.base_price) !== null && _c !== void 0 ? _c : 0),
+                stock_total: Number((_d = r.stock_total) !== null && _d !== void 0 ? _d : 0),
                 mayorista_pack_size: Math.max(1, Number(r.mayorista_pack_size) || 1),
-                color_name: (_c = r.color_name) !== null && _c !== void 0 ? _c : null,
-                size_code: (_d = r.size_code) !== null && _d !== void 0 ? _d : null,
-                size_name: (_e = r.size_name) !== null && _e !== void 0 ? _e : null,
+                color_name: (_e = r.color_name) !== null && _e !== void 0 ? _e : null,
+                size_code: (_f = r.size_code) !== null && _f !== void 0 ? _f : null,
+                size_name: (_g = r.size_name) !== null && _g !== void 0 ? _g : null,
                 externalIds: {
                     tiendaNube: r.tienda_nube_id,
                     mercadoLibre: r.mercado_libre_id,

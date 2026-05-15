@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.importStockGridToDespacho = exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
 exports.resolveVariantIdForGridCell = resolveVariantIdForGridCell;
 const db_1 = require("../database/db");
+const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const integrations_controller_1 = require("./integrations.controller");
@@ -234,6 +235,7 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
         yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
        ON DUPLICATE KEY UPDATE stock = ?`, [variantId, newStock, newStock]);
         yield (0, exports.logStockMovement)(variantId, previousStock, newStock, movementType, reference);
+        yield (0, touchProductUpdatedAt_1.touchProductUpdatedAtByVariantId)(variantId);
         if (syncExternal) {
             // Ajuste desde inventario: sin debounce de 2,8s (TN parecía no actualizar hasta el 2º cambio).
             // Pedidos/importaciones masivas siguen con debounce para no saturar APIs.

@@ -38,6 +38,7 @@ const add_dispatched_at_orders_1 = require("./database/add_dispatched_at_orders"
 const fix_integrations_table_1 = require("./database/fix_integrations_table");
 const add_despachos_table_1 = require("./database/add_despachos_table");
 const add_pack_size_products_1 = require("./database/add_pack_size_products");
+const add_product_timestamps_1 = require("./database/add_product_timestamps");
 const add_order_item_sell_as_pack_1 = require("./database/add_order_item_sell_as_pack");
 const add_order_item_despacho_id_1 = require("./database/add_order_item_despacho_id");
 const add_variant_publications_table_1 = require("./database/add_variant_publications_table");
@@ -160,6 +161,7 @@ function initDatabase() {
                 yield (0, fix_integrations_table_1.fixIntegrationsTable)();
                 yield (0, add_despachos_table_1.addDespachosTable)();
                 yield (0, add_pack_size_products_1.addPackSizeToProducts)();
+                yield (0, add_product_timestamps_1.addProductTimestamps)();
                 yield (0, add_order_item_sell_as_pack_1.addOrderItemSellAsPack)();
                 yield (0, add_order_item_despacho_id_1.addOrderItemDespachoId)();
                 yield (0, add_variant_publications_table_1.addVariantPublicationsTable)();

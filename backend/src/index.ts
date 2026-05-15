@@ -25,6 +25,7 @@ import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
 import { addPackSizeToProducts } from './database/add_pack_size_products';
+import { addProductTimestamps } from './database/add_product_timestamps';
 import { addOrderItemSellAsPack } from './database/add_order_item_sell_as_pack';
 import { addOrderItemDespachoId } from './database/add_order_item_despacho_id';
 import { addVariantPublicationsTable } from './database/add_variant_publications_table';
@@ -149,6 +150,7 @@ async function initDatabase() {
       await fixIntegrationsTable();
       await addDespachosTable();
       await addPackSizeToProducts();
+      await addProductTimestamps();
       await addOrderItemSellAsPack();
       await addOrderItemDespachoId();
       await addVariantPublicationsTable();

@@ -228,7 +228,9 @@ export const api = {
       price: Number((r as any).base_price ?? (r as any).price ?? 0),
       description: r.description ?? '',
       externalIds: r.externalIds,
-      mayorista_pack_size: Math.max(1, Number((r as any).mayorista_pack_size) || 1)
+      mayorista_pack_size: Math.max(1, Number((r as any).mayorista_pack_size) || 1),
+      product_created_at: r.product_created_at ?? null,
+      product_updated_at: r.product_updated_at ?? null
     } as Product;
   },
 
@@ -286,7 +288,7 @@ export const api = {
     return rows.map((r: any) => api.mapProductRow(r));
   },
 
-  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
+  getProductsPaged: async (page: number, perPage: number, q?: string, sort?: 'sku' | 'name' | 'stock' | 'created_at' | 'updated_at', dir?: 'asc' | 'desc', syncFilter?: 'ALL' | 'ML' | 'TN' | 'BOTH' | 'NONE' | 'MISMATCH', options?: { skipTotal?: boolean }): Promise<{ items: Product[]; page: number; per_page: number; total: number }> => {
     return handleRequest(async () => {
       const syncMl = syncFilter === 'ML' || syncFilter === 'BOTH';
       const syncTn = syncFilter === 'TN' || syncFilter === 'BOTH';
@@ -320,7 +322,9 @@ export const api = {
           stock: Number((r as any).stock_total ?? (r as any).stock ?? 0),
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
-          externalIds: r.externalIds
+          externalIds: r.externalIds,
+          product_created_at: r.product_created_at ?? null,
+          product_updated_at: r.product_updated_at ?? null
         };
       }) as Product[];
       return { items, page: res.page, per_page: res.per_page, total: res.total };
