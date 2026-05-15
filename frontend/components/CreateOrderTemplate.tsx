@@ -167,6 +167,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           ];
           const detail = labels.length ? ` (${labels.join(' · ')})` : '';
           showToast('success', `Se crearon ${counts.created} pedido(s) en borrador${detail}.`);
+          const omitted = (res.created || []).flatMap((o: { despachoWarnings?: string[] }) => o.despachoWarnings || []);
+          const omitMsgs = omitted.filter((w: string) => /omitido|Sin variante en catálogo/i.test(w));
+          if (omitMsgs.length > 0) {
+            const short = omitMsgs.slice(0, 4).join(' · ');
+            showToast(
+              'warning',
+              omitMsgs.length > 4 ? `${short} … (+${omitMsgs.length - 4} más)` : short,
+              'Líneas sin variante'
+            );
+          }
         }
         if (errors.length > 0) {
           const sample = errors

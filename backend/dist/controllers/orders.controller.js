@@ -571,7 +571,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.getOrders = getOrders;
 function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
         if (!newOrder.customerId || !((_a = newOrder.items) === null || _a === void 0 ? void 0 : _a.length)) {
             const err = new Error('Datos de pedido inválidos');
             err.statusCode = 400;
@@ -588,7 +588,6 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             sellerId = null;
         }
         const orderId = explicitOrderId || newOrder.id || (0, uuid_1.v4)();
-        const despachoWarnings = [];
         const toSqlDate = (d) => {
             try {
                 const dt = new Date(d);
@@ -611,7 +610,9 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         const matrixImportLabelForSql = matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
             ? String(matrixImportLabelRaw).trim().slice(0, 120)
             : null;
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
+        const skippedNoVariant = [];
+        const despachoWarnings = [];
+        const preparedRows = [];
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -619,9 +620,9 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
                     (yield (0, stock_controller_1.resolveVariantIdForGridCell)(String(item.sku).trim(), String(item.colorCode).trim(), String(item.sizeCode).trim())) || undefined;
             }
             if (!variantId) {
-                const err = new Error(`No se encontró variante para código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode}. Revisá el catálogo (SKU, código de color y talle deben coincidir con LupoHub).`);
-                err.statusCode = 400;
-                throw err;
+                const q = Math.max(0, Math.floor(Number(item.quantity) || 0));
+                skippedNoVariant.push(`código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode}${q ? ` ×${q} u.` : ''}`);
+                continue;
             }
             const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
             const explicitDespachoId = yield resolveDespachoIdForItem(item, variantId);
@@ -635,10 +636,33 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
                 const itemLabel = yield getItemLabelForWarning(item, variantId);
                 despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
             }
-            for (const alloc of allocations) {
+            preparedRows.push({ item, variantId, allocations, sellAsPack });
+        }
+        if (preparedRows.length === 0) {
+            const err = new Error(skippedNoVariant.length
+                ? `Ningún ítem coincide con el catálogo. Omitidos: ${skippedNoVariant.slice(0, 8).join('; ')}${skippedNoVariant.length > 8 ? '…' : ''}`
+                : 'Datos de pedido inválidos');
+            err.statusCode = 400;
+            throw err;
+        }
+        for (const s of skippedNoVariant) {
+            despachoWarnings.push(`Sin variante en catálogo (omitido): ${s}`);
+        }
+        let totalRecalculated = 0;
+        for (const pr of preparedRows) {
+            const price = Number((_e = pr.item.priceAtMoment) !== null && _e !== void 0 ? _e : 0) || 0;
+            for (const alloc of pr.allocations) {
+                if (alloc.quantity > 0)
+                    totalRecalculated += alloc.quantity * price;
+            }
+        }
+        totalRecalculated = Math.round(totalRecalculated * 100) / 100;
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
+        for (const pr of preparedRows) {
+            for (const alloc of pr.allocations) {
                 if (!alloc.quantity || alloc.quantity <= 0)
                     continue;
-                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_e = item.priceAtMoment) !== null && _e !== void 0 ? _e : 0, sellAsPack, alloc.despachoId]);
+                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, pr.variantId, alloc.quantity, 0, (_f = pr.item.priceAtMoment) !== null && _f !== void 0 ? _f : 0, pr.sellAsPack, alloc.despachoId]);
             }
         }
         // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
@@ -690,14 +714,14 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            createdBy: (_f = created.created_by) !== null && _f !== void 0 ? _f : undefined,
-            createdByName: (_g = created.created_by_name) !== null && _g !== void 0 ? _g : undefined,
-            createdByRole: (_h = created.created_by_role) !== null && _h !== void 0 ? _h : undefined,
-            sellerName: (_j = created.seller_name) !== null && _j !== void 0 ? _j : undefined,
+            createdBy: (_g = created.created_by) !== null && _g !== void 0 ? _g : undefined,
+            createdByName: (_h = created.created_by_name) !== null && _h !== void 0 ? _h : undefined,
+            createdByRole: (_j = created.created_by_role) !== null && _j !== void 0 ? _j : undefined,
+            sellerName: (_k = created.seller_name) !== null && _k !== void 0 ? _k : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_k = created.picked_by) !== null && _k !== void 0 ? _k : undefined,
+            pickedBy: (_l = created.picked_by) !== null && _l !== void 0 ? _l : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),

@@ -584,7 +584,6 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
 
   const orderId = explicitOrderId || newOrder.id || uuidv4();
 
-  const despachoWarnings: string[] = [];
   const toSqlDate = (d: string) => {
     try {
       const dt = new Date(d);
@@ -608,10 +607,16 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
       ? String(matrixImportLabelRaw).trim().slice(0, 120)
       : null;
-  await execute(
-    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
-  );
+
+  const skippedNoVariant: string[] = [];
+  const despachoWarnings: string[] = [];
+  type PreparedOrderItem = {
+    item: any;
+    variantId: string;
+    allocations: Array<{ despachoId: string | null; quantity: number }>;
+    sellAsPack: number;
+  };
+  const preparedRows: PreparedOrderItem[] = [];
 
   for (const item of newOrder.items as any[]) {
     let variantId = item.variantId;
@@ -624,11 +629,11 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
         )) || undefined;
     }
     if (!variantId) {
-      const err: any = new Error(
-        `No se encontró variante para código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode}. Revisá el catálogo (SKU, código de color y talle deben coincidir con LupoHub).`
+      const q = Math.max(0, Math.floor(Number(item.quantity) || 0));
+      skippedNoVariant.push(
+        `código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode}${q ? ` ×${q} u.` : ''}`
       );
-      err.statusCode = 400;
-      throw err;
+      continue;
     }
     const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
     const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
@@ -642,11 +647,45 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
       const itemLabel = await getItemLabelForWarning(item, variantId);
       despachoWarnings.push(`El artículo ${itemLabel} tiene ${unassignedQty} unidad(es) sin despacho.`);
     }
-    for (const alloc of allocations) {
+    preparedRows.push({ item, variantId, allocations, sellAsPack });
+  }
+
+  if (preparedRows.length === 0) {
+    const err: any = new Error(
+      skippedNoVariant.length
+        ? `Ningún ítem coincide con el catálogo. Omitidos: ${skippedNoVariant.slice(0, 8).join('; ')}${
+            skippedNoVariant.length > 8 ? '…' : ''
+          }`
+        : 'Datos de pedido inválidos'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  for (const s of skippedNoVariant) {
+    despachoWarnings.push(`Sin variante en catálogo (omitido): ${s}`);
+  }
+
+  let totalRecalculated = 0;
+  for (const pr of preparedRows) {
+    const price = Number(pr.item.priceAtMoment ?? 0) || 0;
+    for (const alloc of pr.allocations) {
+      if (alloc.quantity > 0) totalRecalculated += alloc.quantity * price;
+    }
+  }
+  totalRecalculated = Math.round(totalRecalculated * 100) / 100;
+
+  await execute(
+    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
+  );
+
+  for (const pr of preparedRows) {
+    for (const alloc of pr.allocations) {
       if (!alloc.quantity || alloc.quantity <= 0) continue;
       await execute(
         `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [uuidv4(), orderId, variantId, alloc.quantity, 0, item.priceAtMoment ?? 0, sellAsPack, alloc.despachoId]
+        [uuidv4(), orderId, pr.variantId, alloc.quantity, 0, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
       );
     }
   }
