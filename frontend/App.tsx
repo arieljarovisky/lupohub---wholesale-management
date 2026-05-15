@@ -725,17 +725,45 @@ const App: React.FC = () => {
   };
 
   const handleFinishPicking = async (orderId: string, updatedItems: OrderItem[]) => {
-    // Al finalizar picking el pedido pasa a "Falta controlar" (luego Depósito pasará a Controlado y Despachado)
     const newStatus = OrderStatus.PENDING_CONTROL;
+    const base =
+      orders.find((o) => o.id === orderId) ??
+      (activePickingOrder?.id === orderId ? activePickingOrder : null);
+    if (!base) {
+      showToast('error', 'No se encontró el pedido.');
+      return;
+    }
+    const safeItems = updatedItems.map((i) => {
+      const maxQ = Math.max(0, Math.floor(Number(i.quantity) || 0));
+      const p = Math.min(maxQ, Math.max(0, Math.floor(Number(i.picked) || 0)));
+      return { ...i, picked: p };
+    });
+    const pickingTotal =
+      Math.round(
+        safeItems.reduce((s, i) => s + (Number(i.picked) || 0) * (Number(i.priceAtMoment) || 0), 0) * 100
+      ) / 100;
 
-    setOrders(prev => prev.map(o => o.id === orderId ? {
-      ...o,
-      items: updatedItems,
-      status: newStatus,
-      pickedBy: currentUser?.id
-    } : o));
+    const orderToSave: Order = {
+      ...base,
+      items: safeItems,
+      status: base.status,
+      total: pickingTotal,
+    };
 
-    await handleUpdateOrderStatus(orderId, newStatus, currentUser?.id);
+    try {
+      const saved = await api.updateOrder(orderToSave);
+      await api.updateOrderStatus(orderId, newStatus, currentUser?.id);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId ? { ...saved, status: newStatus, pickedBy: currentUser?.id } : o
+        )
+      );
+      showToast('success', 'Picking guardado. El pedido pasó a control; la factura AFIP usará solo lo pickeado.');
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Error al guardar picking';
+      showToast('error', msg);
+      return;
+    }
 
     setActivePickingOrder(null);
     setCurrentView('orders');

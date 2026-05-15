@@ -11,7 +11,7 @@ const TITLE_NO_IMPACT =
   'Facturación sin movimiento de inventario: no desconta ni devuelve stock (incluye factura emitida con “sin impacto de stock”).';
 
 const TITLE_PENDING =
-  'El stock no se descuenta al confirmar. Se descuenta cuando finaliza el picking (Falta controlar/Controlado/Despachado).';
+  'El stock no se descuenta al confirmar. Al pasar a control tras picking, se descuenta solo la cantidad pickeada por línea (Falta controlar / Controlado / Despachado).';
 
 const TITLE_DEDUCTED =
   'El inventario ya se actualizó: al confirmar este pedido, las unidades se descontaron. Si se cancela antes de despachar, el stock se restaura.';

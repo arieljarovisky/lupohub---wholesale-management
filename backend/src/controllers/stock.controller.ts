@@ -271,10 +271,18 @@ export const isMayoristaStockDeductedForWholesale = async (orderId: string): Pro
 // Descontar stock por pedido mayorista
 export const deductStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
   const errors: string[] = [];
-  
+
   try {
+    const meta = await get(
+      `SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`,
+      [orderId]
+    ) as { no_stock_impact?: number; status?: string } | undefined;
+    const usePicked =
+      !Number(meta?.no_stock_impact) &&
+      ['Falta controlar', 'Controlado', 'Despachado'].includes(String(meta?.status || ''));
+
     const items = await query(
-      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
               COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
               s.stock AS current_stock
        FROM order_items oi
@@ -288,7 +296,10 @@ export const deductStockForOrder = async (orderId: string): Promise<{ success: b
 
     const unitsByVariant = new Map<string, { units: number; sku: string }>();
     for (const item of items as any[]) {
-      const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
+      const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
+      const p = Math.max(0, Math.floor(Number(item.picked) || 0));
+      const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
+      const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
       const vid = item.variant_id as string;
       const prev = unitsByVariant.get(vid);
       if (prev) prev.units += units;
@@ -322,10 +333,18 @@ export const deductStockForOrder = async (orderId: string): Promise<{ success: b
 // Restaurar stock cuando se cancela un pedido
 export const restoreStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
   const errors: string[] = [];
-  
+
   try {
+    const meta = await get(
+      `SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`,
+      [orderId]
+    ) as { no_stock_impact?: number; status?: string } | undefined;
+    const usePicked =
+      !Number(meta?.no_stock_impact) &&
+      ['Falta controlar', 'Controlado', 'Despachado'].includes(String(meta?.status || ''));
+
     const items = await query(
-      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
               COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
               s.stock AS current_stock
        FROM order_items oi
@@ -339,7 +358,10 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
 
     const unitsByVariant = new Map<string, { units: number; sku: string }>();
     for (const item of items as any[]) {
-      const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
+      const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
+      const p = Math.max(0, Math.floor(Number(item.picked) || 0));
+      const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
+      const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
       const vid = item.variant_id as string;
       const prev = unitsByVariant.get(vid);
       if (prev) prev.units += units;

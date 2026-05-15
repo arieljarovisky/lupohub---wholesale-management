@@ -132,6 +132,13 @@ export function buildWholesaleFacturaHtml(params: {
 
   const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
   const items = sortOrderItemsForPrint(itemsOriginal, products);
+  const anyPicked = items.some((i) => Number(i.picked) > 0);
+  const qtyOnFacturaLine = (i: OrderItem) => {
+    const q = Number(i.quantity || 0);
+    if (!anyPicked) return q;
+    const p = Math.max(0, Math.floor(Number(i.picked) || 0));
+    return Math.min(q, p);
+  };
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
@@ -151,7 +158,7 @@ export function buildWholesaleFacturaHtml(params: {
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
 
   const sumLines = items.reduce((s, i) => {
-    const qty = Number(i.quantity || 0);
+    const qty = qtyOnFacturaLine(i);
     const unit = Number(i.priceAtMoment ?? 0);
     return s + Math.round(qty * unit * 100) / 100;
   }, 0);
@@ -166,7 +173,7 @@ export function buildWholesaleFacturaHtml(params: {
 
   const rows = items
     .map((i) => {
-      const qty = Number(i.quantity || 0);
+      const qty = qtyOnFacturaLine(i);
       const unit = Number(i.priceAtMoment ?? 0);
       const importe = Math.round(qty * unit * 100) / 100;
       const variantId = i.variantId ?? i.productId;

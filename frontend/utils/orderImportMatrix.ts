@@ -1,18 +1,13 @@
 /**
  * Parsea Excel tipo matriz para importación masiva de pedidos (ExcelJS, con soporte de color):
  * Cliente/Ref., Código, Color, columnas de talles, Precio opcional.
- * Si `splitByInvoiceGreen` es true en el parser, se separan líneas en
- * `importGroup`: NO_FACTURAR (cantidad con relleno verde, no se factura) y
- * PENDIENTE (sin verde: pedido del cliente no enviado / sin stock) → dos borradores por cliente.
- * Por defecto el parser lleva `splitByInvoiceGreen: false` (un solo pedido).
+ * Un borrador por cliente; lo que se factura y el stock se definen después en picking.
  * Sin columna de cliente se usa el nombre de la hoja como referencia de cliente.
  */
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import { normalizeArticleCodeForMatrixImport } from './inventoryUtils';
 import { codigoTalleParaSku } from './tallesTango';
-
-export type MatrixImportGroup = 'NO_FACTURAR' | 'PENDIENTE';
 
 export interface OrderMatrixImportLine {
   customerRef: string;
@@ -21,7 +16,6 @@ export interface OrderMatrixImportLine {
   sizeCode: string;
   quantity: number;
   unitPrice?: number | null;
-  importGroup?: MatrixImportGroup;
 }
 
 function normHeader(h: string): string {
@@ -54,28 +48,6 @@ function parseQtyFromCellValue(v: unknown): number {
   const s = String(v).trim();
   if (!s || s.toUpperCase() === 'X') return 0;
   return parseInt(s.replace(/\D/g, ''), 10) || 0;
-}
-
-/** Relleno verde tipo Excel (acento 6) y variantes habituales (marcar cantidad que no se factura en este flujo). */
-function cellFillSuggestsMatrixGreen(fill: ExcelJS.Cell['fill']): boolean {
-  if (!fill || (fill as { type?: string }).type !== 'pattern') return false;
-  const fg = (fill as { fgColor?: { argb?: string } }).fgColor;
-  if (!fg) return false;
-  const raw = String((fg as { argb?: string }).argb ?? '')
-    .replace(/^#/, '')
-    .toUpperCase();
-  const hex = raw.length === 8 ? raw.slice(2) : raw;
-  const known = ['92D050', '00B050', '548235', '70AD47', '375623', 'A9D08E', 'C6E0B4', '63BE7B'];
-  for (const k of known) {
-    if (hex.endsWith(k) || hex.includes(k)) return true;
-  }
-  if (raw.length === 8) {
-    const r = parseInt(raw.slice(2, 4), 16);
-    const g = parseInt(raw.slice(4, 6), 16);
-    const b = parseInt(raw.slice(6, 8), 16);
-    if (g >= 130 && g > r + 20 && g > b + 20) return true;
-  }
-  return false;
 }
 
 function resolveColumns(originalHeaders: string[], normHeaders: string[]) {
@@ -193,7 +165,7 @@ function resolveColumns(originalHeaders: string[], normHeaders: string[]) {
 function parseWorksheet(
   ws: ExcelJS.Worksheet,
   sheetName: string,
-  opts?: ParseOrderMatrixExcelOptions
+  _opts?: ParseOrderMatrixExcelOptions
 ): OrderMatrixImportLine[] {
   const maxCol = Math.max(ws.actualColumnCount || 0, ws.columnCount || 0, 1);
   const headerRow = ws.getRow(1);
@@ -210,24 +182,6 @@ function parseWorksheet(
 
   const { customerCol, codigoCol, colorCol, precioCol, sizeCols } = layout;
   const col1 = (idx: number) => idx + 1;
-
-  const splitByGreen = opts?.splitByInvoiceGreen === true;
-  let hasGreenOnQuantity = false;
-  const lastRow = ws.rowCount || 1;
-  if (splitByGreen) {
-    for (let r = 2; r <= lastRow; r++) {
-      const row = ws.getRow(r);
-      for (const { index } of sizeCols) {
-        const cell = row.getCell(col1(index));
-        const qty = parseQtyFromCellValue(cell.value);
-        if (qty > 0 && cellFillSuggestsMatrixGreen(cell.fill)) {
-          hasGreenOnQuantity = true;
-          break;
-        }
-      }
-      if (hasGreenOnQuantity) break;
-    }
-  }
 
   const sheetFallback = String(sheetName ?? '').trim();
   let lastCodigo = '';
@@ -269,12 +223,6 @@ function parseWorksheet(
       const cell = row.getCell(col1(index));
       const qty = parseQtyFromCellValue(cell.value);
       if (qty <= 0) continue;
-      const green = splitByGreen && cellFillSuggestsMatrixGreen(cell.fill);
-      const importGroup: MatrixImportGroup | undefined = hasGreenOnQuantity
-        ? green
-          ? 'NO_FACTURAR'
-          : 'PENDIENTE'
-        : undefined;
       const sizeCode = codigoTalleParaSku(String(key).trim()) || String(key).trim().toUpperCase();
       if (!sizeCode) continue;
       out.push({
@@ -284,7 +232,6 @@ function parseWorksheet(
         sizeCode,
         quantity: qty,
         unitPrice: rowPrice,
-        importGroup,
       });
     }
   }
@@ -374,11 +321,6 @@ export type ParseOrderMatrixExcelOptions = {
    * para no generar decenas de pedidos duplicados cuando el libro trae muchas hojas copiadas.
    */
   importAllSheets?: boolean;
-  /**
-   * Si es true y el .xlsx tiene celdas de cantidad con relleno verde, se marcan líneas NO_FACTURAR (verde) vs PENDIENTE (sin verde)
-   * (dos borradores por cliente). Por defecto false: un solo pedido por cliente.
-   */
-  splitByInvoiceGreen?: boolean;
 };
 
 function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixExcelOptions): OrderMatrixImportLine[] {
@@ -405,7 +347,7 @@ function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixEx
 }
 
 /**
- * Lee .xlsx con ExcelJS. Opcional: verde = no facturar, sin verde = pendiente sin stock (`splitByInvoiceGreen: true`).
+ * Lee .xlsx con ExcelJS (primera hoja con datos por defecto).
  * @param opts.importAllSheets Por defecto false: solo la primera hoja con datos válidos.
  */
 export async function parseOrderMatrixExcel(

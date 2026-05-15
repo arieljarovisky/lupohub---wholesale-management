@@ -236,17 +236,29 @@ async function getItemLabelForWarning(item: any, variantId: string): Promise<str
   return extras ? `${base} (${extras})${skuSuffix}` : `${base}${skuSuffix}`;
 }
 
-/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
+/** Estados en los que el pedido ya pasó por picking: neto AFIP y stock usan cantidad pickeada por línea. */
+const PICKING_DONE_STATUSES_AFIP = new Set(['Falta controlar', 'Controlado', 'Despachado']);
+
+/** Neto gravado según líneas; tras picking (control/despacho) alinea con lo pickeado para factura AFIP. */
 async function getOrderNetFromLineItems(orderId: string): Promise<number> {
-  const rows = await query(
-    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+  const meta = await get(
+    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+     FROM orders o WHERE o.id = ? LIMIT 1`,
     [orderId]
-  ) as { quantity: number; price_at_moment: string | number }[];
+  ) as { no_stock_impact?: number; status?: string } | undefined;
+  const usePicked =
+    !Number(meta?.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String(meta?.status || ''));
+  const rows = await query(
+    `SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    [orderId]
+  ) as { quantity: number; picked: number | null; price_at_moment: string | number }[];
   let sum = 0;
   for (const r of rows) {
-    const qty = Number(r.quantity) || 0;
+    const q = Number(r.quantity) || 0;
+    const p = Number(r.picked) || 0;
+    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
     const price = Number(r.price_at_moment) || 0;
-    sum += Math.round(qty * price * 100) / 100;
+    sum += Math.round(lineQty * price * 100) / 100;
   }
   return Math.round(sum * 100) / 100;
 }
@@ -822,13 +834,6 @@ function normalizeMatrixCustomerRefKey(ref: string): string {
     .toLowerCase();
 }
 
-/** Verde en Excel = no facturar; sin verde = pendiente (no enviado / sin stock). `FACTURAR` legacy se trata como verde (no facturar). */
-function normalizeMatrixImportLineGroup(ig: unknown): '' | 'NO_FACTURAR' | 'PENDIENTE' {
-  if (ig === 'PENDIENTE') return 'PENDIENTE';
-  if (ig === 'NO_FACTURAR' || ig === 'FACTURAR') return 'NO_FACTURAR';
-  return '';
-}
-
 export interface MatrixImportLineInput {
   customerRef: string;
   codigo: string;
@@ -836,8 +841,6 @@ export interface MatrixImportLineInput {
   sizeCode: string;
   quantity: number;
   unitPrice?: number | null;
-  /** Excel: verde = no facturar; sin verde = pendiente (pedido no enviado / sin stock). `FACTURAR` se normaliza a NO_FACTURAR. */
-  importGroup?: 'NO_FACTURAR' | 'PENDIENTE' | 'FACTURAR';
 }
 
 /** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
@@ -1004,24 +1007,13 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     const bodyPriceListId =
       bodyPriceListRaw != null && String(bodyPriceListRaw).trim() !== '' ? String(bodyPriceListRaw).trim() : null;
 
-    /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
-    const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
-    const linesForImport = splitByInvoiceGreen
-      ? linesRaw
-      : (linesRaw as MatrixImportLineInput[]).map((ln) => {
-          const { importGroup: _omit, ...rest } = ln as MatrixImportLineInput & { importGroup?: unknown };
-          return rest as MatrixImportLineInput;
-        });
-
     const byRefKey = new Map<string, MatrixImportLineInput[]>();
-    for (const ln of linesForImport) {
+    for (const ln of linesRaw) {
       const refTrim = String(ln.customerRef ?? '').trim();
       if (!refTrim) continue;
       const refKey = normalizeMatrixCustomerRefKey(refTrim);
-      const ig = normalizeMatrixImportLineGroup(ln.importGroup);
-      const key = ig ? `${refKey}\t${ig}` : refKey;
-      if (!byRefKey.has(key)) byRefKey.set(key, []);
-      byRefKey.get(key)!.push({ ...ln, customerRef: refTrim, importGroup: ig || undefined });
+      if (!byRefKey.has(refKey)) byRefKey.set(refKey, []);
+      byRefKey.get(refKey)!.push({ ...ln, customerRef: refTrim });
     }
 
     const created: any[] = [];
@@ -1039,17 +1031,13 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       const ref0 = String(refGroupLines[0]?.customerRef ?? '').trim();
       const customer = await findCustomer(ref0);
       if (!customer) {
-        const igRaw = refGroupLines[0]?.importGroup;
-        const igNorm = normalizeMatrixImportLineGroup(igRaw);
         errors.push({
-          customerRef: igNorm ? `${ref0} [${igNorm}]` : ref0,
+          customerRef: ref0,
           message: 'Cliente no encontrado',
         });
         continue;
       }
-      const igRaw = refGroupLines[0]?.importGroup;
-      const ig = normalizeMatrixImportLineGroup(igRaw);
-      const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
+      const mergeKey = customer.id;
       let bucket = byCustomerMerged.get(mergeKey);
       if (!bucket) {
         bucket = { customer, lines: [], displayRef: ref0 };
@@ -1116,14 +1104,6 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
         }
         let total = 0;
         for (const it of items) total += it.quantity * it.priceAtMoment;
-        const importGroupRaw = groupLines[0]?.importGroup;
-        const importGroup = normalizeMatrixImportLineGroup(importGroupRaw);
-        const matrixImportLabel =
-          importGroup === 'NO_FACTURAR'
-            ? 'No facturar — cantidad en verde (Excel)'
-            : importGroup === 'PENDIENTE'
-              ? 'Pendiente sin stock — no enviado (Excel)'
-              : undefined;
         const newOrder: Order = {
           id: uuidv4(),
           customerId: customer.id,
@@ -1133,14 +1113,12 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
           status: OrderStatus.DRAFT,
           date: dateStr,
         };
-        if (matrixImportLabel) (newOrder as any).matrixImportLabel = matrixImportLabel;
         const saved = await persistNewWholesaleOrder(newOrder, user, newOrder.id);
         created.push(saved);
       } catch (e: any) {
         console.error(e);
-        const igErr = normalizeMatrixImportLineGroup(groupLines[0]?.importGroup);
         errors.push({
-          customerRef: igErr ? `${customerRef} [${igErr}]` : customerRef,
+          customerRef,
           message: e?.statusCode === 400 ? e.message : e?.message || 'Error al crear pedido',
         });
       }
@@ -1835,7 +1813,10 @@ export const emitirFactura = async (req: any, res: any) => {
   }
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
-    const orderRow = await get('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
+    const orderRow = await get(
+      'SELECT id, customer_id, date, total, no_stock_impact, status FROM orders WHERE id = ?',
+      [id]
+    );
     if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
     const noStockImpact = req.body?.noStockImpact === true || req.body?.no_stock_impact === 1;
     if (noStockImpact && !orderRow.no_stock_impact) {
@@ -1854,6 +1835,20 @@ export const emitirFactura = async (req: any, res: any) => {
     const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
 
     const netFromItems = await getOrderNetFromLineItems(id);
+    if (!noStockImpact) {
+      if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
+        return res.status(400).json({
+          message:
+            'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
+        });
+      }
+      if (!(netFromItems > 0.005)) {
+        return res.status(400).json({
+          message:
+            'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
+        });
+      }
+    }
     const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
 
     const agip = await getAgipRetentionForOrder({

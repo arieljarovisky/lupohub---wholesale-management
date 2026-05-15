@@ -133,14 +133,18 @@ function sumCreditedByItemIndex(notes: CreditNote[]): Record<number, number> {
   return out;
 }
 
-/** Neto gravado según líneas (cantidad × precio); coincide con subtotal de factura por ítems. `orders.total` puede estar desfasado. */
+/** Neto gravado según líneas (cantidad × precio); tras picking/control usa cantidad pickeada (alineado con factura AFIP). */
 function orderNetoFromItems(order: Order): number {
   if (!order.items?.length) return Number(order.total) || 0;
+  const postPicking =
+    !order.noStockImpact &&
+    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
   let s = 0;
   for (const i of order.items) {
-    const qty = Number(i.quantity) || 0;
+    const q = Number(i.quantity) || 0;
     const p = Number(i.priceAtMoment ?? 0);
-    s += Math.round(qty * p * 100) / 100;
+    const lineQty = postPicking ? Math.min(q, Math.max(0, Number(i.picked) || 0)) : q;
+    s += Math.round(lineQty * p * 100) / 100;
   }
   return Math.round(s * 100) / 100;
 }

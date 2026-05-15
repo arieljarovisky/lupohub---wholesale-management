@@ -41,17 +41,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -276,15 +265,22 @@ function getItemLabelForWarning(item, variantId) {
         return extras ? `${base} (${extras})${skuSuffix}` : `${base}${skuSuffix}`;
     });
 }
-/** Neto gravado = Σ (cantidad × precio unitario) en order_items; alinea factura AFIP con el detalle de líneas. */
+/** Estados en los que el pedido ya pasó por picking: neto AFIP y stock usan cantidad pickeada por línea. */
+const PICKING_DONE_STATUSES_AFIP = new Set(['Falta controlar', 'Controlado', 'Despachado']);
+/** Neto gravado según líneas; tras picking (control/despacho) alinea con lo pickeado para factura AFIP. */
 function getOrderNetFromLineItems(orderId) {
     return __awaiter(this, void 0, void 0, function* () {
-        const rows = yield (0, db_1.query)(`SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [orderId]);
+        const meta = yield (0, db_1.get)(`SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+     FROM orders o WHERE o.id = ? LIMIT 1`, [orderId]);
+        const usePicked = !Number(meta === null || meta === void 0 ? void 0 : meta.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String((meta === null || meta === void 0 ? void 0 : meta.status) || ''));
+        const rows = yield (0, db_1.query)(`SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`, [orderId]);
         let sum = 0;
         for (const r of rows) {
-            const qty = Number(r.quantity) || 0;
+            const q = Number(r.quantity) || 0;
+            const p = Number(r.picked) || 0;
+            const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
             const price = Number(r.price_at_moment) || 0;
-            sum += Math.round(qty * price * 100) / 100;
+            sum += Math.round(lineQty * price * 100) / 100;
         }
         return Math.round(sum * 100) / 100;
     });
@@ -798,14 +794,6 @@ function normalizeMatrixCustomerRefKey(ref) {
         .replace(/\s+/g, ' ')
         .toLowerCase();
 }
-/** Verde en Excel = no facturar; sin verde = pendiente (no enviado / sin stock). `FACTURAR` legacy se trata como verde (no facturar). */
-function normalizeMatrixImportLineGroup(ig) {
-    if (ig === 'PENDIENTE')
-        return 'PENDIENTE';
-    if (ig === 'NO_FACTURAR' || ig === 'FACTURAR')
-        return 'NO_FACTURAR';
-    return '';
-}
 /** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
 function matrixImportSkuLookupCandidates(raw) {
     const t = String(raw !== null && raw !== void 0 ? raw : '').trim();
@@ -911,7 +899,7 @@ function resolveMatrixImportLinePrice(priceListId, skuPad, excelUnitPrice) {
 }
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
@@ -956,25 +944,15 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         }
         const bodyPriceListRaw = (_a = body.priceListId) !== null && _a !== void 0 ? _a : body.price_list_id;
         const bodyPriceListId = bodyPriceListRaw != null && String(bodyPriceListRaw).trim() !== '' ? String(bodyPriceListRaw).trim() : null;
-        /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
-        const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
-        const linesForImport = splitByInvoiceGreen
-            ? linesRaw
-            : linesRaw.map((ln) => {
-                const _a = ln, { importGroup: _omit } = _a, rest = __rest(_a, ["importGroup"]);
-                return rest;
-            });
         const byRefKey = new Map();
-        for (const ln of linesForImport) {
+        for (const ln of linesRaw) {
             const refTrim = String((_b = ln.customerRef) !== null && _b !== void 0 ? _b : '').trim();
             if (!refTrim)
                 continue;
             const refKey = normalizeMatrixCustomerRefKey(refTrim);
-            const ig = normalizeMatrixImportLineGroup(ln.importGroup);
-            const key = ig ? `${refKey}\t${ig}` : refKey;
-            if (!byRefKey.has(key))
-                byRefKey.set(key, []);
-            byRefKey.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: refTrim, importGroup: ig || undefined }));
+            if (!byRefKey.has(refKey))
+                byRefKey.set(refKey, []);
+            byRefKey.get(refKey).push(Object.assign(Object.assign({}, ln), { customerRef: refTrim }));
         }
         const created = [];
         const errors = [];
@@ -985,17 +963,13 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             const ref0 = String((_d = (_c = refGroupLines[0]) === null || _c === void 0 ? void 0 : _c.customerRef) !== null && _d !== void 0 ? _d : '').trim();
             const customer = yield findCustomer(ref0);
             if (!customer) {
-                const igRaw = (_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup;
-                const igNorm = normalizeMatrixImportLineGroup(igRaw);
                 errors.push({
-                    customerRef: igNorm ? `${ref0} [${igNorm}]` : ref0,
+                    customerRef: ref0,
                     message: 'Cliente no encontrado',
                 });
                 continue;
             }
-            const igRaw = (_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup;
-            const ig = normalizeMatrixImportLineGroup(igRaw);
-            const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
+            const mergeKey = customer.id;
             let bucket = byCustomerMerged.get(mergeKey);
             if (!bucket) {
                 bucket = { customer, lines: [], displayRef: ref0 };
@@ -1018,9 +992,9 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_g = ln.codigo) !== null && _g !== void 0 ? _g : '').trim());
-                    const color = String((_h = ln.color) !== null && _h !== void 0 ? _h : '').trim();
-                    const sizeCode = String((_j = ln.sizeCode) !== null && _j !== void 0 ? _j : '').trim();
+                    const codigo = padSku(String((_e = ln.codigo) !== null && _e !== void 0 ? _e : '').trim());
+                    const color = String((_f = ln.color) !== null && _f !== void 0 ? _f : '').trim();
+                    const sizeCode = String((_g = ln.sizeCode) !== null && _g !== void 0 ? _g : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
                     const k = `${codigo}\t${color}\t${sizeCode}`;
@@ -1056,13 +1030,6 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 let total = 0;
                 for (const it of items)
                     total += it.quantity * it.priceAtMoment;
-                const importGroupRaw = (_k = groupLines[0]) === null || _k === void 0 ? void 0 : _k.importGroup;
-                const importGroup = normalizeMatrixImportLineGroup(importGroupRaw);
-                const matrixImportLabel = importGroup === 'NO_FACTURAR'
-                    ? 'No facturar — cantidad en verde (Excel)'
-                    : importGroup === 'PENDIENTE'
-                        ? 'Pendiente sin stock — no enviado (Excel)'
-                        : undefined;
                 const newOrder = {
                     id: (0, uuid_1.v4)(),
                     customerId: customer.id,
@@ -1072,16 +1039,13 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     status: types_1.OrderStatus.DRAFT,
                     date: dateStr,
                 };
-                if (matrixImportLabel)
-                    newOrder.matrixImportLabel = matrixImportLabel;
                 const saved = yield persistNewWholesaleOrder(newOrder, user, newOrder.id);
                 created.push(saved);
             }
             catch (e) {
                 console.error(e);
-                const igErr = normalizeMatrixImportLineGroup((_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup);
                 errors.push({
-                    customerRef: igErr ? `${customerRef} [${igErr}]` : customerRef,
+                    customerRef,
                     message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',
                 });
             }
@@ -1723,7 +1687,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
-        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact FROM orders WHERE id = ?', [id]);
+        const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact, status FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
         const noStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
@@ -1739,6 +1703,18 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const netFromItems = yield getOrderNetFromLineItems(id);
+        if (!noStockImpact) {
+            if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
+                return res.status(400).json({
+                    message: 'Completá el picking y pasá el pedido a «Falta controlar» (o controlado / despachado) antes de emitir la factura AFIP. Solo se factura lo indicado en picking.',
+                });
+            }
+            if (!(netFromItems > 0.005)) {
+                return res.status(400).json({
+                    message: 'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
+                });
+            }
+        }
         const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
         const agip = yield getAgipRetentionForOrder({
             orderDate: orderRow.date,

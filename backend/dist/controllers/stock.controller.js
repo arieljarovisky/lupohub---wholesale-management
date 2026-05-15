@@ -274,7 +274,10 @@ const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, funct
     var _a;
     const errors = [];
     try {
-        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+        const meta = yield (0, db_1.get)(`SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`, [orderId]);
+        const usePicked = !Number(meta === null || meta === void 0 ? void 0 : meta.no_stock_impact) &&
+            ['Falta controlar', 'Controlado', 'Despachado'].includes(String((meta === null || meta === void 0 ? void 0 : meta.status) || ''));
+        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
               COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
               s.stock AS current_stock
        FROM order_items oi
@@ -285,7 +288,10 @@ const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, funct
        WHERE oi.order_id = ?`, [orderId]);
         const unitsByVariant = new Map();
         for (const item of items) {
-            const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
+            const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
+            const p = Math.max(0, Math.floor(Number(item.picked) || 0));
+            const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
+            const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
             const vid = item.variant_id;
             const prev = unitsByVariant.get(vid);
             if (prev)
@@ -315,7 +321,10 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
     var _a;
     const errors = [];
     try {
-        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
+        const meta = yield (0, db_1.get)(`SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`, [orderId]);
+        const usePicked = !Number(meta === null || meta === void 0 ? void 0 : meta.no_stock_impact) &&
+            ['Falta controlar', 'Controlado', 'Despachado'].includes(String((meta === null || meta === void 0 ? void 0 : meta.status) || ''));
+        const items = yield (0, db_1.query)(`SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
               COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
               s.stock AS current_stock
        FROM order_items oi
@@ -326,7 +335,10 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
        WHERE oi.order_id = ?`, [orderId]);
         const unitsByVariant = new Map();
         for (const item of items) {
-            const units = unitsToDeductForOrderItem(item.quantity, item.sell_as_pack, item.mayorista_pack_size);
+            const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
+            const p = Math.max(0, Math.floor(Number(item.picked) || 0));
+            const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
+            const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
             const vid = item.variant_id;
             const prev = unitsByVariant.get(vid);
             if (prev)
