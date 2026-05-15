@@ -822,6 +822,13 @@ function normalizeMatrixCustomerRefKey(ref: string): string {
     .toLowerCase();
 }
 
+/** Verde en Excel = no facturar; sin verde = pendiente (no enviado / sin stock). `FACTURAR` legacy se trata como verde (no facturar). */
+function normalizeMatrixImportLineGroup(ig: unknown): '' | 'NO_FACTURAR' | 'PENDIENTE' {
+  if (ig === 'PENDIENTE') return 'PENDIENTE';
+  if (ig === 'NO_FACTURAR' || ig === 'FACTURAR') return 'NO_FACTURAR';
+  return '';
+}
+
 export interface MatrixImportLineInput {
   customerRef: string;
   codigo: string;
@@ -829,8 +836,8 @@ export interface MatrixImportLineInput {
   sizeCode: string;
   quantity: number;
   unitPrice?: number | null;
-  /** Desde Excel con celdas verdes en cantidades: separa en dos pedidos borrador. */
-  importGroup?: 'FACTURAR' | 'PENDIENTE';
+  /** Excel: verde = no facturar; sin verde = pendiente (pedido no enviado / sin stock). `FACTURAR` se normaliza a NO_FACTURAR. */
+  importGroup?: 'NO_FACTURAR' | 'PENDIENTE' | 'FACTURAR';
 }
 
 /** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
@@ -1011,10 +1018,10 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       const refTrim = String(ln.customerRef ?? '').trim();
       if (!refTrim) continue;
       const refKey = normalizeMatrixCustomerRefKey(refTrim);
-      const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
+      const ig = normalizeMatrixImportLineGroup(ln.importGroup);
       const key = ig ? `${refKey}\t${ig}` : refKey;
       if (!byRefKey.has(key)) byRefKey.set(key, []);
-      byRefKey.get(key)!.push({ ...ln, customerRef: refTrim });
+      byRefKey.get(key)!.push({ ...ln, customerRef: refTrim, importGroup: ig || undefined });
     }
 
     const created: any[] = [];
@@ -1032,18 +1039,16 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       const ref0 = String(refGroupLines[0]?.customerRef ?? '').trim();
       const customer = await findCustomer(ref0);
       if (!customer) {
-        const ig = refGroupLines[0]?.importGroup;
+        const igRaw = refGroupLines[0]?.importGroup;
+        const igNorm = normalizeMatrixImportLineGroup(igRaw);
         errors.push({
-          customerRef:
-            ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${ref0} [${ig}]` : ref0,
+          customerRef: igNorm ? `${ref0} [${igNorm}]` : ref0,
           message: 'Cliente no encontrado',
         });
         continue;
       }
-      const ig =
-        refGroupLines[0]?.importGroup === 'FACTURAR' || refGroupLines[0]?.importGroup === 'PENDIENTE'
-          ? refGroupLines[0].importGroup
-          : '';
+      const igRaw = refGroupLines[0]?.importGroup;
+      const ig = normalizeMatrixImportLineGroup(igRaw);
       const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
       let bucket = byCustomerMerged.get(mergeKey);
       if (!bucket) {
@@ -1111,12 +1116,13 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
         }
         let total = 0;
         for (const it of items) total += it.quantity * it.priceAtMoment;
-        const importGroup = groupLines[0]?.importGroup;
+        const importGroupRaw = groupLines[0]?.importGroup;
+        const importGroup = normalizeMatrixImportLineGroup(importGroupRaw);
         const matrixImportLabel =
-          importGroup === 'FACTURAR'
-            ? 'A facturar (Excel)'
+          importGroup === 'NO_FACTURAR'
+            ? 'No facturar — cantidad en verde (Excel)'
             : importGroup === 'PENDIENTE'
-              ? 'Pendiente facturación (Excel)'
+              ? 'Pendiente sin stock — no enviado (Excel)'
               : undefined;
         const newOrder: Order = {
           id: uuidv4(),
@@ -1132,11 +1138,9 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
         created.push(saved);
       } catch (e: any) {
         console.error(e);
+        const igErr = normalizeMatrixImportLineGroup(groupLines[0]?.importGroup);
         errors.push({
-          customerRef:
-            groupLines[0]?.importGroup === 'FACTURAR' || groupLines[0]?.importGroup === 'PENDIENTE'
-              ? `${customerRef} [${groupLines[0]!.importGroup}]`
-              : customerRef,
+          customerRef: igErr ? `${customerRef} [${igErr}]` : customerRef,
           message: e?.statusCode === 400 ? e.message : e?.message || 'Error al crear pedido',
         });
       }

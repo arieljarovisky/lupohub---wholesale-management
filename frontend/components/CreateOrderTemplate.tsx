@@ -122,7 +122,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [matrixImporting, setMatrixImporting] = useState(false);
   /** false = solo la primera hoja del Excel con filas válidas (evita pedidos duplicados por muchas hojas). */
   const [matrixImportAllSheets, setMatrixImportAllSheets] = useState(false);
-  /** false = un solo borrador por cliente; true = dos borradores si hay celdas verdes en cantidades (a facturar / pendiente). */
+  /** false = un solo borrador por cliente; true = dos borradores si hay celdas verdes en cantidades (no facturar / pendiente sin stock). */
   const [matrixSplitByGreen, setMatrixSplitByGreen] = useState(false);
 
   const { showToast } = useNotification();
@@ -158,7 +158,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         if (!lines.length) {
           showToast(
             'error',
-            'No se encontraron filas válidas. Revisá columnas Cliente (o nombre de hoja), Código, Color y talles. Con colores: verde en cantidad = a facturar; cantidad sin verde = pendiente (si hay al menos una celda verde con cantidad).'
+            'No se encontraron filas válidas. Revisá columnas Cliente (o nombre de hoja), Código, Color y talles. Con colores: verde en cantidad = no se factura; cantidad sin verde = pendiente sin stock (no enviado), si hay al menos una celda verde con cantidad en la hoja.'
           );
           return;
         }
@@ -974,9 +974,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                   disabled={matrixImporting || savingOrder}
                 />
                 <span>
-                  <span className="text-slate-300 font-semibold">Dos borradores</span> por celdas verdes (a facturar / pendiente)
+                  <span className="text-slate-300 font-semibold">Dos borradores</span> por celdas verdes (no facturar / pendiente sin stock)
                   <span className="block text-[10px] text-slate-500 font-normal mt-0.5 leading-snug">
-                    Desmarcado: un solo pedido por cliente (recomendado). Marcá solo si usás relleno verde a propósito en las cantidades.
+                    Desmarcado: un solo pedido por cliente (recomendado). Marcá solo si el verde marca lo que no facturás y el resto son pendientes por falta de stock.
                   </span>
                 </span>
               </label>
@@ -1007,7 +1007,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
                 className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Por defecto: una sola hoja con datos y un solo pedido por cliente. Opciones: todas las hojas; dos borradores si usás relleno verde en cantidades. Columnas Cliente, Código, Color, talles. Sin columna cliente se usa el nombre de la hoja."
+                title="Por defecto: una sola hoja con datos y un solo pedido por cliente. Opciones: todas las hojas; dos borradores si usás verde en cantidades (no facturar) y sin verde (pendiente sin stock). Columnas Cliente, Código, Color, talles. Sin columna cliente se usa el nombre de la hoja."
               >
                 <Upload size={20} strokeWidth={2.5} />
                 {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}

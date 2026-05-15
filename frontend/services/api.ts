@@ -641,7 +641,7 @@ export const api = {
     date?: string;
     /** Lista de precios (id). Si no se envía, el servidor usa la del cliente. */
     priceListId?: string | null;
-    /** Solo si es true: dos borradores por cliente (celdas verdes). El servidor ignora importGroup si es false. */
+    /** Solo si es true: dos borradores por cliente (verde = no facturar, sin verde = pendiente sin stock). El servidor ignora importGroup si es false. */
     splitByInvoiceGreen?: boolean;
     lines: Array<{
       customerRef: string;
@@ -650,7 +650,7 @@ export const api = {
       sizeCode: string;
       quantity: number;
       unitPrice?: number | null;
-      importGroup?: 'FACTURAR' | 'PENDIENTE';
+      importGroup?: 'NO_FACTURAR' | 'PENDIENTE' | 'FACTURAR';
     }>;
   }): Promise<{
     created: Order[];

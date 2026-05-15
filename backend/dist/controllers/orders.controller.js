@@ -798,6 +798,14 @@ function normalizeMatrixCustomerRefKey(ref) {
         .replace(/\s+/g, ' ')
         .toLowerCase();
 }
+/** Verde en Excel = no facturar; sin verde = pendiente (no enviado / sin stock). `FACTURAR` legacy se trata como verde (no facturar). */
+function normalizeMatrixImportLineGroup(ig) {
+    if (ig === 'PENDIENTE')
+        return 'PENDIENTE';
+    if (ig === 'NO_FACTURAR' || ig === 'FACTURAR')
+        return 'NO_FACTURAR';
+    return '';
+}
 /** Candidatos de SKU de artículo para cruzar `products.sku` con lista de precios / base (misma idea que import matriz + prefijos Tango). */
 function matrixImportSkuLookupCandidates(raw) {
     const t = String(raw !== null && raw !== void 0 ? raw : '').trim();
@@ -903,7 +911,7 @@ function resolveMatrixImportLinePrice(priceListId, skuPad, excelUnitPrice) {
 }
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
@@ -962,11 +970,11 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             if (!refTrim)
                 continue;
             const refKey = normalizeMatrixCustomerRefKey(refTrim);
-            const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
+            const ig = normalizeMatrixImportLineGroup(ln.importGroup);
             const key = ig ? `${refKey}\t${ig}` : refKey;
             if (!byRefKey.has(key))
                 byRefKey.set(key, []);
-            byRefKey.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: refTrim }));
+            byRefKey.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: refTrim, importGroup: ig || undefined }));
         }
         const created = [];
         const errors = [];
@@ -977,16 +985,16 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             const ref0 = String((_d = (_c = refGroupLines[0]) === null || _c === void 0 ? void 0 : _c.customerRef) !== null && _d !== void 0 ? _d : '').trim();
             const customer = yield findCustomer(ref0);
             if (!customer) {
-                const ig = (_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup;
+                const igRaw = (_e = refGroupLines[0]) === null || _e === void 0 ? void 0 : _e.importGroup;
+                const igNorm = normalizeMatrixImportLineGroup(igRaw);
                 errors.push({
-                    customerRef: ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${ref0} [${ig}]` : ref0,
+                    customerRef: igNorm ? `${ref0} [${igNorm}]` : ref0,
                     message: 'Cliente no encontrado',
                 });
                 continue;
             }
-            const ig = ((_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup) === 'FACTURAR' || ((_g = refGroupLines[0]) === null || _g === void 0 ? void 0 : _g.importGroup) === 'PENDIENTE'
-                ? refGroupLines[0].importGroup
-                : '';
+            const igRaw = (_f = refGroupLines[0]) === null || _f === void 0 ? void 0 : _f.importGroup;
+            const ig = normalizeMatrixImportLineGroup(igRaw);
             const mergeKey = ig ? `${customer.id}\t${ig}` : customer.id;
             let bucket = byCustomerMerged.get(mergeKey);
             if (!bucket) {
@@ -1010,9 +1018,9 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_h = ln.codigo) !== null && _h !== void 0 ? _h : '').trim());
-                    const color = String((_j = ln.color) !== null && _j !== void 0 ? _j : '').trim();
-                    const sizeCode = String((_k = ln.sizeCode) !== null && _k !== void 0 ? _k : '').trim();
+                    const codigo = padSku(String((_g = ln.codigo) !== null && _g !== void 0 ? _g : '').trim());
+                    const color = String((_h = ln.color) !== null && _h !== void 0 ? _h : '').trim();
+                    const sizeCode = String((_j = ln.sizeCode) !== null && _j !== void 0 ? _j : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
                     const k = `${codigo}\t${color}\t${sizeCode}`;
@@ -1048,11 +1056,12 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 let total = 0;
                 for (const it of items)
                     total += it.quantity * it.priceAtMoment;
-                const importGroup = (_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup;
-                const matrixImportLabel = importGroup === 'FACTURAR'
-                    ? 'A facturar (Excel)'
+                const importGroupRaw = (_k = groupLines[0]) === null || _k === void 0 ? void 0 : _k.importGroup;
+                const importGroup = normalizeMatrixImportLineGroup(importGroupRaw);
+                const matrixImportLabel = importGroup === 'NO_FACTURAR'
+                    ? 'No facturar — cantidad en verde (Excel)'
                     : importGroup === 'PENDIENTE'
-                        ? 'Pendiente facturación (Excel)'
+                        ? 'Pendiente sin stock — no enviado (Excel)'
                         : undefined;
                 const newOrder = {
                     id: (0, uuid_1.v4)(),
@@ -1070,10 +1079,9 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             }
             catch (e) {
                 console.error(e);
+                const igErr = normalizeMatrixImportLineGroup((_l = groupLines[0]) === null || _l === void 0 ? void 0 : _l.importGroup);
                 errors.push({
-                    customerRef: ((_m = groupLines[0]) === null || _m === void 0 ? void 0 : _m.importGroup) === 'FACTURAR' || ((_o = groupLines[0]) === null || _o === void 0 ? void 0 : _o.importGroup) === 'PENDIENTE'
-                        ? `${customerRef} [${groupLines[0].importGroup}]`
-                        : customerRef,
+                    customerRef: igErr ? `${customerRef} [${igErr}]` : customerRef,
                     message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',
                 });
             }
