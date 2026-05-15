@@ -13,7 +13,7 @@ router.post('/:id/apply-mayorista-stock', auth_1.authMiddleware, orders_controll
 router.patch('/:id/status', auth_1.authMiddleware, orders_controller_1.updateOrderStatus);
 router.put('/:id', orders_controller_1.updateOrder);
 router.patch('/:id/archive', auth_1.authMiddleware, orders_controller_1.archiveOrder);
-router.delete('/:id', orders_controller_1.deleteOrder);
+router.delete('/:id', auth_1.authMiddleware, orders_controller_1.deleteOrder);
 router.get('/:id/invoice', orders_controller_1.getOrderInvoice);
 router.post('/:id/invoice/recalculate-agip', auth_1.authMiddleware, orders_controller_1.recalculateStoredInvoiceAgip);
 router.post('/:id/invoice/reemitir-con-agip', auth_1.authMiddleware, orders_controller_1.reemitirFacturaConAgip);

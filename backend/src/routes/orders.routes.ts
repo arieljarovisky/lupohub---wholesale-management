@@ -33,7 +33,7 @@ router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDed
 router.patch('/:id/status', authMiddleware, updateOrderStatus);
 router.put('/:id', updateOrder);
 router.patch('/:id/archive', authMiddleware, archiveOrder);
-router.delete('/:id', deleteOrder);
+router.delete('/:id', authMiddleware, deleteOrder);
 router.get('/:id/invoice', getOrderInvoice);
 router.post('/:id/invoice/recalculate-agip', authMiddleware, recalculateStoredInvoiceAgip);
 router.post('/:id/invoice/reemitir-con-agip', authMiddleware, reemitirFacturaConAgip);

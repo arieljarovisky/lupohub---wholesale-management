@@ -640,6 +640,16 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     const allocations = explicitDespachoId
       ? [{ despachoId: explicitDespachoId, quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)) }]
       : await allocateOldestDespachosForVariant(variantId, item.quantity);
+    const allocQtySum = allocations.reduce(
+      (sum, a) => sum + Math.max(0, Math.floor(Number(a.quantity) || 0)),
+      0
+    );
+    if (allocQtySum <= 0) {
+      skippedNoVariant.push(
+        `código ${item.sku}, color ${item.colorCode}, talle ${item.sizeCode} (cantidad 0 o sin líneas de despacho)`
+      );
+      continue;
+    }
     const unassignedQty = allocations
       .filter((a) => !a.despachoId)
       .reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
@@ -680,6 +690,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
   );
 
+  let insertedItems = 0;
   for (const pr of preparedRows) {
     for (const alloc of pr.allocations) {
       if (!alloc.quantity || alloc.quantity <= 0) continue;
@@ -687,7 +698,17 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
         `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [uuidv4(), orderId, pr.variantId, alloc.quantity, 0, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
       );
+      insertedItems += 1;
     }
+  }
+
+  if (insertedItems === 0) {
+    await execute('DELETE FROM orders WHERE id = ?', [orderId]);
+    const err: any = new Error(
+      'No se pudo guardar ninguna línea del pedido (cantidades en cero o error al insertar ítems).'
+    );
+    err.statusCode = 400;
+    throw err;
   }
 
   // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
@@ -1254,8 +1275,23 @@ export const archiveOrder = async (req: any, res: any) => {
 
 export const deleteOrder = async (req: any, res: any) => {
   const { id } = req.params;
+  const user = req.user;
+  if (!user) return res.status(401).json({ message: 'Tenés que iniciar sesión' });
+  if (!['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para eliminar pedidos' });
+  }
   if (!id) return res.status(400).json({ message: "ID inválido" });
   try {
+    if (user.role === 'SELLER') {
+      const ord = await get('SELECT seller_id, status FROM orders WHERE id = ?', [id]);
+      if (!ord) return res.status(404).json({ message: 'Pedido no encontrado' });
+      if (String(ord.seller_id || '') !== String(user.id)) {
+        return res.status(403).json({ message: 'Solo podés eliminar pedidos asignados a vos' });
+      }
+      if (String(ord.status || '') !== 'Borrador') {
+        return res.status(400).json({ message: 'Solo podés eliminar pedidos en borrador' });
+      }
+    }
     const hasInvoice = await get("SELECT id FROM invoices WHERE order_id = ?", [id]);
     if (hasInvoice) {
       return res.status(400).json({

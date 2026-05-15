@@ -2241,7 +2241,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       label="Anular"
                     />
                   )}
-                  {role === Role.ADMIN && !order.invoice && (
+                  {(role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.SELLER) &&
+                    !order.invoice &&
+                    (role !== Role.SELLER || order.status === OrderStatus.DRAFT) && (
                     <OrderCardActionButton
                       variant="danger"
                       onClick={(e) => {
