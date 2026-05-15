@@ -16,6 +16,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
+import { calcTotalesDesdeNetoGravado } from '../utils/afipComprobante';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -104,12 +105,20 @@ const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 /** Valor de `remitoEntregaId` cuando se usa la dirección principal del cliente (no una sucursal). */
 const REMITO_ENTREGA_PRINCIPAL = '__principal__';
 
-/** Mismo criterio que AFIP: base imponible neto; IVA 21% sobre neto. */
-function afipDesdeNeto(neto: number) {
-  const n = Number(neto) || 0;
-  const iva = Math.round(n * 0.21 * 100) / 100;
-  const impTotal = Math.round((n + iva) * 100) / 100;
-  return { neto: n, iva, impTotal };
+/** Totales AFIP desde neto gravado; en clase B el comprobante impreso no discrimina IVA. */
+function afipDesdeNeto(neto: number, cbteTipo = 6, agipRetPer = 0) {
+  const t = calcTotalesDesdeNetoGravado(neto, cbteTipo, agipRetPer);
+  return {
+    neto: t.neto,
+    iva: t.iva,
+    impTotal: t.total,
+    discriminaIva: t.discriminaIva,
+    subtotalConIva: Math.round((t.neto + t.iva) * 100) / 100,
+  };
+}
+
+function ncCbteTipoFromFactura(cbteTipoFactura: number): 3 | 8 {
+  return Number(cbteTipoFactura) === 1 ? 3 : 8;
 }
 
 /** Suma el monto neto ya creditado por cada ítem (índice) a partir de la lista
@@ -216,13 +225,13 @@ function ncComprobanteTotalesAfip(
   neto: number,
   inv: Order['invoice'] | undefined,
   netoPedidoTotal: number
-): { neto: number; iva: number; iibb: number; total: number } {
+): { neto: number; iva: number; iibb: number; total: number; discriminaIva: boolean } {
   const n = Math.round((Number(neto) || 0) * 100) / 100;
-  const iva = Math.round(n * 0.21 * 100) / 100;
+  const factTipo = Number((inv as { cbteTipo?: number; cbte_tipo?: number })?.cbteTipo ?? (inv as { cbte_tipo?: number })?.cbte_tipo ?? 6);
   const pr = iibbProratedFromInvoiceForNc(inv, n, netoPedidoTotal);
   const iibb = pr ? pr.retPer : 0;
-  const total = Math.round((n + iva + iibb) * 100) / 100;
-  return { neto: n, iva, iibb, total };
+  const t = calcTotalesDesdeNetoGravado(n, ncCbteTipoFromFactura(factTipo), iibb);
+  return { neto: n, iva: t.iva, iibb, total: t.total, discriminaIva: t.discriminaIva };
 }
 
 function syntheticCreditNotePreview(
@@ -2336,7 +2345,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                          const agip = orderInvoiceApplicableAgip(order);
                          if (!agip) return null;
                          const neto = orderNetoFromItems(order);
-                         const { impTotal } = afipDesdeNeto(neto);
+                         const cbteTipoOrd = Number(order.invoice?.cbteTipo ?? 6);
+                         const { impTotal } = afipDesdeNeto(neto, cbteTipoOrd, agip.retPer);
                          const totalConIvaEIibb = Math.round((impTotal + agip.retPer) * 100) / 100;
                          return (
                            <div className="mt-1.5 space-y-0.5 text-right">
@@ -2878,13 +2888,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       {reemitPreviewOrder && reemitPreviewOrder.invoice && (() => {
         const o = reemitPreviewOrder;
         const netoPed = orderNetoFromItems(o);
-        const ncSoloNetoIva = afipDesdeNeto(netoPed);
+        const factTipo = Number(o.invoice?.cbteTipo ?? 6);
+        const ncCbte = ncCbteTipoFromFactura(factTipo);
+        const ncSoloNetoIva = afipDesdeNeto(netoPed, ncCbte);
         const cust = customers.find((c) => c.id === o.customerId);
         const alicNueva =
           cust?.shouldRetainIibb && Number(cust?.iibbAlicuota || 0) > 0 ? Number(cust?.iibbAlicuota || 0) : 0;
         const iibbNueva = Math.round(netoPed * (alicNueva / 100) * 100) / 100;
-        const ivaNueva = Math.round(netoPed * 0.21 * 100) / 100;
-        const totalNueva = Math.round((netoPed + ivaNueva + iibbNueva) * 100) / 100;
+        const factNueva = afipDesdeNeto(netoPed, factTipo, iibbNueva);
         return (
           <div
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -2907,12 +2918,23 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <div className="grid sm:grid-cols-2 gap-4 mb-5 text-sm">
                 <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 space-y-2">
                   <div className="text-xs font-bold uppercase text-amber-500 tracking-wide">Nota de crédito (total)</div>
-                  <div className="text-slate-400">
-                    Neto <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.neto)}</span>
-                  </div>
-                  <div className="text-slate-400">
-                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.iva)}</span>
-                  </div>
+                  {ncSoloNetoIva.discriminaIva ? (
+                    <>
+                      <div className="text-slate-400">
+                        Neto <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.neto)}</span>
+                      </div>
+                      <div className="text-slate-400">
+                        IVA 21% <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.iva)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-slate-400">
+                        Subtotal <span className="text-white float-right">${formatMoneyAr(ncSoloNetoIva.subtotalConIva)}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">IVA incluido en el precio (comprobante clase B).</p>
+                    </>
+                  )}
                   <div className="text-slate-200 font-bold pt-2 border-t border-slate-600 clear-both">
                     Total NC <span className="float-right">${formatMoneyAr(ncSoloNetoIva.impTotal)}</span>
                   </div>
@@ -2933,12 +2955,23 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 </div>
                 <div className="rounded-xl border border-slate-600 bg-slate-900/50 p-4 space-y-2">
                   <div className="text-xs font-bold uppercase text-sky-500 tracking-wide">Factura nueva (proforma)</div>
-                  <div className="text-slate-400">
-                    Neto <span className="text-white float-right">${formatMoneyAr(netoPed)}</span>
-                  </div>
-                  <div className="text-slate-400">
-                    IVA 21% <span className="text-white float-right">${formatMoneyAr(ivaNueva)}</span>
-                  </div>
+                  {factNueva.discriminaIva ? (
+                    <>
+                      <div className="text-slate-400">
+                        Neto <span className="text-white float-right">${formatMoneyAr(factNueva.neto)}</span>
+                      </div>
+                      <div className="text-slate-400">
+                        IVA 21% <span className="text-white float-right">${formatMoneyAr(factNueva.iva)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-slate-400">
+                        Subtotal <span className="text-white float-right">${formatMoneyAr(factNueva.subtotalConIva)}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">IVA incluido en el precio (comprobante clase B).</p>
+                    </>
+                  )}
                   {iibbNueva > 0.005 && (
                     <div className="text-slate-400">
                       Percep. IIBB ({alicNueva.toFixed(2)}%){' '}
@@ -2946,7 +2979,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     </div>
                   )}
                   <div className="text-slate-200 font-bold pt-2 border-t border-slate-600 clear-both">
-                    Total factura <span className="float-right">${formatMoneyAr(totalNueva)}</span>
+                    Total factura <span className="float-right">${formatMoneyAr(factNueva.impTotal)}</span>
                   </div>
                   <button
                     type="button"
@@ -3107,11 +3140,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <>
                           Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(lineNet)}</strong>
                           <span className="block mt-1 text-slate-400">
-                            AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
-                            {totalesNcPreview.iibb > 0.005 ? (
-                              <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
-                            ) : null}{' '}
-                            → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
+                            {totalesNcPreview.discriminaIva ? (
+                              <>
+                                AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                                {totalesNcPreview.iibb > 0.005 ? (
+                                  <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                                ) : null}{' '}
+                                → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
+                              </>
+                            ) : (
+                              <>AFIP: total comprobante ${formatMoneyAr(totalesNcPreview.total)} (IVA incluido, sin discriminar en clase B)</>
+                            )}
                           </span>
                         </>
                       );
@@ -3126,11 +3165,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <strong className="text-white">${formatMoneyAr(totalesNcPreview.neto)}</strong>
                   </p>
                   <p className="text-xs text-slate-400">
-                    En AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
-                    {totalesNcPreview.iibb > 0.005 ? (
-                      <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
-                    ) : null}{' '}
-                    → total del comprobante ${formatMoneyAr(totalesNcPreview.total)}.
+                    {totalesNcPreview.discriminaIva ? (
+                      <>
+                        En AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                        {totalesNcPreview.iibb > 0.005 ? (
+                          <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                        ) : null}{' '}
+                        → total del comprobante ${formatMoneyAr(totalesNcPreview.total)}.
+                      </>
+                    ) : (
+                      <>En AFIP: total comprobante ${formatMoneyAr(totalesNcPreview.total)} (IVA incluido, sin discriminar en clase B).</>
+                    )}
                   </p>
                 </div>
               )}
@@ -3205,11 +3250,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <>
                           Monto neto a creditar (sin IVA): <strong className="text-slate-300">${formatMoneyAr(net)}</strong>
                           <span className="block mt-1 text-slate-400">
-                            AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
-                            {totalesNcPreview.iibb > 0.005 ? (
-                              <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
-                            ) : null}{' '}
-                            → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
+                            {totalesNcPreview.discriminaIva ? (
+                              <>
+                                AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                                {totalesNcPreview.iibb > 0.005 ? (
+                                  <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                                ) : null}{' '}
+                                → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
+                              </>
+                            ) : (
+                              <>AFIP: total comprobante ${formatMoneyAr(totalesNcPreview.total)} (IVA incluido, sin discriminar en clase B)</>
+                            )}
                           </span>
                         </>
                       );

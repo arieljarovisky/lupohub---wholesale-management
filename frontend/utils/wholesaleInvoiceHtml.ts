@@ -1,8 +1,9 @@
 /**
  * HTML imprimible de factura y nota de crédito para pedidos mayorista (misma vista en Pedidos y Facturación).
- * Totales: neto gravado + IVA 21% + percepción IIBB (si figura en la factura); total alineado con AFIP.
+ * Totales: neto gravado + IVA 21% + percepción IIBB (Factura A); en Factura B el importe impreso lleva IVA incluido sin discriminar.
  */
 import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
+import { calcTotalesDesdeNetoGravado } from './afipComprobante';
 import { formatMoneyAr } from './moneyFormat';
 
 export type FacturaRemitente = Record<string, unknown> & {
@@ -167,14 +168,14 @@ export function buildWholesaleFacturaHtml(params: {
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
   const agipAlicuota = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
   const agipRetPer = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
-  const iva21 = Math.round(netoGravado * 0.21 * 100) / 100;
-  const total = Math.round((netoGravado + iva21 + agipRetPer) * 100) / 100;
-  const subtotalBruto = netoGravado;
+  const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, agipRetPer);
+  const { neto: netoImpreso, iva: iva21, total, discriminaIva, factorPrecioImpreso } = totales;
+  const subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
 
   const rows = items
     .map((i) => {
       const qty = qtyOnFacturaLine(i);
-      const unit = Number(i.priceAtMoment ?? 0);
+      const unit = Math.round(Number(i.priceAtMoment ?? 0) * factorPrecioImpreso * 100) / 100;
       const importe = Math.round(qty * unit * 100) / 100;
       const variantId = i.variantId ?? i.productId;
       const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
@@ -399,10 +400,15 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
             </div>
             <div class="totals">
-              <div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+              ${
+                discriminaIva
+                  ? `<div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
-              <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoGravado)}</span></div>
-              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
+              <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
+                  : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+              <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
+              }
               ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
               <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
             </div>
@@ -453,14 +459,15 @@ export function buildWholesaleCreditNoteHtml(params: {
   /** Monto creditado en BD = neto (ImpNeto AFIP), igual que en emitirNotaCredito. */
   const totalNota = Number(nc.amountCredited || 0);
   const netoNc = Math.round(totalNota * 100) / 100;
-  const ivaNc = Math.round(netoNc * 0.21 * 100) / 100;
+  const cbteTipoNc = Number((nc as { cbteTipo?: number }).cbteTipo ?? (nc as { cbte_tipo?: number }).cbte_tipo ?? 0);
   let iibbNc = 0;
   let alicuotaIibbNc = 0;
   if (previewAgip && Number(previewAgip.retPer) > 0.005) {
     iibbNc = Math.round(Number(previewAgip.retPer) * 100) / 100;
     alicuotaIibbNc = Math.round(Number(previewAgip.alicuota || 0) * 100) / 100;
   }
-  const totalComprobanteNc = Math.round((netoNc + ivaNc + iibbNc) * 100) / 100;
+  const totalesNc = calcTotalesDesdeNetoGravado(netoNc, cbteTipoNc, iibbNc);
+  const { iva: ivaNc, total: totalComprobanteNc, discriminaIva: discriminaIvaNc, factorPrecioImpreso: factorNc } = totalesNc;
   const iibbRowHtml =
     iibbNc > 0.005
       ? `<div class="r"><span>Percepciones IIBB${alicuotaIibbNc > 0.005 ? ` (${alicuotaIibbNc.toFixed(2)}%)` : ''}</span><span>$${formatMoneyAr(iibbNc)}</span></div>`
@@ -500,9 +507,13 @@ export function buildWholesaleCreditNoteHtml(params: {
           ? qtyNcRaw
           : (price > 0 ? Math.round((netoSafe / price) * 1000) / 1000 : Number(i.quantity || 0));
         const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
-        const ivaLinea = Math.round(netoSafe * 0.21 * 100) / 100;
-        const totalLinea = Math.round((netoSafe + ivaLinea) * 100) / 100;
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoSafe)}</td><td class="col-r">$${formatMoneyAr(ivaLinea)}</td><td class="col-r">$${formatMoneyAr(totalLinea)}</td></tr>`;
+        const totalLinea = Math.round(netoSafe * factorNc * 100) / 100;
+        if (discriminaIvaNc) {
+          const ivaLinea = Math.round(netoSafe * 0.21 * 100) / 100;
+          const totalConIva = Math.round((netoSafe + ivaLinea) * 100) / 100;
+          return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoSafe)}</td><td class="col-r">$${formatMoneyAr(ivaLinea)}</td><td class="col-r">$${formatMoneyAr(totalConIva)}</td></tr>`;
+        }
+        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalLinea)}</td></tr>`;
       });
     rows = selectedRows.join('');
   } else if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
@@ -511,16 +522,22 @@ export function buildWholesaleCreditNoteHtml(params: {
     const price = Number(i.priceAtMoment ?? 0);
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
-    rows = `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoNc)}</td><td class="col-r">$${formatMoneyAr(ivaNc)}</td><td class="col-r">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`;
+    rows = discriminaIvaNc
+      ? `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoNc)}</td><td class="col-r">$${formatMoneyAr(ivaNc)}</td><td class="col-r">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`
+      : `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`;
   } else {
     rows = items
       .map((i) => {
         const qty = Number(i.quantity || 0);
         const unit = Number(i.priceAtMoment ?? 0);
         const lineNeto = Math.round(qty * unit * 100) / 100;
-        const lineIva = Math.round(lineNeto * 0.21 * 100) / 100;
-        const lineTotal = Math.round((lineNeto + lineIva) * 100) / 100;
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${formatMoneyAr(lineNeto)}</td><td class="col-r">$${formatMoneyAr(lineIva)}</td><td class="col-r">$${formatMoneyAr(lineTotal)}</td></tr>`;
+        const lineTotal = Math.round(lineNeto * factorNc * 100) / 100;
+        if (discriminaIvaNc) {
+          const lineIva = Math.round(lineNeto * 0.21 * 100) / 100;
+          const lineTotalA = Math.round((lineNeto + lineIva) * 100) / 100;
+          return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${formatMoneyAr(lineNeto)}</td><td class="col-r">$${formatMoneyAr(lineIva)}</td><td class="col-r">$${formatMoneyAr(lineTotalA)}</td></tr>`;
+        }
+        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r" colspan="3">$${formatMoneyAr(lineTotal)}</td></tr>`;
       })
       .join('');
   }
@@ -549,7 +566,6 @@ export function buildWholesaleCreditNoteHtml(params: {
   const cuitCliente = (customer?.cuit || '').toString();
   const ptoVtaNc = String(nc.puntoVta ?? '').padStart(5, '0');
   const compNroNc = String(nc.cbteDesde ?? '').padStart(8, '0');
-  const cbteTipoNc = Number((nc as { cbteTipo?: number }).cbteTipo ?? (nc as { cbte_tipo?: number }).cbte_tipo ?? 0);
   const letraNc = cbteTipoNc === 3 ? 'A' : cbteTipoNc === 13 ? 'C' : 'B';
   const codigoNc = String(cbteTipoNc || 8).padStart(3, '0');
   const periodDate = new Date(order.date);
@@ -651,9 +667,11 @@ export function buildWholesaleCreditNoteHtml(params: {
               <th>Producto / Descripción</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
               <th class="col-c" style="width: 70px;">CANT.</th>
-              <th class="col-r" style="width: 100px;">BASE</th>
+              ${discriminaIvaNc
+                ? `<th class="col-r" style="width: 100px;">BASE</th>
               <th class="col-r" style="width: 90px;">IVA</th>
-              <th class="col-r" style="width: 92px;">TOTAL</th>
+              <th class="col-r" style="width: 92px;">TOTAL</th>`
+                : `<th class="col-r" style="width: 180px;">IMPORTE</th>`}
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -663,8 +681,13 @@ export function buildWholesaleCreditNoteHtml(params: {
           <div class="summary">
             <div></div>
             <div class="totals">
-              <div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
-              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>
+              ${
+                discriminaIvaNc
+                  ? `<div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>`
+                  : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(Math.round((netoNc + ivaNc) * 100) / 100)}</span></div>
+              <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
+              }
               ${iibbRowHtml}
               <div class="r"><span>Total NC</span><span>$${formatMoneyAr(totalComprobanteNc)}</span></div>
             </div>
