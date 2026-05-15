@@ -4102,9 +4102,73 @@ function mlNormalizeTitle(title: string): string {
   return (title || '').trim().replace(/\s+/g, ' ');
 }
 
+/** Registra una publicación ML en variant_publications (sincronización de stock). */
+async function registerMercadoLibrePublication(
+  variantId: string,
+  mlItemId: string,
+  mlVariationId: string | number | null = null,
+  mlPack = 1
+): Promise<void> {
+  const productId = String(mlItemId || '').trim();
+  if (!productId || !variantId) return;
+  const extVarId = mlVariationId != null && String(mlVariationId).trim() !== '' ? String(mlVariationId).trim() : '';
+  await execute(
+    `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+     VALUES (?, ?, 'mercadolibre', ?, ?, ?)
+     ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
+    [uuidv4(), variantId, productId, extVarId, Math.max(1, mlPack)]
+  );
+}
+
+/** Crea o reutiliza variante local y vincula una o más publicaciones ML del mismo color/talle. */
+async function upsertLocalVariantFromMlEntries(
+  productId: string,
+  baseSku: string,
+  entries: { sku: string; color: string; size: string; stock: number; mlItemId?: string | null; variationId?: string | number | null }[]
+): Promise<{ variantId: string; created: boolean }> {
+  const v = entries[0];
+  const sizeCode = (v.size || 'U').toString().trim() || 'U';
+  const colorCode = (v.color || 'Único').toString().trim() || 'Único';
+  const sizeId = await ensureSize(sizeCode);
+  const colorId = await ensureColor(colorCode);
+  let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
+  if (!productColorId) {
+    productColorId = uuidv4();
+    await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+  }
+  const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+  let variantId = existingVariant?.id as string | undefined;
+  let created = false;
+  if (!variantId) {
+    variantId = uuidv4();
+    const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
+    const primary = entries.find((e) => e.mlItemId) || v;
+    const mlItemId = primary.mlItemId ? String(primary.mlItemId).trim() : null;
+    const mlVarId = primary.variationId != null && String(primary.variationId) !== String(mlItemId || '')
+      ? String(primary.variationId)
+      : null;
+    await execute(
+      `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`,
+      [variantId, productColorId, sizeId, variantSku, mlVarId, mlItemId]
+    );
+    await execute(
+      `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
+      [variantId, v.stock]
+    );
+    created = true;
+  }
+  for (const e of entries) {
+    const itemId = e.mlItemId ? String(e.mlItemId).trim() : '';
+    if (!itemId) continue;
+    const varId = e.variationId != null && String(e.variationId) !== itemId ? e.variationId : null;
+    await registerMercadoLibrePublication(variantId, itemId, varId);
+  }
+  return { variantId, created };
+}
+
 /** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
 function mlBaseTitle(title: string): string {
-  let t = mlNormalizeTitle(title);
+  let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
   // Algunos títulos traen sufijos de publicación (p.ej. "Sin cuotas") que rompen el
   // agrupado por color/talle. Esto los elimina para recuperar el "título base".
   t = t
@@ -4136,7 +4200,7 @@ function mlStripTrailingPublicationIndex(title: string): string {
 
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title: string): { color: string; size: string } {
-  let t = mlNormalizeTitle(title);
+  let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
   t = t
     .replace(/(?:^|\s)(?:sin|s\/c)\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
     .replace(/(?:^|\s)con\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
@@ -5048,33 +5112,25 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
         [productId, baseSku, title, 'General', first.price || 0, first.description?.plain_text || null, null]
       );
 
-      let variantsCreated = 0;
+      const byVariantKey = new Map<string, typeof variations>();
       for (const v of variations) {
-        const sizeCode = (v.size || 'U').toString().trim() || 'U';
-        const colorCode = (v.color || 'Único').toString().trim() || 'Único';
-        const sizeId = await ensureSize(sizeCode);
-        const colorId = await ensureColor(colorCode);
-        let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
-        if (!productColorId) {
-          productColorId = uuidv4();
-          await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-        }
-        const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-        if (existingVariant) continue;
-        const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
-        const variantId = uuidv4();
-        await execute(
-          `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`,
-          [variantId, productColorId, sizeId, variantSku, null, v.mlItemId]
-        );
-        await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
-        variantsCreated++;
+        const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
+        const sizeKey = (v.size || 'U').toString().trim().toUpperCase() || 'U';
+        const key = `${colorKey}|${sizeKey}`;
+        if (!byVariantKey.has(key)) byVariantKey.set(key, []);
+        byVariantKey.get(key)!.push(v);
+      }
+      let variantsCreated = 0;
+      for (const group of byVariantKey.values()) {
+        const { created } = await upsertLocalVariantFromMlEntries(productId, baseSku, group);
+        if (created) variantsCreated++;
       }
       return res.status(201).json({
         productId,
         baseSku,
         name: title,
         variantsCreated,
+        publicationsLinked: variations.length,
         message: 'Producto importado de Mercado Libre (variantes agrupadas)'
       });
     }
@@ -5125,11 +5181,12 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
         sku = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : (v0.seller_sku ?? v0.seller_custom_field ?? '')).toString().trim();
       }
       if (!sku) sku = (item.id ?? itemIdToFetch).toString();
+      const parsed = mlColorSizeFromTitle(title);
       variations = [{
         variationId: item.id,
         sku: sku || `ML-${item.id}`,
-        color: 'Único',
-        size: 'U',
+        color: parsed.color || 'Único',
+        size: parsed.size || 'U',
         stock: item.available_quantity || 0,
         mlItemId: (item.id || '').toString()
       }];
@@ -5147,43 +5204,38 @@ export const importProductFromMercadoLibre = async (req: Request, res: Response)
       }
     }
     productId = uuidv4();
+    const displayName = mlBaseTitle(title) || title;
     await execute(
       `INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [productId, baseSku, title, 'General', item.price || 0, item.description?.plain_text || null, itemIdToFetch]
+      [productId, baseSku, displayName, 'General', item.price || 0, item.description?.plain_text || null, itemIdToFetch]
     );
 
-    let variantsCreated = 0;
+    const byVariantKey = new Map<string, typeof variations>();
     for (const v of variations) {
-      const sizeCode = (v.size || 'U').toString().trim() || 'U';
-      const colorCode = (v.color || 'Único').toString().trim() || 'Único';
-      const sizeId = await ensureSize(sizeCode);
-      const colorId = await ensureColor(colorCode);
-
-      let productColorId = (await get(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))?.id;
-      if (!productColorId) {
-        productColorId = uuidv4();
-        await execute(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-      }
-
-      const existingVariant = await get(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-      if (existingVariant) continue;
-
-      const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
-      const variantId = uuidv4();
-      const mlVariantId = v.variationId != null ? String(v.variationId) : null;
-      const mlItemId = (v as any).mlItemId ?? null;
-      await execute(
-        `INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`,
-        [variantId, productColorId, sizeId, variantSku, mlVariantId, mlItemId]
-      );
-      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
-      variantsCreated++;
+      const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
+      const sizeKey = (v.size || 'U').toString().trim().toUpperCase() || 'U';
+      const key = `${colorKey}|${sizeKey}`;
+      if (!byVariantKey.has(key)) byVariantKey.set(key, []);
+      byVariantKey.get(key)!.push({ ...v, mlItemId: (v as any).mlItemId ?? itemIdToFetch });
+    }
+    let variantsCreated = 0;
+    for (const group of byVariantKey.values()) {
+      const entries = group.map((v) => ({
+        sku: v.sku,
+        color: v.color,
+        size: v.size,
+        stock: v.stock,
+        mlItemId: (v as any).mlItemId ?? itemIdToFetch,
+        variationId: v.variationId
+      }));
+      const { created } = await upsertLocalVariantFromMlEntries(productId, baseSku, entries);
+      if (created) variantsCreated++;
     }
 
     res.status(201).json({
       productId,
       baseSku,
-      name: title,
+      name: displayName,
       variantsCreated,
       message: 'Producto importado de Mercado Libre'
     });

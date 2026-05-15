@@ -454,12 +454,19 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                           if (importingItemId) return;
                           setImportingItemId(item.id);
                           try {
-                            const payload = (item.hasVariations && item.variations && item.variations.length > 0)
-                              ? { itemIds: item.variations.map((v: { variationId: string }) => String(v.variationId)) }
-                              : { itemId: item.id };
+                            const multiIds =
+                              item.hasVariations && item.variations && item.variations.length > 0
+                                ? item.variations.map((v) => String(v.variationId))
+                                : null;
+                            const payload = multiIds && multiIds.length > 0 ? { itemIds: multiIds } : { itemId: item.id };
                             const res = await api.importProductFromMercadoLibre(payload);
+                            const pubCount = (res as { publicationsLinked?: number }).publicationsLinked;
                             if (res.variantsCreated > 0) {
-                              showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s))`);
+                              const extra =
+                                pubCount && pubCount > res.variantsCreated
+                                  ? ` · ${pubCount} publicaciones ML vinculadas para sincronizar stock`
+                                  : '';
+                              showToast?.('success', `"${res.name}" agregado a tu inventario (${res.variantsCreated} variante(s)${extra})`);
                             } else {
                               showToast?.('success', `"${res.name}" vinculado a tu inventario (las variantes ya existían)`);
                             }
@@ -472,7 +479,11 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                         }}
                         disabled={!!importingItemId}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 transition-colors"
-                        title="Crear producto en Mi inventario y vincular con esta publicación"
+                        title={
+                          item.hasVariations && item.variations.length > 1
+                            ? `Importar ${item.variations.length} publicaciones ML como un solo artículo (mismo stock en todas)`
+                            : 'Crear producto en Mi inventario y vincular con esta publicación'
+                        }
                       >
                         {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
                         Agregar a mi stock

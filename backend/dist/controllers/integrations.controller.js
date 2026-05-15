@@ -3809,9 +3809,60 @@ exports.getMercadoLibreStockTotals = getMercadoLibreStockTotals;
 function mlNormalizeTitle(title) {
     return (title || '').trim().replace(/\s+/g, ' ');
 }
+/** Registra una publicación ML en variant_publications (sincronización de stock). */
+function registerMercadoLibrePublication(variantId_1, mlItemId_1) {
+    return __awaiter(this, arguments, void 0, function* (variantId, mlItemId, mlVariationId = null, mlPack = 1) {
+        const productId = String(mlItemId || '').trim();
+        if (!productId || !variantId)
+            return;
+        const extVarId = mlVariationId != null && String(mlVariationId).trim() !== '' ? String(mlVariationId).trim() : '';
+        yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+     VALUES (?, ?, 'mercadolibre', ?, ?, ?)
+     ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, productId, extVarId, Math.max(1, mlPack)]);
+    });
+}
+/** Crea o reutiliza variante local y vincula una o más publicaciones ML del mismo color/talle. */
+function upsertLocalVariantFromMlEntries(productId, baseSku, entries) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const v = entries[0];
+        const sizeCode = (v.size || 'U').toString().trim() || 'U';
+        const colorCode = (v.color || 'Único').toString().trim() || 'Único';
+        const sizeId = yield ensureSize(sizeCode);
+        const colorId = yield ensureColor(colorCode);
+        let productColorId = (_a = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _a === void 0 ? void 0 : _a.id;
+        if (!productColorId) {
+            productColorId = (0, uuid_1.v4)();
+            yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
+        }
+        const existingVariant = yield (0, db_1.get)(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
+        let variantId = existingVariant === null || existingVariant === void 0 ? void 0 : existingVariant.id;
+        let created = false;
+        if (!variantId) {
+            variantId = (0, uuid_1.v4)();
+            const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
+            const primary = entries.find((e) => e.mlItemId) || v;
+            const mlItemId = primary.mlItemId ? String(primary.mlItemId).trim() : null;
+            const mlVarId = primary.variationId != null && String(primary.variationId) !== String(mlItemId || '')
+                ? String(primary.variationId)
+                : null;
+            yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`, [variantId, productColorId, sizeId, variantSku, mlVarId, mlItemId]);
+            yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
+            created = true;
+        }
+        for (const e of entries) {
+            const itemId = e.mlItemId ? String(e.mlItemId).trim() : '';
+            if (!itemId)
+                continue;
+            const varId = e.variationId != null && String(e.variationId) !== itemId ? e.variationId : null;
+            yield registerMercadoLibrePublication(variantId, itemId, varId);
+        }
+        return { variantId, created };
+    });
+}
 /** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
 function mlBaseTitle(title) {
-    let t = mlNormalizeTitle(title);
+    let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
     // Algunos títulos traen sufijos de publicación (p.ej. "Sin cuotas") que rompen el
     // agrupado por color/talle. Esto los elimina para recuperar el "título base".
     t = t
@@ -3844,7 +3895,7 @@ function mlStripTrailingPublicationIndex(title) {
 }
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title) {
-    let t = mlNormalizeTitle(title);
+    let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
     t = t
         .replace(/(?:^|\s)(?:sin|s\/c)\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
         .replace(/(?:^|\s)con\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')
@@ -4699,7 +4750,7 @@ function ensureColor(codeOrName) {
 }
 /** Importar un producto de Mercado Libre al inventario local: crea producto + variantes y vincula ML. Acepta itemId (una publicación) o itemIds (varias publicaciones agrupadas = una por variante). */
 const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
     try {
         const { itemId, itemIds } = req.body || {};
         const idsToImport = Array.isArray(itemIds) && itemIds.length > 0
@@ -4771,31 +4822,27 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             }
             const productId = (0, uuid_1.v4)();
             yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', first.price || 0, ((_m = first.description) === null || _m === void 0 ? void 0 : _m.plain_text) || null, null]);
-            let variantsCreated = 0;
+            const byVariantKey = new Map();
             for (const v of variations) {
-                const sizeCode = (v.size || 'U').toString().trim() || 'U';
-                const colorCode = (v.color || 'Único').toString().trim() || 'Único';
-                const sizeId = yield ensureSize(sizeCode);
-                const colorId = yield ensureColor(colorCode);
-                let productColorId = (_o = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _o === void 0 ? void 0 : _o.id;
-                if (!productColorId) {
-                    productColorId = (0, uuid_1.v4)();
-                    yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-                }
-                const existingVariant = yield (0, db_1.get)(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-                if (existingVariant)
-                    continue;
-                const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
-                const variantId = (0, uuid_1.v4)();
-                yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`, [variantId, productColorId, sizeId, variantSku, null, v.mlItemId]);
-                yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
-                variantsCreated++;
+                const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
+                const sizeKey = (v.size || 'U').toString().trim().toUpperCase() || 'U';
+                const key = `${colorKey}|${sizeKey}`;
+                if (!byVariantKey.has(key))
+                    byVariantKey.set(key, []);
+                byVariantKey.get(key).push(v);
+            }
+            let variantsCreated = 0;
+            for (const group of byVariantKey.values()) {
+                const { created } = yield upsertLocalVariantFromMlEntries(productId, baseSku, group);
+                if (created)
+                    variantsCreated++;
             }
             return res.status(201).json({
                 productId,
                 baseSku,
                 name: title,
                 variantsCreated,
+                publicationsLinked: variations.length,
                 message: 'Producto importado de Mercado Libre (variantes agrupadas)'
             });
         }
@@ -4840,24 +4887,25 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             });
         }
         if (variations.length === 0) {
-            let sku = ((_q = (_p = item.seller_sku) !== null && _p !== void 0 ? _p : item.seller_custom_field) !== null && _q !== void 0 ? _q : '').toString().trim();
+            let sku = ((_p = (_o = item.seller_sku) !== null && _o !== void 0 ? _o : item.seller_custom_field) !== null && _p !== void 0 ? _p : '').toString().trim();
             if (!sku && item.variations && item.variations.length === 1) {
                 const v0 = item.variations[0];
                 const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                sku = (skuAttr ? ((_s = (_r = skuAttr.value_name) !== null && _r !== void 0 ? _r : skuAttr.value) !== null && _s !== void 0 ? _s : '') : ((_u = (_t = v0.seller_sku) !== null && _t !== void 0 ? _t : v0.seller_custom_field) !== null && _u !== void 0 ? _u : '')).toString().trim();
+                sku = (skuAttr ? ((_r = (_q = skuAttr.value_name) !== null && _q !== void 0 ? _q : skuAttr.value) !== null && _r !== void 0 ? _r : '') : ((_t = (_s = v0.seller_sku) !== null && _s !== void 0 ? _s : v0.seller_custom_field) !== null && _t !== void 0 ? _t : '')).toString().trim();
             }
             if (!sku)
-                sku = ((_v = item.id) !== null && _v !== void 0 ? _v : itemIdToFetch).toString();
+                sku = ((_u = item.id) !== null && _u !== void 0 ? _u : itemIdToFetch).toString();
+            const parsed = mlColorSizeFromTitle(title);
             variations = [{
                     variationId: item.id,
                     sku: sku || `ML-${item.id}`,
-                    color: 'Único',
-                    size: 'U',
+                    color: parsed.color || 'Único',
+                    size: parsed.size || 'U',
                     stock: item.available_quantity || 0,
                     mlItemId: (item.id || '').toString()
                 }];
         }
-        const firstSku = ((_w = variations[0]) === null || _w === void 0 ? void 0 : _w.sku) || '';
+        const firstSku = ((_v = variations[0]) === null || _v === void 0 ? void 0 : _v.sku) || '';
         const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${itemIdToFetch}`);
         let productId;
         const existingBySku = yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
@@ -4868,41 +4916,46 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             }
         }
         productId = (0, uuid_1.v4)();
-        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', item.price || 0, ((_x = item.description) === null || _x === void 0 ? void 0 : _x.plain_text) || null, itemIdToFetch]);
-        let variantsCreated = 0;
+        const displayName = mlBaseTitle(title) || title;
+        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, displayName, 'General', item.price || 0, ((_w = item.description) === null || _w === void 0 ? void 0 : _w.plain_text) || null, itemIdToFetch]);
+        const byVariantKey = new Map();
         for (const v of variations) {
-            const sizeCode = (v.size || 'U').toString().trim() || 'U';
-            const colorCode = (v.color || 'Único').toString().trim() || 'Único';
-            const sizeId = yield ensureSize(sizeCode);
-            const colorId = yield ensureColor(colorCode);
-            let productColorId = (_y = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _y === void 0 ? void 0 : _y.id;
-            if (!productColorId) {
-                productColorId = (0, uuid_1.v4)();
-                yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
-            }
-            const existingVariant = yield (0, db_1.get)(`SELECT id FROM product_variants WHERE product_color_id = ? AND size_id = ?`, [productColorId, sizeId]);
-            if (existingVariant)
-                continue;
-            const variantSku = v.sku || `${baseSku}-${sizeCode}-${colorCode}`;
-            const variantId = (0, uuid_1.v4)();
-            const mlVariantId = v.variationId != null ? String(v.variationId) : null;
-            const mlItemId = (_z = v.mlItemId) !== null && _z !== void 0 ? _z : null;
-            yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku, mercado_libre_variant_id, mercado_libre_item_id) VALUES (?, ?, ?, ?, ?, ?)`, [variantId, productColorId, sizeId, variantSku, mlVariantId, mlItemId]);
-            yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
-            variantsCreated++;
+            const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
+            const sizeKey = (v.size || 'U').toString().trim().toUpperCase() || 'U';
+            const key = `${colorKey}|${sizeKey}`;
+            if (!byVariantKey.has(key))
+                byVariantKey.set(key, []);
+            byVariantKey.get(key).push(Object.assign(Object.assign({}, v), { mlItemId: (_x = v.mlItemId) !== null && _x !== void 0 ? _x : itemIdToFetch }));
+        }
+        let variantsCreated = 0;
+        for (const group of byVariantKey.values()) {
+            const entries = group.map((v) => {
+                var _a;
+                return ({
+                    sku: v.sku,
+                    color: v.color,
+                    size: v.size,
+                    stock: v.stock,
+                    mlItemId: (_a = v.mlItemId) !== null && _a !== void 0 ? _a : itemIdToFetch,
+                    variationId: v.variationId
+                });
+            });
+            const { created } = yield upsertLocalVariantFromMlEntries(productId, baseSku, entries);
+            if (created)
+                variantsCreated++;
         }
         res.status(201).json({
             productId,
             baseSku,
-            name: title,
+            name: displayName,
             variantsCreated,
             message: 'Producto importado de Mercado Libre'
         });
     }
     catch (error) {
-        const status = (_0 = error.response) === null || _0 === void 0 ? void 0 : _0.status;
+        const status = (_y = error.response) === null || _y === void 0 ? void 0 : _y.status;
         const code = error.code;
-        const detail = ((_2 = (_1 = error.response) === null || _1 === void 0 ? void 0 : _1.data) === null || _2 === void 0 ? void 0 : _2.message) || error.message;
+        const detail = ((_0 = (_z = error.response) === null || _z === void 0 ? void 0 : _z.data) === null || _0 === void 0 ? void 0 : _0.message) || error.message;
         console.error('Error importing product from ML:', code || status, detail);
         if (code === 'ER_DUP_ENTRY' || (detail && String(detail).includes('Duplicate entry'))) {
             return res.status(409).json({ message: 'Ya existe un artículo con ese código (SKU). Editá el existente en Mi inventario para vincularlo con ML.', detail: String(detail) });
