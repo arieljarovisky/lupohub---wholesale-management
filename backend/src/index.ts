@@ -52,6 +52,7 @@ import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_
 import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhook_config_table';
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addOrderCreatedBy } from './database/add_order_created_by';
+import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
@@ -175,6 +176,7 @@ async function initDatabase() {
       await addLupoStockWebhookConfigTable();
       await addVariantLuposhopStockTable();
       await addOrderCreatedBy();
+      await addOrderMatrixImportLabel();
       await addUserTasksTable();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();

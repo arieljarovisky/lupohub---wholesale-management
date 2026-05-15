@@ -536,6 +536,7 @@ export const getOrders = async (req: any, res: any) => {
       dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
       archived: !!(order.archived),
       remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
+      matrixImportLabel: order.matrix_import_label ? String(order.matrix_import_label) : undefined,
       items: itemsByOrderId[order.id] || [],
       invoice: inv ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
@@ -601,9 +602,14 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   const shouldStayPendingAdmin =
     requestedStatus === 'Confirmado' && (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
   const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+  const matrixImportLabelRaw = (newOrder as any).matrixImportLabel ?? (newOrder as any).matrix_import_label;
+  const matrixImportLabelForSql =
+    matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
+      ? String(matrixImportLabelRaw).trim().slice(0, 120)
+      : null;
   await execute(
-    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]
+    `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
   );
 
   for (const item of newOrder.items as any[]) {
@@ -659,7 +665,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
 
   const created = await get(
     `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
      LEFT JOIN users cu ON cu.id = o.created_by
      LEFT JOIN users su ON su.id = o.seller_id
@@ -725,6 +731,9 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     items: itemsMapped,
     paymentStatus: mapPaymentStatus(created),
     noStockImpact: !!created.no_stock_impact,
+    matrixImportLabel: (created as any).matrix_import_label
+      ? String((created as any).matrix_import_label)
+      : undefined,
     despachoWarnings,
   };
 }
@@ -751,6 +760,8 @@ export interface MatrixImportLineInput {
   sizeCode: string;
   quantity: number;
   unitPrice?: number | null;
+  /** Desde Excel con celdas verdes en cantidades: separa en dos pedidos borrador. */
+  importGroup?: 'FACTURAR' | 'PENDIENTE';
 }
 
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
@@ -816,7 +827,8 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     for (const ln of linesRaw) {
       const ref = String(ln.customerRef ?? '').trim();
       if (!ref) continue;
-      const key = ref.toLowerCase();
+      const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
+      const key = ig ? `${ref.toLowerCase()}\t${ig}` : ref.toLowerCase();
       if (!byCustomer.has(key)) byCustomer.set(key, []);
       byCustomer.get(key)!.push({ ...ln, customerRef: ref });
     }
@@ -829,7 +841,12 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       try {
         const customer = await findCustomer(customerRef);
         if (!customer) {
-          errors.push({ customerRef, message: 'Cliente no encontrado' });
+          const ig = groupLines[0]?.importGroup;
+          errors.push({
+            customerRef:
+              ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${customerRef} [${ig}]` : customerRef,
+            message: 'Cliente no encontrado',
+          });
           continue;
         }
         const items: any[] = [];
@@ -849,6 +866,13 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
         }
         let total = 0;
         for (const it of items) total += it.quantity * it.priceAtMoment;
+        const importGroup = groupLines[0]?.importGroup;
+        const matrixImportLabel =
+          importGroup === 'FACTURAR'
+            ? 'A facturar (Excel)'
+            : importGroup === 'PENDIENTE'
+              ? 'Pendiente facturación (Excel)'
+              : undefined;
         const newOrder: Order = {
           id: uuidv4(),
           customerId: customer.id,
@@ -858,12 +882,16 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
           status: OrderStatus.DRAFT,
           date: dateStr,
         };
+        if (matrixImportLabel) (newOrder as any).matrixImportLabel = matrixImportLabel;
         const saved = await persistNewWholesaleOrder(newOrder, user, newOrder.id);
         created.push(saved);
       } catch (e: any) {
         console.error(e);
         errors.push({
-          customerRef,
+          customerRef:
+            groupLines[0]?.importGroup === 'FACTURAR' || groupLines[0]?.importGroup === 'PENDIENTE'
+              ? `${customerRef} [${groupLines[0]!.importGroup}]`
+              : customerRef,
           message: e?.statusCode === 400 ? e.message : e?.message || 'Error al crear pedido',
         });
       }

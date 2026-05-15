@@ -541,6 +541,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 dispatchedAt: order.dispatched_at ? new Date(order.dispatched_at).toISOString() : undefined,
                 archived: !!(order.archived),
                 remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
+                matrixImportLabel: order.matrix_import_label ? String(order.matrix_import_label) : undefined,
                 items: itemsByOrderId[order.id] || [],
                 invoice: inv !== null && inv !== void 0 ? inv : undefined,
                 creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
@@ -569,7 +570,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.getOrders = getOrders;
 function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
         if (!newOrder.customerId || !((_a = newOrder.items) === null || _a === void 0 ? void 0 : _a.length)) {
             const err = new Error('Datos de pedido inválidos');
             err.statusCode = 400;
@@ -605,7 +606,11 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         const requestedStatus = String(newOrder.status || 'Borrador');
         const shouldStayPendingAdmin = requestedStatus === 'Confirmado' && ((user === null || user === void 0 ? void 0 : user.role) === 'SELLER' || (user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER');
         const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
-        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy]);
+        const matrixImportLabelRaw = (_d = newOrder.matrixImportLabel) !== null && _d !== void 0 ? _d : newOrder.matrix_import_label;
+        const matrixImportLabelForSql = matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
+            ? String(matrixImportLabelRaw).trim().slice(0, 120)
+            : null;
+        yield (0, db_1.execute)(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, newOrder.total, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
         for (const item of newOrder.items) {
             let variantId = item.variantId;
             if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -642,12 +647,12 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             for (const alloc of allocations) {
                 if (!alloc.quantity || alloc.quantity <= 0)
                     continue;
-                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_d = item.priceAtMoment) !== null && _d !== void 0 ? _d : 0, sellAsPack, alloc.despachoId]);
+                yield (0, db_1.execute)(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, variantId, alloc.quantity, 0, (_e = item.priceAtMoment) !== null && _e !== void 0 ? _e : 0, sellAsPack, alloc.despachoId]);
             }
         }
         // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
      LEFT JOIN users cu ON cu.id = o.created_by
      LEFT JOIN users su ON su.id = o.seller_id
@@ -694,18 +699,21 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            createdBy: (_e = created.created_by) !== null && _e !== void 0 ? _e : undefined,
-            createdByName: (_f = created.created_by_name) !== null && _f !== void 0 ? _f : undefined,
-            createdByRole: (_g = created.created_by_role) !== null && _g !== void 0 ? _g : undefined,
-            sellerName: (_h = created.seller_name) !== null && _h !== void 0 ? _h : undefined,
+            createdBy: (_f = created.created_by) !== null && _f !== void 0 ? _f : undefined,
+            createdByName: (_g = created.created_by_name) !== null && _g !== void 0 ? _g : undefined,
+            createdByRole: (_h = created.created_by_role) !== null && _h !== void 0 ? _h : undefined,
+            sellerName: (_j = created.seller_name) !== null && _j !== void 0 ? _j : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_j = created.picked_by) !== null && _j !== void 0 ? _j : undefined,
+            pickedBy: (_k = created.picked_by) !== null && _k !== void 0 ? _k : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
             noStockImpact: !!created.no_stock_impact,
+            matrixImportLabel: created.matrix_import_label
+                ? String(created.matrix_import_label)
+                : undefined,
             despachoWarnings,
         };
     });
@@ -730,7 +738,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.createOrder = createOrder;
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
@@ -791,7 +799,8 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             const ref = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
             if (!ref)
                 continue;
-            const key = ref.toLowerCase();
+            const ig = ln.importGroup === 'FACTURAR' || ln.importGroup === 'PENDIENTE' ? ln.importGroup : '';
+            const key = ig ? `${ref.toLowerCase()}\t${ig}` : ref.toLowerCase();
             if (!byCustomer.has(key))
                 byCustomer.set(key, []);
             byCustomer.get(key).push(Object.assign(Object.assign({}, ln), { customerRef: ref }));
@@ -803,7 +812,11 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             try {
                 const customer = yield findCustomer(customerRef);
                 if (!customer) {
-                    errors.push({ customerRef, message: 'Cliente no encontrado' });
+                    const ig = (_c = groupLines[0]) === null || _c === void 0 ? void 0 : _c.importGroup;
+                    errors.push({
+                        customerRef: ig === 'FACTURAR' || ig === 'PENDIENTE' ? `${customerRef} [${ig}]` : customerRef,
+                        message: 'Cliente no encontrado',
+                    });
                     continue;
                 }
                 const items = [];
@@ -811,9 +824,9 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_c = ln.codigo) !== null && _c !== void 0 ? _c : '').trim());
-                    const color = String((_d = ln.color) !== null && _d !== void 0 ? _d : '').trim();
-                    const sizeCode = String((_e = ln.sizeCode) !== null && _e !== void 0 ? _e : '').trim();
+                    const codigo = padSku(String((_d = ln.codigo) !== null && _d !== void 0 ? _d : '').trim());
+                    const color = String((_e = ln.color) !== null && _e !== void 0 ? _e : '').trim();
+                    const sizeCode = String((_f = ln.sizeCode) !== null && _f !== void 0 ? _f : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
                     const priceAtMoment = yield resolvePrice(codigo, ln.unitPrice);
@@ -826,6 +839,12 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                 let total = 0;
                 for (const it of items)
                     total += it.quantity * it.priceAtMoment;
+                const importGroup = (_g = groupLines[0]) === null || _g === void 0 ? void 0 : _g.importGroup;
+                const matrixImportLabel = importGroup === 'FACTURAR'
+                    ? 'A facturar (Excel)'
+                    : importGroup === 'PENDIENTE'
+                        ? 'Pendiente facturación (Excel)'
+                        : undefined;
                 const newOrder = {
                     id: (0, uuid_1.v4)(),
                     customerId: customer.id,
@@ -835,13 +854,17 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     status: types_1.OrderStatus.DRAFT,
                     date: dateStr,
                 };
+                if (matrixImportLabel)
+                    newOrder.matrixImportLabel = matrixImportLabel;
                 const saved = yield persistNewWholesaleOrder(newOrder, user, newOrder.id);
                 created.push(saved);
             }
             catch (e) {
                 console.error(e);
                 errors.push({
-                    customerRef,
+                    customerRef: ((_h = groupLines[0]) === null || _h === void 0 ? void 0 : _h.importGroup) === 'FACTURAR' || ((_j = groupLines[0]) === null || _j === void 0 ? void 0 : _j.importGroup) === 'PENDIENTE'
+                        ? `${customerRef} [${groupLines[0].importGroup}]`
+                        : customerRef,
                     message: (e === null || e === void 0 ? void 0 : e.statusCode) === 400 ? e.message : (e === null || e === void 0 ? void 0 : e.message) || 'Error al crear pedido',
                 });
             }

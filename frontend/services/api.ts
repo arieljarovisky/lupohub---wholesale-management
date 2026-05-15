@@ -646,6 +646,7 @@ export const api = {
       sizeCode: string;
       quantity: number;
       unitPrice?: number | null;
+      importGroup?: 'FACTURAR' | 'PENDIENTE';
     }>;
   }): Promise<{
     created: Order[];

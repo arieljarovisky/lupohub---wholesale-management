@@ -1753,6 +1753,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>
                       {order.status}
                     </span>
+                    {order.matrixImportLabel && (
+                      <span
+                        className="px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wide border border-slate-600 bg-slate-900/80 text-slate-300 max-w-[200px] truncate"
+                        title={order.matrixImportLabel}
+                      >
+                        {order.matrixImportLabel}
+                      </span>
+                    )}
                     {hasBackorders && (
                       <span className="bg-red-950/45 text-red-300 border border-red-800/45 px-2 py-0.5 rounded-lg text-[10px] font-bold inline-flex items-center gap-1">
                         <AlertCircle size={10} aria-hidden />

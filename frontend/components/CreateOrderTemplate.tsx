@@ -151,14 +151,22 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         if (!lines.length) {
           showToast(
             'error',
-            'No se encontraron filas válidas. Revisá columnas Cliente (o nombre de hoja), Código, Color y talles.'
+            'No se encontraron filas válidas. Revisá columnas Cliente (o nombre de hoja), Código, Color y talles. Con colores: verde en cantidad = a facturar; cantidad sin verde = pendiente (si hay al menos una celda verde con cantidad).'
           );
           return;
         }
         const res = await api.importOrdersFromMatrix({ date: orderDate, lines });
         const { errors, counts } = res;
         if (counts.created > 0) {
-          showToast('success', `Se crearon ${counts.created} pedido(s) en borrador.`);
+          const labels = [
+            ...new Set(
+              (res.created || [])
+                .map((o: { matrixImportLabel?: string }) => o.matrixImportLabel)
+                .filter(Boolean) as string[]
+            ),
+          ];
+          const detail = labels.length ? ` (${labels.join(' · ')})` : '';
+          showToast('success', `Se crearon ${counts.created} pedido(s) en borrador${detail}.`);
         }
         if (errors.length > 0) {
           const sample = errors
@@ -939,7 +947,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
                 className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Una hoja o varias: columnas Cliente/Ref., Código, Color, talles (U, P, G…) y Precio opcional. Sin columna cliente se usa el nombre de la hoja."
+                title="Una hoja o varias: columnas Cliente/Ref., Código, Color, talles (U, P, G…) y Precio opcional. Sin columna cliente se usa el nombre de la hoja. Si marcás cantidades con relleno verde (Excel), se crean dos borradores: a facturar (verde) y pendiente de facturación (sin verde)."
               >
                 <Upload size={20} strokeWidth={2.5} />
                 {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}

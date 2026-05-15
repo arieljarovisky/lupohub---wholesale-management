@@ -24,6 +24,7 @@ exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
  */
 const db_1 = require("../database/db");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
+const stock_controller_1 = require("../controllers/stock.controller");
 /** Texto de color comparable: minúsculas, sin acentos, espacios colapsados. */
 function normalizeColorNameForMatch(raw) {
     return String(raw !== null && raw !== void 0 ? raw : '')
@@ -244,6 +245,7 @@ function mergeTwoVariants(fromVariantId, toVariantId, keeperProductId) {
             }
         }
         yield (0, db_1.execute)(`DELETE FROM product_variants WHERE id = ?`, [fromVariantId]);
+        yield (0, stock_controller_1.syncStockToExternalPlatforms)(toVariantId, sumStock);
     });
 }
 /**

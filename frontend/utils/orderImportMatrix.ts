@@ -1,11 +1,16 @@
 /**
- * Parsea Excel tipo matriz para importación masiva de pedidos:
- * Cliente/Ref., Código (con arrastre hacia abajo), Color, columnas de talles, Precio opcional.
- * Si no hay columna de cliente, se usa el nombre de la hoja como referencia de cliente.
+ * Parsea Excel tipo matriz para importación masiva de pedidos (ExcelJS, con soporte de color):
+ * Cliente/Ref., Código, Color, columnas de talles, Precio opcional.
+ * Si alguna celda de cantidad tiene relleno verde (p. ej. Excel estándar), se separan líneas en
+ * `importGroup`: FACTURAR (verde) y PENDIENTE (cantidad sin verde) → dos pedidos borrador por cliente.
+ * Sin columna de cliente se usa el nombre de la hoja como referencia de cliente.
  */
+import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import { padArticleCodeTo7 } from './inventoryUtils';
 import { codigoTalleParaSku } from './tallesTango';
+
+export type MatrixImportGroup = 'FACTURAR' | 'PENDIENTE';
 
 export interface OrderMatrixImportLine {
   customerRef: string;
@@ -14,6 +19,7 @@ export interface OrderMatrixImportLine {
   sizeCode: string;
   quantity: number;
   unitPrice?: number | null;
+  importGroup?: MatrixImportGroup;
 }
 
 function normHeader(h: string): string {
@@ -25,15 +31,52 @@ function normHeader(h: string): string {
     .trim();
 }
 
-function parseSheetToLines(
-  rows: (string | number)[][],
-  sheetName: string
-): OrderMatrixImportLine[] {
-  if (rows.length < 2) return [];
+function getCellDisplayValue(cell: ExcelJS.Cell): string {
+  const v = cell.value as unknown;
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && !Number.isNaN(v)) return String(v);
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (o.result != null && o.result !== '') return String(o.result).trim();
+    if (Array.isArray(o.richText))
+      return (o.richText as { text?: string }[]).map((x) => x?.text ?? '').join('').trim();
+    if (typeof o.text === 'string') return o.text.trim();
+  }
+  return String(v).trim();
+}
 
-  const originalHeaders = (rows[0] || []).map((h) => String(h ?? '').trim());
-  const normHeaders = originalHeaders.map((h) => normHeader(h));
+function parseQtyFromCellValue(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number' && !Number.isNaN(v)) return Math.max(0, Math.floor(v));
+  const s = String(v).trim();
+  if (!s || s.toUpperCase() === 'X') return 0;
+  return parseInt(s.replace(/\D/g, ''), 10) || 0;
+}
 
+/** Relleno verde tipo Excel (acento 6) y variantes habituales para “marcar a facturar”. */
+function cellFillSuggestsInvoiceGreen(fill: ExcelJS.Cell['fill']): boolean {
+  if (!fill || (fill as { type?: string }).type !== 'pattern') return false;
+  const fg = (fill as { fgColor?: { argb?: string } }).fgColor;
+  if (!fg) return false;
+  const raw = String((fg as { argb?: string }).argb ?? '')
+    .replace(/^#/, '')
+    .toUpperCase();
+  const hex = raw.length === 8 ? raw.slice(2) : raw;
+  const known = ['92D050', '00B050', '548235', '70AD47', '375623', 'A9D08E', 'C6E0B4', '63BE7B'];
+  for (const k of known) {
+    if (hex.endsWith(k) || hex.includes(k)) return true;
+  }
+  if (raw.length === 8) {
+    const r = parseInt(raw.slice(2, 4), 16);
+    const g = parseInt(raw.slice(4, 6), 16);
+    const b = parseInt(raw.slice(6, 8), 16);
+    if (g >= 130 && g > r + 20 && g > b + 20) return true;
+  }
+  return false;
+}
+
+function resolveColumns(originalHeaders: string[], normHeaders: string[]) {
   const customerCandidates = [
     'CLIENTE / REF.',
     'CLIENTE / REF',
@@ -73,7 +116,7 @@ function parseSheetToLines(
     }
   }
 
-  if (codigoCol < 0 || colorCol < 0) return [];
+  if (codigoCol < 0 || colorCol < 0) return null;
 
   let precioCol = -1;
   for (let i = 0; i < normHeaders.length; i++) {
@@ -140,11 +183,122 @@ function parseSheetToLines(
     }
   }
 
-  if (sizeCols.length === 0) return [];
+  if (sizeCols.length === 0) return null;
+
+  return { customerCol, codigoCol, colorCol, precioCol, sizeCols };
+}
+
+function parseWorksheet(
+  ws: ExcelJS.Worksheet,
+  sheetName: string
+): OrderMatrixImportLine[] {
+  const maxCol = Math.max(ws.actualColumnCount || 0, ws.columnCount || 0, 1);
+  const headerRow = ws.getRow(1);
+  const originalHeaders: string[] = [];
+  const normHeaders: string[] = [];
+  for (let c = 1; c <= maxCol; c++) {
+    const t = getCellDisplayValue(headerRow.getCell(c));
+    originalHeaders.push(t);
+    normHeaders.push(normHeader(t));
+  }
+
+  const layout = resolveColumns(originalHeaders, normHeaders);
+  if (!layout) return [];
+
+  const { customerCol, codigoCol, colorCol, precioCol, sizeCols } = layout;
+  const col1 = (idx: number) => idx + 1;
+
+  let hasGreenOnQuantity = false;
+  const lastRow = ws.rowCount || 1;
+  for (let r = 2; r <= lastRow; r++) {
+    const row = ws.getRow(r);
+    for (const { index } of sizeCols) {
+      const cell = row.getCell(col1(index));
+      const qty = parseQtyFromCellValue(cell.value);
+      if (qty > 0 && cellFillSuggestsInvoiceGreen(cell.fill)) {
+        hasGreenOnQuantity = true;
+        break;
+      }
+    }
+    if (hasGreenOnQuantity) break;
+  }
 
   const sheetFallback = String(sheetName ?? '').trim();
   let lastCodigo = '';
-  let lastCustomer = customerCol < 0 && sheetFallback ? sheetFallback : '';
+  let lastCustomer = layout.customerCol < 0 && sheetFallback ? sheetFallback : '';
+
+  const out: OrderMatrixImportLine[] = [];
+  for (let r = 2; r <= lastRow; r++) {
+    const row = ws.getRow(r);
+    const rawCodigo = getCellDisplayValue(row.getCell(col1(codigoCol)));
+    const codigo = rawCodigo ? rawCodigo : lastCodigo;
+    if (rawCodigo) lastCodigo = rawCodigo;
+
+    let customerRef = lastCustomer;
+    if (customerCol >= 0) {
+      const cStr = getCellDisplayValue(row.getCell(col1(customerCol)));
+      if (cStr) {
+        customerRef = cStr;
+        lastCustomer = cStr;
+      }
+    } else if (sheetFallback) {
+      customerRef = sheetFallback;
+      lastCustomer = sheetFallback;
+    }
+
+    const color = getCellDisplayValue(row.getCell(col1(colorCol)));
+    if (!customerRef || !codigo || !color) continue;
+
+    let rowPrice: number | null = null;
+    if (precioCol >= 0) {
+      const pv = row.getCell(col1(precioCol)).value;
+      if (pv != null && pv !== '') {
+        const n = typeof pv === 'number' ? pv : parseFloat(String(pv).replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) rowPrice = n;
+      }
+    }
+
+    const skuPad = padArticleCodeTo7(codigo);
+    for (const { key, index } of sizeCols) {
+      const cell = row.getCell(col1(index));
+      const qty = parseQtyFromCellValue(cell.value);
+      if (qty <= 0) continue;
+      const green = cellFillSuggestsInvoiceGreen(cell.fill);
+      const importGroup: MatrixImportGroup | undefined = hasGreenOnQuantity
+        ? green
+          ? 'FACTURAR'
+          : 'PENDIENTE'
+        : undefined;
+      const sizeCode = codigoTalleParaSku(String(key).trim()) || String(key).trim().toUpperCase();
+      if (!sizeCode) continue;
+      out.push({
+        customerRef,
+        codigo: skuPad,
+        color,
+        sizeCode,
+        quantity: qty,
+        unitPrice: rowPrice,
+        importGroup,
+      });
+    }
+  }
+  return out;
+}
+
+/** Sin lectura de estilos (archivos .xls o fallback): mismo layout de matriz, sin separar por color. */
+function parseSheetToLinesLegacy(rows: (string | number)[][], sheetName: string): OrderMatrixImportLine[] {
+  if (rows.length < 2) return [];
+
+  const originalHeaders = (rows[0] || []).map((h) => String(h ?? '').trim());
+  const normHeaders = originalHeaders.map((h) => normHeader(h));
+  const layout = resolveColumns(originalHeaders, normHeaders);
+  if (!layout) return [];
+
+  const { customerCol, codigoCol, colorCol, precioCol, sizeCols } = layout;
+
+  const sheetFallback = String(sheetName ?? '').trim();
+  let lastCodigo = '';
+  let lastCustomer = layout.customerCol < 0 && sheetFallback ? sheetFallback : '';
 
   const out: OrderMatrixImportLine[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -203,20 +357,36 @@ function parseSheetToLines(
   return out;
 }
 
-/**
- * Lee un .xlsx/.xls: procesa **todas** las hojas que tengan cabecera válida (código + color + talles).
- * Si no hay columna de cliente, usa el nombre de cada hoja como `customerRef`.
- */
-export async function parseOrderMatrixExcel(file: File): Promise<OrderMatrixImportLine[]> {
-  const data = new Uint8Array(await file.arrayBuffer());
+function parseOrderMatrixExcelLegacy(data: Uint8Array): OrderMatrixImportLine[] {
   const workbook = XLSX.read(data, { type: 'array' });
   const all: OrderMatrixImportLine[] = [];
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
-    const part = parseSheetToLines(rows, sheetName);
-    all.push(...part);
+    all.push(...parseSheetToLinesLegacy(rows, sheetName));
   }
   return all;
+}
+
+/**
+ * Lee .xlsx con ExcelJS (incluye celdas verdes → dos pedidos). .xls o error al cargar: SheetJS sin colores.
+ */
+export async function parseOrderMatrixExcel(file: File): Promise<OrderMatrixImportLine[]> {
+  const buf = await file.arrayBuffer();
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith('.xls') && !lower.endsWith('.xlsx')) {
+    return parseOrderMatrixExcelLegacy(new Uint8Array(buf));
+  }
+  try {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const all: OrderMatrixImportLine[] = [];
+    wb.eachSheet((ws) => {
+      all.push(...parseWorksheet(ws, ws.name));
+    });
+    return all;
+  } catch {
+    return parseOrderMatrixExcelLegacy(new Uint8Array(buf));
+  }
 }

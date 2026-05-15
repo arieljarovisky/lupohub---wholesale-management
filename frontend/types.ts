@@ -232,6 +232,8 @@ export interface Order {
   despachoWarnings?: string[];
   /** N° de remito único asignado a este pedido (secuencia incremental que arranca en 31457). */
   remitoNumber?: number;
+  /** Etiqueta opcional (p. ej. import Excel matriz: a facturar vs pendiente). */
+  matrixImportLabel?: string;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

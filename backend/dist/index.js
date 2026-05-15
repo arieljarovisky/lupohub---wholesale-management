@@ -65,6 +65,7 @@ const add_customer_multimedia_ledger_1 = require("./database/add_customer_multim
 const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock_webhook_config_table");
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
+const add_order_matrix_import_label_1 = require("./database/add_order_matrix_import_label");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
@@ -186,6 +187,7 @@ function initDatabase() {
                 yield (0, add_lupo_stock_webhook_config_table_1.addLupoStockWebhookConfigTable)();
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
+                yield (0, add_order_matrix_import_label_1.addOrderMatrixImportLabel)();
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
