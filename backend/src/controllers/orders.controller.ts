@@ -872,8 +872,8 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     }
     sql += ` LIMIT 1`;
     let c = await get(sql, params);
-    if (!c && ref.length >= 2) {
-      const safe = ref.replace(/%/g, '').replace(/_/g, '');
+    const safe = ref.replace(/%/g, '').replace(/_/g, '').trim();
+    if (!c && safe.length >= 10) {
       const needle = `%${safe}%`;
       const p2: any[] = [needle, needle];
       let sql2 = `SELECT id, seller_id FROM customers WHERE business_name LIKE ? OR name LIKE ?`;
@@ -896,8 +896,17 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
       return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
     }
 
+    /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
+    const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
+    const linesForImport = splitByInvoiceGreen
+      ? linesRaw
+      : (linesRaw as MatrixImportLineInput[]).map((ln) => {
+          const { importGroup: _omit, ...rest } = ln as MatrixImportLineInput & { importGroup?: unknown };
+          return rest as MatrixImportLineInput;
+        });
+
     const byRefKey = new Map<string, MatrixImportLineInput[]>();
-    for (const ln of linesRaw) {
+    for (const ln of linesForImport) {
       const refTrim = String(ln.customerRef ?? '').trim();
       if (!refTrim) continue;
       const refKey = normalizeMatrixCustomerRefKey(refTrim);

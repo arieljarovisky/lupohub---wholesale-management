@@ -639,6 +639,8 @@ export const api = {
 
   importOrdersFromMatrix: async (payload: {
     date?: string;
+    /** Solo si es true: dos borradores por cliente (celdas verdes). El servidor ignora importGroup si es false. */
+    splitByInvoiceGreen?: boolean;
     lines: Array<{
       customerRef: string;
       codigo: string;

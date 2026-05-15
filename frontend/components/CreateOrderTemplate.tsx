@@ -122,6 +122,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [matrixImporting, setMatrixImporting] = useState(false);
   /** false = solo la primera hoja del Excel con filas válidas (evita pedidos duplicados por muchas hojas). */
   const [matrixImportAllSheets, setMatrixImportAllSheets] = useState(false);
+  /** false = un solo borrador por cliente; true = dos borradores si hay celdas verdes en cantidades (a facturar / pendiente). */
+  const [matrixSplitByGreen, setMatrixSplitByGreen] = useState(false);
 
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
@@ -149,7 +151,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if (!file || matrixImporting) return;
       setMatrixImporting(true);
       try {
-        const lines = await parseOrderMatrixExcel(file, { importAllSheets: matrixImportAllSheets });
+        const lines = await parseOrderMatrixExcel(file, {
+          importAllSheets: matrixImportAllSheets,
+          splitByInvoiceGreen: matrixSplitByGreen,
+        });
         if (!lines.length) {
           showToast(
             'error',
@@ -157,7 +162,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           );
           return;
         }
-        const res = await api.importOrdersFromMatrix({ date: orderDate, lines });
+        const res = await api.importOrdersFromMatrix({
+          date: orderDate,
+          lines,
+          splitByInvoiceGreen: matrixSplitByGreen,
+        });
         const { errors, counts } = res;
         if (counts.created > 0) {
           const labels = [
@@ -202,7 +211,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         setMatrixImporting(false);
       }
     },
-    [matrixImporting, matrixImportAllSheets, orderDate, onMatrixImportDone, showToast]
+    [matrixImporting, matrixImportAllSheets, matrixSplitByGreen, orderDate, onMatrixImportDone, showToast]
   );
 
   const isEditing = !!initialOrder;
@@ -951,6 +960,21 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 <input
                   type="checkbox"
                   className="mt-0.5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500/40 shrink-0"
+                  checked={matrixSplitByGreen}
+                  onChange={(e) => setMatrixSplitByGreen(e.target.checked)}
+                  disabled={matrixImporting || savingOrder}
+                />
+                <span>
+                  <span className="text-slate-300 font-semibold">Dos borradores</span> por celdas verdes (a facturar / pendiente)
+                  <span className="block text-[10px] text-slate-500 font-normal mt-0.5 leading-snug">
+                    Desmarcado: un solo pedido por cliente (recomendado). Marcá solo si usás relleno verde a propósito en las cantidades.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer select-none max-w-[min(100%,280px)] sm:mr-1">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500/40 shrink-0"
                   checked={matrixImportAllSheets}
                   onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
                   disabled={matrixImporting || savingOrder}
@@ -974,7 +998,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
                 className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Por defecto solo la primera hoja con filas válidas. Marcá «todas las hojas» si tu pedido está repartido en varias hojas a propósito. Columnas Cliente/Ref., Código, Color, talles. Sin columna cliente se usa el nombre de la hoja. Relleno verde en cantidades: dos borradores (a facturar / pendiente)."
+                title="Por defecto: una sola hoja con datos y un solo pedido por cliente. Opciones: todas las hojas; dos borradores si usás relleno verde en cantidades. Columnas Cliente, Código, Color, talles. Sin columna cliente se usa el nombre de la hoja."
               >
                 <Upload size={20} strokeWidth={2.5} />
                 {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}

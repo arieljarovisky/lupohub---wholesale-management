@@ -41,6 +41,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -826,8 +837,8 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         }
         sql += ` LIMIT 1`;
         let c = yield (0, db_1.get)(sql, params);
-        if (!c && ref.length >= 2) {
-            const safe = ref.replace(/%/g, '').replace(/_/g, '');
+        const safe = ref.replace(/%/g, '').replace(/_/g, '').trim();
+        if (!c && safe.length >= 10) {
             const needle = `%${safe}%`;
             const p2 = [needle, needle];
             let sql2 = `SELECT id, seller_id FROM customers WHERE business_name LIKE ? OR name LIKE ?`;
@@ -847,8 +858,16 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
             return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
         }
+        /** Solo con true se crean dos borradores por cliente (verde vs no verde). Default: un solo pedido. */
+        const splitByInvoiceGreen = body.splitByInvoiceGreen === true;
+        const linesForImport = splitByInvoiceGreen
+            ? linesRaw
+            : linesRaw.map((ln) => {
+                const _a = ln, { importGroup: _omit } = _a, rest = __rest(_a, ["importGroup"]);
+                return rest;
+            });
         const byRefKey = new Map();
-        for (const ln of linesRaw) {
+        for (const ln of linesForImport) {
             const refTrim = String((_a = ln.customerRef) !== null && _a !== void 0 ? _a : '').trim();
             if (!refTrim)
                 continue;

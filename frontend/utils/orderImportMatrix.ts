@@ -1,8 +1,9 @@
 /**
  * Parsea Excel tipo matriz para importación masiva de pedidos (ExcelJS, con soporte de color):
  * Cliente/Ref., Código, Color, columnas de talles, Precio opcional.
- * Si alguna celda de cantidad tiene relleno verde (p. ej. Excel estándar), se separan líneas en
- * `importGroup`: FACTURAR (verde) y PENDIENTE (cantidad sin verde) → dos pedidos borrador por cliente.
+ * Si `splitByInvoiceGreen` es true en el parser, se separan líneas en
+ * `importGroup`: FACTURAR (verde) y PENDIENTE (sin verde) → dos pedidos por cliente.
+ * Por defecto el parser lleva `splitByInvoiceGreen: false` (un solo pedido).
  * Sin columna de cliente se usa el nombre de la hoja como referencia de cliente.
  */
 import ExcelJS from 'exceljs';
@@ -77,11 +78,11 @@ function cellFillSuggestsInvoiceGreen(fill: ExcelJS.Cell['fill']): boolean {
 }
 
 function resolveColumns(originalHeaders: string[], normHeaders: string[]) {
+  /** Sin "REF" suelto: suele ser ref. interna del artículo, no el cliente (evita columna mal tomada como cliente). */
   const customerCandidates = [
     'CLIENTE / REF.',
     'CLIENTE / REF',
     'CLIENTE',
-    'REF',
     'REFERENCIA',
     'RAZON SOCIAL',
     'RAZON',
@@ -190,7 +191,8 @@ function resolveColumns(originalHeaders: string[], normHeaders: string[]) {
 
 function parseWorksheet(
   ws: ExcelJS.Worksheet,
-  sheetName: string
+  sheetName: string,
+  opts?: ParseOrderMatrixExcelOptions
 ): OrderMatrixImportLine[] {
   const maxCol = Math.max(ws.actualColumnCount || 0, ws.columnCount || 0, 1);
   const headerRow = ws.getRow(1);
@@ -208,19 +210,22 @@ function parseWorksheet(
   const { customerCol, codigoCol, colorCol, precioCol, sizeCols } = layout;
   const col1 = (idx: number) => idx + 1;
 
+  const splitByGreen = opts?.splitByInvoiceGreen === true;
   let hasGreenOnQuantity = false;
   const lastRow = ws.rowCount || 1;
-  for (let r = 2; r <= lastRow; r++) {
-    const row = ws.getRow(r);
-    for (const { index } of sizeCols) {
-      const cell = row.getCell(col1(index));
-      const qty = parseQtyFromCellValue(cell.value);
-      if (qty > 0 && cellFillSuggestsInvoiceGreen(cell.fill)) {
-        hasGreenOnQuantity = true;
-        break;
+  if (splitByGreen) {
+    for (let r = 2; r <= lastRow; r++) {
+      const row = ws.getRow(r);
+      for (const { index } of sizeCols) {
+        const cell = row.getCell(col1(index));
+        const qty = parseQtyFromCellValue(cell.value);
+        if (qty > 0 && cellFillSuggestsInvoiceGreen(cell.fill)) {
+          hasGreenOnQuantity = true;
+          break;
+        }
       }
+      if (hasGreenOnQuantity) break;
     }
-    if (hasGreenOnQuantity) break;
   }
 
   const sheetFallback = String(sheetName ?? '').trim();
@@ -263,7 +268,7 @@ function parseWorksheet(
       const cell = row.getCell(col1(index));
       const qty = parseQtyFromCellValue(cell.value);
       if (qty <= 0) continue;
-      const green = cellFillSuggestsInvoiceGreen(cell.fill);
+      const green = splitByGreen && cellFillSuggestsInvoiceGreen(cell.fill);
       const importGroup: MatrixImportGroup | undefined = hasGreenOnQuantity
         ? green
           ? 'FACTURAR'
@@ -286,7 +291,11 @@ function parseWorksheet(
 }
 
 /** Sin lectura de estilos (archivos .xls o fallback): mismo layout de matriz, sin separar por color. */
-function parseSheetToLinesLegacy(rows: (string | number)[][], sheetName: string): OrderMatrixImportLine[] {
+function parseSheetToLinesLegacy(
+  rows: (string | number)[][],
+  sheetName: string,
+  _opts?: ParseOrderMatrixExcelOptions
+): OrderMatrixImportLine[] {
   if (rows.length < 2) return [];
 
   const originalHeaders = (rows[0] || []).map((h) => String(h ?? '').trim());
@@ -364,6 +373,11 @@ export type ParseOrderMatrixExcelOptions = {
    * para no generar decenas de pedidos duplicados cuando el libro trae muchas hojas copiadas.
    */
   importAllSheets?: boolean;
+  /**
+   * Si es true y el .xlsx tiene celdas de cantidad con relleno verde, se marcan líneas FACTURAR vs PENDIENTE
+   * (dos borradores por cliente). Por defecto false: un solo pedido por cliente.
+   */
+  splitByInvoiceGreen?: boolean;
 };
 
 function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixExcelOptions): OrderMatrixImportLine[] {
@@ -374,7 +388,7 @@ function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixEx
       const sheet = workbook.Sheets[sheetName];
       if (!sheet) continue;
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
-      const lines = parseSheetToLinesLegacy(rows, sheetName);
+      const lines = parseSheetToLinesLegacy(rows, sheetName, opts);
       if (lines.length > 0) return lines;
     }
     return [];
@@ -384,13 +398,13 @@ function parseOrderMatrixExcelLegacy(data: Uint8Array, opts?: ParseOrderMatrixEx
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
-    all.push(...parseSheetToLinesLegacy(rows, sheetName));
+    all.push(...parseSheetToLinesLegacy(rows, sheetName, opts));
   }
   return all;
 }
 
 /**
- * Lee .xlsx con ExcelJS (incluye celdas verdes → dos pedidos). .xls o error al cargar: SheetJS sin colores.
+ * Lee .xlsx con ExcelJS. Opcional: celdas verdes → dos pedidos por cliente (`splitByInvoiceGreen: true`).
  * @param opts.importAllSheets Por defecto false: solo la primera hoja con datos válidos.
  */
 export async function parseOrderMatrixExcel(
@@ -408,14 +422,14 @@ export async function parseOrderMatrixExcel(
     const importAllSheets = opts?.importAllSheets === true;
     if (!importAllSheets) {
       for (const ws of wb.worksheets) {
-        const lines = parseWorksheet(ws, ws.name);
+        const lines = parseWorksheet(ws, ws.name, opts);
         if (lines.length > 0) return lines;
       }
       return [];
     }
     const all: OrderMatrixImportLine[] = [];
     wb.eachSheet((ws) => {
-      all.push(...parseWorksheet(ws, ws.name));
+      all.push(...parseWorksheet(ws, ws.name, opts));
     });
     return all;
   } catch {
