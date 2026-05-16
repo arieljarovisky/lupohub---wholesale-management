@@ -1620,12 +1620,12 @@ export const api = {
     mlItemsUsed?: string[];
     missing?: string[];
   }> => {
-    return handleRequest(
-      async () => {
-        return await request('/integrations/mercadolibre/export-to-tiendanube', 'POST', payload, undefined, 180000);
-      },
-      { message: 'Offline' },
-      'exportMercadoLibreToTiendaNube'
+    return await request(
+      '/integrations/mercadolibre/export-to-tiendanube',
+      'POST',
+      payload,
+      undefined,
+      180000
     );
   },
 

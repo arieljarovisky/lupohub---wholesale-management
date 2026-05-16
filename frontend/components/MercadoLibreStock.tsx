@@ -503,13 +503,23 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                                 : null;
                             const payload = multiIds && multiIds.length > 0 ? { itemIds: multiIds } : { itemId: item.id };
                             const res = await api.exportMercadoLibreToTiendaNube({ ...payload, published: true, linkLocal: true });
+                            const tnId = res.tiendaNubeProductId;
+                            if (tnId == null || tnId === '') {
+                              showToast?.(
+                                'warning',
+                                res.message ||
+                                  'No se recibió el ID de Tienda Nube. Revisá en el admin de TN si se creó la publicación.'
+                              );
+                              return;
+                            }
                             const linked =
                               res.variantsLinkedLocal != null && res.variantsLinkedLocal > 0
                                 ? ` · ${res.variantsLinkedLocal} variante(s) vinculada(s) en LupoHub`
                                 : '';
+                            const varCount = res.tiendaNubeVariantCount ?? 0;
                             showToast?.(
                               'success',
-                              `Publicado en Tienda Nube (ID ${res.tiendaNubeProductId ?? '—'}, ${res.tiendaNubeVariantCount ?? 0} variante(s)${linked})`
+                              `Publicado en Tienda Nube (ID ${tnId}, ${varCount} variante(s)${linked})`
                             );
                           } catch (err: any) {
                             showToast?.('error', err?.message || 'No se pudo publicar en Tienda Nube');

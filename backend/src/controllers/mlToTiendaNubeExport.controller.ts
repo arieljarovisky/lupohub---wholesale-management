@@ -17,6 +17,59 @@ const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lu
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+async function fetchAllTnProductVariants(
+  storeId: string,
+  accessToken: string,
+  productId: string | number
+): Promise<any[]> {
+  const headers = { Authentication: `bearer ${accessToken}`, 'User-Agent': TN_USER_AGENT };
+  let variantsList: any[] = [];
+  let vPage = 1;
+  let hasMore = true;
+  while (hasMore) {
+    const variantsRes = await axios.get(
+      `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`,
+      { headers, params: { page: vPage, per_page: 200 }, validateStatus: () => true }
+    );
+    const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
+    variantsList = variantsList.concat(chunk);
+    if (chunk.length < 200) hasMore = false;
+    else vPage++;
+    if (vPage > 50) hasMore = false;
+  }
+  return variantsList;
+}
+
+/** TN a veces devuelve 201 con cuerpo mínimo; el id puede venir en data, product o header Location. */
+function parseTnCreateResponse(r: { status: number; data?: any; headers?: Record<string, unknown> }): {
+  productId: number | null;
+  product: any;
+  variants: any[];
+} {
+  const data = r.data;
+  const product =
+    data && typeof data === 'object' && data.product && typeof data.product === 'object'
+      ? data.product
+      : data;
+  let productId: number | null = null;
+  const rawId = product?.id ?? data?.id;
+  if (rawId != null && String(rawId).trim() !== '') {
+    const n = Number(rawId);
+    if (Number.isFinite(n)) productId = n;
+  }
+  if (productId == null && r.headers) {
+    const loc = String(r.headers.location ?? r.headers.Location ?? '').trim();
+    const m = loc.match(/\/products\/(\d+)/i);
+    if (m) productId = Number(m[1]);
+  }
+  const embedded = Array.isArray(product?.variants)
+    ? product.variants
+    : Array.isArray(data?.variants)
+      ? data.variants
+      : [];
+  return { productId, product: product ?? data, variants: embedded };
+}
+
 type MlVariantRow = {
   sku: string;
   color: string;
@@ -305,7 +358,8 @@ export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response
       'Content-Type': 'application/json',
     };
     const r = await tnPostWithRetry(axios, url, createBody, { headers, validateStatus: () => true });
-    if (r.status !== 201) {
+    const okStatus = r.status === 201 || r.status === 200;
+    if (!okStatus) {
       const detail = r.data?.description || r.data?.message || r.statusText;
       return res.status(r.status >= 400 ? r.status : 502).json({
         message: ['Tienda Nube rechazó la publicación', detail].filter(Boolean).join(' — '),
@@ -315,9 +369,30 @@ export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response
       });
     }
 
-    const tnProduct = r.data;
-    const tnProductId = tnProduct?.id;
-    const tnVariants = Array.isArray(tnProduct?.variants) ? tnProduct.variants : [];
+    const parsed = parseTnCreateResponse(r);
+    let tnProductId = parsed.productId;
+    let tnProduct = parsed.product;
+    let tnVariants = parsed.variants;
+
+    if (tnProductId == null) {
+      return res.status(502).json({
+        message:
+          'Tienda Nube aceptó la solicitud pero no devolvió el ID del producto. Revisá en el administrador de TN si se creó la publicación.',
+        tnStatus: r.status,
+        tnResponse: r.data,
+        mlItemsLoaded: items.length,
+        missing,
+      });
+    }
+
+    if (tnVariants.length === 0) {
+      tnVariants = await fetchAllTnProductVariants(storeId, tnIntegration.access_token, tnProductId);
+    }
+    if (tnVariants.length === 0 && (createBody.variants as unknown[])?.length > 0) {
+      console.warn(
+        `[ML→TN export] Producto TN ${tnProductId} sin variantes en respuesta; se enviaron ${(createBody.variants as unknown[]).length} en el POST`
+      );
+    }
 
     const allMlRows: MlVariantRow[] = [];
     const rowMap = new Map<string, MlVariantRow>();
@@ -340,10 +415,12 @@ export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response
 
     if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
 
+    const variantCount = tnVariants.length || (createBody.variants as unknown[])?.length || 0;
+
     return res.status(201).json({
       message: 'Publicación creada en Tienda Nube desde Mercado Libre',
       tiendaNubeProductId: tnProductId,
-      tiendaNubeVariantCount: tnVariants.length,
+      tiendaNubeVariantCount: variantCount,
       mlItemsUsed: items.map((i) => i.id),
       variantsInProduct: allMlRows.length,
       variantsLinkedLocal: variantsLinked,
