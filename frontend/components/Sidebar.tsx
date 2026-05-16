@@ -31,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       title: 'Canales de Venta',
       items: [
         { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'emerald' },
+        { id: 'channel_margins', label: 'Márgenes y precios', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'emerald' },
         { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
         { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
       ]

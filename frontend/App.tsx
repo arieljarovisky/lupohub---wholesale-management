@@ -58,6 +58,7 @@ const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'))
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
+const ChannelMargins = lazyWithReload(() => import('./components/ChannelMargins'));
 const UserTaskManager = lazyWithReload(() => import('./components/UserTaskManager'));
 
 const ViewFallback = () => (
@@ -883,6 +884,7 @@ const App: React.FC = () => {
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'channel_margins', label: 'Márgenes', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -988,7 +990,8 @@ const App: React.FC = () => {
                  {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
                  {baseView === 'inventory' && 'Inventario'}
                  {baseView === 'orders' && (currentUser.role === Role.CUSTOMER ? 'Mis pedidos' : 'Pedidos Mayoristas')}
-                {baseView === 'bulk_invoicing' && 'Facturación masiva'}
+                 {baseView === 'bulk_invoicing' && 'Facturación masiva'}
+                 {baseView === 'channel_margins' && 'Márgenes y precios'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
                  {baseView === 'mercadolibre_canal_difusion' && 'Canal de difusión — Mercado Libre'}
@@ -1167,6 +1170,11 @@ const App: React.FC = () => {
           {baseView === 'bulk_invoicing' && (
             <Suspense fallback={<ViewFallback />}>
               <BulkInvoicing />
+            </Suspense>
+          )}
+          {baseView === 'channel_margins' && (
+            <Suspense fallback={<ViewFallback />}>
+              <ChannelMargins />
             </Suspense>
           )}
           {baseView === 'mercadolibre_orders' && (

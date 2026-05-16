@@ -20,7 +20,6 @@ import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
-import { ChannelPricesModal } from './ChannelPricesModal';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
@@ -279,25 +278,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }>>({});
-  const [variantChannelPrices, setVariantChannelPrices] = useState<
-    Record<string, { priceLocal?: number; priceML?: number; priceTN?: number }>
-  >({});
-  const [channelPricesModalOpen, setChannelPricesModalOpen] = useState(false);
-  const [channelPricesModalVariants, setChannelPricesModalVariants] = useState<Product[]>([]);
-
-  const loadChannelPricesForIds = useCallback((ids: string[]) => {
-    if (!ids.length) return;
-    const batches: string[][] = [];
-    for (let i = 0; i < ids.length; i += 80) batches.push(ids.slice(i, i + 80));
-    Promise.all(batches.map((batch) => api.getVariantChannelPrices(batch)))
-      .then((results) => {
-        const merged: Record<string, { priceLocal?: number; priceML?: number; priceTN?: number }> = {};
-        results.forEach((r) => Object.assign(merged, r.prices || {}));
-        setVariantChannelPrices((prev) => ({ ...prev, ...merged }));
-      })
-      .catch(() => {});
-  }, []);
-
   const extStocksForMismatchFilter =
     filterSync === 'MISMATCH' ? variantExternalStocks : STABLE_EMPTY_EXTERNAL_STOCKS;
 
@@ -801,7 +781,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         api.getVariantExternalStocks(ids).then(res => {
           if (!cancelled && res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
         }).catch(() => {});
-        if (!cancelled) loadChannelPricesForIds(ids);
       } catch {
         // ignore
       } finally {
@@ -1296,38 +1275,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
   const [loadingVariantsByGroup, setLoadingVariantsByGroup] = useState<Record<string, boolean>>({});
 
-  const resolveVariantsByIds = useCallback(
-    (ids: string[]): Product[] => {
-      const map = new Map<string, Product>();
-      const pools: Product[] = [
-        ...serverItems,
-        ...products,
-        ...Object.values(loadedVariants).flat(),
-      ];
-      for (const p of pools) {
-        if (ids.includes(p.id)) map.set(p.id, p);
-      }
-      return ids.map((id) => map.get(id)).filter((p): p is Product => !!p);
-    },
-    [serverItems, products, loadedVariants]
-  );
-
-  const openChannelPricesForIds = useCallback(
-    (ids: string[]) => {
-      const variants = resolveVariantsByIds(ids);
-      if (variants.length === 0) {
-        showToast('warning', 'No se encontraron variantes para editar precios');
-        return;
-      }
-      setChannelPricesModalVariants(variants);
-      setChannelPricesModalOpen(true);
-    },
-    [resolveVariantsByIds, showToast]
-  );
-
-  const formatChannelPrice = (n?: number) =>
-    n != null && Number.isFinite(n) ? `$${n.toLocaleString('es-AR', { maximumFractionDigits: 0 })}` : '—';
-
   const getGroupRawVariants = (groupKey: string, groupVariants: Product[]) => {
     const lv = loadedVariants[groupKey];
     return (lv && lv.length > 0) ? lv : groupVariants;
@@ -1502,7 +1449,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         api.getVariantExternalStocks(ids).then(res => {
           if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
         }).catch(() => {});
-        loadChannelPricesForIds(ids);
       }).catch(() => {
         // keep fallback group items
       }).finally(() => {
@@ -3223,14 +3169,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             Enviar a Mercado Libre
           </button>
           <button
-            type="button"
-            onClick={() => openChannelPricesForIds(selectedVariantIds)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold"
-          >
-            <DollarSign size={16} />
-            Editar precios
-          </button>
-          <button
             onClick={() => setSelectedVariantIds([])}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium"
           >
@@ -3459,17 +3397,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       <div className="flex flex-col sm:flex-row justify-end gap-2">
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openChannelPricesForIds(variantsToShow.map((p) => p.id));
-                          }}
-                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation"
-                        >
-                          <DollarSign size={16} />
-                          Precios ML / TN
-                        </button>
-                        <button
-                          type="button"
                           onClick={(e) => { e.stopPropagation(); openBulkLinkModal(groupKey); }}
                           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation"
                         >
@@ -3639,31 +3566,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                                : '—'}
                                            </span>
                                          </div>
-                                         <div className="flex items-center gap-1.5 border-t border-slate-700/40 pt-1 mt-0.5">
-                                           <DollarSign size={10} className="text-emerald-400 shrink-0" />
-                                           <span className="text-slate-400">Lupo:</span>
-                                           <span className="text-emerald-200 font-medium">
-                                             {formatChannelPrice(variantChannelPrices[product.id]?.priceLocal ?? product.price)}
-                                           </span>
-                                         </div>
-                                         {product.integrations?.mercadoLibre && (
-                                           <div className="flex items-center gap-1.5">
-                                             <span className="text-slate-500 w-[18px]" />
-                                             <span className="text-slate-400">$ ML:</span>
-                                             <span className="text-amber-200 font-medium">
-                                               {formatChannelPrice(variantChannelPrices[product.id]?.priceML)}
-                                             </span>
-                                           </div>
-                                         )}
-                                         {product.integrations?.tiendaNube && (
-                                           <div className="flex items-center gap-1.5">
-                                             <span className="text-slate-500 w-[18px]" />
-                                             <span className="text-slate-400">$ TN:</span>
-                                             <span className="text-cyan-200 font-medium">
-                                               {formatChannelPrice(variantChannelPrices[product.id]?.priceTN)}
-                                             </span>
-                                           </div>
-                                         )}
                                        </div>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}
@@ -5298,13 +5200,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
           </>
         )}
-      />
-      <ChannelPricesModal
-        open={channelPricesModalOpen}
-        onClose={() => setChannelPricesModalOpen(false)}
-        variants={channelPricesModalVariants}
-        showToast={showToast}
-        onSaved={() => loadChannelPricesForIds(channelPricesModalVariants.map((v) => v.id))}
       />
     </div>
   );

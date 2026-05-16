@@ -1584,6 +1584,89 @@ export const api = {
     }, { prices: {} }, 'getVariantChannelPrices');
   },
 
+  getChannelMargins: async (params?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+    channel?: 'all' | 'ml' | 'tn';
+    tnFeePreset?: string;
+  }): Promise<{
+    config: {
+      fobListId: string | null;
+      fobListName: string | null;
+      ivaPercent: number;
+      tnFeePresetId: string;
+      tnFeePresetLabel: string;
+      tnFeePresets: Array<{ id: string; label: string; ratePercent: number; cptPercent: number; appliesIva: boolean }>;
+      mlListingFeeSource: string;
+      mlPaymentCptPercent: number;
+      mlPaymentCptSource: string;
+    };
+    total: number;
+    page: number;
+    limit: number;
+    rows: Array<{
+      variantId: string;
+      sku: string;
+      productId: string;
+      productName: string;
+      color: string;
+      size: string;
+      fob: number | null;
+      ml: {
+        price: number;
+        fee: number;
+        feeListing?: number;
+        feePayment?: number;
+        margin: number | null;
+        marginPercent: number | null;
+        linked: boolean;
+      } | null;
+      tn: {
+        price: number;
+        fee: number;
+        feeRate?: number;
+        feeCpt?: number;
+        margin: number | null;
+        marginPercent: number | null;
+        linked: boolean;
+      } | null;
+    }>;
+  }> => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.channel) q.set('channel', params.channel);
+    if (params?.tnFeePreset) q.set('tnFeePreset', params.tnFeePreset);
+    const qs = q.toString();
+    return handleRequest(async () => {
+      return await request(
+        `/integrations/channel-margins${qs ? `?${qs}` : ''}`,
+        'GET',
+        undefined,
+        undefined,
+        120000
+      );
+    }, {
+      config: {
+        fobListId: null,
+        fobListName: null,
+        ivaPercent: 21,
+        tnFeePresetId: 'tn_mp_instant',
+        tnFeePresetLabel: '',
+        tnFeePresets: [],
+        mlListingFeeSource: '',
+        mlPaymentCptPercent: 1,
+        mlPaymentCptSource: '',
+      },
+      total: 0,
+      page: 1,
+      limit: 50,
+      rows: [],
+    }, 'getChannelMargins');
+  },
+
   bulkUpdateChannelPrices: async (body: {
     updates: Array<{ variantId: string; priceLocal?: number; priceML?: number; priceTN?: number }>;
     applyLocal?: boolean;
