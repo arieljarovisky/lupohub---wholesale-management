@@ -1525,6 +1525,56 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** ZIP con imágenes de todos los productos de una categoría TN (ej. ropa deportiva). */
+  downloadTiendaNubeCategoryImages: async (params?: {
+    category?: string;
+    categoryId?: number;
+  }): Promise<void> => {
+    const query = new URLSearchParams();
+    query.set('category', (params?.category || 'ropa deportiva').trim());
+    if (params?.categoryId != null) query.set('categoryId', String(params.categoryId));
+    const blob = await getBlob(
+      `/integrations/tiendanube/category-images/download?${query.toString()}`,
+      600000
+    );
+    const slug = (params?.category || 'ropa-deportiva')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tiendanube-${slug || 'categoria'}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Vista previa de categorías TN que coinciden con el texto. */
+  previewTiendaNubeCategoryMatches: async (category?: string): Promise<{
+    query: string;
+    categoryIds: number[];
+    categoryNames: string[];
+    matches: Array<{ id: number; name?: string; parent?: number | null }>;
+  }> => {
+    const q = new URLSearchParams();
+    q.set('category', (category || 'ropa deportiva').trim());
+    return handleRequest(
+      async () =>
+        request<{
+          query: string;
+          categoryIds: number[];
+          categoryNames: string[];
+          matches: Array<{ id: number; name?: string; parent?: number | null }>;
+        }>(`/integrations/tiendanube/category-images/preview?${q.toString()}`, 'GET'),
+      { query: category || '', categoryIds: [], categoryNames: [], matches: [] },
+      'previewTiendaNubeCategoryMatches'
+    );
+  },
+
   /** Reporte de ventas Tienda Nube por período (Excel), opcionalmente filtrado por productos. */
   exportTiendaNubeSalesReport: async (params: { from: string; to: string; products?: string[] }): Promise<void> => {
     const query = new URLSearchParams();

@@ -1,5 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download, SquareStack, Plus } from 'lucide-react';
+import {
+  RefreshCw,
+  Package,
+  Loader2,
+  Zap,
+  Search,
+  X,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  AlertTriangle,
+  Copy,
+  Check,
+  Download,
+  SquareStack,
+  Plus,
+  Images,
+} from 'lucide-react';
 import { api } from '../services/api';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
@@ -63,6 +81,13 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
   const [createStock, setCreateStock] = useState('0');
   const [createSku, setCreateSku] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [categoryImagesModalOpen, setCategoryImagesModalOpen] = useState(false);
+  const [categoryImagesName, setCategoryImagesName] = useState('ropa deportiva');
+  const [categoryImagesLoading, setCategoryImagesLoading] = useState(false);
+  const [categoryPreview, setCategoryPreview] = useState<{
+    categoryNames: string[];
+    matches: Array<{ id: number; name?: string }>;
+  } | null>(null);
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(String(text)).then(() => {
       setCopiedId(label);
@@ -90,6 +115,41 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
       console.error('Error fetching TN stock:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePreviewCategory = async () => {
+    const cat = categoryImagesName.trim();
+    if (!cat) {
+      showToast?.('warning', 'Indicá el nombre de la categoría');
+      return;
+    }
+    try {
+      const res = await api.previewTiendaNubeCategoryMatches(cat);
+      setCategoryPreview({ categoryNames: res.categoryNames, matches: res.matches });
+      if (res.matches.length === 0) {
+        showToast?.('warning', `No se encontró ninguna categoría «${cat}»`);
+      }
+    } catch (e: unknown) {
+      showToast?.('error', e instanceof Error ? e.message : 'No se pudo buscar la categoría');
+    }
+  };
+
+  const handleDownloadCategoryImages = async () => {
+    const cat = categoryImagesName.trim();
+    if (!cat) {
+      showToast?.('warning', 'Indicá el nombre de la categoría');
+      return;
+    }
+    setCategoryImagesLoading(true);
+    try {
+      await api.downloadTiendaNubeCategoryImages({ category: cat });
+      showToast?.('success', `Descarga iniciada: imágenes de «${cat}»`);
+      setCategoryImagesModalOpen(false);
+    } catch (e: unknown) {
+      showToast?.('error', e instanceof Error ? e.message : 'No se pudieron descargar las imágenes');
+    } finally {
+      setCategoryImagesLoading(false);
     }
   };
 
@@ -213,6 +273,20 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryImagesModalOpen(true);
+              setCategoryImagesName('ropa deportiva');
+              setCategoryPreview(null);
+            }}
+            disabled={loading || categoryImagesLoading}
+            className="bg-slate-700 hover:bg-slate-600 border border-cyan-700/50 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 transition-all"
+            title="Descargar ZIP con todas las fotos de una categoría"
+          >
+            <Images size={18} className="text-cyan-400" />
+            Imágenes por categoría
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -515,6 +589,89 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
               </div>
             );
           })}
+        </div>
+      )}
+
+      {categoryImagesModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tn-category-images-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !categoryImagesLoading) setCategoryImagesModalOpen(false);
+          }}
+        >
+          <div
+            className="bg-slate-800 border border-cyan-800/40 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-black/40"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="tn-category-images-title" className="text-lg font-black text-white mb-1 flex items-center gap-2">
+              <Images size={20} className="text-cyan-400" />
+              Imágenes por categoría
+            </h3>
+            <p className="text-slate-500 text-xs mb-4">
+              Descarga un ZIP con todas las fotos de los productos de la categoría (incluye subcategorías). Puede tardar
+              unos minutos si hay muchos artículos.
+            </p>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">
+              Nombre de categoría en Tienda Nube
+            </label>
+            <input
+              type="text"
+              value={categoryImagesName}
+              onChange={(e) => {
+                setCategoryImagesName(e.target.value);
+                setCategoryPreview(null);
+              }}
+              placeholder="Ej. ropa deportiva"
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              disabled={categoryImagesLoading}
+            />
+            {categoryPreview && categoryPreview.matches.length > 0 && (
+              <div className="mb-3 p-3 rounded-xl bg-slate-900/80 border border-slate-700 text-xs text-slate-300">
+                <p className="font-bold text-cyan-400 mb-1">
+                  {categoryPreview.matches.length} categoría(s) encontrada(s)
+                </p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  {categoryPreview.categoryNames.slice(0, 8).map((n, i) => (
+                    <li key={i}>{n}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                disabled={categoryImagesLoading}
+                onClick={() => !categoryImagesLoading && setCategoryImagesModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:bg-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={categoryImagesLoading || !categoryImagesName.trim()}
+                onClick={handlePreviewCategory}
+                className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm disabled:opacity-50"
+              >
+                Verificar
+              </button>
+              <button
+                type="button"
+                disabled={categoryImagesLoading || !categoryImagesName.trim()}
+                onClick={handleDownloadCategoryImages}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {categoryImagesLoading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Download size={16} />
+                )}
+                Descargar ZIP
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
