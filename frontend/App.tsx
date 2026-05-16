@@ -127,6 +127,7 @@ const App: React.FC = () => {
     orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
     create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
+    channel_margins: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
     stock_history: [Role.ADMIN, Role.WAREHOUSE],
