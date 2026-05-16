@@ -17,6 +17,7 @@ const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
+const channelMarginFetch_1 = require("../utils/channelMarginFetch");
 const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
@@ -106,7 +107,7 @@ function updateTnPrice(storeId, accessToken, tnProductId, tnVariantId, price) {
 }
 /** POST { variantIds: string[] } → precios local / ML / TN por variante. */
 const getVariantChannelPrices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     try {
         const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds)
             ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 100)
@@ -155,50 +156,23 @@ const getVariantChannelPrices = (req, res) => __awaiter(void 0, void 0, void 0, 
                 yield fetchMlPricesForItem(mlToken.access_token, itemId, vars, prices);
             }
         }
-        const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
-        if ((tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) && (tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.store_id)) {
-            const tnHeaders = {
-                Authentication: `bearer ${tnIntegration.access_token}`,
-                'User-Agent': TN_USER_AGENT,
-            };
+        const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        const tnStoreId = (0, channelMarginFetch_1.resolveTnStoreId)(tnIntegration);
+        if ((tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) && tnStoreId) {
             const tnProductIds = new Map();
-            const variantToTnVariant = new Map();
             for (const r of rows || []) {
                 if (!r.tienda_nube_id || !r.tienda_nube_variant_id)
                     continue;
-                if (!tnProductIds.has(r.tienda_nube_id))
-                    tnProductIds.set(r.tienda_nube_id, []);
-                tnProductIds.get(r.tienda_nube_id).push(r.variant_id);
-                variantToTnVariant.set(r.variant_id, String(r.tienda_nube_variant_id));
+                const pid = String(r.tienda_nube_id);
+                if (!tnProductIds.has(pid))
+                    tnProductIds.set(pid, []);
+                tnProductIds.get(pid).push({
+                    variantId: r.variant_id,
+                    tnVariantId: String(r.tienda_nube_variant_id),
+                });
             }
-            for (const [productId, vIds] of tnProductIds) {
-                try {
-                    let tnVariants = [];
-                    let tnPage = 1;
-                    let hasMore = true;
-                    while (hasMore) {
-                        const varRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`, { headers: tnHeaders, params: { page: tnPage, per_page: 200 }, validateStatus: () => true });
-                        const chunk = varRes.status === 200 && Array.isArray(varRes.data) ? varRes.data : [];
-                        tnVariants = tnVariants.concat(chunk);
-                        if (chunk.length < 200)
-                            hasMore = false;
-                        else
-                            tnPage++;
-                        if (tnPage > 50)
-                            hasMore = false;
-                    }
-                    for (const variantId of vIds) {
-                        const tnVid = variantToTnVariant.get(variantId);
-                        const tv = tnVariants.find((v) => String(v.id) === String(tnVid));
-                        if (tv != null && prices[variantId]) {
-                            const raw = (_d = tv.price) !== null && _d !== void 0 ? _d : tv.promotional_price;
-                            prices[variantId].priceTN = Number(raw) || 0;
-                        }
-                    }
-                }
-                catch (_e) {
-                    /* ignore */
-                }
+            if (tnProductIds.size > 0) {
+                yield (0, channelMarginFetch_1.fetchTnProductsBatched)(tnStoreId, tnIntegration.access_token, tnProductIds, prices);
             }
         }
         res.json({ prices });

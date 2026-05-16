@@ -6,6 +6,7 @@ import axios from 'axios';
 import { query, execute, get } from '../database/db';
 import { getValidMLToken } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { fetchTnProductsBatched, resolveTnStoreId } from '../utils/channelMarginFetch';
 import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
@@ -179,47 +180,23 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
       }
     }
 
-    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
-    if (tnIntegration?.access_token && tnIntegration?.store_id) {
-      const tnHeaders = {
-        Authentication: `bearer ${tnIntegration.access_token}`,
-        'User-Agent': TN_USER_AGENT,
-      };
-      const tnProductIds = new Map<string, string[]>();
-      const variantToTnVariant = new Map<string, string>();
+    const tnIntegration = await get(
+      `SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`
+    );
+    const tnStoreId = resolveTnStoreId(tnIntegration);
+    if (tnIntegration?.access_token && tnStoreId) {
+      const tnProductIds = new Map<string, { variantId: string; tnVariantId: string }[]>();
       for (const r of rows || []) {
         if (!r.tienda_nube_id || !r.tienda_nube_variant_id) continue;
-        if (!tnProductIds.has(r.tienda_nube_id)) tnProductIds.set(r.tienda_nube_id, []);
-        tnProductIds.get(r.tienda_nube_id)!.push(r.variant_id);
-        variantToTnVariant.set(r.variant_id, String(r.tienda_nube_variant_id));
+        const pid = String(r.tienda_nube_id);
+        if (!tnProductIds.has(pid)) tnProductIds.set(pid, []);
+        tnProductIds.get(pid)!.push({
+          variantId: r.variant_id,
+          tnVariantId: String(r.tienda_nube_variant_id),
+        });
       }
-      for (const [productId, vIds] of tnProductIds) {
-        try {
-          let tnVariants: any[] = [];
-          let tnPage = 1;
-          let hasMore = true;
-          while (hasMore) {
-            const varRes = await axios.get(
-              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
-              { headers: tnHeaders, params: { page: tnPage, per_page: 200 }, validateStatus: () => true }
-            );
-            const chunk = varRes.status === 200 && Array.isArray(varRes.data) ? varRes.data : [];
-            tnVariants = tnVariants.concat(chunk);
-            if (chunk.length < 200) hasMore = false;
-            else tnPage++;
-            if (tnPage > 50) hasMore = false;
-          }
-          for (const variantId of vIds) {
-            const tnVid = variantToTnVariant.get(variantId);
-            const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
-            if (tv != null && prices[variantId]) {
-              const raw = tv.price ?? tv.promotional_price;
-              prices[variantId].priceTN = Number(raw) || 0;
-            }
-          }
-        } catch {
-          /* ignore */
-        }
+      if (tnProductIds.size > 0) {
+        await fetchTnProductsBatched(tnStoreId, tnIntegration.access_token, tnProductIds, prices);
       }
     }
 

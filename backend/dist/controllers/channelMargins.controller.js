@@ -8,16 +8,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getChannelMargins = void 0;
-const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("./integrations.controller");
 const channelMarginUtils_1 = require("../utils/channelMarginUtils");
-const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
+const channelMarginFetch_1 = require("../utils/channelMarginFetch");
 function buildChannelSlice(price, fee, fob) {
     const margin = (0, channelMarginUtils_1.calcMargin)(price, fee, fob);
     return {
@@ -91,7 +87,7 @@ function loadPublicationLinks(variantIds) {
 }
 /** GET /integrations/channel-margins — una fila por artículo (producto padre). */
 const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d;
     try {
         const search = String(req.query.search || '').trim();
         const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
@@ -188,121 +184,62 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 });
             }
         }
-        if (mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) {
-            const headers = { Authorization: `Bearer ${mlToken.access_token}` };
-            for (const [itemId, vars] of mlItemIds) {
-                try {
-                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, {
-                        headers,
-                        validateStatus: () => true,
-                    });
-                    if (itemRes.status !== 200 || !itemRes.data)
-                        continue;
-                    const item = itemRes.data;
-                    mlItemCache.set(itemId, item);
-                    const variations = item.variations || [];
-                    for (const { variantId, variationId } of vars) {
-                        if (!prices[variantId])
-                            continue;
-                        let priceML = 0;
-                        if (variations.length === 0) {
-                            priceML = Number((_b = item.price) !== null && _b !== void 0 ? _b : 0);
-                        }
-                        else if (variationId) {
-                            const vr = variations.find((x) => String(x.id) === String(variationId));
-                            priceML = Number((_d = (_c = vr === null || vr === void 0 ? void 0 : vr.price) !== null && _c !== void 0 ? _c : item.price) !== null && _d !== void 0 ? _d : 0);
-                        }
-                        else if (variations.length === 1) {
-                            priceML = Number((_g = (_f = (_e = variations[0]) === null || _e === void 0 ? void 0 : _e.price) !== null && _f !== void 0 ? _f : item.price) !== null && _g !== void 0 ? _g : 0);
-                        }
-                        else {
-                            priceML = Number((_h = item.price) !== null && _h !== void 0 ? _h : 0);
-                        }
-                        prices[variantId].priceML = priceML;
-                        prices[variantId].mlItem = item;
-                    }
-                }
-                catch (_l) {
-                    /* ignore */
-                }
-            }
+        if ((mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) && mlItemIds.size > 0) {
+            yield (0, channelMarginFetch_1.fetchMlItemsMultiget)(mlToken.access_token, mlItemIds, prices, mlItemCache);
         }
-        const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
-        if ((tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) && (tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.store_id)) {
-            const tnHeaders = {
-                Authentication: `bearer ${tnIntegration.access_token}`,
-                'User-Agent': TN_USER_AGENT,
-            };
-            for (const [tnProductId, entries] of tnProductIds) {
-                try {
-                    let tnVariants = [];
-                    let tnPage = 1;
-                    let hasMore = true;
-                    while (hasMore) {
-                        const varRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${tnProductId}/variants`, { headers: tnHeaders, params: { page: tnPage, per_page: 200 }, validateStatus: () => true });
-                        const chunk = varRes.status === 200 && Array.isArray(varRes.data) ? varRes.data : [];
-                        tnVariants = tnVariants.concat(chunk);
-                        if (chunk.length < 200)
-                            hasMore = false;
-                        else
-                            tnPage++;
-                        if (tnPage > 50)
-                            hasMore = false;
-                    }
-                    for (const { variantId, tnVariantId } of entries) {
-                        const tv = tnVariants.find((x) => String(x.id) === String(tnVariantId));
-                        if (tv != null && prices[variantId]) {
-                            const raw = (_j = tv.price) !== null && _j !== void 0 ? _j : tv.promotional_price;
-                            prices[variantId].priceTN = Number(raw) || 0;
-                        }
-                    }
-                }
-                catch (_m) {
-                    /* ignore */
-                }
-            }
+        const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        const tnStoreId = (0, channelMarginFetch_1.resolveTnStoreId)(tnIntegration);
+        if ((tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) && tnStoreId && tnProductIds.size > 0) {
+            yield (0, channelMarginFetch_1.fetchTnProductsBatched)(tnStoreId, tnIntegration.access_token, tnProductIds, prices);
         }
+        const mlMarginJobs = [];
         const outRows = [];
         for (const pr of productRows) {
             const vars = variantsByProduct.get(pr.product_id) || [];
             const variantIds = allVariantIdsByProduct.get(pr.product_id) || vars.map((v) => v.variant_id);
-            const totalVariants = ((_k = allVariantIdsByProduct.get(pr.product_id)) === null || _k === void 0 ? void 0 : _k.length) ||
+            const totalVariants = ((_b = allVariantIdsByProduct.get(pr.product_id)) === null || _b === void 0 ? void 0 : _b.length) ||
                 Number(pr.variant_count) ||
                 variantIds.length;
             const fobRaw = fobInfo.byProductId.get(pr.product_id);
             const fob = fobRaw != null && Number.isFinite(fobRaw) ? Number(fobRaw) : null;
             const repMl = vars.find((v) => resolveVariantLinks(v, pubLinks).hasMl);
-            const repTn = vars.find((v) => {
-                const links = resolveVariantLinks(v, pubLinks);
-                if (!links.hasTn)
-                    return false;
-                const p = prices[v.variant_id];
-                return (p === null || p === void 0 ? void 0 : p.priceTN) != null && p.priceTN > 0;
-            }) || vars.find((v) => resolveVariantLinks(v, pubLinks).hasTn);
+            const hasTnLink = vars.some((v) => resolveVariantLinks(v, pubLinks).hasTn);
+            let priceTN = 0;
+            for (const v of vars) {
+                const pt = (_c = prices[v.variant_id]) === null || _c === void 0 ? void 0 : _c.priceTN;
+                if (pt != null && pt > 0) {
+                    priceTN = pt;
+                    break;
+                }
+            }
             let mlSlice = null;
             if (repMl) {
                 const p = prices[repMl.variant_id] || {};
                 if (p.priceML != null && p.priceML > 0) {
-                    const mlItemId = resolveVariantLinks(repMl, pubLinks).mlItemId;
+                    const mlItemId = resolveVariantLinks(repMl, pubLinks).mlItemId || '';
                     const item = (mlItemId && mlItemCache.get(String(mlItemId))) || p.mlItem || {};
-                    let listingFee = 0;
-                    if (mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) {
-                        listingFee = yield (0, channelMarginUtils_1.fetchListingSaleFeeAmount)(mlToken.access_token, item, p.priceML, feeCache);
+                    if ((mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) && mlItemId) {
+                        mlMarginJobs.push({
+                            productId: pr.product_id,
+                            priceML: p.priceML,
+                            mlItemId,
+                            item,
+                        });
                     }
-                    const paymentCpt = (0, channelMarginUtils_1.calcMlPaymentCpt)(p.priceML, mlPaymentCptPercent);
-                    const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
-                    mlSlice = Object.assign(Object.assign({}, buildChannelSlice(p.priceML, totalMlFee, fob)), { feeListing: listingFee, feePayment: paymentCpt, linked: true });
+                    else {
+                        const paymentCpt = (0, channelMarginUtils_1.calcMlPaymentCpt)(p.priceML, mlPaymentCptPercent);
+                        mlSlice = Object.assign(Object.assign({}, buildChannelSlice(p.priceML, paymentCpt, fob)), { feeListing: 0, feePayment: paymentCpt, linked: true });
+                    }
                 }
                 else {
                     mlSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
                 }
             }
             let tnSlice = null;
-            if (repTn) {
-                const p = prices[repTn.variant_id] || {};
-                if (p.priceTN != null && p.priceTN > 0) {
-                    const tnParts = (0, channelMarginUtils_1.calcTnSaleFeeFromPreset)(p.priceTN, tnPreset);
-                    tnSlice = Object.assign(Object.assign({}, buildChannelSlice(p.priceTN, tnParts.total, fob)), { feeRate: tnParts.ratePart, feeCpt: tnParts.cptPart, linked: true });
+            if (hasTnLink) {
+                if (priceTN > 0) {
+                    const tnParts = (0, channelMarginUtils_1.calcTnSaleFeeFromPreset)(priceTN, tnPreset);
+                    tnSlice = Object.assign(Object.assign({}, buildChannelSlice(priceTN, tnParts.total, fob)), { feeRate: tnParts.ratePart, feeCpt: tnParts.cptPart, linked: true });
                 }
                 else {
                     tnSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
@@ -318,6 +255,22 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 ml: mlSlice,
                 tn: tnSlice,
             });
+        }
+        const mlListingFees = new Map();
+        if ((mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) && mlMarginJobs.length > 0) {
+            yield (0, channelMarginFetch_1.runPool)(mlMarginJobs, 8, (job) => __awaiter(void 0, void 0, void 0, function* () {
+                const fee = yield (0, channelMarginUtils_1.fetchListingSaleFeeAmount)(mlToken.access_token, job.item, job.priceML, feeCache);
+                mlListingFees.set(job.productId, fee);
+            }));
+            for (const job of mlMarginJobs) {
+                const row = outRows.find((r) => r.productId === job.productId);
+                if (!row)
+                    continue;
+                const listingFee = (_d = mlListingFees.get(job.productId)) !== null && _d !== void 0 ? _d : 0;
+                const paymentCpt = (0, channelMarginUtils_1.calcMlPaymentCpt)(job.priceML, mlPaymentCptPercent);
+                const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
+                row.ml = Object.assign(Object.assign({}, buildChannelSlice(job.priceML, totalMlFee, row.fob)), { feeListing: listingFee, feePayment: paymentCpt, linked: true });
+            }
         }
         res.json({
             config: buildConfigResponse(fobInfo, tnPreset),

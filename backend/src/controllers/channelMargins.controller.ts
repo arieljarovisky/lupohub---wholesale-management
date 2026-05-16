@@ -3,7 +3,6 @@
  * Todas las variantes comparten el mismo precio en ML/TN → un cálculo por artículo.
  */
 import { Request, Response } from 'express';
-import axios from 'axios';
 import { query, get } from '../database/db';
 import { getValidMLToken } from './integrations.controller';
 import {
@@ -18,8 +17,12 @@ import {
   calcMarginPercent,
   fetchListingSaleFeeAmount,
 } from '../utils/channelMarginUtils';
-
-const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
+import {
+  fetchMlItemsMultiget,
+  fetchTnProductsBatched,
+  resolveTnStoreId,
+  runPool,
+} from '../utils/channelMarginFetch';
 
 type VariantRow = {
   variant_id: string;
@@ -257,74 +260,25 @@ export const getChannelMargins = async (req: Request, res: Response) => {
       }
     }
 
-    if (mlToken?.access_token) {
-      const headers = { Authorization: `Bearer ${mlToken.access_token}` };
-      for (const [itemId, vars] of mlItemIds) {
-        try {
-          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, {
-            headers,
-            validateStatus: () => true,
-          });
-          if (itemRes.status !== 200 || !itemRes.data) continue;
-          const item = itemRes.data as Record<string, unknown>;
-          mlItemCache.set(itemId, item);
-          const variations = (item.variations as unknown[]) || [];
-          for (const { variantId, variationId } of vars) {
-            if (!prices[variantId]) continue;
-            let priceML = 0;
-            if (variations.length === 0) {
-              priceML = Number(item.price ?? 0);
-            } else if (variationId) {
-              const vr = variations.find((x: any) => String(x.id) === String(variationId));
-              priceML = Number((vr as any)?.price ?? item.price ?? 0);
-            } else if (variations.length === 1) {
-              priceML = Number((variations[0] as any)?.price ?? item.price ?? 0);
-            } else {
-              priceML = Number(item.price ?? 0);
-            }
-            prices[variantId].priceML = priceML;
-            prices[variantId].mlItem = item;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+    if (mlToken?.access_token && mlItemIds.size > 0) {
+      await fetchMlItemsMultiget(mlToken.access_token, mlItemIds, prices, mlItemCache);
     }
 
-    const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
-    if (tnIntegration?.access_token && tnIntegration?.store_id) {
-      const tnHeaders = {
-        Authentication: `bearer ${tnIntegration.access_token}`,
-        'User-Agent': TN_USER_AGENT,
-      };
-      for (const [tnProductId, entries] of tnProductIds) {
-        try {
-          let tnVariants: any[] = [];
-          let tnPage = 1;
-          let hasMore = true;
-          while (hasMore) {
-            const varRes = await axios.get(
-              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${tnProductId}/variants`,
-              { headers: tnHeaders, params: { page: tnPage, per_page: 200 }, validateStatus: () => true }
-            );
-            const chunk = varRes.status === 200 && Array.isArray(varRes.data) ? varRes.data : [];
-            tnVariants = tnVariants.concat(chunk);
-            if (chunk.length < 200) hasMore = false;
-            else tnPage++;
-            if (tnPage > 50) hasMore = false;
-          }
-          for (const { variantId, tnVariantId } of entries) {
-            const tv = tnVariants.find((x: any) => String(x.id) === String(tnVariantId));
-            if (tv != null && prices[variantId]) {
-              const raw = tv.price ?? tv.promotional_price;
-              prices[variantId].priceTN = Number(raw) || 0;
-            }
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+    const tnIntegration = await get(
+      `SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`
+    );
+    const tnStoreId = resolveTnStoreId(tnIntegration);
+    if (tnIntegration?.access_token && tnStoreId && tnProductIds.size > 0) {
+      await fetchTnProductsBatched(tnStoreId, tnIntegration.access_token, tnProductIds, prices);
     }
+
+    type MlMarginJob = {
+      productId: string;
+      priceML: number;
+      mlItemId: string;
+      item: Record<string, unknown>;
+    };
+    const mlMarginJobs: MlMarginJob[] = [];
 
     const outRows: Array<{
       productId: string;
@@ -348,44 +302,50 @@ export const getChannelMargins = async (req: Request, res: Response) => {
       const fob = fobRaw != null && Number.isFinite(fobRaw) ? Number(fobRaw) : null;
 
       const repMl = vars.find((v) => resolveVariantLinks(v, pubLinks).hasMl);
-      const repTn = vars.find((v) => {
-        const links = resolveVariantLinks(v, pubLinks);
-        if (!links.hasTn) return false;
-        const p = prices[v.variant_id];
-        return p?.priceTN != null && p.priceTN > 0;
-      }) || vars.find((v) => resolveVariantLinks(v, pubLinks).hasTn);
+      const hasTnLink = vars.some((v) => resolveVariantLinks(v, pubLinks).hasTn);
+      let priceTN = 0;
+      for (const v of vars) {
+        const pt = prices[v.variant_id]?.priceTN;
+        if (pt != null && pt > 0) {
+          priceTN = pt;
+          break;
+        }
+      }
 
       let mlSlice: (ChannelMarginSlice & { linked: boolean }) | null = null;
       if (repMl) {
         const p = prices[repMl.variant_id] || {};
         if (p.priceML != null && p.priceML > 0) {
-          const mlItemId = resolveVariantLinks(repMl, pubLinks).mlItemId;
+          const mlItemId = resolveVariantLinks(repMl, pubLinks).mlItemId || '';
           const item =
             (mlItemId && mlItemCache.get(String(mlItemId))) || p.mlItem || ({} as Record<string, unknown>);
-          let listingFee = 0;
-          if (mlToken?.access_token) {
-            listingFee = await fetchListingSaleFeeAmount(mlToken.access_token, item, p.priceML, feeCache);
+          if (mlToken?.access_token && mlItemId) {
+            mlMarginJobs.push({
+              productId: pr.product_id,
+              priceML: p.priceML,
+              mlItemId,
+              item,
+            });
+          } else {
+            const paymentCpt = calcMlPaymentCpt(p.priceML, mlPaymentCptPercent);
+            mlSlice = {
+              ...buildChannelSlice(p.priceML, paymentCpt, fob),
+              feeListing: 0,
+              feePayment: paymentCpt,
+              linked: true,
+            };
           }
-          const paymentCpt = calcMlPaymentCpt(p.priceML, mlPaymentCptPercent);
-          const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
-          mlSlice = {
-            ...buildChannelSlice(p.priceML, totalMlFee, fob),
-            feeListing: listingFee,
-            feePayment: paymentCpt,
-            linked: true,
-          };
         } else {
           mlSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
         }
       }
 
       let tnSlice: (ChannelMarginSlice & { linked: boolean }) | null = null;
-      if (repTn) {
-        const p = prices[repTn.variant_id] || {};
-        if (p.priceTN != null && p.priceTN > 0) {
-          const tnParts = calcTnSaleFeeFromPreset(p.priceTN, tnPreset);
+      if (hasTnLink) {
+        if (priceTN > 0) {
+          const tnParts = calcTnSaleFeeFromPreset(priceTN, tnPreset);
           tnSlice = {
-            ...buildChannelSlice(p.priceTN, tnParts.total, fob),
+            ...buildChannelSlice(priceTN, tnParts.total, fob),
             feeRate: tnParts.ratePart,
             feeCpt: tnParts.cptPart,
             linked: true,
@@ -405,6 +365,27 @@ export const getChannelMargins = async (req: Request, res: Response) => {
         ml: mlSlice,
         tn: tnSlice,
       });
+    }
+
+    const mlListingFees = new Map<string, number>();
+    if (mlToken?.access_token && mlMarginJobs.length > 0) {
+      await runPool(mlMarginJobs, 8, async (job) => {
+        const fee = await fetchListingSaleFeeAmount(mlToken.access_token!, job.item, job.priceML, feeCache);
+        mlListingFees.set(job.productId, fee);
+      });
+      for (const job of mlMarginJobs) {
+        const row = outRows.find((r) => r.productId === job.productId);
+        if (!row) continue;
+        const listingFee = mlListingFees.get(job.productId) ?? 0;
+        const paymentCpt = calcMlPaymentCpt(job.priceML, mlPaymentCptPercent);
+        const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
+        row.ml = {
+          ...buildChannelSlice(job.priceML, totalMlFee, row.fob),
+          feeListing: listingFee,
+          feePayment: paymentCpt,
+          linked: true,
+        };
+      }
     }
 
     res.json({

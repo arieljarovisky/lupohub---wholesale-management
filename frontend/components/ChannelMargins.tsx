@@ -56,7 +56,7 @@ const ChannelMargins: React.FC = () => {
       const res = await api.getChannelMargins({
         search: searchDebounced || undefined,
         page,
-        limit: 100,
+        limit: 50,
         channel,
         tnFeePreset,
       });
