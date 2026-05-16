@@ -10,11 +10,13 @@ import {
   mercadoLibreItemIdCandidates,
   mlBaseTitle,
   mlColorSizeFromTitle,
+  mlStripTrailingPublicationIndex,
 } from './integrations.controller';
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
+const ML_EXPORT_MAX_ITEMS = Math.max(10, parseInt(process.env.ML_EXPORT_TO_TN_MAX_ITEMS || '100', 10));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function fetchAllTnProductVariants(
@@ -224,6 +226,88 @@ function buildTiendaNubeBodyFromMlItems(items: any[], published: boolean): Recor
   return body;
 }
 
+/** Publicaciones hermanas (mismo modelo, distinto color/talle en títulos separados). */
+async function findSiblingMlItems(
+  accessToken: string,
+  sellerUserId: string,
+  seedItem: any
+): Promise<any[]> {
+  if (!seedItem || (seedItem.variations && seedItem.variations.length > 0)) {
+    return seedItem ? [seedItem] : [];
+  }
+  const baseTitle = mlBaseTitle((seedItem.title || '').toString().trim());
+  const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
+  if (!baseTitle) return [seedItem];
+
+  const searchRes = await axios.get(`https://api.mercadolibre.com/users/${sellerUserId}/items/search`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
+    validateStatus: () => true,
+  });
+  const siblingIds: string[] =
+    searchRes.status === 200 && Array.isArray(searchRes.data?.results)
+      ? searchRes.data.results.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+      : [];
+  const uniqueSiblingIds = Array.from(new Set([String(seedItem.id), ...siblingIds])).slice(0, 50);
+  if (uniqueSiblingIds.length <= 1) return [seedItem];
+
+  const siblings = await Promise.all(
+    uniqueSiblingIds.map(async (sid) => fetchMlItem(accessToken, sid))
+  );
+  const matched = (siblings || []).filter((it: any) => {
+    if (!it || it.error) return false;
+    if (it.variations && it.variations.length > 0) return false;
+    const siblingBase = mlBaseTitle((it.title || '').toString().trim());
+    const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
+    return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
+  });
+  return matched.length > 0 ? matched : [seedItem];
+}
+
+/**
+ * Resuelve ítems ML a exportar: un itemId + hermanas automáticas, o lista explícita itemIds.
+ */
+async function resolveMlItemsForExport(
+  accessToken: string,
+  sellerUserId: string,
+  seedIds: string[],
+  includeSiblings: boolean
+): Promise<{ items: any[]; missing: string[] }> {
+  const items: any[] = [];
+  const missing: string[] = [];
+  const seen = new Set<string>();
+
+  const pushItem = (item: any) => {
+    const id = String(item?.id || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    items.push(item);
+  };
+
+  const singleSeed = seedIds.length === 1;
+
+  for (const rawId of seedIds) {
+    const item = await fetchMlItem(accessToken, rawId);
+    if (!item) {
+      missing.push(rawId);
+      continue;
+    }
+    if (includeSiblings && singleSeed) {
+      const group = await findSiblingMlItems(accessToken, sellerUserId, item);
+      for (const g of group) pushItem(g);
+    } else {
+      pushItem(item);
+    }
+  }
+
+  if (items.length > ML_EXPORT_MAX_ITEMS) {
+    throw new Error(
+      `Hay ${items.length} publicaciones ML para este artículo; el máximo por exportación es ${ML_EXPORT_MAX_ITEMS}. Exportá por partes o contactá soporte.`
+    );
+  }
+  return { items, missing };
+}
+
 async function fetchMlItem(accessToken: string, rawId: string): Promise<any | null> {
   for (const id of mercadoLibreItemIdCandidates(rawId)) {
     try {
@@ -315,10 +399,11 @@ async function linkLocalInventoryToTn(
   return linked;
 }
 
-/** POST { itemId?, itemIds?, published?, linkLocal? } — crea producto en TN desde una o varias publicaciones ML. */
+/** POST { itemId?, itemIds?, includeSiblings?, published?, linkLocal? } — crea producto en TN desde ML. */
 export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response) => {
   try {
     const { itemId, itemIds, published = true, linkLocal = true } = req.body || {};
+    const includeSiblings = req.body?.includeSiblings !== false;
     const ids: string[] = Array.isArray(itemIds) && itemIds.length > 0
       ? itemIds.flatMap((id: unknown) => mercadoLibreItemIdCandidates(id)).filter(Boolean)
       : itemId != null && itemId !== ''
@@ -326,9 +411,6 @@ export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response
         : [];
     if (ids.length === 0) {
       return res.status(400).json({ message: 'Indicá itemId o itemIds (publicación/es de Mercado Libre)' });
-    }
-    if (ids.length > 30) {
-      return res.status(400).json({ message: 'Máximo 30 publicaciones ML por exportación' });
     }
 
     const mlToken = await getValidMLToken();
@@ -339,12 +421,19 @@ export const exportMercadoLibreToTiendaNube = async (req: Request, res: Response
     const storeId = tnIntegration.store_id || tnIntegration.user_id;
     if (!storeId) return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
 
-    const items: any[] = [];
-    const missing: string[] = [];
-    for (const id of ids) {
-      const item = await fetchMlItem(mlToken.access_token, id);
-      if (item) items.push(item);
-      else missing.push(id);
+    let items: any[] = [];
+    let missing: string[] = [];
+    try {
+      const resolved = await resolveMlItemsForExport(
+        mlToken.access_token,
+        String(mlToken.user_id),
+        ids,
+        includeSiblings
+      );
+      items = resolved.items;
+      missing = resolved.missing;
+    } catch (resolveErr: any) {
+      return res.status(400).json({ message: resolveErr?.message || String(resolveErr) });
     }
     if (items.length === 0) {
       return res.status(404).json({ message: 'No se encontró ninguna publicación en Mercado Libre', missing });

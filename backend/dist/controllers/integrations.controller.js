@@ -52,6 +52,7 @@ exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
 exports.getValidMLToken = getValidMLToken;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 exports.mlBaseTitle = mlBaseTitle;
+exports.mlStripTrailingPublicationIndex = mlStripTrailingPublicationIndex;
 exports.mlColorSizeFromTitle = mlColorSizeFromTitle;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");

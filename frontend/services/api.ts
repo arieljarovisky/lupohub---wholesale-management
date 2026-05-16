@@ -1610,6 +1610,8 @@ export const api = {
   exportMercadoLibreToTiendaNube: async (payload: {
     itemId?: string;
     itemIds?: string[];
+    /** Si true (default) y solo hay itemId, agrupa publicaciones hermanas ML en un solo producto TN. */
+    includeSiblings?: boolean;
     published?: boolean;
     linkLocal?: boolean;
   }): Promise<{

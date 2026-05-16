@@ -4192,7 +4192,7 @@ export function mlBaseTitle(title: string): string {
 }
 
 /** Quita sufijos de numeración de publicación (ej. "... Negro 1", "... #2", "... N° 3"). */
-function mlStripTrailingPublicationIndex(title: string): string {
+export function mlStripTrailingPublicationIndex(title: string): string {
   return (title || '')
     .replace(/\s*(?:#|N°|Nº)?\s*\d{1,2}\s*$/i, '')
     .trim();

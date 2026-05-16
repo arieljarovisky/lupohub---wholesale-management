@@ -20,6 +20,7 @@ const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
+const ML_EXPORT_MAX_ITEMS = Math.max(10, parseInt(process.env.ML_EXPORT_TO_TN_MAX_ITEMS || '100', 10));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function fetchAllTnProductVariants(storeId, accessToken, productId) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -216,6 +217,78 @@ function buildTiendaNubeBodyFromMlItems(items, published) {
         body.images = images;
     return body;
 }
+/** Publicaciones hermanas (mismo modelo, distinto color/talle en títulos separados). */
+function findSiblingMlItems(accessToken, sellerUserId, seedItem) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        if (!seedItem || (seedItem.variations && seedItem.variations.length > 0)) {
+            return seedItem ? [seedItem] : [];
+        }
+        const baseTitle = (0, integrations_controller_1.mlBaseTitle)((seedItem.title || '').toString().trim());
+        const baseTitleLoose = (0, integrations_controller_1.mlStripTrailingPublicationIndex)(baseTitle);
+        if (!baseTitle)
+            return [seedItem];
+        const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${sellerUserId}/items/search`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
+            validateStatus: () => true,
+        });
+        const siblingIds = searchRes.status === 200 && Array.isArray((_a = searchRes.data) === null || _a === void 0 ? void 0 : _a.results)
+            ? searchRes.data.results.map((x) => String(x || '').trim()).filter(Boolean)
+            : [];
+        const uniqueSiblingIds = Array.from(new Set([String(seedItem.id), ...siblingIds])).slice(0, 50);
+        if (uniqueSiblingIds.length <= 1)
+            return [seedItem];
+        const siblings = yield Promise.all(uniqueSiblingIds.map((sid) => __awaiter(this, void 0, void 0, function* () { return fetchMlItem(accessToken, sid); })));
+        const matched = (siblings || []).filter((it) => {
+            if (!it || it.error)
+                return false;
+            if (it.variations && it.variations.length > 0)
+                return false;
+            const siblingBase = (0, integrations_controller_1.mlBaseTitle)((it.title || '').toString().trim());
+            const siblingLoose = (0, integrations_controller_1.mlStripTrailingPublicationIndex)(siblingBase);
+            return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
+        });
+        return matched.length > 0 ? matched : [seedItem];
+    });
+}
+/**
+ * Resuelve ítems ML a exportar: un itemId + hermanas automáticas, o lista explícita itemIds.
+ */
+function resolveMlItemsForExport(accessToken, sellerUserId, seedIds, includeSiblings) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const items = [];
+        const missing = [];
+        const seen = new Set();
+        const pushItem = (item) => {
+            const id = String((item === null || item === void 0 ? void 0 : item.id) || '').trim();
+            if (!id || seen.has(id))
+                return;
+            seen.add(id);
+            items.push(item);
+        };
+        const singleSeed = seedIds.length === 1;
+        for (const rawId of seedIds) {
+            const item = yield fetchMlItem(accessToken, rawId);
+            if (!item) {
+                missing.push(rawId);
+                continue;
+            }
+            if (includeSiblings && singleSeed) {
+                const group = yield findSiblingMlItems(accessToken, sellerUserId, item);
+                for (const g of group)
+                    pushItem(g);
+            }
+            else {
+                pushItem(item);
+            }
+        }
+        if (items.length > ML_EXPORT_MAX_ITEMS) {
+            throw new Error(`Hay ${items.length} publicaciones ML para este artículo; el máximo por exportación es ${ML_EXPORT_MAX_ITEMS}. Exportá por partes o contactá soporte.`);
+        }
+        return { items, missing };
+    });
+}
 function fetchMlItem(accessToken, rawId) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const id of (0, integrations_controller_1.mercadoLibreItemIdCandidates)(rawId)) {
@@ -288,11 +361,12 @@ function linkLocalInventoryToTn(tnProductId, tnVariants, mlRows) {
         return linked;
     });
 }
-/** POST { itemId?, itemIds?, published?, linkLocal? } — crea producto en TN desde una o varias publicaciones ML. */
+/** POST { itemId?, itemIds?, includeSiblings?, published?, linkLocal? } — crea producto en TN desde ML. */
 const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     try {
         const { itemId, itemIds, published = true, linkLocal = true } = req.body || {};
+        const includeSiblings = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.includeSiblings) !== false;
         const ids = Array.isArray(itemIds) && itemIds.length > 0
             ? itemIds.flatMap((id) => (0, integrations_controller_1.mercadoLibreItemIdCandidates)(id)).filter(Boolean)
             : itemId != null && itemId !== ''
@@ -300,9 +374,6 @@ const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, v
                 : [];
         if (ids.length === 0) {
             return res.status(400).json({ message: 'Indicá itemId o itemIds (publicación/es de Mercado Libre)' });
-        }
-        if (ids.length > 30) {
-            return res.status(400).json({ message: 'Máximo 30 publicaciones ML por exportación' });
         }
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!mlToken)
@@ -313,14 +384,15 @@ const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, v
         const storeId = tnIntegration.store_id || tnIntegration.user_id;
         if (!storeId)
             return res.status(400).json({ message: 'No se encontró store_id de Tienda Nube' });
-        const items = [];
-        const missing = [];
-        for (const id of ids) {
-            const item = yield fetchMlItem(mlToken.access_token, id);
-            if (item)
-                items.push(item);
-            else
-                missing.push(id);
+        let items = [];
+        let missing = [];
+        try {
+            const resolved = yield resolveMlItemsForExport(mlToken.access_token, String(mlToken.user_id), ids, includeSiblings);
+            items = resolved.items;
+            missing = resolved.missing;
+        }
+        catch (resolveErr) {
+            return res.status(400).json({ message: (resolveErr === null || resolveErr === void 0 ? void 0 : resolveErr.message) || String(resolveErr) });
         }
         if (items.length === 0) {
             return res.status(404).json({ message: 'No se encontró ninguna publicación en Mercado Libre', missing });
@@ -335,7 +407,7 @@ const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, v
         const r = yield (0, tiendanubeClient_1.tnPostWithRetry)(axios_1.default, url, createBody, { headers, validateStatus: () => true });
         const okStatus = r.status === 201 || r.status === 200;
         if (!okStatus) {
-            const detail = ((_a = r.data) === null || _a === void 0 ? void 0 : _a.description) || ((_b = r.data) === null || _b === void 0 ? void 0 : _b.message) || r.statusText;
+            const detail = ((_b = r.data) === null || _b === void 0 ? void 0 : _b.description) || ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || r.statusText;
             return res.status(r.status >= 400 ? r.status : 502).json({
                 message: ['Tienda Nube rechazó la publicación', detail].filter(Boolean).join(' — '),
                 errors: r.data,
@@ -359,7 +431,7 @@ const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, v
         if (tnVariants.length === 0) {
             tnVariants = yield fetchAllTnProductVariants(storeId, tnIntegration.access_token, tnProductId);
         }
-        if (tnVariants.length === 0 && ((_c = createBody.variants) === null || _c === void 0 ? void 0 : _c.length) > 0) {
+        if (tnVariants.length === 0 && ((_d = createBody.variants) === null || _d === void 0 ? void 0 : _d.length) > 0) {
             console.warn(`[ML→TN export] Producto TN ${tnProductId} sin variantes en respuesta; se enviaron ${createBody.variants.length} en el POST`);
         }
         const allMlRows = [];
@@ -383,7 +455,7 @@ const exportMercadoLibreToTiendaNube = (req, res) => __awaiter(void 0, void 0, v
         }
         if (TN_RATE_LIMIT_DELAY_MS > 0)
             yield sleep(TN_RATE_LIMIT_DELAY_MS);
-        const variantCount = tnVariants.length || ((_d = createBody.variants) === null || _d === void 0 ? void 0 : _d.length) || 0;
+        const variantCount = tnVariants.length || ((_e = createBody.variants) === null || _e === void 0 ? void 0 : _e.length) || 0;
         return res.status(201).json({
             message: 'Publicación creada en Tienda Nube desde Mercado Libre',
             tiendaNubeProductId: tnProductId,

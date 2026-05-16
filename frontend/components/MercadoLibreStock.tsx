@@ -497,12 +497,12 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                           if (exportingToTnItemId || importingItemId) return;
                           setExportingToTnItemId(item.id);
                           try {
-                            const multiIds =
-                              item.hasVariations && item.variations && item.variations.length > 0
-                                ? item.variations.map((v) => String(v.variationId))
-                                : null;
-                            const payload = multiIds && multiIds.length > 0 ? { itemIds: multiIds } : { itemId: item.id };
-                            const res = await api.exportMercadoLibreToTiendaNube({ ...payload, published: true, linkLocal: true });
+                            const res = await api.exportMercadoLibreToTiendaNube({
+                              itemId: item.id,
+                              includeSiblings: true,
+                              published: true,
+                              linkLocal: true,
+                            });
                             const tnId = res.tiendaNubeProductId;
                             if (tnId == null || tnId === '') {
                               showToast?.(
