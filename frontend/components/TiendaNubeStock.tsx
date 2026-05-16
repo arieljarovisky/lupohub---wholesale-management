@@ -611,8 +611,8 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
               Imágenes por categoría
             </h3>
             <p className="text-slate-500 text-xs mb-4">
-              Descarga un ZIP con todas las fotos de los productos de la categoría (incluye subcategorías). Puede tardar
-              unos minutos si hay muchos artículos.
+              Descarga un ZIP con todas las fotos de la categoría (incluye subcategorías). Cada artículo va en su
+              propia carpeta dentro del ZIP. Puede tardar unos minutos si hay muchos productos.
             </p>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">
               Nombre de categoría en Tienda Nube

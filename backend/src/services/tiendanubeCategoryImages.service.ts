@@ -93,6 +93,19 @@ function productSlug(p: TnProduct): string {
     .slice(0, 80) || `producto-${p.id}`;
 }
 
+/** Carpeta por artículo dentro del ZIP (nombre legible + ID TN único). */
+function productFolderName(p: TnProduct): string {
+  const label = productLabel(p);
+  const slug = productSlug(p);
+  const safeLabel = label
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  const base = safeLabel || slug || `producto-${p.id}`;
+  return `${base}__${p.id}`.slice(0, 120);
+}
+
 function extFromUrl(url: string): string {
   try {
     const p = new URL(url).pathname;
@@ -306,26 +319,31 @@ export async function downloadCategoryImages(
   };
 
   const jobs: ImageJob[] = [];
-  const seenUrls = new Set<string>();
 
   for (const product of products) {
     const images = [...(product.images || [])].sort(
       (a, b) => (a.position ?? 0) - (b.position ?? 0)
     );
-    const slug = productSlug(product);
+    if (images.length === 0) continue;
+
+    const productDir = path.join(opts.outputDir, productFolderName(product));
+    fs.mkdirSync(productDir, { recursive: true });
+
+    const seenInProduct = new Set<string>();
     let idx = 0;
     for (const image of images) {
       const url = String(image.src || '').trim();
       if (!url || !url.startsWith('http')) continue;
-      if (seenUrls.has(url)) continue;
-      seenUrls.add(url);
+      if (seenInProduct.has(url)) continue;
+      seenInProduct.add(url);
       idx++;
       const ext = extFromUrl(url);
-      const fileName = `${slug}_p${image.position ?? idx}_img${image.id}.${ext}`;
+      const pos = image.position ?? idx;
+      const fileName = `${String(pos).padStart(2, '0')}_img${image.id}.${ext}`;
       jobs.push({
         product,
         image,
-        filePath: path.join(opts.outputDir, fileName),
+        filePath: path.join(productDir, fileName),
         url,
       });
     }

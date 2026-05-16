@@ -63,6 +63,18 @@ function productSlug(p) {
         .replace(/^-|-$/g, '')
         .slice(0, 80) || `producto-${p.id}`;
 }
+/** Carpeta por artículo dentro del ZIP (nombre legible + ID TN único). */
+function productFolderName(p) {
+    const label = productLabel(p);
+    const slug = productSlug(p);
+    const safeLabel = label
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 60);
+    const base = safeLabel || slug || `producto-${p.id}`;
+    return `${base}__${p.id}`.slice(0, 120);
+}
 function extFromUrl(url) {
     try {
         const p = new URL(url).pathname;
@@ -77,10 +89,15 @@ function extFromUrl(url) {
 }
 function getTiendaNubeIntegration() {
     return __awaiter(this, void 0, void 0, function* () {
+        const envToken = (process.env.TN_ACCESS_TOKEN || process.env.TIENDA_NUBE_ACCESS_TOKEN || '').trim();
+        const envStore = (process.env.TN_STORE_ID || process.env.TIENDA_NUBE_STORE_ID || '').trim();
+        if (envToken && envStore) {
+            return { accessToken: envToken, storeId: envStore };
+        }
         const row = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         const storeId = (0, channelMarginFetch_1.resolveTnStoreId)(row);
         if (!(row === null || row === void 0 ? void 0 : row.access_token) || !storeId) {
-            throw new Error('No hay integración activa con Tienda Nube. Conectala desde Configuración.');
+            throw new Error('No hay integración activa con Tienda Nube. Conectala desde Configuración o definí TN_STORE_ID y TN_ACCESS_TOKEN en .env');
         }
         return { accessToken: String(row.access_token), storeId };
     });
@@ -237,25 +254,29 @@ function downloadCategoryImages(opts) {
         }
         fs_1.default.mkdirSync(opts.outputDir, { recursive: true });
         const jobs = [];
-        const seenUrls = new Set();
         for (const product of products) {
             const images = [...(product.images || [])].sort((a, b) => { var _a, _b; return ((_a = a.position) !== null && _a !== void 0 ? _a : 0) - ((_b = b.position) !== null && _b !== void 0 ? _b : 0); });
-            const slug = productSlug(product);
+            if (images.length === 0)
+                continue;
+            const productDir = path_1.default.join(opts.outputDir, productFolderName(product));
+            fs_1.default.mkdirSync(productDir, { recursive: true });
+            const seenInProduct = new Set();
             let idx = 0;
             for (const image of images) {
                 const url = String(image.src || '').trim();
                 if (!url || !url.startsWith('http'))
                     continue;
-                if (seenUrls.has(url))
+                if (seenInProduct.has(url))
                     continue;
-                seenUrls.add(url);
+                seenInProduct.add(url);
                 idx++;
                 const ext = extFromUrl(url);
-                const fileName = `${slug}_p${(_a = image.position) !== null && _a !== void 0 ? _a : idx}_img${image.id}.${ext}`;
+                const pos = (_a = image.position) !== null && _a !== void 0 ? _a : idx;
+                const fileName = `${String(pos).padStart(2, '0')}_img${image.id}.${ext}`;
                 jobs.push({
                     product,
                     image,
-                    filePath: path_1.default.join(opts.outputDir, fileName),
+                    filePath: path_1.default.join(productDir, fileName),
                     url,
                 });
             }
