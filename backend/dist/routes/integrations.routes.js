@@ -7,6 +7,7 @@ const mlToTiendaNubeExport_controller_1 = require("../controllers/mlToTiendaNube
 const channelPrices_controller_1 = require("../controllers/channelPrices.controller");
 const channelMargins_controller_1 = require("../controllers/channelMargins.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
+const tiendanubeCategoryImages_controller_1 = require("../controllers/tiendanubeCategoryImages.controller");
 const auth_1 = require("../middleware/auth");
 const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
 const router = (0, express_1.Router)();
@@ -67,6 +68,8 @@ router.get('/tiendanube/orders', integrations_controller_1.getTiendaNubeOrders);
 router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
+router.get('/tiendanube/category-images/preview', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.listTiendaNubeCategoryMatches);
+router.get('/tiendanube/category-images/download', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.downloadTiendaNubeCategoryImagesZip);
 router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
 router.post('/tiendanube/products', integrations_controller_1.createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', integrations_controller_1.duplicateTiendaNubeProduct);
