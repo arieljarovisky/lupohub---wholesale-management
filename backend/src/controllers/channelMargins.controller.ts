@@ -1,5 +1,6 @@
 /**
- * Márgenes por canal: precio de venta − comisión ML/TN − costo FOB.
+ * Márgenes por canal agrupados por artículo (producto padre).
+ * Todas las variantes comparten el mismo precio en ML/TN → un cálculo por artículo.
  */
 import { Request, Response } from 'express';
 import axios from 'axios';
@@ -24,7 +25,6 @@ type VariantRow = {
   variant_id: string;
   product_id: string;
   sku: string | null;
-  product_name: string;
   color_name: string | null;
   size_code: string | null;
   mercado_libre_id: string | null;
@@ -32,6 +32,13 @@ type VariantRow = {
   mercado_libre_variant_id: string | null;
   tienda_nube_id: string | null;
   tienda_nube_variant_id: string | null;
+};
+
+type ProductGroupRow = {
+  product_id: string;
+  product_name: string;
+  base_sku: string | null;
+  variant_count: number;
 };
 
 type ChannelMarginSlice = {
@@ -55,7 +62,20 @@ function buildChannelSlice(price: number, fee: number, fob: number | null): Chan
   };
 }
 
-/** GET /integrations/channel-margins?search=&page=1&limit=50&channel=all|ml|tn */
+function variantChannelWhere(channel: string): string {
+  if (channel === 'ml') {
+    return `AND (pv.mercado_libre_item_id IS NOT NULL OR p.mercado_libre_id IS NOT NULL OR pv.mercado_libre_variant_id IS NOT NULL)`;
+  }
+  if (channel === 'tn') {
+    return `AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL`;
+  }
+  return `AND (
+    pv.mercado_libre_item_id IS NOT NULL OR p.mercado_libre_id IS NOT NULL OR pv.mercado_libre_variant_id IS NOT NULL
+    OR (p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL)
+  )`;
+}
+
+/** GET /integrations/channel-margins — una fila por artículo (producto padre). */
 export const getChannelMargins = async (req: Request, res: Response) => {
   try {
     const search = String(req.query.search || '').trim();
@@ -64,37 +84,55 @@ export const getChannelMargins = async (req: Request, res: Response) => {
     const channel = String(req.query.channel || 'all').toLowerCase();
     const offset = (page - 1) * limit;
 
-    const channelWhere =
-      channel === 'ml'
-        ? `AND (pv.mercado_libre_item_id IS NOT NULL OR p.mercado_libre_id IS NOT NULL OR pv.mercado_libre_variant_id IS NOT NULL)`
-        : channel === 'tn'
-          ? `AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL`
-          : `AND (
-              pv.mercado_libre_item_id IS NOT NULL OR p.mercado_libre_id IS NOT NULL OR pv.mercado_libre_variant_id IS NOT NULL
-              OR (p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL)
-            )`;
-
+    const channelWhere = variantChannelWhere(channel);
     const searchWhere = search
-      ? `AND (pv.sku LIKE ? OR p.name LIKE ? OR p.sku LIKE ? OR c.name LIKE ?)`
+      ? `AND (p.name LIKE ? OR p.sku LIKE ? OR pv.sku LIKE ? OR c.name LIKE ?)`
       : '';
     const searchParams = search ? [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`] : [];
 
+    const joinFrom = `
+       FROM products p
+       INNER JOIN product_colors pc ON pc.product_id = p.id
+       INNER JOIN product_variants pv ON pv.product_color_id = pc.id
+       INNER JOIN colors c ON c.id = pc.color_id
+       INNER JOIN sizes s ON s.id = pv.size_id
+       WHERE 1=1 ${channelWhere} ${searchWhere}`;
+
     const countRow = (await get(
-      `SELECT COUNT(*) AS total
-       FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       JOIN colors c ON c.id = pc.color_id
-       JOIN sizes s ON s.id = pv.size_id
-       WHERE 1=1 ${channelWhere} ${searchWhere}`,
+      `SELECT COUNT(DISTINCT p.id) AS total ${joinFrom}`,
       searchParams
     )) as { total: number } | undefined;
-
     const total = Number(countRow?.total ?? 0);
 
-    const rows = (await query(
+    const productRows = (await query(
+      `SELECT p.id AS product_id, p.name AS product_name, p.sku AS base_sku,
+              COUNT(pv.id) AS variant_count
+       ${joinFrom}
+       GROUP BY p.id, p.name, p.sku
+       ORDER BY p.name
+       LIMIT ? OFFSET ?`,
+      [...searchParams, limit, offset]
+    )) as ProductGroupRow[];
+
+    const fobInfo = await resolveFobPriceList();
+    const tnPreset = resolveTnFeePreset(String(req.query.tnFeePreset || ''));
+
+    if (productRows.length === 0) {
+      return res.json({
+        config: buildConfigResponse(fobInfo, tnPreset),
+        total,
+        page,
+        limit,
+        rows: [],
+      });
+    }
+
+    const productIds = productRows.map((p) => p.product_id);
+    const placeholders = productIds.map(() => '?').join(',');
+
+    const variantRows = (await query(
       `SELECT pv.id AS variant_id, p.id AS product_id, pv.sku,
-              p.name AS product_name, c.name AS color_name, s.size_code,
+              c.name AS color_name, s.size_code,
               p.mercado_libre_id, pv.mercado_libre_item_id, pv.mercado_libre_variant_id,
               p.tienda_nube_id, pv.tienda_nube_variant_id
        FROM product_variants pv
@@ -102,45 +140,44 @@ export const getChannelMargins = async (req: Request, res: Response) => {
        JOIN products p ON p.id = pc.product_id
        JOIN colors c ON c.id = pc.color_id
        JOIN sizes s ON s.id = pv.size_id
-       WHERE 1=1 ${channelWhere} ${searchWhere}
-       ORDER BY p.name, pv.sku
-       LIMIT ? OFFSET ?`,
-      [...searchParams, limit, offset]
+       WHERE p.id IN (${placeholders}) ${channelWhere}
+       ORDER BY p.id, s.size_code, c.name`,
+      productIds
     )) as VariantRow[];
 
-    const fobInfo = await resolveFobPriceList();
-    const tnPreset = resolveTnFeePreset(String(req.query.tnFeePreset || ''));
     const mlPaymentCptPercent = getMlPaymentCptPercent();
-    const ivaPercent = Math.round((getIvaMultiplier() - 1) * 10000) / 100;
+
+    const variantsByProduct = new Map<string, VariantRow[]>();
+    for (const v of variantRows) {
+      if (!variantsByProduct.has(v.product_id)) variantsByProduct.set(v.product_id, []);
+      variantsByProduct.get(v.product_id)!.push(v);
+    }
 
     const mlToken = await getValidMLToken();
     const feeCache = new Map<string, number>();
     const mlItemCache = new Map<string, Record<string, unknown>>();
-
-    const mlItemIds = new Map<
-      string,
-      { variantId: string; variationId: string | null; price?: number }[]
-    >();
-    const tnProductIds = new Map<string, string[]>();
-    const variantToTnVariant = new Map<string, string>();
 
     const prices: Record<
       string,
       { priceML?: number; priceTN?: number; mlItem?: Record<string, unknown> }
     > = {};
 
-    for (const r of rows) {
-      prices[r.variant_id] = {};
-      const mlItemId = r.mercado_libre_item_id || r.mercado_libre_id;
+    const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
+    const tnProductIds = new Map<string, { variantId: string; tnVariantId: string }>();
+
+    for (const v of variantRows) {
+      prices[v.variant_id] = {};
+      const mlItemId = v.mercado_libre_item_id || v.mercado_libre_id;
       if (mlItemId && mlToken?.access_token) {
-        const variationId = r.mercado_libre_variant_id ? String(r.mercado_libre_variant_id) : null;
+        const variationId = v.mercado_libre_variant_id ? String(v.mercado_libre_variant_id) : null;
         if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
-        mlItemIds.get(mlItemId)!.push({ variantId: r.variant_id, variationId });
+        mlItemIds.get(mlItemId)!.push({ variantId: v.variant_id, variationId });
       }
-      if (r.tienda_nube_id && r.tienda_nube_variant_id) {
-        if (!tnProductIds.has(r.tienda_nube_id)) tnProductIds.set(r.tienda_nube_id, []);
-        tnProductIds.get(r.tienda_nube_id)!.push(r.variant_id);
-        variantToTnVariant.set(r.variant_id, String(r.tienda_nube_variant_id));
+      if (v.tienda_nube_id && v.tienda_nube_variant_id && !tnProductIds.has(v.product_id)) {
+        tnProductIds.set(v.product_id, {
+          variantId: v.variant_id,
+          tnVariantId: String(v.tienda_nube_variant_id),
+        });
       }
     }
 
@@ -162,8 +199,8 @@ export const getChannelMargins = async (req: Request, res: Response) => {
             if (variations.length === 0) {
               priceML = Number(item.price ?? 0);
             } else if (variationId) {
-              const v = variations.find((x: any) => String(x.id) === String(variationId));
-              priceML = Number((v as any)?.price ?? item.price ?? 0);
+              const vr = variations.find((x: any) => String(x.id) === String(variationId));
+              priceML = Number((vr as any)?.price ?? item.price ?? 0);
             } else if (variations.length === 1) {
               priceML = Number((variations[0] as any)?.price ?? item.price ?? 0);
             } else {
@@ -184,14 +221,14 @@ export const getChannelMargins = async (req: Request, res: Response) => {
         Authentication: `bearer ${tnIntegration.access_token}`,
         'User-Agent': TN_USER_AGENT,
       };
-      for (const [productId, vIds] of tnProductIds) {
+      for (const [tnProductId, { variantId, tnVariantId }] of tnProductIds) {
         try {
           let tnVariants: any[] = [];
           let tnPage = 1;
           let hasMore = true;
           while (hasMore) {
             const varRes = await axios.get(
-              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${productId}/variants`,
+              `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${tnProductId}/variants`,
               { headers: tnHeaders, params: { page: tnPage, per_page: 200 }, validateStatus: () => true }
             );
             const chunk = varRes.status === 200 && Array.isArray(varRes.data) ? varRes.data : [];
@@ -200,12 +237,9 @@ export const getChannelMargins = async (req: Request, res: Response) => {
             else tnPage++;
             if (tnPage > 50) hasMore = false;
           }
-          for (const variantId of vIds) {
-            const tnVid = variantToTnVariant.get(variantId);
-            const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
-            if (tv != null && prices[variantId]) {
-              prices[variantId].priceTN = Number(tv.price ?? tv.promotional_price) || 0;
-            }
+          const tv = tnVariants.find((v: any) => String(v.id) === String(tnVariantId));
+          if (tv != null && prices[variantId]) {
+            prices[variantId].priceTN = Number(tv.price ?? tv.promotional_price) || 0;
           }
         } catch {
           /* ignore */
@@ -214,65 +248,73 @@ export const getChannelMargins = async (req: Request, res: Response) => {
     }
 
     const outRows: Array<{
-      variantId: string;
-      sku: string;
       productId: string;
       productName: string;
-      color: string;
-      size: string;
+      baseSku: string;
+      variantCount: number;
+      variantIds: string[];
       fob: number | null;
       ml: (ChannelMarginSlice & { linked: boolean }) | null;
       tn: (ChannelMarginSlice & { linked: boolean }) | null;
     }> = [];
 
-    for (const r of rows) {
-      const fobRaw = fobInfo.byProductId.get(r.product_id);
+    for (const pr of productRows) {
+      const vars = variantsByProduct.get(pr.product_id) || [];
+      const variantIds = vars.map((v) => v.variant_id);
+      const fobRaw = fobInfo.byProductId.get(pr.product_id);
       const fob = fobRaw != null && Number.isFinite(fobRaw) ? Number(fobRaw) : null;
-      const p = prices[r.variant_id] || {};
+
+      const repMl = vars.find(
+        (v) => v.mercado_libre_item_id || v.mercado_libre_id || v.mercado_libre_variant_id
+      );
+      const repTn = vars.find((v) => v.tienda_nube_id && v.tienda_nube_variant_id);
 
       let mlSlice: (ChannelMarginSlice & { linked: boolean }) | null = null;
-      const hasMl = !!(r.mercado_libre_item_id || r.mercado_libre_id || r.mercado_libre_variant_id);
-      if (hasMl && p.priceML != null && p.priceML > 0) {
-        const mlItemId = r.mercado_libre_item_id || r.mercado_libre_id;
-        const item =
-          (mlItemId && mlItemCache.get(String(mlItemId))) || p.mlItem || ({} as Record<string, unknown>);
-        let listingFee = 0;
-        if (mlToken?.access_token) {
-          listingFee = await fetchListingSaleFeeAmount(mlToken.access_token, item, p.priceML, feeCache);
+      if (repMl) {
+        const p = prices[repMl.variant_id] || {};
+        if (p.priceML != null && p.priceML > 0) {
+          const mlItemId = repMl.mercado_libre_item_id || repMl.mercado_libre_id;
+          const item =
+            (mlItemId && mlItemCache.get(String(mlItemId))) || p.mlItem || ({} as Record<string, unknown>);
+          let listingFee = 0;
+          if (mlToken?.access_token) {
+            listingFee = await fetchListingSaleFeeAmount(mlToken.access_token, item, p.priceML, feeCache);
+          }
+          const paymentCpt = calcMlPaymentCpt(p.priceML, mlPaymentCptPercent);
+          const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
+          mlSlice = {
+            ...buildChannelSlice(p.priceML, totalMlFee, fob),
+            feeListing: listingFee,
+            feePayment: paymentCpt,
+            linked: true,
+          };
+        } else {
+          mlSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
         }
-        const paymentCpt = calcMlPaymentCpt(p.priceML, mlPaymentCptPercent);
-        const totalMlFee = Math.round((listingFee + paymentCpt) * 100) / 100;
-        mlSlice = {
-          ...buildChannelSlice(p.priceML, totalMlFee, fob),
-          feeListing: listingFee,
-          feePayment: paymentCpt,
-          linked: true,
-        };
-      } else if (hasMl) {
-        mlSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
       }
 
       let tnSlice: (ChannelMarginSlice & { linked: boolean }) | null = null;
-      const hasTn = !!(r.tienda_nube_id && r.tienda_nube_variant_id);
-      if (hasTn && p.priceTN != null && p.priceTN > 0) {
-        const tnParts = calcTnSaleFeeFromPreset(p.priceTN, tnPreset);
-        tnSlice = {
-          ...buildChannelSlice(p.priceTN, tnParts.total, fob),
-          feeRate: tnParts.ratePart,
-          feeCpt: tnParts.cptPart,
-          linked: true,
-        };
-      } else if (hasTn) {
-        tnSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
+      if (repTn) {
+        const p = prices[repTn.variant_id] || {};
+        if (p.priceTN != null && p.priceTN > 0) {
+          const tnParts = calcTnSaleFeeFromPreset(p.priceTN, tnPreset);
+          tnSlice = {
+            ...buildChannelSlice(p.priceTN, tnParts.total, fob),
+            feeRate: tnParts.ratePart,
+            feeCpt: tnParts.cptPart,
+            linked: true,
+          };
+        } else {
+          tnSlice = { price: 0, fee: 0, margin: null, marginPercent: null, linked: true };
+        }
       }
 
       outRows.push({
-        variantId: r.variant_id,
-        sku: r.sku || '',
-        productId: r.product_id,
-        productName: r.product_name || '',
-        color: r.color_name || '',
-        size: r.size_code || '',
+        productId: pr.product_id,
+        productName: pr.product_name || '',
+        baseSku: pr.base_sku || '',
+        variantCount: Number(pr.variant_count) || variantIds.length,
+        variantIds,
         fob,
         ml: mlSlice,
         tn: tnSlice,
@@ -280,17 +322,7 @@ export const getChannelMargins = async (req: Request, res: Response) => {
     }
 
     res.json({
-      config: {
-        fobListId: fobInfo.id,
-        fobListName: fobInfo.name || null,
-        ivaPercent,
-        tnFeePresetId: tnPreset.id,
-        tnFeePresetLabel: tnPreset.label,
-        tnFeePresets: listTnFeePresets(),
-        mlListingFeeSource: 'API Mercado Libre listing_prices (comisión por vender)',
-        mlPaymentCptPercent,
-        mlPaymentCptSource: 'CPT cobro (Personalizado / transferencia, configurable con LUPOHUB_ML_PAYMENT_CPT_PERCENT)',
-      },
+      config: buildConfigResponse(fobInfo, tnPreset),
       total,
       page,
       limit,
@@ -302,3 +334,21 @@ export const getChannelMargins = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error calculando márgenes', detail: msg });
   }
 };
+
+function buildConfigResponse(
+  fobInfo: { id: string | null; name: string },
+  tnPreset: { id: string; label: string }
+) {
+  const ivaPercent = Math.round((getIvaMultiplier() - 1) * 10000) / 100;
+  return {
+    fobListId: fobInfo.id,
+    fobListName: fobInfo.name || null,
+    ivaPercent,
+    tnFeePresetId: tnPreset.id,
+    tnFeePresetLabel: tnPreset.label,
+    tnFeePresets: listTnFeePresets(),
+    mlListingFeeSource: 'API Mercado Libre listing_prices (comisión por vender)',
+    mlPaymentCptPercent: getMlPaymentCptPercent(),
+    mlPaymentCptSource: 'CPT cobro (Personalizado / transferencia, configurable con LUPOHUB_ML_PAYMENT_CPT_PERCENT)',
+  };
+}

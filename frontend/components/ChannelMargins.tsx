@@ -16,7 +16,7 @@ import { useNotification } from '../context/NotificationContext';
 import { ChannelPricesModal } from './ChannelPricesModal';
 import type { Product } from '../types';
 
-type MarginRow = Awaited<ReturnType<typeof api.getChannelMargins>>['rows'][number];
+type ArticleRow = Awaited<ReturnType<typeof api.getChannelMargins>>['rows'][number];
 
 const fmt = (n: number | null | undefined) =>
   n != null && Number.isFinite(n)
@@ -42,7 +42,7 @@ const ChannelMargins: React.FC = () => {
   const [tnFeePreset, setTnFeePreset] = useState('tn_mp_instant');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Awaited<ReturnType<typeof api.getChannelMargins>> | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [pricesModalOpen, setPricesModalOpen] = useState(false);
 
   useEffect(() => {
@@ -78,42 +78,58 @@ const ChannelMargins: React.FC = () => {
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
 
+  const rowsByProductId = useMemo(() => {
+    const m = new Map<string, ArticleRow>();
+    for (const r of data?.rows || []) m.set(r.productId, r);
+    return m;
+  }, [data?.rows]);
+
+  const selectedVariantCount = useMemo(() => {
+    let n = 0;
+    for (const pid of selectedProductIds) {
+      n += rowsByProductId.get(pid)?.variantIds.length ?? 0;
+    }
+    return n;
+  }, [selectedProductIds, rowsByProductId]);
+
   const selectedVariants: Product[] = useMemo(() => {
-    if (!data?.rows.length || !selectedIds.length) return [];
-    const map = new Map(data.rows.map((r) => [r.variantId, r]));
-    return selectedIds
-      .map((id) => {
-        const r = map.get(id);
-        if (!r) return null;
-        return {
-          id: r.variantId,
-          sku: r.sku,
-          name: r.productName,
+    const out: Product[] = [];
+    for (const pid of selectedProductIds) {
+      const row = rowsByProductId.get(pid);
+      if (!row) continue;
+      for (const variantId of row.variantIds) {
+        out.push({
+          id: variantId,
+          sku: row.baseSku,
+          name: row.productName,
           category: '',
           price: 0,
           description: '',
-          size: r.size,
-          color: r.color,
           stock: 0,
           integrations: {
             local: true,
-            mercadoLibre: !!r.ml?.linked,
-            tiendaNube: !!r.tn?.linked,
+            mercadoLibre: !!row.ml?.linked,
+            tiendaNube: !!row.tn?.linked,
           },
-        } as Product;
-      })
-      .filter((p): p is Product => !!p);
-  }, [data?.rows, selectedIds]);
+        } as Product);
+      }
+    }
+    return out;
+  }, [selectedProductIds, rowsByProductId]);
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const isProductSelected = (productId: string) => selectedProductIds.includes(productId);
+
+  const toggleProduct = (productId: string) => {
+    setSelectedProductIds((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
   };
 
   const toggleSelectAll = () => {
     if (!data?.rows.length) return;
-    const ids = data.rows.map((r) => r.variantId);
-    const allSelected = ids.every((id) => selectedIds.includes(id));
-    setSelectedIds(allSelected ? selectedIds.filter((id) => !ids.includes(id)) : [...new Set([...selectedIds, ...ids])]);
+    const ids = data.rows.map((r) => r.productId);
+    const allSelected = ids.every((id) => selectedProductIds.includes(id));
+    setSelectedProductIds(allSelected ? [] : ids);
   };
 
   const config = data?.config;
@@ -127,7 +143,8 @@ const ChannelMargins: React.FC = () => {
             Márgenes por canal
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-            Ganancia estimada por unidad: precio − comisiones (venta + cobro) − FOB. ML: comisión de publicación (API) + CPT del 1%. TN: elegí el medio de cobro como en tu panel de Tienda Nube (tasas + IVA).
+            Una fila por artículo: todas las variantes comparten el mismo precio en ML y TN. Ganancia estimada:
+            precio − comisiones − FOB.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -140,14 +157,16 @@ const ChannelMargins: React.FC = () => {
             {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             Actualizar
           </button>
-          {selectedIds.length > 0 && (
+          {selectedProductIds.length > 0 && (
             <button
               type="button"
               onClick={() => setPricesModalOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold"
             >
               <Pencil size={16} />
-              Editar precios ({selectedIds.length})
+              Editar precios ({selectedProductIds.length} artículo
+              {selectedProductIds.length !== 1 ? 's' : ''}
+              {selectedVariantCount > 0 ? ` · ${selectedVariantCount} variantes` : ''})
             </button>
           )}
         </div>
@@ -159,7 +178,9 @@ const ChannelMargins: React.FC = () => {
           <div>
             <p>
               <strong className="text-white">FOB:</strong>{' '}
-              {config.fobListName ? `lista «${config.fobListName}»` : 'sin lista FOB (creá una lista con "fob" en el nombre o definí LUPOHUB_FOB_PRICE_LIST_ID)'}
+              {config.fobListName
+                ? `lista «${config.fobListName}»`
+                : 'sin lista FOB (creá una lista con "fob" en el nombre o definí LUPOHUB_FOB_PRICE_LIST_ID)'}
             </p>
             <p className="mt-1">
               <strong className="text-amber-300">Mercado Libre:</strong> {config.mlListingFeeSource} + CPT cobro{' '}
@@ -178,7 +199,7 @@ const ChannelMargins: React.FC = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
           <input
             type="search"
-            placeholder="Buscar por SKU, artículo o color…"
+            placeholder="Buscar por SKU o artículo…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm"
@@ -199,13 +220,14 @@ const ChannelMargins: React.FC = () => {
           className="rounded-xl bg-slate-800 border border-cyan-700/50 text-white text-sm px-4 py-2.5 min-w-[220px] max-w-full"
           title="Medio de cobro en Tienda Nube"
         >
-          {(config?.tnFeePresets?.length ? config.tnFeePresets : [{ id: 'tn_mp_instant', label: 'Mercado Pago en TN · al momento' }]).map(
-            (p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            )
-          )}
+          {(config?.tnFeePresets?.length
+            ? config.tnFeePresets
+            : [{ id: 'tn_mp_instant', label: 'Mercado Pago en TN · al momento' }]
+          ).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
           <option value="custom">Personalizado (.env)</option>
         </select>
       </div>
@@ -217,12 +239,15 @@ const ChannelMargins: React.FC = () => {
               <th className="p-3 w-10">
                 <input
                   type="checkbox"
-                  checked={!!data?.rows.length && data.rows.every((r) => selectedIds.includes(r.variantId))}
+                  checked={
+                    !!data?.rows.length &&
+                    data.rows.every((r) => selectedProductIds.includes(r.productId))
+                  }
                   onChange={toggleSelectAll}
                   title="Seleccionar página"
                 />
               </th>
-              <th className="p-3">Variante</th>
+              <th className="p-3">Artículo</th>
               <th className="p-3">FOB</th>
               <th className="p-3 text-amber-300">
                 <span className="inline-flex items-center gap-1">
@@ -254,16 +279,16 @@ const ChannelMargins: React.FC = () => {
             ) : !data?.rows.length ? (
               <tr>
                 <td colSpan={5} className="p-12 text-center text-slate-400">
-                  No hay variantes vinculadas a canales con estos filtros.
+                  No hay artículos vinculados a canales con estos filtros.
                 </td>
               </tr>
             ) : (
               data.rows.map((r) => (
                 <MarginTableRow
-                  key={r.variantId}
+                  key={r.productId}
                   row={r}
-                  selected={selectedIds.includes(r.variantId)}
-                  onToggle={() => toggleSelect(r.variantId)}
+                  selected={isProductSelected(r.productId)}
+                  onToggle={() => toggleProduct(r.productId)}
                 />
               ))
             )}
@@ -274,7 +299,7 @@ const ChannelMargins: React.FC = () => {
       {data && data.total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
           <span>
-            {data.total} variante{data.total !== 1 ? 's' : ''} · página {data.page} de {totalPages}
+            {data.total} artículo{data.total !== 1 ? 's' : ''} · página {data.page} de {totalPages}
           </span>
           <div className="flex gap-2">
             <button
@@ -304,6 +329,7 @@ const ChannelMargins: React.FC = () => {
         showToast={showToast}
         onSaved={() => {
           setPricesModalOpen(false);
+          setSelectedProductIds([]);
           load();
         }}
       />
@@ -312,7 +338,7 @@ const ChannelMargins: React.FC = () => {
 };
 
 const MarginTableRow: React.FC<{
-  row: MarginRow;
+  row: ArticleRow;
   selected: boolean;
   onToggle: () => void;
 }> = ({ row, selected, onToggle }) => (
@@ -321,10 +347,10 @@ const MarginTableRow: React.FC<{
       <input type="checkbox" checked={selected} onChange={onToggle} />
     </td>
     <td className="p-3 align-top">
-      <div className="font-mono text-xs text-blue-400">{row.sku}</div>
+      {row.baseSku ? <div className="font-mono text-xs text-blue-400">{row.baseSku}</div> : null}
       <div className="text-white font-medium">{row.productName}</div>
       <div className="text-slate-500 text-xs">
-        {[row.color, row.size].filter(Boolean).join(' · ')}
+        {row.variantCount} variante{row.variantCount !== 1 ? 's' : ''} · mismo precio en canal
       </div>
     </td>
     <td className="p-3 align-top text-slate-300">{fmt(row.fob)}</td>
@@ -338,11 +364,11 @@ const MarginTableRow: React.FC<{
 );
 
 const ChannelCells: React.FC<{
-  slice: NonNullable<MarginRow['ml']>;
+  slice: NonNullable<ArticleRow['ml']>;
   accent: 'amber' | 'cyan';
 }> = ({ slice, accent }) => {
   const border = accent === 'amber' ? 'border-amber-900/40' : 'border-cyan-900/40';
-  if (!slice.linked) return null;
+  if (!slice.linked) return <span className="text-slate-600 text-xs">Sin vínculo</span>;
   if (slice.price <= 0) return <span className="text-slate-500 text-xs">Sin precio</span>;
   return (
     <div className={`space-y-1 text-xs rounded-lg border ${border} p-2 bg-slate-900/50`}>

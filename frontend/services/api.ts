@@ -1606,12 +1606,11 @@ export const api = {
     page: number;
     limit: number;
     rows: Array<{
-      variantId: string;
-      sku: string;
       productId: string;
       productName: string;
-      color: string;
-      size: string;
+      baseSku: string;
+      variantCount: number;
+      variantIds: string[];
       fob: number | null;
       ml: {
         price: number;
