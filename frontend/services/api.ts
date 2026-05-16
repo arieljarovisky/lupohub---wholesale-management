@@ -1565,6 +1565,42 @@ export const api = {
     }, { stocks: {} }, 'getVariantExternalStocks');
   },
 
+  /** Precios local / ML / TN por variante (consulta APIs externas). */
+  getVariantChannelPrices: async (
+    variantIds: string[]
+  ): Promise<{
+    prices: Record<
+      string,
+      { priceLocal?: number; priceML?: number; priceTN?: number; hasML?: boolean; hasTN?: boolean }
+    >;
+  }> => {
+    return handleRequest(async () => {
+      return await request<{
+        prices: Record<
+          string,
+          { priceLocal?: number; priceML?: number; priceTN?: number; hasML?: boolean; hasTN?: boolean }
+        >;
+      }>('/integrations/variant-channel-prices', 'POST', { variantIds }, undefined, 60000);
+    }, { prices: {} }, 'getVariantChannelPrices');
+  },
+
+  bulkUpdateChannelPrices: async (body: {
+    updates: Array<{ variantId: string; priceLocal?: number; priceML?: number; priceTN?: number }>;
+    applyLocal?: boolean;
+    applyML?: boolean;
+    applyTN?: boolean;
+  }): Promise<{ message: string; updatedLocal: number; updatedML: number; updatedTN: number; errors: string[] }> => {
+    return handleRequest(async () => {
+      return await request<{
+        message: string;
+        updatedLocal: number;
+        updatedML: number;
+        updatedTN: number;
+        errors: string[];
+      }>('/integrations/variant-channel-prices/bulk', 'POST', body, undefined, 120000);
+    }, { message: 'Offline', updatedLocal: 0, updatedML: 0, updatedTN: 0, errors: [] }, 'bulkUpdateChannelPrices');
+  },
+
   /** Opcional: ML como fuente — importa stock desde ML a LupoHub y envía a TN. Para flujo normal usar syncAllStockToMercadoLibre (LupoHub → ML). */
   syncAllStockFromMercadoLibre: async (): Promise<{
     message: string;

@@ -4,6 +4,7 @@ const express_1 = require("express");
 const integrations_controller_1 = require("../controllers/integrations.controller");
 const mercadolibrePublicationsExport_controller_1 = require("../controllers/mercadolibrePublicationsExport.controller");
 const mlToTiendaNubeExport_controller_1 = require("../controllers/mlToTiendaNubeExport.controller");
+const channelPrices_controller_1 = require("../controllers/channelPrices.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const auth_1 = require("../middleware/auth");
 const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
@@ -34,6 +35,8 @@ router.get('/mercadolibre/display-ads/campaigns', integrations_controller_1.getM
 router.get('/mercadolibre/publications-export', auth_1.authMiddleware, mercadolibrePublicationsExport_controller_1.exportMercadolibrePublicationsXlsx);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
+router.post('/variant-channel-prices', auth_1.authMiddleware, channelPrices_controller_1.getVariantChannelPrices);
+router.post('/variant-channel-prices/bulk', auth_1.authMiddleware, channelPrices_controller_1.bulkUpdateChannelPrices);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiConfig);
