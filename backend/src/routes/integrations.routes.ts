@@ -56,6 +56,7 @@ import {
   getMercadoLibreDisplayAdsCampaigns
 } from '../controllers/integrations.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
+import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { authMiddleware } from '../middleware/auth';
 import {
@@ -105,6 +106,7 @@ router.post('/mercadolibre/sync-stock-selected', syncSelectedStockToMercadoLibre
 router.post('/mercadolibre/sync-from-ml', syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', importStockFromMercadoLibre);
 router.post('/mercadolibre/import-product', importProductFromMercadoLibre);
+router.post('/mercadolibre/export-to-tiendanube', authMiddleware, exportMercadoLibreToTiendaNube);
 router.post('/mercadolibre/sync-ml-to-tn', (req, res) => runAutoSyncMLtoTN().then(r => res.json({ message: 'ML → TN ejecutado', ...r })).catch(e => res.status(500).json({ message: e.message })));
 router.post('/mercadolibre/webhook', handleMercadoLibreWebhook);
 /** Descontar stock de ventas ML desde una fecha (ej. fromDate=2026-03-09). Idempotente. */

@@ -1606,6 +1606,29 @@ export const api = {
     }, { productId: '', baseSku: '', name: '', variantsCreated: 0 }, 'importProductFromMercadoLibre');
   },
 
+  /** Crea publicación en Tienda Nube a partir de una o varias publicaciones ML (mismo producto agrupado). */
+  exportMercadoLibreToTiendaNube: async (payload: {
+    itemId?: string;
+    itemIds?: string[];
+    published?: boolean;
+    linkLocal?: boolean;
+  }): Promise<{
+    message: string;
+    tiendaNubeProductId?: number;
+    tiendaNubeVariantCount?: number;
+    variantsLinkedLocal?: number;
+    mlItemsUsed?: string[];
+    missing?: string[];
+  }> => {
+    return handleRequest(
+      async () => {
+        return await request('/integrations/mercadolibre/export-to-tiendanube', 'POST', payload, undefined, 180000);
+      },
+      { message: 'Offline' },
+      'exportMercadoLibreToTiendaNube'
+    );
+  },
+
   /** Crear producto en inventario local desde un producto de Tienda Nube */
   importProductFromTiendaNube: async (productId: string | number): Promise<{ productId: string; baseSku: string; name: string; variantsCreated: number }> => {
     return handleRequest(async () => {

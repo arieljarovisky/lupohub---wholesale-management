@@ -50,6 +50,7 @@ const talles_tango_1 = require("../talles-tango");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const stock_controller_1 = require("./stock.controller");
 const mergeDuplicateProductsBySku_1 = require("../services/mergeDuplicateProductsBySku");
+const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query;
@@ -880,6 +881,7 @@ const updateVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         values.push(variantId);
         yield (0, db_1.execute)(`UPDATE product_variants SET ${updates.join(', ')} WHERE id = ?`, values);
+        yield (0, touchProductUpdatedAt_1.touchProductUpdatedAtByVariantId)(variantId);
         const updated = yield (0, db_1.get)(`SELECT pv.id, pv.sku, pv.external_sku, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id

@@ -4167,7 +4167,7 @@ async function upsertLocalVariantFromMlEntries(
 }
 
 /** Extrae título base para agrupar: quita las últimas 1–2 palabras (talle y opcionalmente color). */
-function mlBaseTitle(title: string): string {
+export function mlBaseTitle(title: string): string {
   let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
   // Algunos títulos traen sufijos de publicación (p.ej. "Sin cuotas") que rompen el
   // agrupado por color/talle. Esto los elimina para recuperar el "título base".
@@ -4199,7 +4199,7 @@ function mlStripTrailingPublicationIndex(title: string): string {
 }
 
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
-function mlColorSizeFromTitle(title: string): { color: string; size: string } {
+export function mlColorSizeFromTitle(title: string): { color: string; size: string } {
   let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
   t = t
     .replace(/(?:^|\s)(?:sin|s\/c)\s*[-]?\s*cuotas?\s*[.,;:]?\s*$/i, '')

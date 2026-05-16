@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download } from 'lucide-react';
+import { RefreshCw, Package, Loader2, Zap, Search, X, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, AlertTriangle, Copy, Check, Download, Store } from 'lucide-react';
 import { api } from '../services/api';
 import { mercadoLibreItemIdsMatch } from '../utils/mercadoLibreItemId';
 
@@ -53,6 +53,7 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
   } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [importingItemId, setImportingItemId] = useState<string | null>(null);
+  const [exportingToTnItemId, setExportingToTnItemId] = useState<string | null>(null);
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(text).then(() => {
       setCopiedId(label);
@@ -447,11 +448,12 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                       <p className="text-slate-500 text-sm mb-3">Sin variaciones (producto único)</p>
                     )}
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={async (e) => {
                           e.stopPropagation();
-                          if (importingItemId) return;
+                          if (importingItemId || exportingToTnItemId) return;
                           setImportingItemId(item.id);
                           try {
                             const multiIds =
@@ -477,7 +479,7 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                             setImportingItemId(null);
                           }
                         }}
-                        disabled={!!importingItemId}
+                        disabled={!!importingItemId || !!exportingToTnItemId}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50 transition-colors"
                         title={
                           item.hasVariations && item.variations.length > 1
@@ -488,6 +490,45 @@ const MercadoLibreStock: React.FC<MercadoLibreStockProps> = ({ searchTerm: searc
                         {importingItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
                         Agregar a mi stock
                       </button>
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (exportingToTnItemId || importingItemId) return;
+                          setExportingToTnItemId(item.id);
+                          try {
+                            const multiIds =
+                              item.hasVariations && item.variations && item.variations.length > 0
+                                ? item.variations.map((v) => String(v.variationId))
+                                : null;
+                            const payload = multiIds && multiIds.length > 0 ? { itemIds: multiIds } : { itemId: item.id };
+                            const res = await api.exportMercadoLibreToTiendaNube({ ...payload, published: true, linkLocal: true });
+                            const linked =
+                              res.variantsLinkedLocal != null && res.variantsLinkedLocal > 0
+                                ? ` · ${res.variantsLinkedLocal} variante(s) vinculada(s) en LupoHub`
+                                : '';
+                            showToast?.(
+                              'success',
+                              `Publicado en Tienda Nube (ID ${res.tiendaNubeProductId ?? '—'}, ${res.tiendaNubeVariantCount ?? 0} variante(s)${linked})`
+                            );
+                          } catch (err: any) {
+                            showToast?.('error', err?.message || 'No se pudo publicar en Tienda Nube');
+                          } finally {
+                            setExportingToTnItemId(null);
+                          }
+                        }}
+                        disabled={!!exportingToTnItemId || !!importingItemId}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50 transition-colors"
+                        title={
+                          item.hasVariations && item.variations.length > 1
+                            ? `Crear en Tienda Nube un producto con ${item.variations.length} variantes (desde publicaciones ML agrupadas)`
+                            : 'Crear esta publicación en Tienda Nube (título, fotos, precio y stock desde ML)'
+                        }
+                      >
+                        {exportingToTnItemId === item.id ? <Loader2 size={18} className="animate-spin" /> : <Store size={18} />}
+                        Publicar en Tienda Nube
+                      </button>
+                      </div>
                       <a
                         href={item.permalink}
                         target="_blank"

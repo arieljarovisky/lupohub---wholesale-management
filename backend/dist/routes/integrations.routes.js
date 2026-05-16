@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const integrations_controller_1 = require("../controllers/integrations.controller");
 const mercadolibrePublicationsExport_controller_1 = require("../controllers/mercadolibrePublicationsExport.controller");
+const mlToTiendaNubeExport_controller_1 = require("../controllers/mlToTiendaNubeExport.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const auth_1 = require("../middleware/auth");
 const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
@@ -44,6 +45,7 @@ router.post('/mercadolibre/sync-stock-selected', integrations_controller_1.syncS
 router.post('/mercadolibre/sync-from-ml', integrations_controller_1.syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', integrations_controller_1.importStockFromMercadoLibre);
 router.post('/mercadolibre/import-product', integrations_controller_1.importProductFromMercadoLibre);
+router.post('/mercadolibre/export-to-tiendanube', auth_1.authMiddleware, mlToTiendaNubeExport_controller_1.exportMercadoLibreToTiendaNube);
 router.post('/mercadolibre/sync-ml-to-tn', (req, res) => (0, integrations_controller_1.runAutoSyncMLtoTN)().then(r => res.json(Object.assign({ message: 'ML → TN ejecutado' }, r))).catch(e => res.status(500).json({ message: e.message })));
 router.post('/mercadolibre/webhook', integrations_controller_1.handleMercadoLibreWebhook);
 /** Descontar stock de ventas ML desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
