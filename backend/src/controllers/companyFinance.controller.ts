@@ -9,6 +9,7 @@ import {
   sumDespachosCostInRange,
   sumReceiptsInRange,
 } from '../services/companyFinanceAggregates.service';
+import { fetchMercadoPagoMovements } from '../services/mercadopagoFinance.service';
 import {
   countCalendarMonthsInRange,
   fixedExpenseMonthsInRange,
@@ -483,6 +484,18 @@ async function wholesaleOrdersRevenue(from: string, to: string): Promise<number>
   )) as { total: string | number } | undefined;
   return Math.round(Number(row?.total ?? 0) * 100) / 100;
 }
+
+export const getCompanyFinanceMercadoPagoMovements = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const { from, to } = parseDateRange(req);
+    const data = await fetchMercadoPagoMovements(from, to);
+    res.json({ from, to, ...data });
+  } catch (error: unknown) {
+    console.error('getCompanyFinanceMercadoPagoMovements:', error);
+    res.status(500).json({ message: 'Error obteniendo movimientos de Mercado Pago' });
+  }
+};
 
 export const getCompanyFinancePendingInvoices = async (req: Request, res: Response) => {
   try {

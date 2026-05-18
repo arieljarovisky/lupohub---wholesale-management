@@ -230,6 +230,42 @@ export const api = {
     return await request(`/company-finance/summary?${q.toString()}`, 'GET');
   },
 
+  getCompanyFinanceMercadoPagoMovements: async (params: {
+    from?: string;
+    to?: string;
+  }): Promise<{
+    from: string;
+    to: string;
+    connected: boolean;
+    note?: string;
+    summary: {
+      count: number;
+      grossIn: number;
+      fees: number;
+      refunds: number;
+      netIn: number;
+    };
+    movements: Array<{
+      id: string;
+      date: string;
+      dateTime: string;
+      movementType: 'cobro' | 'reembolso' | 'pendiente' | 'otro';
+      direction: 'in' | 'out';
+      description: string;
+      grossAmount: number;
+      feeAmount: number;
+      netAmount: number;
+      status: string;
+      paymentMethod: string;
+      externalReference: string;
+    }>;
+  }> => {
+    const q = new URLSearchParams();
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
+    return await request(`/company-finance/mercadopago-movements?${q.toString()}`, 'GET', undefined, undefined, 120000);
+  },
+
   getCompanyFinancePendingInvoices: async (limit?: number): Promise<{
     items: Array<{
       orderId: string;

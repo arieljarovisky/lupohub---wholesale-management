@@ -15,6 +15,7 @@ import {
   Package,
   AlertCircle,
   Repeat,
+  CreditCard,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -41,6 +42,9 @@ type FixedExpense = {
   startsFrom: string | null;
   endsAt: string | null;
 };
+
+type MpMovement = Awaited<ReturnType<typeof api.getCompanyFinanceMercadoPagoMovements>>['movements'][number];
+type MpData = Awaited<ReturnType<typeof api.getCompanyFinanceMercadoPagoMovements>>;
 
 const fmt = (n: number) =>
   n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
@@ -72,6 +76,8 @@ const CompanyFinance: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingFixedId, setEditingFixedId] = useState<string | null>(null);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
+  const [mpData, setMpData] = useState<MpData | null>(null);
+  const [mpLoading, setMpLoading] = useState(false);
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
@@ -112,6 +118,12 @@ const CompanyFinance: React.FC = () => {
       setSummary(sum);
       setEntries(list.entries as FinanceEntry[]);
       setFixedExpenses(fixed.items as FixedExpense[]);
+      setMpLoading(true);
+      api
+        .getCompanyFinanceMercadoPagoMovements({ from: range.from, to: range.to })
+        .then(setMpData)
+        .catch(() => setMpData(null))
+        .finally(() => setMpLoading(false));
     } catch (e: unknown) {
       showToast('error', e instanceof Error ? e.message : 'No se pudieron cargar los datos');
     } finally {
@@ -311,7 +323,7 @@ const CompanyFinance: React.FC = () => {
             Resultados de la empresa
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Recibos, ventas Mercado Libre y Tienda Nube, despachos, comisiones de canales y facturas pendientes.
+            Recibos, ventas Mercado Libre y Tienda Nube, movimientos Mercado Pago, despachos y facturas pendientes.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -619,6 +631,125 @@ const CompanyFinance: React.FC = () => {
           )}
         </>
       ) : null}
+
+      <div className="rounded-xl border border-sky-800/50 overflow-hidden">
+        <div className="px-4 py-3 bg-sky-950/40 border-b border-sky-900/50 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-bold text-sky-200 flex items-center gap-2">
+            <CreditCard size={16} className="text-sky-400" /> Mercado Pago
+          </span>
+          {mpData?.connected && mpData.summary && (
+            <span className="text-xs text-slate-400 font-mono">
+              Neto período:{' '}
+              <span className={mpData.summary.netIn >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                {fmt(mpData.summary.netIn)}
+              </span>
+              {' · '}
+              {mpData.summary.count} mov.
+            </span>
+          )}
+        </div>
+        {mpLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="animate-spin text-sky-400" size={28} />
+          </div>
+        ) : !mpData?.connected ? (
+          <p className="p-6 text-center text-slate-500 text-sm max-w-lg mx-auto">
+            {mpData?.note ||
+              'Mercado Pago no está configurado. Agregá MERCADOPAGO_ACCESS_TOKEN en Railway (token de producción).'}
+          </p>
+        ) : mpData.movements.length === 0 ? (
+          <p className="p-6 text-center text-slate-500 text-sm">
+            No hay movimientos de Mercado Pago en este período.
+            {mpData.note ? <span className="block mt-2 text-[10px] text-slate-600">{mpData.note}</span> : null}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Cobros brutos</p>
+                <p className="font-mono text-emerald-400 mt-1">{fmt(mpData.summary.grossIn)}</p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Comisiones MP</p>
+                <p className="font-mono text-red-400 mt-1">{fmt(mpData.summary.fees)}</p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Reembolsos</p>
+                <p className="font-mono text-amber-400 mt-1">{fmt(mpData.summary.refunds)}</p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Neto</p>
+                <p
+                  className={`font-mono mt-1 ${
+                    mpData.summary.netIn >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {fmt(mpData.summary.netIn)}
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-sm min-w-[720px]">
+                <thead className="sticky top-0 bg-slate-900/95 z-10">
+                  <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                    <th className="p-3">Fecha</th>
+                    <th className="p-3">Tipo</th>
+                    <th className="p-3">Descripción</th>
+                    <th className="p-3 text-right">Bruto</th>
+                    <th className="p-3 text-right">Comisión</th>
+                    <th className="p-3 text-right">Neto</th>
+                    <th className="p-3">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mpData.movements.map((row: MpMovement) => (
+                    <tr key={row.id} className="border-b border-slate-800/60 hover:bg-slate-800/30">
+                      <td className="p-3 text-slate-400 whitespace-nowrap">{row.date}</td>
+                      <td className="p-3">
+                        {row.movementType === 'reembolso' ? (
+                          <span className="text-amber-400">Reembolso</span>
+                        ) : row.movementType === 'cobro' ? (
+                          <span className="text-emerald-400">Cobro</span>
+                        ) : row.movementType === 'pendiente' ? (
+                          <span className="text-slate-400">Pendiente</span>
+                        ) : (
+                          <span className="text-slate-500">Otro</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-slate-300 max-w-[240px]">
+                        <div className="truncate" title={row.description}>
+                          {row.description}
+                        </div>
+                        {row.externalReference ? (
+                          <div className="text-[10px] text-slate-600 font-mono truncate">
+                            Ref: {row.externalReference}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-300">{fmt(row.grossAmount)}</td>
+                      <td className="p-3 text-right font-mono text-red-400/90">
+                        {row.feeAmount > 0 ? `−${fmt(row.feeAmount)}` : '—'}
+                      </td>
+                      <td
+                        className={`p-3 text-right font-mono font-bold ${
+                          row.netAmount >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        }`}
+                      >
+                        {row.netAmount >= 0 ? '+' : '−'}
+                        {fmt(Math.abs(row.netAmount))}
+                      </td>
+                      <td className="p-3 text-slate-500 text-xs">{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {mpData.note ? (
+              <p className="px-4 py-2 text-[10px] text-slate-600 border-t border-slate-800">{mpData.note}</p>
+            ) : null}
+          </>
+        )}
+      </div>
 
       <div className="rounded-xl border border-orange-900/40 overflow-hidden">
         <div className="px-4 py-3 bg-orange-950/30 border-b border-orange-900/40 flex flex-wrap items-center justify-between gap-2">
