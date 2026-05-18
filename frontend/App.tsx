@@ -154,19 +154,21 @@ const App: React.FC = () => {
     return !!allowedByRole[view]?.includes(role);
   }, []);
 
+  /** Finanzas empresa: por email; el resto de vistas por rol. */
+  const isViewAccessible = useCallback(
+    (view: string, user: User | null): boolean => {
+      if (!user) return false;
+      const base = String(view || '').split('?')[0];
+      if (base === COMPANY_FINANCE_VIEW) return isCompanyFinanceUser(user.email);
+      return isViewAllowedForRole(base, user.role);
+    },
+    [isViewAllowedForRole]
+  );
+
   const handleChangeView = useCallback((nextView: string) => {
     const nextBase = String(nextView || '').split('?')[0];
-    if (nextBase === COMPANY_FINANCE_VIEW) {
-      if (!currentUser || !isCompanyFinanceUser(currentUser.email)) {
-        if (currentUser) setCurrentView(defaultViewForRole(currentUser.role));
-        return;
-      }
-      setCurrentView(nextView);
-      return;
-    }
-    if (currentUser && !isViewAllowedForRole(nextBase, currentUser.role)) {
-      const fallback = defaultViewForRole(currentUser.role);
-      setCurrentView(fallback);
+    if (currentUser && !isViewAccessible(nextView, currentUser)) {
+      setCurrentView(defaultViewForRole(currentUser.role));
       return;
     }
     if (nextBase === 'create_order' || nextBase === 'create_order_template') {
@@ -180,7 +182,7 @@ const App: React.FC = () => {
       }
     }
     setCurrentView(nextView);
-  }, [currentUser, defaultViewForRole, isViewAllowedForRole]);
+  }, [currentUser, defaultViewForRole, isViewAccessible]);
 
   // Comprobar sesión al cargar (evita flash de login al actualizar)
   useEffect(() => {
@@ -222,21 +224,20 @@ const App: React.FC = () => {
     if (!currentUser) return;
     const savedView = localStorage.getItem('lupo_current_view');
     if (savedView && currentUser) {
-      const role = currentUser.role;
       const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
-      if (!isSpecial && isViewAllowedForRole(savedView, role)) {
+      if (isSpecial || isViewAccessible(savedView, currentUser)) {
         setCurrentView(savedView);
       }
     }
     loadData();
-  }, [currentUser, isViewAllowedForRole]);
+  }, [currentUser, isViewAccessible]);
 
   useEffect(() => {
     if (!currentUser) return;
-    if (!isViewAllowedForRole(baseView, currentUser.role)) {
+    if (!isViewAccessible(baseView, currentUser)) {
       setCurrentView(defaultViewForRole(currentUser.role));
     }
-  }, [baseView, currentUser, defaultViewForRole, isViewAllowedForRole]);
+  }, [baseView, currentUser, defaultViewForRole, isViewAccessible]);
 
   useEffect(() => {
     if (!currentUser) {
