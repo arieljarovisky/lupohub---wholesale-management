@@ -79,6 +79,15 @@ const canonicalSizeCode = (value: unknown): string => {
   return codigoTalleParaSku(raw) || raw;
 };
 
+/** La rueda del mouse no debe modificar cantidades/precios al hacer scroll en la tabla. */
+const blockWheelOnNumberInput = (e: React.WheelEvent<HTMLInputElement>) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
+
+const numberInputNoSpinClass =
+  '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]';
+
 const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   products,
   customers,
@@ -1063,8 +1072,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           step="0.01"
           value={globalDiscountPercent}
           onChange={(e) => setGlobalDiscountPercent(e.target.value)}
+          onWheel={blockWheelOnNumberInput}
           placeholder="Ej: 10"
-          className="w-full sm:w-36 h-10 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 text-sm text-white font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+          className={`w-full sm:w-36 h-10 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 text-sm text-white font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
         />
         <button
           type="button"
@@ -1183,7 +1193,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                   type="number"
                                   min={0}
                                   placeholder="0"
-                                  className="w-11 h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-1.5 py-1 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                                  onWheel={blockWheelOnNumberInput}
+                                  className={`w-11 h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-1.5 py-1 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                                   onBlur={(e) => {
                                     const v = parseInt(e.target.value, 10);
                                     if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
@@ -1225,8 +1236,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       type="number"
                                       min={0}
                                       value={qtyVal === 0 ? '' : qtyVal}
+                                      onWheel={blockWheelOnNumberInput}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
-                                      className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${
+                                      className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
                                         noStock || exceeds
                                           ? 'bg-red-950/30 border-red-700/70'
                                           : 'bg-slate-700/80 border-slate-600'
@@ -1243,8 +1255,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 min={0}
                                 step="0.01"
                                 value={row.price}
+                                onWheel={blockWheelOnNumberInput}
                                 onChange={(e) => updateRowPrice(row.id, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                                className="w-20 min-w-[72px] h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-2 py-1 text-right text-emerald-400 font-mono text-sm tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                                className={`w-20 min-w-[72px] h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-2 py-1 text-right text-emerald-400 font-mono text-sm tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                               />
                             </td>
                             <td className="py-2.5 px-2">
