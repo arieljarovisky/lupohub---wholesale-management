@@ -2076,10 +2076,17 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
   }
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
-  const { tipo, itemIndex, quantity, items } = req.body || {};
+  const { tipo, itemIndex, quantity, items, restoreStock: restoreStockRaw } = req.body || {};
   if (!tipo || (tipo !== 'total' && tipo !== 'item' && tipo !== 'items')) {
     return res.status(400).json({ message: 'Body debe incluir tipo: "total", "item" o "items"' });
   }
+  const restoreStock =
+    restoreStockRaw === false ||
+    restoreStockRaw === 0 ||
+    restoreStockRaw === '0' ||
+    restoreStockRaw === 'false'
+      ? false
+      : true;
 
   try {
     const orderRow = await get('SELECT id, customer_id, total FROM orders WHERE id = ?', [id]);
@@ -2293,21 +2300,23 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       }
     }
 
-    if (scope === 'total') {
-      const stockResult = await restoreStockForOrder(id);
-      if (!stockResult.success) {
-        return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito total', errors: stockResult.errors });
-      }
-    } else if (tipo === 'item' && typeof itemIndexVal === 'number') {
-      const stockResult = await restoreStockForOrderItem(id, itemIndexVal, creditNoteItemQuantity ?? undefined);
-      if (!stockResult.success) {
-        return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial', errors: stockResult.errors });
-      }
-    } else if (tipo === 'items') {
-      for (const it of itemsToCredit) {
-        const stockResult = await restoreStockForOrderItem(id, it.itemIndex, it.quantity);
+    if (restoreStock) {
+      if (scope === 'total') {
+        const stockResult = await restoreStockForOrder(id);
         if (!stockResult.success) {
-          return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial múltiple', errors: stockResult.errors });
+          return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito total', errors: stockResult.errors });
+        }
+      } else if (tipo === 'item' && typeof itemIndexVal === 'number') {
+        const stockResult = await restoreStockForOrderItem(id, itemIndexVal, creditNoteItemQuantity ?? undefined);
+        if (!stockResult.success) {
+          return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial', errors: stockResult.errors });
+        }
+      } else if (tipo === 'items') {
+        for (const it of itemsToCredit) {
+          const stockResult = await restoreStockForOrderItem(id, it.itemIndex, it.quantity);
+          if (!stockResult.success) {
+            return res.status(500).json({ message: 'Error actualizando stock después de la nota de crédito parcial múltiple', errors: stockResult.errors });
+          }
         }
       }
     }
@@ -2322,7 +2331,8 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       cbteTipo: result.cbteTipo,
       cbteDesde: result.cbteDesde,
       cbteHasta: result.cbteHasta,
-      amountCredited: amountToCredit
+      amountCredited: amountToCredit,
+      stockRestored: restoreStock,
     });
   } catch (error: any) {
     console.error('emitirNotaCredito:', error);

@@ -317,6 +317,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [ncItemIndex, setNcItemIndex] = useState(0);
   const [ncQuantity, setNcQuantity] = useState<number>(1);
   const [ncItemsQuantities, setNcItemsQuantities] = useState<Record<number, number>>({});
+  const [ncRestoreStock, setNcRestoreStock] = useState(true);
   const [emitiendoNC, setEmitiendoNC] = useState(false);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
@@ -2081,6 +2082,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         setNcItemIndex(0);
                         setNcQuantity(order.items[0]?.quantity ?? 1);
                         setNcItemsQuantities({});
+                        setNcRestoreStock(true);
                       }}
                       title="Emitir nota de crédito AFIP (total o por artículo)"
                       icon={<FileMinus size={16} />}
@@ -3138,6 +3140,23 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </p>
                 </div>
               )}
+              <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-slate-700 bg-slate-900/50 p-3">
+                <input
+                  type="checkbox"
+                  checked={ncRestoreStock}
+                  onChange={(e) => setNcRestoreStock(e.target.checked)}
+                  disabled={emitiendoNC}
+                  className="mt-0.5 rounded border-slate-500 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-sm text-slate-300">
+                  <span className="font-semibold text-white block">Devolver stock al inventario</span>
+                  <span className="text-slate-500 text-xs block mt-0.5">
+                    {ncRestoreStock
+                      ? 'Las unidades creditadas vuelven al depósito (comportamiento habitual).'
+                      : 'Solo se emite la NC en AFIP; el inventario no se modifica (ajuste fiscal, error de facturación, etc.).'}
+                  </span>
+                </span>
+              </label>
                 </>
               )}
             </div>
@@ -3196,7 +3215,13 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   if (!ncOrder) return;
                   setEmitiendoNC(true);
                   try {
-                    const payload: { tipo: 'total' | 'item' | 'items'; itemIndex?: number; quantity?: number; items?: Array<{ itemIndex: number; quantity: number }> } = { tipo: ncTipo };
+                    const payload: {
+                      tipo: 'total' | 'item' | 'items';
+                      itemIndex?: number;
+                      quantity?: number;
+                      items?: Array<{ itemIndex: number; quantity: number }>;
+                      restoreStock: boolean;
+                    } = { tipo: ncTipo, restoreStock: ncRestoreStock };
                     if (ncTipo === 'item') {
                       payload.itemIndex = ncItemIndex;
                       payload.quantity = ncQuantity;
@@ -3204,7 +3229,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       payload.items = selectedMulti.map((c) => ({ itemIndex: c.index, quantity: c.selectedQty }));
                     }
                     const res = await api.emitirNotaCredito(ncOrder.id, payload);
-                    showToast('success', `Nota de crédito emitida. CAE ${res.cae}`);
+                    const stockMsg = res.stockRestored === false ? ' Sin cambios en inventario.' : '';
+                    showToast('success', `Nota de crédito emitida. CAE ${res.cae}.${stockMsg}`);
                     onCreditNoteEmitida?.(ncOrder.id);
                     setNcOrder(null);
                   } catch (err: any) {
