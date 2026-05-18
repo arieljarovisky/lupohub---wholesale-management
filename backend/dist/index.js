@@ -69,6 +69,7 @@ const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_order_matrix_import_label_1 = require("./database/add_order_matrix_import_label");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const add_company_finance_table_1 = require("./database/add_company_finance_table");
+const add_company_finance_fixed_expenses_table_1 = require("./database/add_company_finance_fixed_expenses_table");
 const companyFinance_routes_1 = __importDefault(require("./routes/companyFinance.routes"));
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
@@ -195,6 +196,7 @@ function initDatabase() {
                 yield (0, add_order_matrix_import_label_1.addOrderMatrixImportLabel)();
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
                 yield (0, add_company_finance_table_1.addCompanyFinanceTable)();
+                yield (0, add_company_finance_fixed_expenses_table_1.addCompanyFinanceFixedExpensesTable)();
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
                 yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();

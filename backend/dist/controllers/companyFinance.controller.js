@@ -9,10 +9,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCompanyFinanceSummary = exports.deleteCompanyFinanceEntry = exports.updateCompanyFinanceEntry = exports.createCompanyFinanceEntry = exports.listCompanyFinanceEntries = exports.getCompanyFinanceAccess = exports.INCOME_CATEGORIES = exports.EXPENSE_CATEGORIES = void 0;
+exports.getCompanyFinanceSummary = exports.getCompanyFinancePendingInvoices = exports.deleteCompanyFinanceFixedExpense = exports.updateCompanyFinanceFixedExpense = exports.createCompanyFinanceFixedExpense = exports.listCompanyFinanceFixedExpenses = exports.deleteCompanyFinanceEntry = exports.updateCompanyFinanceEntry = exports.createCompanyFinanceEntry = exports.listCompanyFinanceEntries = exports.getCompanyFinanceAccess = exports.INCOME_CATEGORIES = exports.EXPENSE_CATEGORIES = void 0;
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const companyFinanceAccess_1 = require("../utils/companyFinanceAccess");
+const companyFinanceAggregates_service_1 = require("../services/companyFinanceAggregates.service");
+const companyFinanceFixed_1 = require("../utils/companyFinanceFixed");
 exports.EXPENSE_CATEGORIES = [
     { id: 'sueldo', label: 'Sueldos' },
     { id: 'servicios', label: 'Servicios' },
@@ -214,24 +216,247 @@ const deleteCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0
     }
 });
 exports.deleteCompanyFinanceEntry = deleteCompanyFinanceEntry;
+function mapFixedExpenseRow(r) {
+    return {
+        id: r.id,
+        category: r.category,
+        amount: (0, companyFinanceFixed_1.round2)(Number(r.amount)),
+        description: r.description,
+        active: !!r.active,
+        startsFrom: r.startsFrom,
+        endsAt: r.endsAt,
+    };
+}
+function computeFixedExpensesForPeriod(from, to) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const rows = (yield (0, db_1.query)(`SELECT id, category, amount, description, active,
+            DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+            DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+     FROM company_finance_fixed_expenses
+     WHERE active = 1
+     ORDER BY amount DESC`));
+        const monthsInPeriod = (0, companyFinanceFixed_1.countCalendarMonthsInRange)(from, to);
+        let total = 0;
+        let monthlySubtotal = 0;
+        const items = [];
+        for (const r of rows) {
+            const monthsApplied = (0, companyFinanceFixed_1.fixedExpenseMonthsInRange)(from, to, r.startsFrom, r.endsAt);
+            if (monthsApplied <= 0)
+                continue;
+            const monthlyAmount = (0, companyFinanceFixed_1.round2)(Number(r.amount));
+            monthlySubtotal += monthlyAmount;
+            const periodTotal = (0, companyFinanceFixed_1.round2)(monthlyAmount * monthsApplied);
+            total += periodTotal;
+            items.push({
+                id: r.id,
+                category: r.category,
+                description: r.description,
+                monthlyAmount,
+                monthsApplied,
+                periodTotal,
+            });
+        }
+        return {
+            fixedMonthlyExpenses: (0, companyFinanceFixed_1.round2)(total),
+            fixedMonthlySubtotal: (0, companyFinanceFixed_1.round2)(monthlySubtotal),
+            monthsInPeriod,
+            fixedExpenseItems: items,
+        };
+    });
+}
+const listCompanyFinanceFixedExpenses = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const rows = (yield (0, db_1.query)(`SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt,
+              created_by_email AS createdByEmail, created_at AS createdAt
+       FROM company_finance_fixed_expenses
+       ORDER BY active DESC, amount DESC`));
+        const categoryLabels = {};
+        for (const c of exports.EXPENSE_CATEGORIES)
+            categoryLabels[c.id] = c.label;
+        res.json({
+            items: rows.map((r) => (Object.assign(Object.assign({}, mapFixedExpenseRow(r)), { categoryLabel: categoryLabels[r.category] || r.category, createdByEmail: r.createdByEmail, createdAt: r.createdAt }))),
+        });
+    }
+    catch (error) {
+        console.error('listCompanyFinanceFixedExpenses:', error);
+        res.status(500).json({ message: 'Error listando gastos fijos' });
+    }
+});
+exports.listCompanyFinanceFixedExpenses = listCompanyFinanceFixedExpenses;
+const createCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const category = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.category) || '').trim();
+        const amount = Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.amount);
+        const description = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.description) || '').trim() || null;
+        const active = ((_d = req.body) === null || _d === void 0 ? void 0 : _d.active) !== false;
+        const startsFrom = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.startsFrom) ? String(req.body.startsFrom).slice(0, 10) : null;
+        const endsAt = ((_f = req.body) === null || _f === void 0 ? void 0 : _f.endsAt) ? String(req.body.endsAt).slice(0, 10) : null;
+        if (!exports.EXPENSE_CATEGORIES.some((c) => c.id === category)) {
+            return res.status(400).json({ message: 'Categoría inválida' });
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return res.status(400).json({ message: 'El importe mensual debe ser mayor a 0' });
+        }
+        if (startsFrom && !/^\d{4}-\d{2}-\d{2}$/.test(startsFrom)) {
+            return res.status(400).json({ message: 'startsFrom inválida' });
+        }
+        if (endsAt && !/^\d{4}-\d{2}-\d{2}$/.test(endsAt)) {
+            return res.status(400).json({ message: 'endsAt inválida' });
+        }
+        if (startsFrom && endsAt && startsFrom > endsAt) {
+            return res.status(400).json({ message: 'La vigencia desde no puede ser posterior al hasta' });
+        }
+        const id = (0, uuid_1.v4)();
+        const user = req.user || {};
+        yield (0, db_1.execute)(`INSERT INTO company_finance_fixed_expenses
+       (id, category, amount, description, active, starts_from, ends_at, created_by_user_id, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            id,
+            category,
+            (0, companyFinanceFixed_1.round2)(amount),
+            description,
+            active ? 1 : 0,
+            startsFrom,
+            endsAt,
+            user.id || null,
+            (0, companyFinanceAccess_1.normalizeFinanceEmail)(user.email),
+        ]);
+        const created = yield (0, db_1.get)(`SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+       FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+        res.status(201).json(mapFixedExpenseRow(created));
+    }
+    catch (error) {
+        console.error('createCompanyFinanceFixedExpense:', error);
+        res.status(500).json({ message: 'Error creando gasto fijo' });
+    }
+});
+exports.createCompanyFinanceFixedExpense = createCompanyFinanceFixedExpense;
+const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const id = String(req.params.id || '').trim();
+        const existing = yield (0, db_1.get)(`SELECT id FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+        if (!existing)
+            return res.status(404).json({ message: 'Gasto fijo no encontrado' });
+        const fields = [];
+        const params = [];
+        if (((_a = req.body) === null || _a === void 0 ? void 0 : _a.category) != null) {
+            const category = String(req.body.category).trim();
+            if (!exports.EXPENSE_CATEGORIES.some((c) => c.id === category)) {
+                return res.status(400).json({ message: 'Categoría inválida' });
+            }
+            fields.push('category = ?');
+            params.push(category);
+        }
+        if (((_b = req.body) === null || _b === void 0 ? void 0 : _b.amount) != null) {
+            const amount = Number(req.body.amount);
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return res.status(400).json({ message: 'Importe inválido' });
+            }
+            fields.push('amount = ?');
+            params.push((0, companyFinanceFixed_1.round2)(amount));
+        }
+        if (((_c = req.body) === null || _c === void 0 ? void 0 : _c.description) !== undefined) {
+            fields.push('description = ?');
+            params.push(String(req.body.description || '').trim() || null);
+        }
+        if (((_d = req.body) === null || _d === void 0 ? void 0 : _d.active) !== undefined) {
+            fields.push('active = ?');
+            params.push(req.body.active ? 1 : 0);
+        }
+        if (((_e = req.body) === null || _e === void 0 ? void 0 : _e.startsFrom) !== undefined) {
+            const startsFrom = req.body.startsFrom ? String(req.body.startsFrom).slice(0, 10) : null;
+            if (startsFrom && !/^\d{4}-\d{2}-\d{2}$/.test(startsFrom)) {
+                return res.status(400).json({ message: 'startsFrom inválida' });
+            }
+            fields.push('starts_from = ?');
+            params.push(startsFrom);
+        }
+        if (((_f = req.body) === null || _f === void 0 ? void 0 : _f.endsAt) !== undefined) {
+            const endsAt = req.body.endsAt ? String(req.body.endsAt).slice(0, 10) : null;
+            if (endsAt && !/^\d{4}-\d{2}-\d{2}$/.test(endsAt)) {
+                return res.status(400).json({ message: 'endsAt inválida' });
+            }
+            fields.push('ends_at = ?');
+            params.push(endsAt);
+        }
+        if (fields.length === 0)
+            return res.status(400).json({ message: 'Nada para actualizar' });
+        params.push(id);
+        yield (0, db_1.execute)(`UPDATE company_finance_fixed_expenses SET ${fields.join(', ')} WHERE id = ?`, params);
+        const updated = yield (0, db_1.get)(`SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+       FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+        res.json(mapFixedExpenseRow(updated));
+    }
+    catch (error) {
+        console.error('updateCompanyFinanceFixedExpense:', error);
+        res.status(500).json({ message: 'Error actualizando gasto fijo' });
+    }
+});
+exports.updateCompanyFinanceFixedExpense = updateCompanyFinanceFixedExpense;
+const deleteCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const id = String(req.params.id || '').trim();
+        const result = yield (0, db_1.execute)(`DELETE FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+        if ((result === null || result === void 0 ? void 0 : result.affectedRows) === 0) {
+            return res.status(404).json({ message: 'Gasto fijo no encontrado' });
+        }
+        res.json({ id });
+    }
+    catch (error) {
+        console.error('deleteCompanyFinanceFixedExpense:', error);
+        res.status(500).json({ message: 'Error eliminando gasto fijo' });
+    }
+});
+exports.deleteCompanyFinanceFixedExpense = deleteCompanyFinanceFixedExpense;
 function wholesaleOrdersRevenue(from, to) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         const row = (yield (0, db_1.get)(`SELECT COALESCE(SUM(o.total), 0) AS total
      FROM orders o
      WHERE o.date >= ? AND o.date <= ?
-       AND o.status IN ('Confirmado', 'Preparación', 'Falta controlar', 'Controlado', 'Despachado')
+       AND o.status IN ('Confirmado', 'Preparando', 'Falta controlar', 'Controlado', 'Despachado')
        AND (o.archived IS NULL OR o.archived = 0)`, [from, to]));
         return Math.round(Number((_a = row === null || row === void 0 ? void 0 : row.total) !== null && _a !== void 0 ? _a : 0) * 100) / 100;
     });
 }
+const getCompanyFinancePendingInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+        const data = yield (0, companyFinanceAggregates_service_1.listPendingInvoices)(limit);
+        res.json(data);
+    }
+    catch (error) {
+        console.error('getCompanyFinancePendingInvoices:', error);
+        res.status(500).json({ message: 'Error listando facturas pendientes' });
+    }
+});
+exports.getCompanyFinancePendingInvoices = getCompanyFinancePendingInvoices;
 const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
     try {
         if (!assertFinanceAccess(req, res))
             return;
         const { from, to } = parseDateRange(req);
-        const includeOrders = req.query.includeOrders !== '0';
+        const includeOrders = req.query.includeOrders === '1' || req.query.includeOrders === 'true';
+        const includeChannels = req.query.includeChannels !== '0' && req.query.includeChannels !== 'false';
         const totals = (yield (0, db_1.get)(`SELECT
          COALESCE(SUM(CASE WHEN entry_type = 'income' THEN amount ELSE 0 END), 0) AS manualIncome,
          COALESCE(SUM(CASE WHEN entry_type = 'expense' THEN amount ELSE 0 END), 0) AS totalExpenses,
@@ -253,10 +478,33 @@ const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0,
        WHERE entry_date >= ? AND entry_date <= ?
        GROUP BY DATE_FORMAT(entry_date, '%Y-%m'), entry_type
        ORDER BY month ASC`, [from, to]));
+        const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg] = yield Promise.all([
+            (0, companyFinanceAggregates_service_1.sumReceiptsInRange)(from, to),
+            (0, companyFinanceAggregates_service_1.sumDespachosCostInRange)(from, to),
+            (0, companyFinanceAggregates_service_1.listPendingInvoices)(200),
+            computeFixedExpensesForPeriod(from, to),
+            includeChannels
+                ? Promise.all([
+                    (0, companyFinanceAggregates_service_1.aggregateMercadoLibreInRange)(from, to),
+                    (0, companyFinanceAggregates_service_1.aggregateTiendaNubeInRange)(from, to),
+                ])
+                : Promise.resolve([
+                    { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined },
+                    { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined },
+                ]),
+        ]);
+        const [mlAgg, tnAgg] = channelAgg;
         const ordersRevenue = includeOrders ? yield wholesaleOrdersRevenue(from, to) : 0;
         const manualIncome = Math.round(Number((_a = totals === null || totals === void 0 ? void 0 : totals.manualIncome) !== null && _a !== void 0 ? _a : 0) * 100) / 100;
-        const totalExpenses = Math.round(Number((_b = totals === null || totals === void 0 ? void 0 : totals.totalExpenses) !== null && _b !== void 0 ? _b : 0) * 100) / 100;
-        const totalIncome = Math.round((manualIncome + ordersRevenue) * 100) / 100;
+        const manualExpenses = Math.round(Number((_b = totals === null || totals === void 0 ? void 0 : totals.totalExpenses) !== null && _b !== void 0 ? _b : 0) * 100) / 100;
+        const receiptsTotal = receipts.total;
+        const mlSales = mlAgg.sales;
+        const tnSales = tnAgg.sales;
+        const channelFees = Math.round((mlAgg.fees + tnAgg.fees) * 100) / 100;
+        const despachosCost = despachos.total;
+        const totalIncome = Math.round((receiptsTotal + mlSales + tnSales + manualIncome + ordersRevenue) * 100) / 100;
+        const fixedMonthlyExpenses = fixedAgg.fixedMonthlyExpenses;
+        const totalExpenses = Math.round((manualExpenses + despachosCost + channelFees + fixedMonthlyExpenses) * 100) / 100;
         const netResult = Math.round((totalIncome - totalExpenses) * 100) / 100;
         const categoryLabels = {};
         for (const c of [...exports.EXPENSE_CATEGORIES, ...exports.INCOME_CATEGORIES]) {
@@ -267,12 +515,35 @@ const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0,
             to,
             manualIncome,
             ordersRevenue,
+            receiptsTotal,
+            receiptsCount: receipts.count,
+            mlSales,
+            mlFees: mlAgg.fees,
+            mlOrderCount: mlAgg.orderCount,
+            mlConnected: mlAgg.connected,
+            mlNote: mlAgg.note,
+            tnSales,
+            tnFees: tnAgg.fees,
+            tnOrderCount: tnAgg.orderCount,
+            tnConnected: tnAgg.connected,
+            tnNote: tnAgg.note,
+            channelFees,
+            despachosCost,
+            despachosCount: despachos.count,
+            manualExpenses,
+            fixedMonthlyExpenses,
+            fixedMonthlySubtotal: fixedAgg.fixedMonthlySubtotal,
+            monthsInPeriod: fixedAgg.monthsInPeriod,
+            fixedExpenseItems: fixedAgg.fixedExpenseItems.map((item) => (Object.assign(Object.assign({}, item), { categoryLabel: categoryLabels[item.category] || item.category }))),
             totalIncome,
             totalExpenses,
             netResult,
             profitOrLoss: netResult >= 0 ? 'profit' : 'loss',
             expenseCount: Number((_c = totals === null || totals === void 0 ? void 0 : totals.expenseCount) !== null && _c !== void 0 ? _c : 0),
             incomeCount: Number((_d = totals === null || totals === void 0 ? void 0 : totals.incomeCount) !== null && _d !== void 0 ? _d : 0),
+            pendingInvoicesTotal: pendingInvoices.totalPending,
+            pendingInvoicesCount: pendingInvoices.items.length,
+            pendingInvoices: pendingInvoices.items,
             byCategory: (byCategory || []).map((r) => (Object.assign(Object.assign({}, r), { total: Math.round(Number(r.total) * 100) / 100, categoryLabel: categoryLabels[r.category] || r.category }))),
             byMonth: (byMonth || []).map((r) => (Object.assign(Object.assign({}, r), { total: Math.round(Number(r.total) * 100) / 100 }))),
         });
