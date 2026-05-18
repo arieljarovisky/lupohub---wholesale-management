@@ -8,6 +8,7 @@ import { formatMoneyAr } from '../utils/moneyFormat';
 import {
   enrichOrderItem,
   sortOrderItemsForPrint as sortItemsForFacturaPrint,
+  groupOrderItemsByArticleAndSize,
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   normalizeSkuForPrint,
@@ -560,7 +561,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
     remitenteMerged.logoUrl = localRemitente.logoUrl; // siempre el SVG fijo
     const remitente = remitenteMerged;
-    const items = sortItemsForFacturaPrint(order.items.map(enrichItem), products);
+    const items = groupOrderItemsByArticleAndSize(
+      sortItemsForFacturaPrint(order.items.map(enrichItem), products),
+      products
+    );
     const formatDateShort = (d: string) => {
       const x = new Date(d);
       if (isNaN(x.getTime())) return d;

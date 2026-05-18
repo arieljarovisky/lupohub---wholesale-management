@@ -5,6 +5,7 @@
 import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
 import { calcTotalesDesdeNetoGravado } from './afipComprobante';
 import { formatMoneyAr } from './moneyFormat';
+import { nombreTalleDesdeCodigo } from './tallesTango';
 
 export type FacturaRemitente = Record<string, unknown> & {
   businessName?: string;
@@ -33,6 +34,122 @@ export function enrichOrderItem(item: OrderItem, products: Product[]): OrderItem
     sizeCode: item.sizeCode ?? p.size,
     colorName: item.colorName ?? p.color,
   };
+}
+
+function stripLeadingZerosArticle(s: string): string {
+  const digits = String(s || '').replace(/\D/g, '');
+  if (!digits) return String(s || '').trim();
+  return digits.replace(/^0+/, '') || '0';
+}
+
+/** Código de artículo para agrupar / imprimir (sin color ni talle en el SKU). */
+export function articleCodeForPrintGroup(skuRaw: string): string {
+  const sku = String(skuRaw || '').trim();
+  if (!sku) return '';
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 3) return stripLeadingZerosArticle(parts[0]);
+  const digits = sku.replace(/\D/g, '');
+  if (!digits) return sku;
+  if (digits.length > 9) return stripLeadingZerosArticle(digits.slice(0, -6));
+  if (digits.length >= 7) return stripLeadingZerosArticle(digits.slice(0, 7));
+  return stripLeadingZerosArticle(digits);
+}
+
+function sizeKeyForGroup(sizeCode: string): string {
+  const c = String(sizeCode || '').trim().toUpperCase();
+  return c || '_';
+}
+
+function sizeLabelForPrintGroup(sizeCode: string): string {
+  const code = String(sizeCode || '').trim();
+  if (!code) return '';
+  const letter = nombreTalleDesdeCodigo(code);
+  return letter && letter !== code ? letter : code;
+}
+
+/**
+ * Agrupa líneas del mismo artículo y talle (suma cantidades; unifica despachos).
+ * Si el mismo artículo+talle tiene precios distintos, quedan en líneas separadas.
+ */
+export function groupOrderItemsByArticleAndSize(
+  items: OrderItem[],
+  products: Product[],
+  getQty: (item: OrderItem) => number = (i) => Number(i.quantity || 0)
+): OrderItem[] {
+  type Acc = {
+    template: OrderItem;
+    qty: number;
+    lineNeto: number;
+    despachos: Set<string>;
+    articleCode: string;
+    sizeCode: string;
+  };
+  const map = new Map<string, Acc>();
+
+  for (const item of items) {
+    const qty = getQty(item);
+    if (qty <= 0) continue;
+    const variantId = item.variantId ?? item.productId;
+    const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+    const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
+    const articleCode = articleCodeForPrintGroup(variantSku);
+    const sizeCode = String(item.sizeCode ?? localProduct?.size ?? '').trim();
+    const sizeKey = sizeKeyForGroup(sizeCode);
+    const unit = Number(item.priceAtMoment ?? 0);
+    const groupKey = `${articleCode}|${sizeKey}|${Math.round(unit * 100)}`;
+
+    const despachoRaw =
+      (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
+      (item as OrderItem & { numero_despacho?: string }).numero_despacho;
+    const despachoStr = despachoRaw != null && String(despachoRaw).trim() ? String(despachoRaw).trim() : '';
+
+    let acc = map.get(groupKey);
+    if (!acc) {
+      acc = {
+        template: item,
+        qty: 0,
+        lineNeto: 0,
+        despachos: new Set(),
+        articleCode,
+        sizeCode,
+      };
+      map.set(groupKey, acc);
+    }
+    acc.qty += qty;
+    acc.lineNeto += Math.round(qty * unit * 100) / 100;
+    if (despachoStr) acc.despachos.add(despachoStr);
+  }
+
+  const grouped: OrderItem[] = [];
+  for (const acc of map.values()) {
+    const qty = acc.qty;
+    if (qty <= 0) continue;
+    const unit = Math.round((acc.lineNeto / qty) * 100) / 100;
+    const sizeLabel = sizeLabelForPrintGroup(acc.sizeCode);
+    const baseName = String(acc.template.productName ?? '').trim();
+    const productName = [baseName, sizeLabel].filter(Boolean).join(' ') || baseName || '—';
+    const despachos = [...acc.despachos];
+    const numeroDespacho =
+      despachos.length === 0 ? undefined : despachos.length === 1 ? despachos[0] : despachos.join(', ');
+
+    grouped.push({
+      ...acc.template,
+      quantity: qty,
+      priceAtMoment: unit,
+      productName,
+      sku: acc.articleCode,
+      sizeCode: acc.sizeCode,
+      colorName: undefined,
+      ...(numeroDespacho
+        ? ({ numeroDespacho, numero_despacho: numeroDespacho } as OrderItem & {
+            numeroDespacho: string;
+            numero_despacho: string;
+          })
+        : {}),
+    });
+  }
+
+  return sortOrderItemsForPrint(grouped, products);
 }
 
 export function sortOrderItemsForPrint(items: OrderItem[], products: Product[]): OrderItem[] {
@@ -132,14 +249,15 @@ export function buildWholesaleFacturaHtml(params: {
   const inv = order.invoice;
 
   const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
-  const items = sortOrderItemsForPrint(itemsOriginal, products);
-  const anyPicked = items.some((i) => Number(i.picked) > 0);
+  const itemsSorted = sortOrderItemsForPrint(itemsOriginal, products);
+  const anyPicked = itemsSorted.some((i) => Number(i.picked) > 0);
   const qtyOnFacturaLine = (i: OrderItem) => {
     const q = Number(i.quantity || 0);
     if (!anyPicked) return q;
     const p = Math.max(0, Math.floor(Number(i.picked) || 0));
     return Math.min(q, p);
   };
+  const items = groupOrderItemsByArticleAndSize(itemsSorted, products, qtyOnFacturaLine);
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
@@ -158,8 +276,10 @@ export function buildWholesaleFacturaHtml(params: {
   const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
 
+  const lineQty = (i: OrderItem) => Number(i.quantity || 0);
+
   const sumLines = items.reduce((s, i) => {
-    const qty = qtyOnFacturaLine(i);
+    const qty = lineQty(i);
     const unit = Number(i.priceAtMoment ?? 0);
     return s + Math.round(qty * unit * 100) / 100;
   }, 0);
@@ -174,12 +294,15 @@ export function buildWholesaleFacturaHtml(params: {
 
   const rows = items
     .map((i) => {
-      const qty = qtyOnFacturaLine(i);
+      const qty = lineQty(i);
       const unit = Math.round(Number(i.priceAtMoment ?? 0) * factorPrecioImpreso * 100) / 100;
       const importe = Math.round(qty * unit * 100) / 100;
       const variantId = i.variantId ?? i.productId;
       const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
-      const sku = normalizeSkuForPrint(localProduct?.sku ?? i.sku ?? '');
+      const variantSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
+      const sku = normalizeSkuForPrint(
+        articleCodeForPrintGroup(variantSku) || variantSku
+      );
       const name = (i.productName ?? '').toString().trim();
       const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
