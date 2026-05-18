@@ -1752,8 +1752,8 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('reemitirFacturaConAgip:', error);
     const msg = error?.message || 'Error reemitiendo factura con IIBB';
-    const status = msg.includes('no configurado') ? 503 : 500;
-    res.status(status).json({ message: msg });
+    const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
+    res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
   }
 };
 
@@ -1913,8 +1913,8 @@ export const emitirFactura = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('emitirFactura:', error);
     const msg = error?.message || 'Error emitiendo factura AFIP';
-    const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
-    res.status(status).json({ message: msg });
+    const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
+    res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
   }
 };
 
@@ -2296,8 +2296,8 @@ export const emitirNotaCredito = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('emitirNotaCredito:', error);
     const msg = error?.message || 'Error emitiendo nota de crédito AFIP';
-    const status = msg.includes('no configurado') ? 503 : 500;
-    res.status(status).json({ message: msg });
+    const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
+    res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
   }
 };
 

@@ -32,6 +32,80 @@ const ID_IVA_21 = 5;
 const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9_999_999_999_999.99; // 13 enteros + 2 decimales
 
+/** Reintentos ante congestión ARCA/AFIP (503). */
+const AFIP_RETRY_MAX = 4;
+const AFIP_RETRY_DELAYS_MS = [2500, 5000, 8000, 12000];
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAfipTransientError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    response?: { status?: number };
+    data?: { statusCode?: number; message?: string };
+    message?: string;
+  };
+  const status = e?.status ?? e?.response?.status ?? e?.data?.statusCode;
+  if (status === 503 || status === 502 || status === 429) return true;
+  const msg = String(e?.data?.message ?? e?.message ?? '').toLowerCase();
+  return (
+    msg.includes('congestion') ||
+    msg.includes('congestionados') ||
+    msg.includes('unavailable') ||
+    msg.includes('timeout') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout')
+  );
+}
+
+/** Mensaje legible para el usuario (ARCA congestionado, etc.). */
+export function formatAfipError(err: unknown): string {
+  const e = err as { data?: { message?: string }; message?: string };
+  const arcMsg = e?.data?.message;
+  if (typeof arcMsg === 'string' && arcMsg.trim()) return arcMsg.trim();
+  const msg = String(e?.message ?? '').trim();
+  if (!msg) return 'Error comunicándose con AFIP';
+  if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
+    return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+  }
+  return msg;
+}
+
+export function afipEmitHttpStatusFromMessage(msg: string): number {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('no configurado')) return 503;
+  if (m.includes('ya tiene')) return 409;
+  if (
+    m.includes('congestion') ||
+    m.includes('congestionados') ||
+    m.includes('arca') ||
+    m.includes('espere unos minutos')
+  ) {
+    return 503;
+  }
+  return 500;
+}
+
+async function withAfipRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < AFIP_RETRY_MAX; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isAfipTransientError(err) || attempt >= AFIP_RETRY_MAX - 1) break;
+      const delay = AFIP_RETRY_DELAYS_MS[attempt] ?? 12000;
+      console.warn(
+        `[AFIP] ${label}: intento ${attempt + 1}/${AFIP_RETRY_MAX} falló (${formatAfipError(err)}). Reintento en ${delay}ms…`
+      );
+      await sleepMs(delay);
+    }
+  }
+  throw new Error(formatAfipError(lastErr));
+}
+
 export interface OrderForAfip {
   id: string;
   date: string | Date;
@@ -272,7 +346,11 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   const ambiente = config.production ? 'producción' : 'homologación';
   console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
 
-  const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+  const lastVoucher = Number(
+    await withAfipRetry('getLastVoucher factura', () =>
+      afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte) as Promise<number>
+    )
+  );
   const numeroFactura = lastVoucher + 1;
 
   const data: Record<string, unknown> = {
@@ -318,7 +396,9 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     );
   }
 
-  const res = await afip.ElectronicBilling.createVoucher(data);
+  const res = (await withAfipRetry('createVoucher factura', () =>
+    afip.ElectronicBilling.createVoucher(data)
+  )) as Record<string, unknown>;
   const cae = res?.CAE ?? res?.cae;
   const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
 
@@ -455,7 +535,11 @@ export async function emitirNotaCredito(
   const ambiente = config.production ? 'producción' : 'homologación';
   console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
 
-  const lastVoucher = await afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+  const lastVoucher = Number(
+    await withAfipRetry('getLastVoucher NC', () =>
+      afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte) as Promise<number>
+    )
+  );
   const numeroNC = lastVoucher + 1;
 
   const data: Record<string, unknown> = {
@@ -508,7 +592,9 @@ export async function emitirNotaCredito(
     );
   }
 
-  const res = await afip.ElectronicBilling.createVoucher(data);
+  const res = (await withAfipRetry('createVoucher NC', () =>
+    afip.ElectronicBilling.createVoucher(data)
+  )) as Record<string, unknown>;
   const cae = res?.CAE ?? res?.cae;
   const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
 

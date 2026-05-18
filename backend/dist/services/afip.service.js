@@ -51,6 +51,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.formatAfipError = formatAfipError;
+exports.afipEmitHttpStatusFromMessage = afipEmitHttpStatusFromMessage;
 exports.isAfipConfigured = isAfipConfigured;
 exports.isAfipProduction = isAfipProduction;
 exports.getAfipIssuerData = getAfipIssuerData;
@@ -80,6 +82,75 @@ const ID_IVA_21 = 5;
 /** Tipo de tributo WSFE: otros / percepción IIBB (ejemplo oficial AfipSDK). */
 const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9999999999999.99; // 13 enteros + 2 decimales
+/** Reintentos ante congestión ARCA/AFIP (503). */
+const AFIP_RETRY_MAX = 4;
+const AFIP_RETRY_DELAYS_MS = [2500, 5000, 8000, 12000];
+function sleepMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isAfipTransientError(err) {
+    var _a, _b, _c, _d, _e, _f, _g;
+    const e = err;
+    const status = (_c = (_a = e === null || e === void 0 ? void 0 : e.status) !== null && _a !== void 0 ? _a : (_b = e === null || e === void 0 ? void 0 : e.response) === null || _b === void 0 ? void 0 : _b.status) !== null && _c !== void 0 ? _c : (_d = e === null || e === void 0 ? void 0 : e.data) === null || _d === void 0 ? void 0 : _d.statusCode;
+    if (status === 503 || status === 502 || status === 429)
+        return true;
+    const msg = String((_g = (_f = (_e = e === null || e === void 0 ? void 0 : e.data) === null || _e === void 0 ? void 0 : _e.message) !== null && _f !== void 0 ? _f : e === null || e === void 0 ? void 0 : e.message) !== null && _g !== void 0 ? _g : '').toLowerCase();
+    return (msg.includes('congestion') ||
+        msg.includes('congestionados') ||
+        msg.includes('unavailable') ||
+        msg.includes('timeout') ||
+        msg.includes('econnreset') ||
+        msg.includes('etimedout'));
+}
+/** Mensaje legible para el usuario (ARCA congestionado, etc.). */
+function formatAfipError(err) {
+    var _a, _b;
+    const e = err;
+    const arcMsg = (_a = e === null || e === void 0 ? void 0 : e.data) === null || _a === void 0 ? void 0 : _a.message;
+    if (typeof arcMsg === 'string' && arcMsg.trim())
+        return arcMsg.trim();
+    const msg = String((_b = e === null || e === void 0 ? void 0 : e.message) !== null && _b !== void 0 ? _b : '').trim();
+    if (!msg)
+        return 'Error comunicándose con AFIP';
+    if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
+        return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+    }
+    return msg;
+}
+function afipEmitHttpStatusFromMessage(msg) {
+    const m = (msg || '').toLowerCase();
+    if (m.includes('no configurado'))
+        return 503;
+    if (m.includes('ya tiene'))
+        return 409;
+    if (m.includes('congestion') ||
+        m.includes('congestionados') ||
+        m.includes('arca') ||
+        m.includes('espere unos minutos')) {
+        return 503;
+    }
+    return 500;
+}
+function withAfipRetry(label, fn) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        let lastErr;
+        for (let attempt = 0; attempt < AFIP_RETRY_MAX; attempt++) {
+            try {
+                return yield fn();
+            }
+            catch (err) {
+                lastErr = err;
+                if (!isAfipTransientError(err) || attempt >= AFIP_RETRY_MAX - 1)
+                    break;
+                const delay = (_a = AFIP_RETRY_DELAYS_MS[attempt]) !== null && _a !== void 0 ? _a : 12000;
+                console.warn(`[AFIP] ${label}: intento ${attempt + 1}/${AFIP_RETRY_MAX} falló (${formatAfipError(err)}). Reintento en ${delay}ms…`);
+                yield sleepMs(delay);
+            }
+        }
+        throw new Error(formatAfipError(lastErr));
+    });
+}
 function readCertOrKey(envVar, value, description) {
     let p = value.trim();
     if (!p)
@@ -272,7 +343,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+        const lastVoucher = yield withAfipRetry('getLastVoucher factura', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte));
         const numeroFactura = lastVoucher + 1;
         const data = {
             CantReg: 1,
@@ -313,7 +384,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
             ];
             console.log(`[AFIP] Factura con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = yield afip.ElectronicBilling.createVoucher(data);
+        const res = yield withAfipRetry('createVoucher factura', () => afip.ElectronicBilling.createVoucher(data));
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
@@ -433,7 +504,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte);
+        const lastVoucher = yield withAfipRetry('getLastVoucher NC', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte));
         const numeroNC = lastVoucher + 1;
         const data = {
             CantReg: 1,

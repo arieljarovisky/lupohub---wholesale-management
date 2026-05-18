@@ -4,6 +4,8 @@ import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBase
 
 /** GET /products con muchas variantes puede tardar >15s (COUNT + JOIN en Railway). */
 const PRODUCTS_LIST_TIMEOUT_MS = 120000;
+/** Emisión AFIP: ARCA puede tardar 20–90s; el default 15s cortaba antes de ver el error real. */
+const AFIP_EMIT_TIMEOUT_MS = 120000;
 
 // Helper to handle offline/demo mode gracefully
 const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorMessage: string): Promise<T> => {
@@ -938,7 +940,7 @@ export const api = {
 
   /** Emite factura electrónica AFIP para un pedido (requiere picking y estado control/despacho). */
   emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number; puntoVta?: number; agipAlicuota?: number; agipRetPer?: number }> => {
-    return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {});
+    return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {}, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
   /** Obtiene los datos de la factura AFIP asociada a un pedido (si existe). */
@@ -988,7 +990,7 @@ export const api = {
     creditNoteEmitted?: boolean;
     detail?: string;
   }> => {
-    return await request(`/orders/${encodeURIComponent(orderId)}/invoice/reemitir-con-agip`, 'POST', body ?? {});
+    return await request(`/orders/${encodeURIComponent(orderId)}/invoice/reemitir-con-agip`, 'POST', body ?? {}, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
   /** Lista las notas de crédito de un pedido.
@@ -1050,7 +1052,7 @@ export const api = {
     orderId: string,
     data: { tipo: 'total' | 'item' | 'items'; itemIndex?: number; quantity?: number; items?: Array<{ itemIndex: number; quantity: number }> }
   ): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; amountCredited: number }> => {
-    return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data);
+    return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
   /** Lista los ítems del pedido que quedaron sin número de despacho asignado. */

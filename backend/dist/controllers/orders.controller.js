@@ -1623,8 +1623,8 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
     catch (error) {
         console.error('reemitirFacturaConAgip:', error);
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error reemitiendo factura con IIBB';
-        const status = msg.includes('no configurado') ? 503 : 500;
-        res.status(status).json({ message: msg });
+        const { afipEmitHttpStatusFromMessage } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
     }
 });
 exports.reemitirFacturaConAgip = reemitirFacturaConAgip;
@@ -1768,8 +1768,8 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     catch (error) {
         console.error('emitirFactura:', error);
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo factura AFIP';
-        const status = msg.includes('no configurado') ? 503 : msg.includes('ya tiene') ? 409 : 500;
-        res.status(status).json({ message: msg });
+        const { afipEmitHttpStatusFromMessage } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
     }
 });
 exports.emitirFactura = emitirFactura;
@@ -2086,8 +2086,8 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
     catch (error) {
         console.error('emitirNotaCredito:', error);
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo nota de crédito AFIP';
-        const status = msg.includes('no configurado') ? 503 : 500;
-        res.status(status).json({ message: msg });
+        const { afipEmitHttpStatusFromMessage } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+        res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
     }
 });
 exports.emitirNotaCredito = emitirNotaCredito;
