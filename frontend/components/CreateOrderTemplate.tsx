@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
-import { articleCodesMatch, resolveDisplayArticleCode } from '../utils/articleCodeUtils';
+import { articleCodesMatch, resolveDisplayArticleCode, skuLookupCandidates } from '../utils/articleCodeUtils';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
 
@@ -442,9 +442,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const displayCode = resolveDisplayArticleCode(code);
     setAddingProduct(true);
     try {
-      const product = await api.getProductBySku(code);
+      let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
+      for (const candidate of skuLookupCandidates(code)) {
+        product = await api.getProductBySku(candidate);
+        if (product?.variants?.length) break;
+        product = null;
+      }
       if (!product || !product.variants?.length) {
-        showToast('error', 'Código no encontrado o sin variantes.');
+        showToast('error', 'Código no encontrado o sin variantes. Probá buscarlo en la lista o verificá que exista en inventario.');
         return;
       }
       const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
@@ -618,7 +623,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const displayCode = resolveDisplayArticleCode(code);
     setAddingColorsForCode(displayCode);
     try {
-      const product = await api.getProductBySku(code);
+      let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
+      for (const candidate of skuLookupCandidates(code)) {
+        product = await api.getProductBySku(candidate);
+        if (product?.variants?.length) break;
+        product = null;
+      }
       if (!product || !product.variants?.length) {
         showToast('error', 'No se pudo cargar el artículo o no tiene variantes.');
         return;

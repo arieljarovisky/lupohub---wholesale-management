@@ -348,54 +348,10 @@ export const getProductById = async (req: Request, res: Response) => {
 export const getProductBySku = async (req: any, res: any) => {
   const { sku } = req.params;
   try {
-    // Buscar por SKU exacto o por SKU base (para agrupar variantes)
-    let product = await get(
-      `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-              COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-       FROM products p WHERE p.sku = ?`,
-      [sku]
-    );
-    
-    // Si no se encuentra exacto, buscar por SKU base
-    if (!product) {
-      product = await get(
-        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`,
-        [`${sku}-%`]
-      );
-    }
-
-    // Código de variante completo (ej. QE5546-158-614): primer segmento = SKU del modelo
-    if (!product && String(sku).includes('-')) {
-      const base = String(sku).split('-')[0];
-      product = await get(
-        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE p.sku = ?`,
-        [base]
-      );
-    }
-    if (!product) {
-      product = await get(
-        `SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE ? LIKE CONCAT(p.sku, '-%') ORDER BY CHAR_LENGTH(p.sku) DESC LIMIT 1`,
-        [sku]
-      );
-    }
+    const { resolveProductByArticleSku, findRelatedProductIdsForArticleSku } = await import('../services/productSkuFamily');
+    const product = await resolveProductByArticleSku(String(sku));
 
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
-
-    const { findRelatedProductIdsForArticleSku } = await import('../services/productSkuFamily');
     const productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
     const idPlaceholders = productIds.map(() => '?').join(',');
 

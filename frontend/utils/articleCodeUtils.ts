@@ -45,3 +45,23 @@ export function resolveDisplayArticleCode(requestedCode: string): string {
   if (!req) return '';
   return padArticleCodeTo7(req);
 }
+
+/** Variantes de código para reintentar búsqueda en API (0127501, 127501, etc.). */
+export function skuLookupCandidates(sku: string): string[] {
+  const t = String(sku ?? '').trim();
+  const out = new Set<string>();
+  if (t) {
+    out.add(t);
+    const base = t.split('-')[0];
+    if (base && base !== t) out.add(base);
+  }
+  const digits = String(t).replace(/\D/g, '');
+  if (digits) {
+    out.add(digits);
+    const stripped = digits.replace(/^0+/, '') || '0';
+    out.add(stripped);
+    if (digits.length <= 7) out.add(digits.padStart(7, '0'));
+    if (stripped.length <= 7) out.add(stripped.padStart(7, '0'));
+  }
+  return [...out];
+}
