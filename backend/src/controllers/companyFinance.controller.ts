@@ -2,6 +2,18 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { query, get, execute } from '../database/db';
 import { isCompanyFinanceUser, normalizeFinanceEmail } from '../utils/companyFinanceAccess';
+import {
+  aggregateMercadoLibreInRange,
+  aggregateTiendaNubeInRange,
+  listPendingInvoices,
+  sumDespachosCostInRange,
+  sumReceiptsInRange,
+} from '../services/companyFinanceAggregates.service';
+import {
+  countCalendarMonthsInRange,
+  fixedExpenseMonthsInRange,
+  round2,
+} from '../utils/companyFinanceFixed';
 
 export const EXPENSE_CATEGORIES = [
   { id: 'sueldo', label: 'Sueldos' },
@@ -219,6 +231,247 @@ export const deleteCompanyFinanceEntry = async (req: Request, res: Response) => 
   }
 };
 
+type FixedExpenseRow = {
+  id: string;
+  category: string;
+  amount: string | number;
+  description: string | null;
+  active: number | boolean;
+  startsFrom: string | null;
+  endsAt: string | null;
+};
+
+function mapFixedExpenseRow(r: FixedExpenseRow) {
+  return {
+    id: r.id,
+    category: r.category,
+    amount: round2(Number(r.amount)),
+    description: r.description,
+    active: !!r.active,
+    startsFrom: r.startsFrom,
+    endsAt: r.endsAt,
+  };
+}
+
+async function computeFixedExpensesForPeriod(from: string, to: string) {
+  const rows = (await query(
+    `SELECT id, category, amount, description, active,
+            DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+            DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+     FROM company_finance_fixed_expenses
+     WHERE active = 1
+     ORDER BY amount DESC`
+  )) as FixedExpenseRow[];
+
+  const monthsInPeriod = countCalendarMonthsInRange(from, to);
+  let total = 0;
+  let monthlySubtotal = 0;
+  const items: Array<{
+    id: string;
+    category: string;
+    description: string | null;
+    monthlyAmount: number;
+    monthsApplied: number;
+    periodTotal: number;
+  }> = [];
+
+  for (const r of rows) {
+    const monthsApplied = fixedExpenseMonthsInRange(from, to, r.startsFrom, r.endsAt);
+    if (monthsApplied <= 0) continue;
+    const monthlyAmount = round2(Number(r.amount));
+    monthlySubtotal += monthlyAmount;
+    const periodTotal = round2(monthlyAmount * monthsApplied);
+    total += periodTotal;
+    items.push({
+      id: r.id,
+      category: r.category,
+      description: r.description,
+      monthlyAmount,
+      monthsApplied,
+      periodTotal,
+    });
+  }
+
+  return {
+    fixedMonthlyExpenses: round2(total),
+    fixedMonthlySubtotal: round2(monthlySubtotal),
+    monthsInPeriod,
+    fixedExpenseItems: items,
+  };
+}
+
+export const listCompanyFinanceFixedExpenses = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const rows = (await query(
+      `SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt,
+              created_by_email AS createdByEmail, created_at AS createdAt
+       FROM company_finance_fixed_expenses
+       ORDER BY active DESC, amount DESC`
+    )) as FixedExpenseRow[];
+
+    const categoryLabels: Record<string, string> = {};
+    for (const c of EXPENSE_CATEGORIES) categoryLabels[c.id] = c.label;
+
+    res.json({
+      items: rows.map((r) => ({
+        ...mapFixedExpenseRow(r),
+        categoryLabel: categoryLabels[r.category] || r.category,
+        createdByEmail: (r as { createdByEmail?: string }).createdByEmail,
+        createdAt: (r as { createdAt?: string }).createdAt,
+      })),
+    });
+  } catch (error: unknown) {
+    console.error('listCompanyFinanceFixedExpenses:', error);
+    res.status(500).json({ message: 'Error listando gastos fijos' });
+  }
+};
+
+export const createCompanyFinanceFixedExpense = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const category = String(req.body?.category || '').trim();
+    const amount = Number(req.body?.amount);
+    const description = String(req.body?.description || '').trim() || null;
+    const active = req.body?.active !== false;
+    const startsFrom = req.body?.startsFrom ? String(req.body.startsFrom).slice(0, 10) : null;
+    const endsAt = req.body?.endsAt ? String(req.body.endsAt).slice(0, 10) : null;
+
+    if (!EXPENSE_CATEGORIES.some((c) => c.id === category)) {
+      return res.status(400).json({ message: 'Categoría inválida' });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: 'El importe mensual debe ser mayor a 0' });
+    }
+    if (startsFrom && !/^\d{4}-\d{2}-\d{2}$/.test(startsFrom)) {
+      return res.status(400).json({ message: 'startsFrom inválida' });
+    }
+    if (endsAt && !/^\d{4}-\d{2}-\d{2}$/.test(endsAt)) {
+      return res.status(400).json({ message: 'endsAt inválida' });
+    }
+    if (startsFrom && endsAt && startsFrom > endsAt) {
+      return res.status(400).json({ message: 'La vigencia desde no puede ser posterior al hasta' });
+    }
+
+    const id = uuidv4();
+    const user = (req as any).user || {};
+    await execute(
+      `INSERT INTO company_finance_fixed_expenses
+       (id, category, amount, description, active, starts_from, ends_at, created_by_user_id, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        category,
+        round2(amount),
+        description,
+        active ? 1 : 0,
+        startsFrom,
+        endsAt,
+        user.id || null,
+        normalizeFinanceEmail(user.email),
+      ]
+    );
+
+    const created = await get(
+      `SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+       FROM company_finance_fixed_expenses WHERE id = ?`,
+      [id]
+    );
+    res.status(201).json(mapFixedExpenseRow(created as FixedExpenseRow));
+  } catch (error: unknown) {
+    console.error('createCompanyFinanceFixedExpense:', error);
+    res.status(500).json({ message: 'Error creando gasto fijo' });
+  }
+};
+
+export const updateCompanyFinanceFixedExpense = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const id = String(req.params.id || '').trim();
+    const existing = await get(`SELECT id FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+    if (!existing) return res.status(404).json({ message: 'Gasto fijo no encontrado' });
+
+    const fields: string[] = [];
+    const params: unknown[] = [];
+
+    if (req.body?.category != null) {
+      const category = String(req.body.category).trim();
+      if (!EXPENSE_CATEGORIES.some((c) => c.id === category)) {
+        return res.status(400).json({ message: 'Categoría inválida' });
+      }
+      fields.push('category = ?');
+      params.push(category);
+    }
+    if (req.body?.amount != null) {
+      const amount = Number(req.body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: 'Importe inválido' });
+      }
+      fields.push('amount = ?');
+      params.push(round2(amount));
+    }
+    if (req.body?.description !== undefined) {
+      fields.push('description = ?');
+      params.push(String(req.body.description || '').trim() || null);
+    }
+    if (req.body?.active !== undefined) {
+      fields.push('active = ?');
+      params.push(req.body.active ? 1 : 0);
+    }
+    if (req.body?.startsFrom !== undefined) {
+      const startsFrom = req.body.startsFrom ? String(req.body.startsFrom).slice(0, 10) : null;
+      if (startsFrom && !/^\d{4}-\d{2}-\d{2}$/.test(startsFrom)) {
+        return res.status(400).json({ message: 'startsFrom inválida' });
+      }
+      fields.push('starts_from = ?');
+      params.push(startsFrom);
+    }
+    if (req.body?.endsAt !== undefined) {
+      const endsAt = req.body.endsAt ? String(req.body.endsAt).slice(0, 10) : null;
+      if (endsAt && !/^\d{4}-\d{2}-\d{2}$/.test(endsAt)) {
+        return res.status(400).json({ message: 'endsAt inválida' });
+      }
+      fields.push('ends_at = ?');
+      params.push(endsAt);
+    }
+
+    if (fields.length === 0) return res.status(400).json({ message: 'Nada para actualizar' });
+    params.push(id);
+    await execute(`UPDATE company_finance_fixed_expenses SET ${fields.join(', ')} WHERE id = ?`, params);
+
+    const updated = await get(
+      `SELECT id, category, amount, description, active,
+              DATE_FORMAT(starts_from, '%Y-%m-%d') AS startsFrom,
+              DATE_FORMAT(ends_at, '%Y-%m-%d') AS endsAt
+       FROM company_finance_fixed_expenses WHERE id = ?`,
+      [id]
+    );
+    res.json(mapFixedExpenseRow(updated as FixedExpenseRow));
+  } catch (error: unknown) {
+    console.error('updateCompanyFinanceFixedExpense:', error);
+    res.status(500).json({ message: 'Error actualizando gasto fijo' });
+  }
+};
+
+export const deleteCompanyFinanceFixedExpense = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const id = String(req.params.id || '').trim();
+    const result = await execute(`DELETE FROM company_finance_fixed_expenses WHERE id = ?`, [id]);
+    if ((result as { affectedRows?: number })?.affectedRows === 0) {
+      return res.status(404).json({ message: 'Gasto fijo no encontrado' });
+    }
+    res.json({ id });
+  } catch (error: unknown) {
+    console.error('deleteCompanyFinanceFixedExpense:', error);
+    res.status(500).json({ message: 'Error eliminando gasto fijo' });
+  }
+};
+
 async function wholesaleOrdersRevenue(from: string, to: string): Promise<number> {
   const row = (await get(
     `SELECT COALESCE(SUM(o.total), 0) AS total
@@ -231,11 +484,25 @@ async function wholesaleOrdersRevenue(from: string, to: string): Promise<number>
   return Math.round(Number(row?.total ?? 0) * 100) / 100;
 }
 
+export const getCompanyFinancePendingInvoices = async (req: Request, res: Response) => {
+  try {
+    if (!assertFinanceAccess(req, res)) return;
+    const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+    const data = await listPendingInvoices(limit);
+    res.json(data);
+  } catch (error: unknown) {
+    console.error('getCompanyFinancePendingInvoices:', error);
+    res.status(500).json({ message: 'Error listando facturas pendientes' });
+  }
+};
+
 export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
   try {
     if (!assertFinanceAccess(req, res)) return;
     const { from, to } = parseDateRange(req);
-    const includeOrders = req.query.includeOrders !== '0';
+    const includeOrders = req.query.includeOrders === '1' || req.query.includeOrders === 'true';
+    const includeChannels =
+      req.query.includeChannels !== '0' && req.query.includeChannels !== 'false';
 
     const totals = (await get(
       `SELECT
@@ -275,10 +542,40 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       [from, to]
     )) as Array<{ month: string; entryType: string; total: number }>;
 
+    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg] = await Promise.all([
+      sumReceiptsInRange(from, to),
+      sumDespachosCostInRange(from, to),
+      listPendingInvoices(200),
+      computeFixedExpensesForPeriod(from, to),
+      includeChannels
+        ? Promise.all([
+            aggregateMercadoLibreInRange(from, to),
+            aggregateTiendaNubeInRange(from, to),
+          ])
+        : Promise.resolve([
+            { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
+            { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
+          ]),
+    ]);
+
+    const [mlAgg, tnAgg] = channelAgg;
     const ordersRevenue = includeOrders ? await wholesaleOrdersRevenue(from, to) : 0;
     const manualIncome = Math.round(Number(totals?.manualIncome ?? 0) * 100) / 100;
-    const totalExpenses = Math.round(Number(totals?.totalExpenses ?? 0) * 100) / 100;
-    const totalIncome = Math.round((manualIncome + ordersRevenue) * 100) / 100;
+    const manualExpenses = Math.round(Number(totals?.totalExpenses ?? 0) * 100) / 100;
+
+    const receiptsTotal = receipts.total;
+    const mlSales = mlAgg.sales;
+    const tnSales = tnAgg.sales;
+    const channelFees = Math.round((mlAgg.fees + tnAgg.fees) * 100) / 100;
+    const despachosCost = despachos.total;
+
+    const totalIncome = Math.round(
+      (receiptsTotal + mlSales + tnSales + manualIncome + ordersRevenue) * 100
+    ) / 100;
+    const fixedMonthlyExpenses = fixedAgg.fixedMonthlyExpenses;
+    const totalExpenses = Math.round(
+      (manualExpenses + despachosCost + channelFees + fixedMonthlyExpenses) * 100
+    ) / 100;
     const netResult = Math.round((totalIncome - totalExpenses) * 100) / 100;
 
     const categoryLabels: Record<string, string> = {};
@@ -291,12 +588,38 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       to,
       manualIncome,
       ordersRevenue,
+      receiptsTotal,
+      receiptsCount: receipts.count,
+      mlSales,
+      mlFees: mlAgg.fees,
+      mlOrderCount: mlAgg.orderCount,
+      mlConnected: mlAgg.connected,
+      mlNote: mlAgg.note,
+      tnSales,
+      tnFees: tnAgg.fees,
+      tnOrderCount: tnAgg.orderCount,
+      tnConnected: tnAgg.connected,
+      tnNote: tnAgg.note,
+      channelFees,
+      despachosCost,
+      despachosCount: despachos.count,
+      manualExpenses,
+      fixedMonthlyExpenses,
+      fixedMonthlySubtotal: fixedAgg.fixedMonthlySubtotal,
+      monthsInPeriod: fixedAgg.monthsInPeriod,
+      fixedExpenseItems: fixedAgg.fixedExpenseItems.map((item) => ({
+        ...item,
+        categoryLabel: categoryLabels[item.category] || item.category,
+      })),
       totalIncome,
       totalExpenses,
       netResult,
       profitOrLoss: netResult >= 0 ? 'profit' : 'loss',
       expenseCount: Number(totals?.expenseCount ?? 0),
       incomeCount: Number(totals?.incomeCount ?? 0),
+      pendingInvoicesTotal: pendingInvoices.totalPending,
+      pendingInvoicesCount: pendingInvoices.items.length,
+      pendingInvoices: pendingInvoices.items,
       byCategory: (byCategory || []).map((r) => ({
         ...r,
         total: Math.round(Number(r.total) * 100) / 100,

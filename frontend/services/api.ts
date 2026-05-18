@@ -167,25 +167,80 @@ export const api = {
     from?: string;
     to?: string;
     includeOrders?: boolean;
+    includeChannels?: boolean;
   }): Promise<{
     from: string;
     to: string;
     manualIncome: number;
     ordersRevenue: number;
+    receiptsTotal: number;
+    receiptsCount: number;
+    mlSales: number;
+    mlFees: number;
+    mlOrderCount: number;
+    mlConnected: boolean;
+    mlNote?: string;
+    tnSales: number;
+    tnFees: number;
+    tnOrderCount: number;
+    tnConnected: boolean;
+    tnNote?: string;
+    channelFees: number;
+    despachosCost: number;
+    despachosCount: number;
+    manualExpenses: number;
+    fixedMonthlyExpenses: number;
+    fixedMonthlySubtotal: number;
+    monthsInPeriod: number;
+    fixedExpenseItems: Array<{
+      id: string;
+      category: string;
+      categoryLabel: string;
+      description: string | null;
+      monthlyAmount: number;
+      monthsApplied: number;
+      periodTotal: number;
+    }>;
     totalIncome: number;
     totalExpenses: number;
     netResult: number;
     profitOrLoss: 'profit' | 'loss';
     expenseCount: number;
     incomeCount: number;
+    pendingInvoicesTotal: number;
+    pendingInvoicesCount: number;
+    pendingInvoices: Array<{
+      orderId: string;
+      orderDate: string;
+      customerName: string;
+      invoiceLabel: string;
+      amountWithIva: number;
+      orderStatus: string;
+    }>;
     byCategory: Array<{ entryType: string; category: string; categoryLabel: string; total: number; count: number }>;
     byMonth: Array<{ month: string; entryType: string; total: number }>;
   }> => {
     const q = new URLSearchParams();
     if (params.from) q.set('from', params.from);
     if (params.to) q.set('to', params.to);
-    if (params.includeOrders === false) q.set('includeOrders', '0');
+    if (params.includeOrders) q.set('includeOrders', '1');
+    if (params.includeChannels === false) q.set('includeChannels', '0');
     return await request(`/company-finance/summary?${q.toString()}`, 'GET');
+  },
+
+  getCompanyFinancePendingInvoices: async (limit?: number): Promise<{
+    items: Array<{
+      orderId: string;
+      orderDate: string;
+      customerName: string;
+      invoiceLabel: string;
+      amountWithIva: number;
+      orderStatus: string;
+    }>;
+    totalPending: number;
+  }> => {
+    const q = limit != null ? `?limit=${limit}` : '';
+    return await request(`/company-finance/pending-invoices${q}`, 'GET');
   },
 
   getCompanyFinanceEntries: async (params?: {
@@ -225,6 +280,53 @@ export const api = {
 
   deleteCompanyFinanceEntry: async (id: string): Promise<{ id: string }> => {
     return await request<{ id: string }>(`/company-finance/entries/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
+  getCompanyFinanceFixedExpenses: async (): Promise<{
+    items: Array<{
+      id: string;
+      category: string;
+      categoryLabel: string;
+      amount: number;
+      description: string | null;
+      active: boolean;
+      startsFrom: string | null;
+      endsAt: string | null;
+    }>;
+  }> => {
+    return await request('/company-finance/fixed-expenses', 'GET');
+  },
+
+  createCompanyFinanceFixedExpense: async (payload: {
+    category: string;
+    amount: number;
+    description?: string;
+    active?: boolean;
+    startsFrom?: string;
+    endsAt?: string;
+  }) => {
+    return await request('/company-finance/fixed-expenses', 'POST', payload);
+  },
+
+  updateCompanyFinanceFixedExpense: async (
+    id: string,
+    payload: Partial<{
+      category: string;
+      amount: number;
+      description: string | null;
+      active: boolean;
+      startsFrom: string | null;
+      endsAt: string | null;
+    }>
+  ) => {
+    return await request(`/company-finance/fixed-expenses/${encodeURIComponent(id)}`, 'PUT', payload);
+  },
+
+  deleteCompanyFinanceFixedExpense: async (id: string): Promise<{ id: string }> => {
+    return await request<{ id: string }>(
+      `/company-finance/fixed-expenses/${encodeURIComponent(id)}`,
+      'DELETE'
+    );
   },
 
   importSellers: async (payload: {

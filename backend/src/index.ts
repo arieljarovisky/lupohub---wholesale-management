@@ -56,6 +56,7 @@ import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addCompanyFinanceTable } from './database/add_company_finance_table';
+import { addCompanyFinanceFixedExpensesTable } from './database/add_company_finance_fixed_expenses_table';
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
@@ -184,6 +185,7 @@ async function initDatabase() {
       await addOrderMatrixImportLabel();
       await addUserTasksTable();
       await addCompanyFinanceTable();
+      await addCompanyFinanceFixedExpensesTable();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
       await addOrdersPerformanceIndexes();

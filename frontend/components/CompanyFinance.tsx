@@ -9,6 +9,12 @@ import {
   Wallet,
   ArrowDownCircle,
   ArrowUpCircle,
+  Receipt,
+  ShoppingBag,
+  Store,
+  Package,
+  AlertCircle,
+  Repeat,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -24,6 +30,17 @@ type FinanceEntry = {
 };
 
 type Summary = Awaited<ReturnType<typeof api.getCompanyFinanceSummary>>;
+
+type FixedExpense = {
+  id: string;
+  category: string;
+  categoryLabel?: string;
+  amount: number;
+  description: string | null;
+  active: boolean;
+  startsFrom: string | null;
+  endsAt: string | null;
+};
 
 const fmt = (n: number) =>
   n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
@@ -49,15 +66,26 @@ const CompanyFinance: React.FC = () => {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [range, setRange] = useState(() => monthRange());
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
-  const [includeOrders, setIncludeOrders] = useState(true);
+  const [includeOrders, setIncludeOrders] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [fixedFormOpen, setFixedFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingFixedId, setEditingFixedId] = useState<string | null>(null);
+  const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
     amount: '',
     description: '',
     entryDate: todayIso(),
+  });
+  const [fixedForm, setFixedForm] = useState({
+    category: 'alquiler',
+    amount: '',
+    description: '',
+    active: true,
+    startsFrom: '',
+    endsAt: '',
   });
 
   const categoryOptions = useMemo(() => {
@@ -76,12 +104,14 @@ const CompanyFinance: React.FC = () => {
         return;
       }
       setAccess(acc);
-      const [sum, list] = await Promise.all([
+      const [sum, list, fixed] = await Promise.all([
         api.getCompanyFinanceSummary({ from: range.from, to: range.to, includeOrders }),
         api.getCompanyFinanceEntries({ from: range.from, to: range.to, type: filterType === 'all' ? undefined : filterType }),
+        api.getCompanyFinanceFixedExpenses(),
       ]);
       setSummary(sum);
       setEntries(list.entries as FinanceEntry[]);
+      setFixedExpenses(fixed.items as FixedExpense[]);
     } catch (e: unknown) {
       showToast('error', e instanceof Error ? e.message : 'No se pudieron cargar los datos');
     } finally {
@@ -109,6 +139,89 @@ const CompanyFinance: React.FC = () => {
       description: '',
       entryDate: todayIso(),
     });
+  };
+
+  const resetFixedForm = () => {
+    setEditingFixedId(null);
+    setFixedForm({
+      category: 'alquiler',
+      amount: '',
+      description: '',
+      active: true,
+      startsFrom: '',
+      endsAt: '',
+    });
+  };
+
+  const openCreateFixed = () => {
+    resetFixedForm();
+    setFixedFormOpen(true);
+  };
+
+  const openEditFixed = (row: FixedExpense) => {
+    setEditingFixedId(row.id);
+    setFixedForm({
+      category: row.category,
+      amount: String(row.amount),
+      description: row.description || '',
+      active: row.active,
+      startsFrom: row.startsFrom || '',
+      endsAt: row.endsAt || '',
+    });
+    setFixedFormOpen(true);
+  };
+
+  const handleSaveFixed = async () => {
+    const amount = Number(String(fixedForm.amount).replace(',', '.'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('warning', 'Indicá un importe mensual válido');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        category: fixedForm.category,
+        amount,
+        description: fixedForm.description.trim() || undefined,
+        active: fixedForm.active,
+        startsFrom: fixedForm.startsFrom.trim() || undefined,
+        endsAt: fixedForm.endsAt.trim() || undefined,
+      };
+      if (editingFixedId) {
+        await api.updateCompanyFinanceFixedExpense(editingFixedId, payload);
+        showToast('success', 'Gasto fijo actualizado');
+      } else {
+        await api.createCompanyFinanceFixedExpense(payload);
+        showToast('success', 'Gasto fijo mensual agregado');
+      }
+      setFixedFormOpen(false);
+      resetFixedForm();
+      load();
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteFixed = async (id: string) => {
+    if (!window.confirm('¿Eliminar este gasto fijo mensual?')) return;
+    try {
+      await api.deleteCompanyFinanceFixedExpense(id);
+      showToast('success', 'Eliminado');
+      load();
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo eliminar');
+    }
+  };
+
+  const toggleFixedActive = async (row: FixedExpense) => {
+    try {
+      await api.updateCompanyFinanceFixedExpense(row.id, { active: !row.active });
+      load();
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo actualizar');
+    }
   };
 
   const openCreate = (type: 'expense' | 'income') => {
@@ -198,10 +311,17 @@ const CompanyFinance: React.FC = () => {
             Resultados de la empresa
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Gastos operativos, ingresos manuales y referencia de ventas mayoristas por período.
+            Recibos, ventas Mercado Libre y Tienda Nube, despachos, comisiones de canales y facturas pendientes.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={openCreateFixed}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-700/90 hover:bg-orange-600 text-white text-sm font-bold"
+          >
+            <Repeat size={16} /> Gasto fijo
+          </button>
           <button
             type="button"
             onClick={() => openCreate('expense')}
@@ -257,7 +377,7 @@ const CompanyFinance: React.FC = () => {
             onChange={(e) => setIncludeOrders(e.target.checked)}
             className="rounded"
           />
-          Incluir ventas mayoristas (pedidos)
+          Incluir referencia pedidos mayoristas (sin facturar)
         </label>
       </div>
 
@@ -271,15 +391,20 @@ const CompanyFinance: React.FC = () => {
             <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Ingresos totales</p>
               <p className="text-2xl font-black text-emerald-400 mt-1">{fmt(summary.totalIncome)}</p>
-              {includeOrders && summary.ordersRevenue > 0 && (
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Manual {fmt(summary.manualIncome)} + pedidos {fmt(summary.ordersRevenue)}
-                </p>
-              )}
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                Recibos {fmt(summary.receiptsTotal ?? 0)} · ML {fmt(summary.mlSales ?? 0)} · TN{' '}
+                {fmt(summary.tnSales ?? 0)}
+                {(summary.manualIncome ?? 0) > 0 ? ` · manual ${fmt(summary.manualIncome)}` : ''}
+              </p>
             </div>
             <div className="rounded-xl border border-red-800/40 bg-red-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Gastos totales</p>
               <p className="text-2xl font-black text-red-400 mt-1">{fmt(summary.totalExpenses)}</p>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                Despachos {fmt(summary.despachosCost ?? 0)} · Fijos {fmt(summary.fixedMonthlyExpenses ?? 0)} · ML{' '}
+                {fmt(summary.mlFees ?? 0)} · TN {fmt(summary.tnFees ?? 0)}
+                {(summary.manualExpenses ?? 0) > 0 ? ` · otros ${fmt(summary.manualExpenses)}` : ''}
+              </p>
             </div>
             <div
               className={`rounded-xl border p-4 ${
@@ -307,13 +432,155 @@ const CompanyFinance: React.FC = () => {
                 {summary.netResult >= 0 ? 'Ganancia del período' : 'Pérdida del período'}
               </p>
             </div>
-            <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold">Movimientos</p>
-              <p className="text-lg font-bold text-white mt-1">
-                {summary.expenseCount} gastos · {summary.incomeCount} ingresos manuales
+            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-4">
+              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <AlertCircle size={14} className="text-amber-400" />
+                Pagos pendientes
+              </p>
+              <p className="text-2xl font-black text-amber-300 mt-1">
+                {fmt(summary.pendingInvoicesTotal ?? 0)}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {summary.pendingInvoicesCount ?? 0} factura(s) sin cobrar
               </p>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-emerald-800/30 bg-slate-900/40 overflow-hidden">
+              <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-sm font-bold text-emerald-300 flex items-center gap-2">
+                <ArrowUpCircle size={16} /> Ganancias del período
+              </div>
+              <ul className="divide-y divide-slate-800/80 text-sm">
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Receipt size={14} className="text-emerald-500" />
+                    Recibos ({summary.receiptsCount ?? 0})
+                  </span>
+                  <span className="font-mono text-emerald-400">{fmt(summary.receiptsTotal ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <ShoppingBag size={14} className="text-yellow-500" />
+                    Mercado Libre ({summary.mlOrderCount ?? 0} órdenes)
+                  </span>
+                  <span className="font-mono text-emerald-400">{fmt(summary.mlSales ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Store size={14} className="text-violet-400" />
+                    Tienda Nube ({summary.tnOrderCount ?? 0} órdenes)
+                  </span>
+                  <span className="font-mono text-emerald-400">{fmt(summary.tnSales ?? 0)}</span>
+                </li>
+                {(summary.manualIncome ?? 0) > 0 && (
+                  <li className="flex justify-between items-center p-3">
+                    <span className="text-slate-300">Ingresos manuales</span>
+                    <span className="font-mono text-emerald-400">{fmt(summary.manualIncome)}</span>
+                  </li>
+                )}
+                {includeOrders && (summary.ordersRevenue ?? 0) > 0 && (
+                  <li className="flex justify-between items-center p-3 text-slate-500">
+                    <span>Ref. pedidos mayoristas</span>
+                    <span className="font-mono">{fmt(summary.ordersRevenue)}</span>
+                  </li>
+                )}
+              </ul>
+              {(summary.mlNote || summary.tnNote) && (
+                <p className="px-4 pb-3 text-[10px] text-slate-600">
+                  {summary.mlNote}
+                  {summary.mlNote && summary.tnNote ? ' · ' : ''}
+                  {summary.tnNote}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-red-800/30 bg-slate-900/40 overflow-hidden">
+              <div className="px-4 py-3 bg-red-950/40 border-b border-red-900/40 text-sm font-bold text-red-300 flex items-center gap-2">
+                <ArrowDownCircle size={16} /> Gastos del período
+              </div>
+              <ul className="divide-y divide-slate-800/80 text-sm">
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Package size={14} className="text-orange-400" />
+                    Despachos importación ({summary.despachosCount ?? 0})
+                  </span>
+                  <span className="font-mono text-red-400">{fmt(summary.despachosCost ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">Comisiones Mercado Libre</span>
+                  <span className="font-mono text-red-400">{fmt(summary.mlFees ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">Comisiones Tienda Nube</span>
+                  <span className="font-mono text-red-400">{fmt(summary.tnFees ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Repeat size={14} className="text-orange-400" />
+                    Gastos fijos mensuales
+                    {(summary.monthsInPeriod ?? 1) > 1 && (
+                      <span className="text-[10px] text-slate-600">
+                        ({summary.monthsInPeriod} meses)
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-mono text-red-400">{fmt(summary.fixedMonthlyExpenses ?? 0)}</span>
+                </li>
+                {(summary.fixedMonthlySubtotal ?? 0) > 0 && (
+                  <li className="px-3 pb-2 text-[10px] text-slate-600">
+                    Base mensual activa: {fmt(summary.fixedMonthlySubtotal ?? 0)}/mes
+                  </li>
+                )}
+                {(summary.manualExpenses ?? 0) > 0 && (
+                  <li className="flex justify-between items-center p-3">
+                    <span className="text-slate-300">Gastos operativos manuales</span>
+                    <span className="font-mono text-red-400">{fmt(summary.manualExpenses)}</span>
+                  </li>
+                )}
+              </ul>
+              <p className="px-4 pb-3 text-[10px] text-slate-600">
+                {summary.expenseCount} gasto(s) manual(es) en el período
+              </p>
+            </div>
+          </div>
+
+          {(summary.pendingInvoices?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-amber-800/40 overflow-hidden">
+              <div className="px-4 py-3 bg-amber-950/30 border-b border-amber-900/40 text-sm font-bold text-amber-200 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <AlertCircle size={16} /> Facturas no pagadas
+                </span>
+                <span className="font-mono text-amber-300">{fmt(summary.pendingInvoicesTotal ?? 0)}</span>
+              </div>
+              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead className="sticky top-0 bg-slate-900/95">
+                    <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                      <th className="p-3">Fecha</th>
+                      <th className="p-3">Cliente</th>
+                      <th className="p-3">Factura</th>
+                      <th className="p-3">Estado pedido</th>
+                      <th className="p-3 text-right">Saldo (IVA incl.)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.pendingInvoices.map((inv) => (
+                      <tr key={inv.orderId} className="border-b border-slate-800/60">
+                        <td className="p-3 text-slate-400">{inv.orderDate}</td>
+                        <td className="p-3 text-slate-200">{inv.customerName}</td>
+                        <td className="p-3 font-mono text-amber-200/90">{inv.invoiceLabel}</td>
+                        <td className="p-3 text-slate-500">{inv.orderStatus}</td>
+                        <td className="p-3 text-right font-mono text-amber-300">
+                          {fmt(inv.amountWithIva)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {summary.byCategory.length > 0 && (
             <div className="rounded-xl border border-slate-700 overflow-hidden">
@@ -353,9 +620,98 @@ const CompanyFinance: React.FC = () => {
         </>
       ) : null}
 
+      <div className="rounded-xl border border-orange-900/40 overflow-hidden">
+        <div className="px-4 py-3 bg-orange-950/30 border-b border-orange-900/40 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-bold text-orange-200 flex items-center gap-2">
+            <Repeat size={16} /> Gastos fijos mensuales
+          </span>
+          <span className="text-xs text-slate-500">
+            Se suman al período ({summary?.monthsInPeriod ?? '—'} mes
+            {(summary?.monthsInPeriod ?? 0) !== 1 ? 'es' : ''} en el rango)
+          </span>
+        </div>
+        {fixedExpenses.length === 0 ? (
+          <p className="p-6 text-center text-slate-500 text-sm">
+            No hay gastos fijos. Usá &quot;Gasto fijo&quot; para cargar alquiler, sueldos fijos, etc.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                  <th className="p-3">Concepto</th>
+                  <th className="p-3">Categoría</th>
+                  <th className="p-3 text-right">$/mes</th>
+                  <th className="p-3">Vigencia</th>
+                  <th className="p-3 text-center">Activo</th>
+                  <th className="p-3 text-right">En período</th>
+                  <th className="p-3 w-20" />
+                </tr>
+              </thead>
+              <tbody>
+                {fixedExpenses.map((row) => {
+                  const periodItem = summary?.fixedExpenseItems?.find((i) => i.id === row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-800/60 ${!row.active ? 'opacity-50' : ''}`}
+                    >
+                      <td className="p-3 text-slate-200">{row.description || '—'}</td>
+                      <td className="p-3 text-slate-400">
+                        {row.categoryLabel || categoryLabel(row.category)}
+                      </td>
+                      <td className="p-3 text-right font-mono text-orange-300">{fmt(row.amount)}</td>
+                      <td className="p-3 text-slate-500 text-xs">
+                        {row.startsFrom || row.endsAt
+                          ? `${row.startsFrom || '…'} → ${row.endsAt || '…'}`
+                          : 'Siempre'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleFixedActive(row)}
+                          className={`text-xs font-bold px-2 py-1 rounded ${
+                            row.active
+                              ? 'bg-emerald-900/50 text-emerald-400'
+                              : 'bg-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {row.active ? 'Sí' : 'No'}
+                        </button>
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-400 text-xs">
+                        {periodItem && row.active ? fmt(periodItem.periodTotal) : '—'}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex gap-1 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => openEditFixed(row)}
+                            className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFixed(row.id)}
+                            className="p-1.5 rounded-lg hover:bg-red-900/40 text-red-400"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="rounded-xl border border-slate-700 overflow-hidden">
         <div className="px-4 py-3 bg-slate-800/80 border-b border-slate-700 text-sm font-bold text-white">
-          Movimientos registrados
+          Movimientos puntuales del período
         </div>
         {entries.length === 0 ? (
           <p className="p-8 text-center text-slate-500 text-sm">No hay movimientos en este período.</p>
@@ -420,6 +776,110 @@ const CompanyFinance: React.FC = () => {
           </div>
         )}
       </div>
+
+      {fixedFormOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          onClick={(e) => e.target === e.currentTarget && !saving && setFixedFormOpen(false)}
+        >
+          <div
+            className="bg-slate-800 border border-orange-800/50 rounded-2xl max-w-md w-full p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-black text-white mb-1 flex items-center gap-2">
+              <Repeat className="text-orange-400" size={20} />
+              {editingFixedId ? 'Editar gasto fijo' : 'Nuevo gasto fijo mensual'}
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Se repite cada mes y se suma automáticamente al resumen del período.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] uppercase text-slate-500 font-bold">Categoría</label>
+                <select
+                  value={fixedForm.category}
+                  onChange={(e) => setFixedForm((f) => ({ ...f, category: e.target.value }))}
+                  className="w-full mt-1 rounded-lg bg-slate-900 border border-slate-600 text-white text-sm px-3 py-2"
+                >
+                  {(access?.expenseCategories || []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase text-slate-500 font-bold">Importe mensual</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={fixedForm.amount}
+                  onChange={(e) => setFixedForm((f) => ({ ...f, amount: e.target.value }))}
+                  className="w-full mt-1 rounded-lg bg-slate-900 border border-slate-600 text-white px-3 py-2"
+                  placeholder="Ej. 850000"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase text-slate-500 font-bold">Concepto</label>
+                <input
+                  type="text"
+                  value={fixedForm.description}
+                  onChange={(e) => setFixedForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Ej. Alquiler depósito"
+                  className="w-full mt-1 rounded-lg bg-slate-900 border border-slate-600 text-white px-3 py-2"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] uppercase text-slate-500 font-bold">Vigente desde</label>
+                  <input
+                    type="date"
+                    value={fixedForm.startsFrom}
+                    onChange={(e) => setFixedForm((f) => ({ ...f, startsFrom: e.target.value }))}
+                    className="w-full mt-1 rounded-lg bg-slate-900 border border-slate-600 text-white px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase text-slate-500 font-bold">Vigente hasta</label>
+                  <input
+                    type="date"
+                    value={fixedForm.endsAt}
+                    onChange={(e) => setFixedForm((f) => ({ ...f, endsAt: e.target.value }))}
+                    className="w-full mt-1 rounded-lg bg-slate-900 border border-slate-600 text-white px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={fixedForm.active}
+                  onChange={(e) => setFixedForm((f) => ({ ...f, active: e.target.checked }))}
+                  className="rounded"
+                />
+                Activo (sumar en resúmenes)
+              </label>
+            </div>
+            <div className="flex gap-2 justify-end mt-5">
+              <button
+                type="button"
+                onClick={() => !saving && setFixedFormOpen(false)}
+                className="px-4 py-2 rounded-xl text-slate-300 hover:bg-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleSaveFixed}
+                className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {formOpen && (
         <div
