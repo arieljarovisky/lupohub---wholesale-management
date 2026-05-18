@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
@@ -22,6 +21,7 @@ import {
   setStoredOrdersListFilters,
   type OrdersInvoiceListFilter,
 } from '../utils/ordersListFilters';
+import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -1406,177 +1406,40 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
-  const buildOrderSheet = (order: Order) => {
-    const customerName = getCustomerName(order);
-    const enrichedItems = order.items.map(enrichItem);
-    const colorCodeFromSku = (skuRaw: string): string => {
-      const sku = String(skuRaw || '').trim();
-      if (!sku) return '';
-      const parts = sku.split('-').filter(Boolean);
-      if (parts.length >= 3) {
-        const d = parts[parts.length - 1].replace(/\D/g, '');
-        if (d.length >= 3) return d.slice(0, 3);
-      }
-      const digits = sku.replace(/\D/g, '');
-      if (digits.length >= 3) return digits.slice(-3);
-      return '';
-    };
-    const articleCodeFromSku = (skuRaw: string): string => {
-      const sku = String(skuRaw || '').trim();
-      if (!sku) return '';
-      const parts = sku.split('-').filter(Boolean);
-      if (parts.length >= 3) return parts[0];
-      const digits = sku.replace(/\D/g, '');
-      if (!digits) return sku;
-      // Formato común local: BASE(7) + TALLE(3) + COLOR(3)
-      if (digits.length > 9) return digits.slice(0, -6);
-      return digits;
-    };
-    const colorCodeFromName = (nameRaw: string): string => {
-      const name = String(nameRaw || '').trim();
-      if (!name) return '';
-      // Ej: "614 - Natural", "997 - Negro"
-      const leading = name.match(/^([A-Z0-9]+)\s*-/i);
-      if (leading?.[1]) return leading[1].toUpperCase();
-      // Ej: "TRICOLOR_905", "ESTAMPADO_948"
-      const embedded = name.match(/(?:^|_)(\d{3})(?:$|_)/);
-      if (embedded?.[1]) return embedded[1];
-      return '';
-    };
+  const orderExportExcelOptions = useMemo(
+    () => ({ products, orderNetoFromItems }),
+    [products]
+  );
 
-    const SIZE_COLS = ['U', 'P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG'] as const;
-    const sizeLabelFromCode = (raw: string): string => {
-      const code = String(raw || '').trim().toUpperCase();
-      if (!code) return '';
-      if (SIZE_COLS.includes(code as any)) return code;
-      const map: Record<string, string> = {
-        '170': 'U',
-        '130': 'P',
-        '140': 'M',
-        '150': 'G',
-        '160': 'GG',
-        '180': 'XG',
-        '200': 'XXG',
-        '250': 'XXXG',
-      };
-      return map[code] || '';
-    };
-
-    type PivotRow = {
-      codigo: string;
-      color: string;
-      price: number;
-      qtyBySize: Record<string, number>;
-      totalUnits: number;
-    };
-
-    const byKey = new Map<string, PivotRow>();
-    for (const item of enrichedItems) {
-      const codigo = articleCodeFromSku(String(item.sku || '')) || String(item.sku || '').trim() || '—';
-      const color = String((item as any).colorCode || '').trim()
-        || colorCodeFromSku(String(item.sku || ''))
-        || colorCodeFromName(String(item.colorName || ''))
-        || String(item.colorName || '').trim()
-        || '—';
-      const size = String(item.sizeCode || '').trim() || '';
-      const price = Number(item.priceAtMoment || 0);
-      const qty = Number(item.quantity || 0);
-      const key = `${codigo}__${color}__${price}`;
-
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          codigo,
-          color,
-          price,
-          qtyBySize: {},
-          totalUnits: 0
-        });
-      }
-      const row = byKey.get(key)!;
-      const sizeLabel = sizeLabelFromCode(size);
-      if (sizeLabel) row.qtyBySize[sizeLabel] = (row.qtyBySize[sizeLabel] || 0) + qty;
-      row.totalUnits += qty;
-    }
-
-    const pivotRows = Array.from(byKey.values()).sort((a, b) => {
-      const byCode = a.codigo.localeCompare(b.codigo, undefined, { numeric: true });
-      if (byCode !== 0) return byCode;
-      return a.color.localeCompare(b.color, undefined, { numeric: true });
-    });
-
-    const blockHeaders = ['CÓDIGO', 'COLOR', ...SIZE_COLS, 'PRECIO'];
-    const blockRow = (r?: PivotRow) => {
-      if (!r) return Array(blockHeaders.length).fill('');
-      return [
-        r.codigo,
-        r.color,
-        ...SIZE_COLS.map(s => {
-          const q = Number(r.qtyBySize[s] || 0);
-          return q > 0 ? q : '';
-        }),
-        r.price
-      ];
-    };
-
-    const totalUnits = enrichedItems.reduce((s, i) => s + Number(i.quantity || 0), 0);
-    const totalFromItems = pivotRows.reduce((sum, r) => sum + (r.totalUnits * r.price), 0);
-    const netFromLines = orderNetoFromItems(order);
-    const displayTotal =
-      netFromLines > 0 ? netFromLines : order.total != null && order.total > 0 ? order.total : totalFromItems;
-    const half = Math.ceil(pivotRows.length / 2);
-    const left = pivotRows.slice(0, half);
-    const right = pivotRows.slice(half);
-    const rowsCount = Math.max(left.length, right.length);
-    const separator = ['', ''];
-
-    const data: any[][] = [
-      ['CLIENTE', customerName, '', '', '', '', '', '', '', '', '', '', '', 'FECHA', formatOrderDate(order.date)],
-      ['PEDIDO', order.id, '', '', '', '', '', '', '', '', '', '', '', 'ESTADO', order.status],
-      ['TOTAL', displayTotal, '', '', '', '', '', '', '', '', '', '', '', 'UNIDADES', totalUnits],
-    ];
-    if (order.createdByName) {
-      const creado = `${order.createdByName}${order.createdByRole ? ` (${orderRoleLabelEs(order.createdByRole)})` : ''}`;
-      data.push(['CREADO POR', creado, '', '', '', '', '', '', '', '', '', '', '', '', '']);
-    }
-    const sellerForExport = order.sellerName || (order.sellerId ? users.find((u) => u.id === order.sellerId)?.name : '');
-    if (order.sellerId && sellerForExport && (order.createdBy !== order.sellerId || !order.createdByName)) {
-      data.push(['VENDEDOR', sellerForExport, '', '', '', '', '', '', '', '', '', '', '', '', '']);
-    }
-    data.push([]);
-    data.push([...blockHeaders, ...separator, ...blockHeaders]);
-    for (let i = 0; i < rowsCount; i++) {
-      data.push([...blockRow(left[i]), ...separator, ...blockRow(right[i])]);
-    }
-    return XLSX.utils.aoa_to_sheet(data);
-  };
-
-  /** Exportar todos los pedidos (filtrados o todos): un archivo Excel con una hoja por pedido, cada una como planilla. */
-  const exportOrdersToExcel = () => {
+  /** Exportar pedidos filtrados: una hoja por pedido (formato planilla cliente). */
+  const exportOrdersToExcel = async () => {
     const list = filteredOrders.length > 0 ? filteredOrders : orders;
     if (list.length === 0) return;
-    const workbook = XLSX.utils.book_new();
-    const usedNames = new Set<string>();
-    list.forEach((order, index) => {
-      let sheetName = safeSheetName(order);
-      if (usedNames.has(sheetName)) sheetName = `${sheetName.slice(0, 28)}_${index}`.slice(0, 31);
-      usedNames.add(sheetName);
-      const ws = buildOrderSheet(order);
-      XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-    });
-    const filename = `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(workbook, filename);
+    try {
+      await downloadOrdersExcel(list, {
+        ...orderExportExcelOptions,
+        sheetNameForOrder: (order) => safeSheetName(order),
+        filename: `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      });
+    } catch (err: unknown) {
+      showToast('error', err instanceof Error ? err.message : 'Error al exportar a Excel');
+    }
   };
 
-  /** Exportar un solo pedido a Excel (una hoja en formato planilla). */
-  const exportOneOrderToExcel = (order: Order, e: React.MouseEvent) => {
+  /** Exportar un solo pedido a Excel (formato planilla cliente). */
+  const exportOneOrderToExcel = async (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
-    const workbook = XLSX.utils.book_new();
-    const ws = buildOrderSheet(order);
-    const sheetName = safeSheetName(order).slice(0, 31);
-    XLSX.utils.book_append_sheet(workbook, ws, sheetName);
     const clientNameForFile = getCustomerName(order).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
     const dateStr = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(workbook, `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`);
+    try {
+      await downloadOneOrderExcel(order, {
+        ...orderExportExcelOptions,
+        sheetName: safeSheetName(order),
+        filename: `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`,
+      });
+    } catch (err: unknown) {
+      showToast('error', err instanceof Error ? err.message : 'Error al exportar a Excel');
+    }
   };
 
   return (
