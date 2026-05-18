@@ -6,4 +6,6 @@ buildCommand = "npm run build"
 
 [deploy]
 startCommand = "npm run start"
+# AFIP/ARCA: reintentos acotados para no superar ~60s del proxy HTTP (502 sin CORS en el navegador).
+# Opcional en Railway → Variables: AFIP_MAX_WAIT_MS=50000, AFIP_ROUTE_TIMEOUT_MS=55000, AFIP_RETRY_MAX=3
 

@@ -1863,21 +1863,31 @@ export const emitirFactura = async (req: any, res: any) => {
         : undefined;
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
-    const result = await emitirAfip(
-      {
-        id: orderRow.id,
-        date: orderRow.date,
-        total: totalForAfip,
-        customerId: orderRow.customer_id,
-        iibbPercepcion: iibbPercepcion ?? null
-      },
-      {
-        id: customerRow.id,
-        businessName: customerRow.business_name ?? '',
-        cuit: customerRow.cuit,
-        condicionIva: customerRow.condicion_iva ?? null
-      },
-      forceCbteTipo
+    const { withRequestTimeout } = await import('../utils/requestTimeout');
+    const routeTimeoutMs = Math.min(
+      115_000,
+      Math.max(40_000, parseInt(process.env.AFIP_ROUTE_TIMEOUT_MS || '55000', 10) || 55_000)
+    );
+    const result = await withRequestTimeout(
+      routeTimeoutMs,
+      () =>
+        emitirAfip(
+          {
+            id: orderRow.id,
+            date: orderRow.date,
+            total: totalForAfip,
+            customerId: orderRow.customer_id,
+            iibbPercepcion: iibbPercepcion ?? null
+          },
+          {
+            id: customerRow.id,
+            businessName: customerRow.business_name ?? '',
+            cuit: customerRow.cuit,
+            condicionIva: customerRow.condicion_iva ?? null
+          },
+          forceCbteTipo
+        ),
+      'La emisión en AFIP superó el tiempo máximo del servidor. Reintentá en unos minutos; si el pedido aún no tiene factura en LupoHub, verificá en AFIP antes de repetir.'
     );
 
     const { v4: uuidv4 } = await import('uuid');
@@ -1914,7 +1924,11 @@ export const emitirFactura = async (req: any, res: any) => {
     console.error('emitirFactura:', error);
     const msg = error?.message || 'Error emitiendo factura AFIP';
     const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
-    res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
+    const status =
+      error?.status === 504 || error?.code === 'REQUEST_TIMEOUT'
+        ? 504
+        : afipEmitHttpStatusFromMessage(msg);
+    res.status(status).json({ message: msg });
   }
 };
 

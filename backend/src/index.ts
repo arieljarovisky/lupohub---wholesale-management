@@ -82,12 +82,22 @@ const allowedOrigins: string[] = [
 const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '');
 if (frontendUrl && !allowedOrigins.includes(frontendUrl)) allowedOrigins.push(frontendUrl);
 
-function isAllowedOrigin(origin?: string): boolean {
+export function isAllowedOrigin(origin?: string): boolean {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   // Permitir previews de Vercel del proyecto (ej: lupohub-wholesale-management-git-...vercel.app)
   if (/^https:\/\/lupohub-wholesale-management(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin)) return true;
   return false;
+}
+
+/** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
+export function applyCorsHeaders(req: express.Request, res: express.Response): void {
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
 }
 
 const corsOpts: cors.CorsOptions = {
@@ -99,8 +109,13 @@ const corsOpts: cors.CorsOptions = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
+app.set('trust proxy', 1);
 app.use(cors(corsOpts) as RequestHandler);
 app.options('*', cors(corsOpts) as RequestHandler);
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res);
+  next();
+});
 app.use(express.json() as any);
 app.use((req, res, next) => {
   console.log('[backend]', req.method, req.path);
@@ -128,9 +143,11 @@ app.use('/api/user-tasks', userTasksRoutes);
 app.use('/api/company-finance', companyFinanceRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  applyCorsHeaders(req, res);
   const message = err?.message || String(err) || 'Error interno del servidor';
-  if (!res.headersSent) res.status(500).json({ error: message, message });
+  const status = typeof err?.status === 'number' ? err.status : 500;
+  if (!res.headersSent) res.status(status).json({ error: message, message });
 });
 
 // Health Check

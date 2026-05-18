@@ -103,6 +103,17 @@ export const request = async <T = any>(path: string, method: HttpMethod = 'GET',
     if (axios.isAxiosError(err)) {
       if (err.code === 'ECONNABORTED') throw new Error('Request timed out');
 
+      if (!err.response) {
+        const isGateway =
+          String(err.message || '').toLowerCase().includes('network error') ||
+          err.code === 'ERR_NETWORK';
+        if (isGateway) {
+          throw new Error(
+            'No hubo respuesta del servidor (error de red o tiempo de espera del hosting). En facturación AFIP suele ser ARCA lento o un corte del proxy (~60s). Reintentá en unos minutos y verificá en AFIP si el comprobante se emitió antes de volver a intentar.'
+          );
+        }
+      }
+
       const errorData = err.response?.data;
       // Backend puede enviar { message: "..." } o { error: "..." }
       const serverMsg =

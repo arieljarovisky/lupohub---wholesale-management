@@ -32,9 +32,17 @@ const ID_IVA_21 = 5;
 const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9_999_999_999_999.99; // 13 enteros + 2 decimales
 
-/** Reintentos ante congestión ARCA/AFIP (503). */
-const AFIP_RETRY_MAX = 4;
-const AFIP_RETRY_DELAYS_MS = [2500, 5000, 8000, 12000];
+/**
+ * Reintentos ante congestión ARCA/AFIP (503).
+ * Tope de espera total: Railway/Vercel cortan ~60s; si superamos eso el proxy devuelve 502
+ * sin headers CORS y el navegador muestra "CORS blocked" aunque el origen esté bien configurado.
+ */
+const AFIP_RETRY_MAX = Math.min(5, Math.max(1, parseInt(process.env.AFIP_RETRY_MAX || '3', 10) || 3));
+const AFIP_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
+const AFIP_MAX_WAIT_MS = Math.min(
+  110_000,
+  Math.max(25_000, parseInt(process.env.AFIP_MAX_WAIT_MS || '50000', 10) || 50_000)
+);
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,6 +85,9 @@ export function afipEmitHttpStatusFromMessage(msg: string): number {
   const m = (msg || '').toLowerCase();
   if (m.includes('no configurado')) return 503;
   if (m.includes('ya tiene')) return 409;
+  if (m.includes('superó el tiempo') || m.includes('tiempo máximo del servidor') || m.includes('tardó demasiado')) {
+    return 504;
+  }
   if (
     m.includes('congestion') ||
     m.includes('congestionados') ||
@@ -89,21 +100,30 @@ export function afipEmitHttpStatusFromMessage(msg: string): number {
 }
 
 async function withAfipRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + AFIP_MAX_WAIT_MS;
   let lastErr: unknown;
   for (let attempt = 0; attempt < AFIP_RETRY_MAX; attempt++) {
+    if (Date.now() >= deadline) break;
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
       if (!isAfipTransientError(err) || attempt >= AFIP_RETRY_MAX - 1) break;
-      const delay = AFIP_RETRY_DELAYS_MS[attempt] ?? 12000;
+      const delay = Math.min(AFIP_RETRY_DELAYS_MS[attempt] ?? 8000, deadline - Date.now());
+      if (delay <= 0) break;
       console.warn(
         `[AFIP] ${label}: intento ${attempt + 1}/${AFIP_RETRY_MAX} falló (${formatAfipError(err)}). Reintento en ${delay}ms…`
       );
       await sleepMs(delay);
     }
   }
-  throw new Error(formatAfipError(lastErr));
+  const base = formatAfipError(lastErr);
+  if (Date.now() >= deadline && isAfipTransientError(lastErr)) {
+    throw new Error(
+      `${base} La emisión tardó demasiado (límite ${Math.round(AFIP_MAX_WAIT_MS / 1000)}s). Reintentá en unos minutos; si el pedido no tiene factura en LupoHub, AFIP pudo no haberla registrado.`
+    );
+  }
+  throw new Error(base);
 }
 
 export interface OrderForAfip {
