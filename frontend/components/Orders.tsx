@@ -17,6 +17,11 @@ import {
 } from '../utils/wholesaleInvoiceHtml';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { calcTotalesDesdeNetoGravado } from '../utils/afipComprobante';
+import {
+  getStoredOrdersListFilters,
+  setStoredOrdersListFilters,
+  type OrdersInvoiceListFilter,
+} from '../utils/ordersListFilters';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -179,14 +184,6 @@ function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: n
   return { alicuota, retPer };
 }
 
-/** Filtros de lista: AFIP + si en la factura guardada figura percepción de ingresos brutos. */
-type OrdersInvoiceListFilter =
-  | 'all'
-  | 'uninvoiced'
-  | 'invoiced'
-  | 'invoiced_with_iibb'
-  | 'invoiced_no_iibb';
-
 function orderMatchesInvoiceListFilter(order: Order, f: OrdersInvoiceListFilter): boolean {
   if (f === 'all') return true;
   if (f === 'uninvoiced') return !order.invoice;
@@ -275,10 +272,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   orderArchivedFilter = 'no', setOrderArchivedFilter, refreshOrders
 }) => {
   const { showConfirm, showToast } = useNotification();
-  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL');
+  const storedListFilters = getStoredOrdersListFilters();
+  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>(storedListFilters.filterStatus);
   /** Filtro por comprobante AFIP y por percepción IIBB persistida en la factura. */
-  const [invoiceFilter, setInvoiceFilter] = useState<OrdersInvoiceListFilter>('all');
-  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [invoiceFilter, setInvoiceFilter] = useState<OrdersInvoiceListFilter>(storedListFilters.invoiceFilter);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState(storedListFilters.customerSearchQuery);
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
   const [remitoEntregaId, setRemitoEntregaId] = useState<string>(REMITO_ENTREGA_PRINCIPAL);
@@ -405,6 +403,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   useEffect(() => {
     api.getRemitenteServer().then(setRemitenteFromApi).catch(() => setRemitenteFromApi(null));
   }, []);
+
+  useEffect(() => {
+    setStoredOrdersListFilters({
+      filterStatus,
+      invoiceFilter,
+      customerSearchQuery,
+      orderArchivedFilter: orderArchivedFilter ?? 'no',
+    });
+  }, [filterStatus, invoiceFilter, customerSearchQuery, orderArchivedFilter]);
 
   useEffect(() => {
     try {

@@ -15,6 +15,7 @@ import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem
 import { api } from './services/api';
 import { setAuthToken } from './services/httpClient';
 import { useNotification } from './context/NotificationContext';
+import { getStoredOrdersListFilters } from './utils/ordersListFilters';
 
 /** Si falla la carga del chunk (ej. 404 tras un nuevo deploy), recarga la página para cargar la versión nueva. */
 function lazyWithReload<T extends React.ComponentType<any>>(
@@ -115,7 +116,9 @@ const App: React.FC = () => {
   /** Modal de aviso post-guardado: artículos cuyas unidades quedaron sin número de despacho. */
   const [despachoWarningsToShow, setDespachoWarningsToShow] = useState<string[] | null>(null);
   /** Filtro de archivados en pedidos: 'no' = ocultar archivados, 'yes' = ver todos, 'only' = solo archivados */
-  const [orderArchivedFilter, setOrderArchivedFilter] = useState<'no' | 'yes' | 'only'>('no');
+  const [orderArchivedFilter, setOrderArchivedFilter] = useState<'no' | 'yes' | 'only'>(
+    () => getStoredOrdersListFilters().orderArchivedFilter
+  );
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const [myUserTasks, setMyUserTasks] = useState<UserTask[]>([]);
