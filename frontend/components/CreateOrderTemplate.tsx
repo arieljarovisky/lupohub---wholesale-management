@@ -50,23 +50,13 @@ interface TemplateRow {
   price: number;
 }
 
-/** Código de color + nombre en la grilla (ej. `614 · Blanco`). */
-function formatColorCell(colorCode: string, colorName: string): React.ReactNode {
+/** Código de color - nombre en la grilla (ej. `111 - Blanco`). */
+function formatColorCell(colorCode: string, colorName: string): string {
   const code = String(colorCode ?? '').trim();
   const name = String(colorName ?? '').trim();
   if (!code && !name) return '—';
-  if (code && name && name !== code) {
-    return (
-      <>
-        <span className="font-mono text-slate-300 tabular-nums" title={`Código ${code}`}>
-          {code}
-        </span>
-        <span className="text-slate-500 mx-1">·</span>
-        <span>{name}</span>
-      </>
-    );
-  }
-  return <span title={code ? `Código ${code}` : undefined}>{name || code}</span>;
+  if (code && name && name !== code) return `${code} - ${name}`;
+  return name || code;
 }
 
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
@@ -116,8 +106,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [addingProduct, setAddingProduct] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<string>('');
-  /** Código del artículo al que se están agregando colores (para mostrar carga en el botón). */
-  const [addingColorsForCode, setAddingColorsForCode] = useState<string | null>(null);
+  /** Modal para elegir qué color agregar a un artículo ya cargado. */
+  const [colorPicker, setColorPicker] = useState<{
+    productCode: string;
+    productName: string;
+    product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>;
+    options: Array<{ colorCode: string; colorName: string }>;
+    loading: boolean;
+  } | null>(null);
   /** Códigos de artículo colapsados (solo se muestra resumen). */
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [matrixImporting, setMatrixImporting] = useState(false);
@@ -323,12 +319,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     applyCustomerPriceList(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
-    const productById = new Map(products.map((p) => [p.id, p]));
-    const getBaseArticleCode = (skuRaw: string, productIdRaw: string) => {
-      const product = productById.get(productIdRaw);
-      const fromProduct = String((product as any)?.base_sku || product?.sku || '').trim();
-      return articleCodeForOrderRow(fromProduct, skuRaw) || fromProduct || String(skuRaw || '').trim();
-    };
+    const productById = new Map<string, Product>();
+    for (const p of products) {
+      const pid = String((p as any).product_id || '').trim();
+      if (pid) productById.set(pid, p);
+      if (p.id) productById.set(p.id, p);
+    }
 
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of initialOrder.items || []) {
@@ -339,7 +335,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const productId = String((item as any).productId || '');
       const variantId = String((item as any).variantId || '').trim();
       if (!variantId) continue;
-      const productCode = getBaseArticleCode(rawSku, productId) || rawSku || productId || `SKU-${variantId.slice(0, 6)}`;
+      const fromProduct = String((productById.get(productId) as any)?.base_sku || productById.get(productId)?.sku || '').trim();
+      const productCode = fromProduct
+        ? resolveDisplayArticleCode(fromProduct)
+        : resolveDisplayArticleCode(articleCodeForOrderRow(undefined, rawSku) || rawSku || productId);
       const colorCode = String((item as any).colorCode || '').trim() || colorName;
 
       const key = `${productId || productCode}__${colorCode}`;
@@ -392,6 +391,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       setSizes(sorted);
     });
   }, []);
+
+  /** Prefijo de artículo (solo código padre, ej. 0127501) para mostrar y agrupar filas. */
+  const rowArticlePrefix = useCallback(
+    (row: TemplateRow): string => {
+      const byProductId = products.find(
+        (p) => String((p as any).product_id || '') === row.productId || p.id === row.productId
+      );
+      const fromCatalog = String((byProductId as any)?.base_sku || byProductId?.sku || '').trim();
+      if (fromCatalog) return resolveDisplayArticleCode(fromCatalog);
+      return resolveDisplayArticleCode(row.productCode);
+    },
+    [products]
+  );
 
   const searchTrimmed = searchTerm.trim().toLowerCase();
   /** Agrupar por artículo (base_sku) para mostrar un ítem por código; totalStock = suma de stock de todas las variantes. */
@@ -473,14 +485,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           price
         });
       });
-      const alreadyInOrder = rows.some(r => articleCodesMatch(r.productCode, displayCode));
+      const alreadyInOrder = rows.some(r => articleCodesMatch(rowArticlePrefix(r), displayCode));
       if (alreadyInOrder) {
         showToast('error', 'Este artículo ya está en el pedido.');
         setAddingProduct(false);
         return;
       }
       setRows(prev => {
-        if (prev.some(r => articleCodesMatch(r.productCode, displayCode))) return prev;
+        if (prev.some(r => articleCodesMatch(rowArticlePrefix(r), displayCode))) return prev;
         return [...prev, ...newRows];
       });
       setShowAddModal(false);
@@ -602,12 +614,52 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
   }, [products, selectedPriceListId, isEditing, rows.length]);
 
-  /** Vuelve a agregar al pedido los colores de un artículo que ya está cargado (p. ej. si eliminaste una fila de color). */
-  const addMissingColorsToArticle = async (productCode: string) => {
+  const buildRowForColor = (
+    product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>,
+    displayCode: string,
+    colorCode: string,
+    vars: Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number; sku?: string; variant_sku?: string }>
+  ): TemplateRow => {
+    const first = vars[0];
+    const colorName = first?.color_name ?? colorCode;
+    const defaultQtys: Record<string, number> = {};
+    sizes.forEach(s => { defaultQtys[s.code] = 0; });
+    const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
+    const variantBySize: Record<string, string> = {};
+    const stockBySize: Record<string, number> = {};
+    vars.forEach(v => {
+      const variantSkuRef = String((v as any).variant_sku || v.sku || product.sku || '');
+      const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
+      variantBySize[sizeCode] = v.variant_id;
+      const st = (v as any).stock ?? (v as any).stock_quantity;
+      stockBySize[sizeCode] = Math.max(0, Number(st ?? 0));
+    });
+    return {
+      id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      productCode: displayCode,
+      productName: product.name ?? displayCode,
+      productId: product.id,
+      colorCode,
+      colorName,
+      variantBySize,
+      quantitiesBySize: { ...defaultQtys },
+      stockBySize,
+      price
+    };
+  };
+
+  /** Abre modal con colores del artículo que aún no están en el pedido. */
+  const openColorPickerForArticle = async (productCode: string) => {
     const code = (productCode || '').trim();
     if (!code) return;
     const displayCode = resolveDisplayArticleCode(code);
-    setAddingColorsForCode(displayCode);
+    setColorPicker({
+      productCode: displayCode,
+      productName: '',
+      product: null as unknown as NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>,
+      options: [],
+      loading: true
+    });
     try {
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
       for (const candidate of skuLookupCandidates(code)) {
@@ -617,6 +669,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
       if (!product || !product.variants?.length) {
         showToast('error', 'No se pudo cargar el artículo o no tiene variantes.');
+        setColorPicker(null);
         return;
       }
       const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
@@ -627,65 +680,59 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         byColor.get(c)!.push(v);
       }
       const existingColorCodes = new Set(
-        rows.filter(r => articleCodesMatch(r.productCode, displayCode)).map(r => r.colorCode)
+        rows.filter(r => articleCodesMatch(rowArticlePrefix(r), displayCode)).map(r => r.colorCode)
       );
-      const defaultQtys: Record<string, number> = {};
-      sizes.forEach(s => { defaultQtys[s.code] = 0; });
-      const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
-      const newRows: TemplateRow[] = [];
+      const options: Array<{ colorCode: string; colorName: string }> = [];
       byColor.forEach((vars, colorCode) => {
         if (existingColorCodes.has(colorCode)) return;
-        const first = vars[0];
-        const colorName = first?.color_name ?? colorCode;
-        const variantBySize: Record<string, string> = {};
-        const stockBySize: Record<string, number> = {};
-        vars.forEach(v => {
-          const variantSkuRef = String((v as any).variant_sku || v.sku || product.sku || '');
-          const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
-          variantBySize[sizeCode] = v.variant_id;
-          // Aceptar stock en snake_case (API) o camelCase
-          const st = (v as any).stock ?? (v as any).stock_quantity;
-          stockBySize[sizeCode] = Math.max(0, Number(st ?? 0));
-          if (defaultQtys[sizeCode] == null) defaultQtys[sizeCode] = 0;
-        });
-        newRows.push({
-          id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          productCode: displayCode,
-          productName: product.name ?? code,
-          productId: product.id,
-          colorCode,
-          colorName,
-          variantBySize,
-          quantitiesBySize: { ...defaultQtys },
-          stockBySize,
-          price
-        });
+        options.push({ colorCode, colorName: vars[0]?.color_name ?? colorCode });
       });
-      if (newRows.length === 0) {
+      options.sort((a, b) => a.colorName.localeCompare(b.colorName, 'es', { sensitivity: 'base' }));
+      if (options.length === 0) {
         showToast('info', 'Este artículo ya tiene todos sus colores en el pedido.');
+        setColorPicker(null);
         return;
       }
-      let insertEnd = rows.length;
-      for (let i = rows.length - 1; i >= 0; i--) {
-        if (articleCodesMatch(rows[i].productCode, displayCode)) {
-          insertEnd = i + 1;
-          break;
-        }
-      }
-      setRows(prev => {
-        const next = [...prev];
-        next.splice(insertEnd, 0, ...newRows);
-        return next;
+      setColorPicker({
+        productCode: displayCode,
+        productName: product.name ?? displayCode,
+        product,
+        options,
+        loading: false
       });
-      showToast('success', `Se agregaron ${newRows.length} color${newRows.length === 1 ? '' : 'es'}.`);
     } catch (e: any) {
       const msg = e?.response?.status === 401
         ? 'Sesión vencida. Cerrá sesión y volvé a iniciar sesión.'
         : (e?.message || 'Error al cargar colores.');
       showToast('error', msg);
-    } finally {
-      setAddingColorsForCode(null);
+      setColorPicker(null);
     }
+  };
+
+  const addSelectedColorToArticle = (colorCode: string) => {
+    if (!colorPicker?.product) return;
+    const { product, productCode: displayCode } = colorPicker;
+    const variants = (product.variants || []) as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
+    const vars = variants.filter(v => (v.color_code ?? '') === colorCode);
+    if (!vars.length) {
+      showToast('error', 'Color no encontrado en el catálogo.');
+      return;
+    }
+    const newRow = buildRowForColor(product, displayCode, colorCode, vars);
+    let insertEnd = rows.length;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (articleCodesMatch(rowArticlePrefix(rows[i]), displayCode)) {
+        insertEnd = i + 1;
+        break;
+      }
+    }
+    setRows(prev => {
+      const next = [...prev];
+      next.splice(insertEnd, 0, newRow);
+      return next;
+    });
+    setColorPicker(null);
+    showToast('success', `Color ${formatColorCell(colorCode, newRow.colorName)} agregado.`);
   };
 
   const total = useMemo(() => {
@@ -796,20 +843,21 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [rows, selectedCustomerId, totalUnits, hasExceededStock, savingOrder]);
 
-  /** Agrupar filas por código de artículo (orden de aparición). */
+  /** Agrupar filas por prefijo de artículo (orden de aparición). */
   const groups = useMemo(() => {
     const list: Array<{ productCode: string; productName: string; rows: TemplateRow[] }> = [];
     let current: { productCode: string; productName: string; rows: TemplateRow[] } | null = null;
     for (const row of rows) {
-      if (!current || !articleCodesMatch(current.productCode, row.productCode)) {
-        current = { productCode: row.productCode, productName: row.productName, rows: [row] };
+      const prefix = rowArticlePrefix(row);
+      if (!current || current.productCode !== prefix) {
+        current = { productCode: prefix, productName: row.productName, rows: [row] };
         list.push(current);
       } else {
         current.rows.push(row);
       }
     }
     return list;
-  }, [rows]);
+  }, [rows, rowArticlePrefix]);
 
   const toggleGroup = (productCode: string) => {
     setCollapsedGroups(prev => ({ ...prev, [productCode]: !prev[productCode] }));
@@ -1124,11 +1172,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                   className="flex items-center gap-2 text-left hover:text-blue-200 transition"
                                 >
                                   <ChevronDown size={18} className="shrink-0" />
-                                  {row.productCode}
+                                  {rowArticlePrefix(row)}
                                 </button>
                               ) : null}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-200 text-sm">{formatColorCell(row.colorCode, row.colorName)}</td>
+                            <td className="py-2.5 px-3 text-slate-200 text-sm font-mono">{formatColorCell(row.colorCode, row.colorName)}</td>
                             <td className="py-2 px-2">
                               <div className="flex items-center gap-1.5 justify-center">
                                 <input
@@ -1216,18 +1264,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
                           <button
                             type="button"
-                            onClick={() => addMissingColorsToArticle(group.productCode)}
-                            disabled={!!addingColorsForCode}
+                            onClick={() => openColorPickerForArticle(group.productCode)}
+                            disabled={readOnly || !!colorPicker?.loading}
                             className="flex items-center gap-2 text-slate-400 hover:text-blue-400 text-xs font-semibold transition-colors touch-manipulation disabled:opacity-50"
                           >
-                            {addingColorsForCode === group.productCode ? (
-                              <>Cargando...</>
-                            ) : (
-                              <>
-                                <Palette size={14} />
-                                Agregar otro color a este artículo
-                              </>
-                            )}
+                            <Palette size={14} />
+                            Agregar otro color a este artículo
                           </button>
                         </td>
                       </tr>
@@ -1282,6 +1324,59 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       )}
 
       </div>{/* /inert subtree */}
+
+      {colorPicker && (
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[110] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="shrink-0 py-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setColorPicker(null)}
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition touch-manipulation"
+              aria-label="Cerrar"
+            >
+              <ArrowLeft size={22} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-bold text-white text-xl">Agregar color</h2>
+              <p className="text-sm text-slate-400 truncate">
+                <span className="font-mono">{colorPicker.productCode}</span>
+                {colorPicker.productName ? ` · ${colorPicker.productName}` : ''}
+              </p>
+            </div>
+          </div>
+
+          {colorPicker.loading ? (
+            <div className="flex-1 flex items-center justify-center text-slate-400">Cargando colores...</div>
+          ) : (
+            <>
+              <p className="text-xs text-slate-500 mb-2">Elegí el color a agregar al pedido</p>
+              <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
+                {colorPicker.options.map((opt) => (
+                  <button
+                    key={opt.colorCode}
+                    type="button"
+                    onClick={() => addSelectedColorToArticle(opt.colorCode)}
+                    className="w-full text-left px-4 py-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 hover:bg-slate-700/80 hover:border-blue-500/50 transition flex items-center justify-between gap-3 touch-manipulation"
+                  >
+                    <span className="font-mono text-white text-sm">{formatColorCell(opt.colorCode, opt.colorName)}</span>
+                    <Plus size={20} className="text-blue-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="pt-4 border-t border-slate-700 shrink-0">
+            <button
+              type="button"
+              onClick={() => setColorPicker(null)}
+              className="w-full min-h-[48px] py-3 rounded-xl bg-slate-700/90 hover:bg-slate-600 text-slate-200 font-semibold border border-slate-600 transition touch-manipulation"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[100] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
