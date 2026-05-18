@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = require("../middleware/auth");
+const companyFinance_controller_1 = require("../controllers/companyFinance.controller");
+const router = (0, express_1.Router)();
+router.use(auth_1.authMiddleware);
+router.get('/access', companyFinance_controller_1.getCompanyFinanceAccess);
+router.get('/summary', companyFinance_controller_1.getCompanyFinanceSummary);
+router.get('/entries', companyFinance_controller_1.listCompanyFinanceEntries);
+router.post('/entries', companyFinance_controller_1.createCompanyFinanceEntry);
+router.put('/entries/:id', companyFinance_controller_1.updateCompanyFinanceEntry);
+router.delete('/entries/:id', companyFinance_controller_1.deleteCompanyFinanceEntry);
+exports.default = router;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet } from 'lucide-react';
+import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MOCK_VISITS,
   MOCK_CUSTOMERS,
@@ -59,6 +60,7 @@ const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
 const ChannelMargins = lazyWithReload(() => import('./components/ChannelMargins'));
+const CompanyFinance = lazyWithReload(() => import('./components/CompanyFinance'));
 const UserTaskManager = lazyWithReload(() => import('./components/UserTaskManager'));
 
 const ViewFallback = () => (
@@ -151,6 +153,14 @@ const App: React.FC = () => {
 
   const handleChangeView = useCallback((nextView: string) => {
     const nextBase = String(nextView || '').split('?')[0];
+    if (nextBase === COMPANY_FINANCE_VIEW) {
+      if (!currentUser || !isCompanyFinanceUser(currentUser.email)) {
+        if (currentUser) setCurrentView(defaultViewForRole(currentUser.role));
+        return;
+      }
+      setCurrentView(nextView);
+      return;
+    }
     if (currentUser && !isViewAllowedForRole(nextBase, currentUser.role)) {
       const fallback = defaultViewForRole(currentUser.role);
       setCurrentView(fallback);
@@ -915,6 +925,7 @@ const App: React.FC = () => {
           currentView={baseView} 
           onChangeView={handleChangeView} 
           userRole={currentUser.role}
+          userEmail={currentUser.email}
           onLogout={handleLogout}
         />
       </div>
@@ -993,6 +1004,7 @@ const App: React.FC = () => {
                  {baseView === 'orders' && (currentUser.role === Role.CUSTOMER ? 'Mis pedidos' : 'Pedidos Mayoristas')}
                  {baseView === 'bulk_invoicing' && 'Facturación masiva'}
                  {baseView === 'channel_margins' && 'Márgenes y precios'}
+                 {baseView === COMPANY_FINANCE_VIEW && 'Resultados empresa'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
                  {baseView === 'mercadolibre_canal_difusion' && 'Canal de difusión — Mercado Libre'}
@@ -1176,6 +1188,11 @@ const App: React.FC = () => {
           {baseView === 'channel_margins' && (
             <Suspense fallback={<ViewFallback />}>
               <ChannelMargins />
+            </Suspense>
+          )}
+          {baseView === COMPANY_FINANCE_VIEW && isCompanyFinanceUser(currentUser.email) && (
+            <Suspense fallback={<ViewFallback />}>
+              <CompanyFinance />
             </Suspense>
           )}
           {baseView === 'mercadolibre_orders' && (

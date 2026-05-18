@@ -1,15 +1,17 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Percent } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet } from 'lucide-react';
 import { Role } from '../types';
+import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
 
 interface SidebarProps {
   currentView: string;
   onChangeView: (view: string) => void;
   userRole: Role;
+  userEmail?: string;
   onLogout: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView, userRole, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView, userRole, userEmail, onLogout }) => {
   const menuSections = [
     {
       title: 'Principal',
@@ -50,7 +52,23 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
         { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE], color: 'emerald' },
         { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN, Role.WAREHOUSE] },
       ]
-    }
+    },
+    ...(isCompanyFinanceUser(userEmail)
+      ? [
+          {
+            title: 'Finanzas',
+            items: [
+              {
+                id: COMPANY_FINANCE_VIEW,
+                label: 'Resultados empresa',
+                icon: Wallet,
+                roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
+                color: 'purple',
+              },
+            ],
+          },
+        ]
+      : []),
   ];
 
   const getItemStyles = (item: any, isActive: boolean) => {

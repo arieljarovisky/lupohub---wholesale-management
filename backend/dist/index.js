@@ -68,6 +68,8 @@ const add_variant_luposhop_stock_table_1 = require("./database/add_variant_lupos
 const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_order_matrix_import_label_1 = require("./database/add_order_matrix_import_label");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
+const add_company_finance_table_1 = require("./database/add_company_finance_table");
+const companyFinance_routes_1 = __importDefault(require("./routes/companyFinance.routes"));
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
 const add_orders_performance_indexes_1 = require("./database/add_orders_performance_indexes");
@@ -134,6 +136,7 @@ app.use('/api/afip', afip_routes_1.default);
 app.use('/api/billing', billing_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
 app.use('/api/user-tasks', userTasks_routes_1.default);
+app.use('/api/company-finance', companyFinance_routes_1.default);
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err, _req, res, _next) => {
     const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
@@ -191,6 +194,7 @@ function initDatabase() {
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
                 yield (0, add_order_matrix_import_label_1.addOrderMatrixImportLabel)();
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
+                yield (0, add_company_finance_table_1.addCompanyFinanceTable)();
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
                 yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();

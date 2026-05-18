@@ -154,6 +154,79 @@ export const api = {
     return await request<{ id: string }>(`/user-tasks/${encodeURIComponent(id)}`, 'DELETE');
   },
 
+  getCompanyFinanceAccess: async (): Promise<{
+    allowed: boolean;
+    email: string | null;
+    expenseCategories: Array<{ id: string; label: string }>;
+    incomeCategories: Array<{ id: string; label: string }>;
+  }> => {
+    return await request('/company-finance/access', 'GET');
+  },
+
+  getCompanyFinanceSummary: async (params: {
+    from?: string;
+    to?: string;
+    includeOrders?: boolean;
+  }): Promise<{
+    from: string;
+    to: string;
+    manualIncome: number;
+    ordersRevenue: number;
+    totalIncome: number;
+    totalExpenses: number;
+    netResult: number;
+    profitOrLoss: 'profit' | 'loss';
+    expenseCount: number;
+    incomeCount: number;
+    byCategory: Array<{ entryType: string; category: string; categoryLabel: string; total: number; count: number }>;
+    byMonth: Array<{ month: string; entryType: string; total: number }>;
+  }> => {
+    const q = new URLSearchParams();
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
+    if (params.includeOrders === false) q.set('includeOrders', '0');
+    return await request(`/company-finance/summary?${q.toString()}`, 'GET');
+  },
+
+  getCompanyFinanceEntries: async (params?: {
+    from?: string;
+    to?: string;
+    type?: 'expense' | 'income';
+  }): Promise<{ from: string; to: string; entries: Array<Record<string, unknown>> }> => {
+    const q = new URLSearchParams();
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    if (params?.type) q.set('type', params.type);
+    return await request(`/company-finance/entries?${q.toString()}`, 'GET');
+  },
+
+  createCompanyFinanceEntry: async (payload: {
+    entryType: 'expense' | 'income';
+    category: string;
+    amount: number;
+    description?: string;
+    entryDate: string;
+  }) => {
+    return await request('/company-finance/entries', 'POST', payload);
+  },
+
+  updateCompanyFinanceEntry: async (
+    id: string,
+    payload: Partial<{
+      entryType: 'expense' | 'income';
+      category: string;
+      amount: number;
+      description: string | null;
+      entryDate: string;
+    }>
+  ) => {
+    return await request(`/company-finance/entries/${encodeURIComponent(id)}`, 'PUT', payload);
+  },
+
+  deleteCompanyFinanceEntry: async (id: string): Promise<{ id: string }> => {
+    return await request<{ id: string }>(`/company-finance/entries/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
   importSellers: async (payload: {
     sellers: Array<{ name: string; email: string; password?: string; commissionPercentage?: number }>;
     defaultPassword: string;

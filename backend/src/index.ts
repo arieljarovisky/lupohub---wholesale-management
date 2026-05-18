@@ -55,6 +55,8 @@ import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_st
 import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
 import { addUserTasksTable } from './database/add_user_tasks_table';
+import { addCompanyFinanceTable } from './database/add_company_finance_table';
+import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
 import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
@@ -122,6 +124,7 @@ app.use('/api/afip', afipRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/user-tasks', userTasksRoutes);
+app.use('/api/company-finance', companyFinanceRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -180,6 +183,7 @@ async function initDatabase() {
       await addOrderCreatedBy();
       await addOrderMatrixImportLabel();
       await addUserTasksTable();
+      await addCompanyFinanceTable();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
       await addOrdersPerformanceIndexes();
