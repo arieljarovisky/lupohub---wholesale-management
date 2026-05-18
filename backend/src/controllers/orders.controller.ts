@@ -12,6 +12,9 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeMatrixImportArticleSku } from '../utils/matrixImportSku';
 
+/** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
+const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
+
 async function getProductIdForVariant(variantId: string): Promise<string | null> {
   const row = await get(
     `SELECT pc.product_id AS product_id
@@ -1862,16 +1865,18 @@ export const emitirFactura = async (req: any, res: any) => {
         ? { baseImp: totalForAfip, alicuota: agip.alicuota, importe: agip.amount }
         : undefined;
 
-    const { emitirFactura: emitirAfip } = await import('../services/afip.service');
-    const { withRequestTimeout } = await import('../utils/requestTimeout');
     const routeTimeoutMs = Math.min(
       115_000,
-      Math.max(40_000, parseInt(process.env.AFIP_ROUTE_TIMEOUT_MS || '55000', 10) || 55_000)
+      Math.max(60_000, parseInt(process.env.AFIP_ROUTE_TIMEOUT_MS || '110000', 10) || 110_000)
     );
-    const result = await withRequestTimeout(
-      routeTimeoutMs,
-      () =>
-        emitirAfip(
+    const timeoutMsg =
+      'La emisión en AFIP está tardando más de lo habitual (ARCA congestionado). No pulses de nuevo de inmediato: si el pedido aún no tiene factura en LupoHub, esperá 1–2 minutos y verificá en AFIP antes de reintentar.';
+
+    let work = emitFacturaInFlight.get(id);
+    if (!work) {
+      work = (async () => {
+        const { emitirFactura: emitirAfip } = await import('../services/afip.service');
+        const result = await emitirAfip(
           {
             id: orderRow.id,
             date: orderRow.date,
@@ -1886,48 +1891,60 @@ export const emitirFactura = async (req: any, res: any) => {
             condicionIva: customerRow.condicion_iva ?? null
           },
           forceCbteTipo
-        ),
-      'La emisión en AFIP superó el tiempo máximo del servidor. Reintentá en unos minutos; si el pedido aún no tiene factura en LupoHub, verificá en AFIP antes de repetir.'
-    );
+        );
+        const invCheck = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
+        if (invCheck) {
+          throw Object.assign(new Error('Este pedido ya tiene una factura emitida'), { status: 409 });
+        }
+        const invoiceId = uuidv4();
+        await execute(
+          `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            invoiceId,
+            id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            agip?.alicuota ?? 0,
+            agip?.amount ?? 0
+          ]
+        );
+        return {
+          id: invoiceId,
+          orderId: id,
+          cae: result.cae,
+          caeFchVto: result.caeFchVto,
+          puntoVta: result.puntoVta,
+          cbteTipo: result.cbteTipo,
+          cbteDesde: result.cbteDesde,
+          cbteHasta: result.cbteHasta,
+          agipAlicuota: agip?.alicuota ?? 0,
+          agipRetPer: agip?.amount ?? 0
+        };
+      })();
+      emitFacturaInFlight.set(id, work);
+      work.finally(() => {
+        if (emitFacturaInFlight.get(id) === work) emitFacturaInFlight.delete(id);
+      });
+    }
 
-    const { v4: uuidv4 } = await import('uuid');
-    const invoiceId = uuidv4();
-    await execute(
-      `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        invoiceId,
-        id,
-        result.cae,
-        result.caeFchVto || null,
-        result.puntoVta,
-        result.cbteTipo,
-        result.cbteDesde,
-        result.cbteHasta,
-        agip?.alicuota ?? 0,
-        agip?.amount ?? 0
-      ]
-    );
-    res.status(201).json({
-      id: invoiceId,
-      orderId: id,
-      cae: result.cae,
-      caeFchVto: result.caeFchVto,
-      puntoVta: result.puntoVta,
-      cbteTipo: result.cbteTipo,
-      cbteDesde: result.cbteDesde,
-      cbteHasta: result.cbteHasta,
-      agipAlicuota: agip?.alicuota ?? 0,
-      agipRetPer: agip?.amount ?? 0
-    });
+    const { withRequestTimeout } = await import('../utils/requestTimeout');
+    const payload = await withRequestTimeout(routeTimeoutMs, () => work!, timeoutMsg);
+    res.status(201).json(payload);
   } catch (error: any) {
     console.error('emitirFactura:', error);
     const msg = error?.message || 'Error emitiendo factura AFIP';
     const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
     const status =
-      error?.status === 504 || error?.code === 'REQUEST_TIMEOUT'
-        ? 504
-        : afipEmitHttpStatusFromMessage(msg);
+      error?.status === 409
+        ? 409
+        : error?.status === 504 || error?.code === 'REQUEST_TIMEOUT'
+          ? 504
+          : afipEmitHttpStatusFromMessage(msg);
     res.status(status).json({ message: msg });
   }
 };

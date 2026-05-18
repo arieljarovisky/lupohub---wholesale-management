@@ -37,11 +37,12 @@ const AFIP_MAX_IMP_NETO = 9_999_999_999_999.99; // 13 enteros + 2 decimales
  * Tope de espera total: Railway/Vercel cortan ~60s; si superamos eso el proxy devuelve 502
  * sin headers CORS y el navegador muestra "CORS blocked" aunque el origen esté bien configurado.
  */
-const AFIP_RETRY_MAX = Math.min(5, Math.max(1, parseInt(process.env.AFIP_RETRY_MAX || '3', 10) || 3));
+const AFIP_RETRY_MAX = Math.min(5, Math.max(1, parseInt(process.env.AFIP_RETRY_MAX || '4', 10) || 4));
 const AFIP_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
+/** Debe ser menor que AFIP_ROUTE_TIMEOUT_MS; ARCA en hora pico puede tardar >50s solo en getLastVoucher. */
 const AFIP_MAX_WAIT_MS = Math.min(
   110_000,
-  Math.max(25_000, parseInt(process.env.AFIP_MAX_WAIT_MS || '50000', 10) || 50_000)
+  Math.max(40_000, parseInt(process.env.AFIP_MAX_WAIT_MS || '95000', 10) || 95_000)
 );
 
 function sleepMs(ms: number): Promise<void> {
