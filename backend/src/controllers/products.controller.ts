@@ -394,8 +394,12 @@ export const getProductBySku = async (req: any, res: any) => {
     }
 
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
-    
-    // Obtener todas las variantes del producto encontrado
+
+    const { findRelatedProductIdsForArticleSku } = await import('../services/productSkuFamily');
+    const productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
+    const idPlaceholders = productIds.map(() => '?').join(',');
+
+    // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
     const variantsRows = await query(
       `SELECT p.sku, pv.sku AS variant_sku, pv.external_sku,
               c.code AS color_code, c.name AS color_name,
@@ -407,9 +411,9 @@ export const getProductBySku = async (req: any, res: any) => {
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.id=?
+       WHERE p.id IN (${idPlaceholders})
        ORDER BY c.code, s.size_code`,
-      [product.id]
+      productIds
     );
     
     const variants = variantsRows.map((v: any) => ({

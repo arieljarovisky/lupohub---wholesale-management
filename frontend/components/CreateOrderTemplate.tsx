@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
+import { articleCodesMatch, resolveDisplayArticleCode } from '../utils/articleCodeUtils';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
 
@@ -438,6 +439,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const addProductBySku = async (baseSku: string) => {
     const code = (baseSku || '').trim();
     if (!code) return;
+    const displayCode = resolveDisplayArticleCode(code);
     setAddingProduct(true);
     try {
       const product = await api.getProductBySku(code);
@@ -469,7 +471,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          productCode: product.sku,
+          productCode: displayCode,
           productName: product.name ?? baseSku,
           productId: product.id,
           colorCode,
@@ -480,14 +482,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           price
         });
       });
-      const alreadyInOrder = rows.some(r => r.productCode === product.sku);
+      const alreadyInOrder = rows.some(r => articleCodesMatch(r.productCode, displayCode));
       if (alreadyInOrder) {
         showToast('error', 'Este artículo ya está en el pedido.');
         setAddingProduct(false);
         return;
       }
       setRows(prev => {
-        if (prev.some(r => r.productCode === product.sku)) return prev;
+        if (prev.some(r => articleCodesMatch(r.productCode, displayCode))) return prev;
         return [...prev, ...newRows];
       });
       setShowAddModal(false);
@@ -613,7 +615,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const addMissingColorsToArticle = async (productCode: string) => {
     const code = (productCode || '').trim();
     if (!code) return;
-    setAddingColorsForCode(code);
+    const displayCode = resolveDisplayArticleCode(code);
+    setAddingColorsForCode(displayCode);
     try {
       const product = await api.getProductBySku(code);
       if (!product || !product.variants?.length) {
@@ -627,7 +630,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         if (!byColor.has(c)) byColor.set(c, []);
         byColor.get(c)!.push(v);
       }
-      const existingColorCodes = new Set(rows.filter(r => r.productCode === product.sku).map(r => r.colorCode));
+      const existingColorCodes = new Set(
+        rows.filter(r => articleCodesMatch(r.productCode, displayCode)).map(r => r.colorCode)
+      );
       const defaultQtys: Record<string, number> = {};
       sizes.forEach(s => { defaultQtys[s.code] = 0; });
       const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
@@ -648,7 +653,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          productCode: product.sku,
+          productCode: displayCode,
           productName: product.name ?? code,
           productId: product.id,
           colorCode,
@@ -665,7 +670,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
       let insertEnd = rows.length;
       for (let i = rows.length - 1; i >= 0; i--) {
-        if (rows[i].productCode === product.sku) {
+        if (articleCodesMatch(rows[i].productCode, displayCode)) {
           insertEnd = i + 1;
           break;
         }
@@ -799,7 +804,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const list: Array<{ productCode: string; productName: string; rows: TemplateRow[] }> = [];
     let current: { productCode: string; productName: string; rows: TemplateRow[] } | null = null;
     for (const row of rows) {
-      if (!current || current.productCode !== row.productCode) {
+      if (!current || !articleCodesMatch(current.productCode, row.productCode)) {
         current = { productCode: row.productCode, productName: row.productName, rows: [row] };
         list.push(current);
       } else {
@@ -814,7 +819,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   };
 
   const removeGroup = (productCode: string) => {
-    setRows(prev => prev.filter(r => r.productCode !== productCode));
+    setRows(prev => prev.filter(r => !articleCodesMatch(r.productCode, productCode)));
     setCollapsedGroups(prev => {
       const next = { ...prev };
       delete next[productCode];

@@ -61,7 +61,7 @@ function skuNormCompactKey(s: string): string {
     .replace(/[\s_-]/g, '');
 }
 
-function digitCore(s: string): string {
+export function digitCore(s: string): string {
   const d = String(s ?? '').replace(/\D/g, '');
   if (!d) return '';
   return d.replace(/^0+/, '') || '0';
@@ -96,7 +96,7 @@ function mergeGroupKey(sku: string): string | null {
  * Incluye `dpre:` = núcleo sin los últimos 2 dígitos (mín. 4 dígitos en el prefijo) para casos tipo
  * `0127501` → 127501 y `1275-11` → 127511 (mismo artículo, sufijos distintos).
  */
-function mergeGroupKeysForProduct(sku: string): string[] {
+export function mergeGroupKeysForProduct(sku: string): string[] {
   const out = new Set<string>();
   const dc = digitCore(sku);
   if (dc.length >= 4) out.add(`d:${dc}`);
