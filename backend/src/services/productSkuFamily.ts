@@ -120,8 +120,8 @@ export async function findRelatedProductIdsForArticleSku(requestedSku: string, p
     const pre = reqDc.slice(0, -2);
     if (pre.length >= 4) {
       const dpreMatches = (await query(
-        `SELECT id, sku, name FROM products
-         WHERE id != ?
+        `SELECT p.id, p.sku, p.name FROM products p
+         WHERE p.id != ?
            AND CHAR_LENGTH(${skuDigitsExpr}) >= 6
            AND LEFT(${skuDigitsExpr}, CHAR_LENGTH(${skuDigitsExpr}) - 2) = ?`,
         [primaryProductId, pre]

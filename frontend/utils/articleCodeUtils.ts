@@ -46,6 +46,28 @@ export function resolveDisplayArticleCode(requestedCode: string): string {
   return padArticleCodeTo7(req);
 }
 
+/**
+ * Código de artículo para filas de pedido: siempre preferir el SKU del producto padre.
+ * Evita interpretar SKUs de variante corruptos (ej. 1275-11170112 → 1275111).
+ */
+export function articleCodeForOrderRow(parentProductSku: string | undefined, variantSku?: string): string {
+  const parent = String(parentProductSku ?? '').trim();
+  if (parent) {
+    const parts = parent.split('-').filter(Boolean);
+    if (parts.length >= 3) return parts.slice(0, -2).join('-');
+    return resolveDisplayArticleCode(parent);
+  }
+  const sku = String(variantSku ?? '').trim();
+  if (!sku) return '';
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 3) return parts.slice(0, -2).join('-');
+  const digits = sku.replace(/\D/g, '');
+  // Variante Tango mal parseada (1275-11170112): no usar los primeros 7 dígitos.
+  if (parts.length === 2 && digits.length > 9) return '';
+  if (digits.length >= 7 && digits.length <= 9) return digits.slice(0, 7);
+  return resolveDisplayArticleCode(sku);
+}
+
 /** Variantes de código para reintentar búsqueda en API (0127501, 127501, etc.). */
 export function skuLookupCandidates(sku: string): string[] {
   const t = String(sku ?? '').trim();

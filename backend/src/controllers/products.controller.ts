@@ -352,7 +352,13 @@ export const getProductBySku = async (req: any, res: any) => {
     const product = await resolveProductByArticleSku(String(sku));
 
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
-    const productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
+
+    let productIds = [product.id];
+    try {
+      productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
+    } catch (relatedErr) {
+      console.warn('[getProductBySku] findRelatedProductIds:', (relatedErr as Error)?.message);
+    }
     const idPlaceholders = productIds.map(() => '?').join(',');
 
     // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
