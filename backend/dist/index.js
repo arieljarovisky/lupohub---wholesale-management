@@ -13,6 +13,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isAllowedOrigin = isAllowedOrigin;
+exports.applyCorsHeaders = applyCorsHeaders;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -102,6 +104,15 @@ function isAllowedOrigin(origin) {
         return true;
     return false;
 }
+/** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
+function applyCorsHeaders(req, res) {
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Vary', 'Origin');
+    }
+}
 const corsOpts = {
     origin: (origin, cb) => {
         if (isAllowedOrigin(origin))
@@ -112,8 +123,13 @@ const corsOpts = {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 };
+app.set('trust proxy', 1);
 app.use((0, cors_1.default)(corsOpts));
 app.options('*', (0, cors_1.default)(corsOpts));
+app.use((req, res, next) => {
+    applyCorsHeaders(req, res);
+    next();
+});
 app.use(express_1.default.json());
 app.use((req, res, next) => {
     console.log('[backend]', req.method, req.path);
@@ -139,10 +155,12 @@ app.use('/api/payments', payments_routes_1.default);
 app.use('/api/user-tasks', userTasks_routes_1.default);
 app.use('/api/company-finance', companyFinance_routes_1.default);
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+    applyCorsHeaders(req, res);
     const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
+    const status = typeof (err === null || err === void 0 ? void 0 : err.status) === 'number' ? err.status : 500;
     if (!res.headersSent)
-        res.status(500).json({ error: message, message });
+        res.status(status).json({ error: message, message });
 });
 // Health Check
 app.get('/health', (req, res) => {

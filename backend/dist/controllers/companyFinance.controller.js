@@ -9,11 +9,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCompanyFinanceSummary = exports.getCompanyFinancePendingInvoices = exports.deleteCompanyFinanceFixedExpense = exports.updateCompanyFinanceFixedExpense = exports.createCompanyFinanceFixedExpense = exports.listCompanyFinanceFixedExpenses = exports.deleteCompanyFinanceEntry = exports.updateCompanyFinanceEntry = exports.createCompanyFinanceEntry = exports.listCompanyFinanceEntries = exports.getCompanyFinanceAccess = exports.INCOME_CATEGORIES = exports.EXPENSE_CATEGORIES = void 0;
+exports.getCompanyFinanceSummary = exports.getCompanyFinancePendingInvoices = exports.getCompanyFinanceMercadoPagoMovements = exports.deleteCompanyFinanceFixedExpense = exports.updateCompanyFinanceFixedExpense = exports.createCompanyFinanceFixedExpense = exports.listCompanyFinanceFixedExpenses = exports.deleteCompanyFinanceEntry = exports.updateCompanyFinanceEntry = exports.createCompanyFinanceEntry = exports.listCompanyFinanceEntries = exports.getCompanyFinanceAccess = exports.INCOME_CATEGORIES = exports.EXPENSE_CATEGORIES = void 0;
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const companyFinanceAccess_1 = require("../utils/companyFinanceAccess");
 const companyFinanceAggregates_service_1 = require("../services/companyFinanceAggregates.service");
+const mercadopagoFinance_service_1 = require("../services/mercadopagoFinance.service");
 const companyFinanceFixed_1 = require("../utils/companyFinanceFixed");
 exports.EXPENSE_CATEGORIES = [
     { id: 'sueldo', label: 'Sueldos' },
@@ -435,6 +436,20 @@ function wholesaleOrdersRevenue(from, to) {
         return Math.round(Number((_a = row === null || row === void 0 ? void 0 : row.total) !== null && _a !== void 0 ? _a : 0) * 100) / 100;
     });
 }
+const getCompanyFinanceMercadoPagoMovements = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!assertFinanceAccess(req, res))
+            return;
+        const { from, to } = parseDateRange(req);
+        const data = yield (0, mercadopagoFinance_service_1.fetchMercadoPagoMovements)(from, to);
+        res.json(Object.assign({ from, to }, data));
+    }
+    catch (error) {
+        console.error('getCompanyFinanceMercadoPagoMovements:', error);
+        res.status(500).json({ message: 'Error obteniendo movimientos de Mercado Pago' });
+    }
+});
+exports.getCompanyFinanceMercadoPagoMovements = getCompanyFinanceMercadoPagoMovements;
 const getCompanyFinancePendingInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!assertFinanceAccess(req, res))

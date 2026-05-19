@@ -82,9 +82,15 @@ const ID_IVA_21 = 5;
 /** Tipo de tributo WSFE: otros / percepción IIBB (ejemplo oficial AfipSDK). */
 const TRIBUTO_OTROS_IIBB = 99;
 const AFIP_MAX_IMP_NETO = 9999999999999.99; // 13 enteros + 2 decimales
-/** Reintentos ante congestión ARCA/AFIP (503). */
-const AFIP_RETRY_MAX = 4;
-const AFIP_RETRY_DELAYS_MS = [2500, 5000, 8000, 12000];
+/**
+ * Reintentos ante congestión ARCA/AFIP (503).
+ * Tope de espera total: Railway/Vercel cortan ~60s; si superamos eso el proxy devuelve 502
+ * sin headers CORS y el navegador muestra "CORS blocked" aunque el origen esté bien configurado.
+ */
+const AFIP_RETRY_MAX = Math.min(5, Math.max(1, parseInt(process.env.AFIP_RETRY_MAX || '4', 10) || 4));
+const AFIP_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000];
+/** Debe ser menor que AFIP_ROUTE_TIMEOUT_MS; ARCA en hora pico puede tardar >50s solo en getLastVoucher. */
+const AFIP_MAX_WAIT_MS = Math.min(110000, Math.max(40000, parseInt(process.env.AFIP_MAX_WAIT_MS || '95000', 10) || 95000));
 function sleepMs(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -123,6 +129,9 @@ function afipEmitHttpStatusFromMessage(msg) {
         return 503;
     if (m.includes('ya tiene'))
         return 409;
+    if (m.includes('superó el tiempo') || m.includes('tiempo máximo del servidor') || m.includes('tardó demasiado')) {
+        return 504;
+    }
     if (m.includes('congestion') ||
         m.includes('congestionados') ||
         m.includes('arca') ||
@@ -134,8 +143,11 @@ function afipEmitHttpStatusFromMessage(msg) {
 function withAfipRetry(label, fn) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
+        const deadline = Date.now() + AFIP_MAX_WAIT_MS;
         let lastErr;
         for (let attempt = 0; attempt < AFIP_RETRY_MAX; attempt++) {
+            if (Date.now() >= deadline)
+                break;
             try {
                 return yield fn();
             }
@@ -143,12 +155,18 @@ function withAfipRetry(label, fn) {
                 lastErr = err;
                 if (!isAfipTransientError(err) || attempt >= AFIP_RETRY_MAX - 1)
                     break;
-                const delay = (_a = AFIP_RETRY_DELAYS_MS[attempt]) !== null && _a !== void 0 ? _a : 12000;
+                const delay = Math.min((_a = AFIP_RETRY_DELAYS_MS[attempt]) !== null && _a !== void 0 ? _a : 8000, deadline - Date.now());
+                if (delay <= 0)
+                    break;
                 console.warn(`[AFIP] ${label}: intento ${attempt + 1}/${AFIP_RETRY_MAX} falló (${formatAfipError(err)}). Reintento en ${delay}ms…`);
                 yield sleepMs(delay);
             }
         }
-        throw new Error(formatAfipError(lastErr));
+        const base = formatAfipError(lastErr);
+        if (Date.now() >= deadline && isAfipTransientError(lastErr)) {
+            throw new Error(`${base} La emisión tardó demasiado (límite ${Math.round(AFIP_MAX_WAIT_MS / 1000)}s). Reintentá en unos minutos; si el pedido no tiene factura en LupoHub, AFIP pudo no haberla registrado.`);
+        }
+        throw new Error(base);
     });
 }
 function readCertOrKey(envVar, value, description) {
@@ -343,7 +361,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo factura en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield withAfipRetry('getLastVoucher factura', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte));
+        const lastVoucher = Number(yield withAfipRetry('getLastVoucher factura', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte)));
         const numeroFactura = lastVoucher + 1;
         const data = {
             CantReg: 1,
@@ -384,7 +402,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
             ];
             console.log(`[AFIP] Factura con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = yield withAfipRetry('createVoucher factura', () => afip.ElectronicBilling.createVoucher(data));
+        const res = (yield withAfipRetry('createVoucher factura', () => afip.ElectronicBilling.createVoucher(data)));
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {
@@ -504,7 +522,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         const afip = new Afip(afipOptions);
         const ambiente = config.production ? 'producción' : 'homologación';
         console.log(`[AFIP] Emitiendo nota de crédito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
-        const lastVoucher = yield withAfipRetry('getLastVoucher NC', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte));
+        const lastVoucher = Number(yield withAfipRetry('getLastVoucher NC', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte)));
         const numeroNC = lastVoucher + 1;
         const data = {
             CantReg: 1,
@@ -552,7 +570,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
             ];
             console.log(`[AFIP] Nota de crédito con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = yield afip.ElectronicBilling.createVoucher(data);
+        const res = (yield withAfipRetry('createVoucher NC', () => afip.ElectronicBilling.createVoucher(data)));
         const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
         const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
         if (!cae) {

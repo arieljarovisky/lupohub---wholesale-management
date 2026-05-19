@@ -357,39 +357,19 @@ exports.getProductById = getProductById;
 const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { sku } = req.params;
     try {
-        // Buscar por SKU exacto o por SKU base (para agrupar variantes)
-        let product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-              COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-              COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-       FROM products p WHERE p.sku = ?`, [sku]);
-        // Si no se encuentra exacto, buscar por SKU base
-        if (!product) {
-            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE p.sku LIKE ? ORDER BY p.sku LIMIT 1`, [`${sku}-%`]);
-        }
-        // Código de variante completo (ej. QE5546-158-614): primer segmento = SKU del modelo
-        if (!product && String(sku).includes('-')) {
-            const base = String(sku).split('-')[0];
-            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE p.sku = ?`, [base]);
-        }
-        if (!product) {
-            product = yield (0, db_1.get)(`SELECT p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
-                COALESCE(p.mercado_libre_pack_size, 1) AS mercado_libre_pack_size,
-                COALESCE(p.tienda_nube_pack_size, 1) AS tienda_nube_pack_size,
-                COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
-         FROM products p WHERE ? LIKE CONCAT(p.sku, '-%') ORDER BY CHAR_LENGTH(p.sku) DESC LIMIT 1`, [sku]);
-        }
+        const { resolveProductByArticleSku, findRelatedProductIdsForArticleSku } = yield Promise.resolve().then(() => __importStar(require('../services/productSkuFamily')));
+        const product = yield resolveProductByArticleSku(String(sku));
         if (!product)
             return res.status(404).json({ message: 'Producto no encontrado' });
-        // Obtener todas las variantes del producto encontrado
+        let productIds = [product.id];
+        try {
+            productIds = yield findRelatedProductIdsForArticleSku(String(sku), product.id);
+        }
+        catch (relatedErr) {
+            console.warn('[getProductBySku] findRelatedProductIds:', relatedErr === null || relatedErr === void 0 ? void 0 : relatedErr.message);
+        }
+        const idPlaceholders = productIds.map(() => '?').join(',');
+        // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
         const variantsRows = yield (0, db_1.query)(`SELECT p.sku, pv.sku AS variant_sku, pv.external_sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
@@ -400,8 +380,8 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
        JOIN product_variants pv ON pv.product_color_id=pc.id
        JOIN sizes s ON s.id=pv.size_id
        LEFT JOIN stocks st ON st.variant_id=pv.id
-       WHERE p.id=?
-       ORDER BY c.code, s.size_code`, [product.id]);
+       WHERE p.id IN (${idPlaceholders})
+       ORDER BY c.code, s.size_code`, productIds);
         const variants = variantsRows.map((v) => (Object.assign(Object.assign({}, v), { externalIds: {
                 tiendaNubeVariant: v.tienda_nube_variant_id,
                 mercadoLibreVariant: v.mercado_libre_variant_id,

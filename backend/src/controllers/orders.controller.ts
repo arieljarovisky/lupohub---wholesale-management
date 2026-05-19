@@ -378,6 +378,7 @@ export const getOrders = async (req: any, res: any) => {
       LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
       LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id IN (${placeholders})
+      ORDER BY i.order_id, i.id
     `, orderIds);
 
     const itemsByOrderId: Record<string, any[]> = {};
@@ -777,6 +778,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
     LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
     WHERE i.order_id = ?
+    ORDER BY i.id
   `,
     [orderId]
   );
@@ -1312,6 +1314,7 @@ export const updateOrder = async (req: any, res: any) => {
       LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
       LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
       WHERE i.order_id = ?
+      ORDER BY i.id
     `, [id]);
     const itemsMapped = (itemsRows as any[]).map((row: any) => ({
       variantId: row.variantId,

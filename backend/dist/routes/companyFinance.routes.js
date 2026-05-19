@@ -7,6 +7,7 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authMiddleware);
 router.get('/access', companyFinance_controller_1.getCompanyFinanceAccess);
 router.get('/summary', companyFinance_controller_1.getCompanyFinanceSummary);
+router.get('/mercadopago-movements', companyFinance_controller_1.getCompanyFinanceMercadoPagoMovements);
 router.get('/pending-invoices', companyFinance_controller_1.getCompanyFinancePendingInvoices);
 router.get('/entries', companyFinance_controller_1.listCompanyFinanceEntries);
 router.get('/fixed-expenses', companyFinance_controller_1.listCompanyFinanceFixedExpenses);
