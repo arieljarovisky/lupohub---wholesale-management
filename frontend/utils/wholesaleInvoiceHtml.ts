@@ -282,21 +282,11 @@ export function orderNetoFromItemsForAfip(order: Order): number {
 }
 
 /**
- * Neto a mostrar en la tarjeta del pedido: lo pickeado (criterio AFIP) menos NC,
- * o —si ya está facturado pero `picked` está en cero— las cantidades del pedido.
+ * Neto en la tarjeta del listado de pedidos: total de todas las líneas (cantidad × precio).
+ * No usa `picked`; coincide con el subtotal del armado del pedido.
  */
 export function orderNetoSaldoForOrderCard(order: Order): number {
-  const netoAfip = orderNetoFromItemsForAfip(order);
-  const netoQty = orderNetoFromItemsByQuantity(order);
-  let neto = netoAfip > 0.005 ? netoAfip : netoQty;
-  const postPicking =
-    !order.noStockImpact &&
-    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
-  if (postPicking && order.invoice && netoAfip <= 0.005 && netoQty > 0.005) {
-    neto = netoQty;
-  }
-  const ncNeto = Math.round((Number(order.creditNotesNetoCredited) || 0) * 100) / 100;
-  return Math.max(0, Math.round((neto - ncNeto) * 100) / 100);
+  return orderNetoFromItemsByQuantity(order);
 }
 
 /** Prorrateo de percepción IIBB de la factura (`invoices.agip_*`), igual que el backend al emitir NC. */

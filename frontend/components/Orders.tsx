@@ -15,7 +15,6 @@ import {
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
-  orderNetoFromItemsByQuantity,
   orderNetoSaldoForOrderCard,
   iibbProratedFromInvoiceForNc,
   type ManualFacturaFields,
@@ -2195,46 +2194,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                      </button>
                    )}
                    <div className={`text-right ml-auto sm:ml-0 ${ncTotalAnnulled ? 'opacity-55' : ''}`}>
-                     {(() => {
-                       const netoSaldo = orderNetoSaldoForOrderCard(order);
-                       const netoAfip = orderNetoFromItems(order);
-                       const netoPedidoQty = orderNetoFromItemsByQuantity(order);
-                       const sinPickingEnBd =
-                         !order.noStockImpact &&
-                         ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || '')) &&
-                         !!order.invoice &&
-                         netoAfip <= 0.005 &&
-                         netoPedidoQty > 0.005;
-                       return (
-                         <>
-                           <div className="text-lg font-black text-blue-400">${formatMoneyAr(netoSaldo)}</div>
-                           <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
-                           {sinPickingEnBd && (
-                             <div className="text-[10px] text-amber-400/90 max-w-[200px] ml-auto leading-tight mt-0.5">
-                               Sin unidades pickeadas en el sistema; importe según cantidades del pedido
-                               {Number(order.creditNotesNetoCredited || 0) > 0.005 ? ' (menos NC)' : ''}
-                             </div>
-                           )}
-                         </>
-                       );
-                     })()}
+                     <div className="text-lg font-black text-blue-400">
+                       ${formatMoneyAr(orderNetoSaldoForOrderCard(order))}
+                     </div>
+                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
                      {order.invoice &&
                        (() => {
-                         const agipBase = orderInvoiceApplicableAgip(order);
-                         if (!agipBase) return null;
-                         const netoSaldo = orderNetoSaldoForOrderCard(order);
-                         const netoPedidoFull = orderNetoFromItemsByQuantity(order);
-                         const agipPr =
-                           iibbProratedFromInvoiceForNc(order.invoice, netoSaldo, netoPedidoFull) ?? agipBase;
+                         const agip = orderInvoiceApplicableAgip(order);
+                         if (!agip) return null;
+                         const netoPedido = orderNetoSaldoForOrderCard(order);
                          const cbteTipoOrd = Number(order.invoice?.cbteTipo ?? 6);
-                         const { impTotal } = afipDesdeNeto(netoSaldo, cbteTipoOrd, agipPr.retPer);
-                         const totalConIvaEIibb = Math.round((impTotal + agipPr.retPer) * 100) / 100;
+                         const { impTotal } = afipDesdeNeto(netoPedido, cbteTipoOrd, agip.retPer);
+                         const totalConIvaEIibb = Math.round((impTotal + agip.retPer) * 100) / 100;
                          return (
                            <div className="mt-1.5 space-y-0.5 text-right">
                              <div className="text-[11px] text-amber-200/95">
                                IIBB
-                               {agipPr.alicuota > 0.005 ? ` (${agipPr.alicuota.toFixed(2)}%)` : ''}:{' '}
-                               <span className="font-mono font-bold">${formatMoneyAr(agipPr.retPer)}</span>
+                               {agip.alicuota > 0.005 ? ` (${agip.alicuota.toFixed(2)}%)` : ''}:{' '}
+                               <span className="font-mono font-bold">${formatMoneyAr(agip.retPer)}</span>
                              </div>
                              <div className="text-[11px] font-bold text-slate-200">
                                Total c/ IVA e IIBB:{' '}
