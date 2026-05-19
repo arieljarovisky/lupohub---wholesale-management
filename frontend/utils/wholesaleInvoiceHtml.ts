@@ -289,6 +289,81 @@ export function orderNetoSaldoForOrderCard(order: Order): number {
   return orderNetoFromItemsByQuantity(order);
 }
 
+export type OrderFiscalTotalsDisplay = {
+  neto: number;
+  iva: number;
+  iibb: number;
+  total: number;
+  discriminaIva: boolean;
+};
+
+function ncCbteTipoFromFactura(cbteTipoFactura: number): number {
+  return Number(cbteTipoFactura) === 1 ? 3 : 8;
+}
+
+/** Neto gravado estimado de la factura (IIBB guardado, picking o cantidades del pedido). */
+export function orderNetoFacturadoEstimado(order: Order): number {
+  if (!order.invoice) return 0;
+  const inv = order.invoice;
+  const retPer = Number(inv.agipRetPer ?? (inv as { agip_ret_per?: number }).agip_ret_per ?? 0);
+  const alicuota = Number(inv.agipAlicuota ?? (inv as { agip_alicuota?: number }).agip_alicuota ?? 0);
+  if (retPer > 0.005 && alicuota > 0.005) {
+    return Math.round((retPer / (alicuota / 100)) * 100) / 100;
+  }
+  const netoPicked = orderNetoFromItemsForAfip(order);
+  if (netoPicked > 0.005) return netoPicked;
+  return orderNetoFromItemsByQuantity(order);
+}
+
+/** Total del comprobante facturado (neto + IVA + IIBB según datos guardados). */
+export function orderTotalesFacturado(order: Order): OrderFiscalTotalsDisplay | null {
+  if (!order.invoice) return null;
+  const neto = orderNetoFacturadoEstimado(order);
+  const cbteTipo = Number(order.invoice.cbteTipo ?? 6);
+  const agipRet = Number(order.invoice.agipRetPer ?? 0);
+  const t = calcTotalesDesdeNetoGravado(neto, cbteTipo, agipRet);
+  return {
+    neto: t.neto,
+    iva: t.iva,
+    iibb: t.agip,
+    total: t.total,
+    discriminaIva: t.discriminaIva,
+  };
+}
+
+/** Total de notas de crédito del pedido (neto creditado + IVA + IIBB prorrateado). */
+export function orderTotalesNotaCredito(order: Order): OrderFiscalTotalsDisplay | null {
+  const ncNeto = Math.round((Number(order.creditNotesNetoCredited) || 0) * 100) / 100;
+  if (!(ncNeto > 0.005) || !order.invoice) return null;
+  const netoFactura = orderNetoFacturadoEstimado(order);
+  const pr = iibbProratedFromInvoiceForNc(order.invoice, ncNeto, netoFactura);
+  const iibb = pr?.retPer ?? 0;
+  const ncCbte = ncCbteTipoFromFactura(Number(order.invoice.cbteTipo ?? 6));
+  const t = calcTotalesDesdeNetoGravado(ncNeto, ncCbte, iibb);
+  return {
+    neto: t.neto,
+    iva: t.iva,
+    iibb: t.agip,
+    total: t.total,
+    discriminaIva: t.discriminaIva,
+  };
+}
+
+/** Etiqueta corta para el bloque de NC en la tarjeta del pedido. */
+export function orderCreditNoteResumenLabel(order: Order): string | null {
+  const ncNeto = Number(order.creditNotesNetoCredited || 0);
+  if (!(ncNeto > 0.005)) return null;
+  const activeVoid = Number(
+    order.creditNotesActiveTotalVoidCount ?? order.creditNotesTotalCount ?? 0
+  );
+  const itemCnt = Number(order.creditNotesItemCount || 0);
+  const cnt = Number(order.creditNotesCount || 0);
+  if (activeVoid > 0) return 'NC por el total';
+  if (itemCnt > 0) return `NC parcial (${itemCnt})`;
+  if (cnt > 0) return `NC (${cnt})`;
+  return 'Nota de crédito';
+}
+
 /** Prorrateo de percepción IIBB de la factura (`invoices.agip_*`), igual que el backend al emitir NC. */
 export function iibbProratedFromInvoiceForNc(
   inv: Order['invoice'] | undefined,

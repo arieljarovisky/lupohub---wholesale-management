@@ -16,6 +16,9 @@ import {
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
   orderNetoSaldoForOrderCard,
+  orderTotalesFacturado,
+  orderTotalesNotaCredito,
+  orderCreditNoteResumenLabel,
   iibbProratedFromInvoiceForNc,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
@@ -171,6 +174,67 @@ function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: n
   const alicuota = Number(inv.agipAlicuota ?? inv.agip_alicuota ?? 0);
   if (retPer <= 0.005 && alicuota <= 0.005) return null;
   return { alicuota, retPer };
+}
+
+/** Importes facturados / NC / saldo en la tarjeta del listado. */
+function OrderCardFiscalAmounts({ order, dimmed }: { order: Order; dimmed?: boolean }) {
+  const wrap = dimmed ? 'opacity-55' : '';
+  const fact = order.invoice ? orderTotalesFacturado(order) : null;
+  const nc = fact ? orderTotalesNotaCredito(order) : null;
+  const ncLabel = orderCreditNoteResumenLabel(order);
+  const saldo =
+    fact && nc ? Math.max(0, Math.round((fact.total - nc.total) * 100) / 100) : fact?.total ?? 0;
+
+  const line = (label: string, value: string, className = 'text-slate-400') => (
+    <div className={`text-[11px] ${className} flex justify-end gap-2`}>
+      <span>{label}</span>
+      <span className="font-mono tabular-nums">{value}</span>
+    </div>
+  );
+
+  if (!fact) {
+    const netoPedido = orderNetoSaldoForOrderCard(order);
+    return (
+      <div className={`text-right ml-auto sm:ml-0 ${wrap}`}>
+        <div className="text-lg font-black text-blue-400">${formatMoneyAr(netoPedido)}</div>
+        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto pedido (sin IVA)</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`text-right ml-auto sm:ml-0 min-w-[140px] ${wrap}`}>
+      <div className="text-lg font-black text-emerald-300">${formatMoneyAr(fact.total)}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total facturado</div>
+      <div className="mt-1.5 space-y-0.5">
+        {line('Neto', `$${formatMoneyAr(fact.neto)}`)}
+        {fact.discriminaIva && fact.iva > 0.005 && line('IVA 21%', `$${formatMoneyAr(fact.iva)}`)}
+        {fact.iibb > 0.005 &&
+          line(
+            'IIBB',
+            `$${formatMoneyAr(fact.iibb)}`,
+            'text-amber-200/90'
+          )}
+      </div>
+      {nc && ncLabel && (
+        <div className="mt-2 pt-2 border-t border-slate-700/80 space-y-0.5">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-orange-400/95">{ncLabel}</div>
+          <div className="text-[11px] font-bold text-orange-300">−${formatMoneyAr(nc.total)}</div>
+          {line('Neto NC', `$${formatMoneyAr(nc.neto)}`, 'text-orange-200/80')}
+          {nc.discriminaIva && nc.iva > 0.005 && line('IVA NC', `$${formatMoneyAr(nc.iva)}`, 'text-orange-200/70')}
+          {nc.iibb > 0.005 && line('IIBB NC', `$${formatMoneyAr(nc.iibb)}`, 'text-orange-200/70')}
+          {!dimmed && saldo > 0.005 && (
+            <div className="text-[11px] font-bold text-slate-200 mt-1 pt-1 border-t border-slate-700/60">
+              Saldo: <span className="text-emerald-300 font-mono">${formatMoneyAr(saldo)}</span>
+            </div>
+          )}
+          {dimmed && (
+            <div className="text-[10px] text-orange-300/90 mt-0.5">Factura anulada fiscalmente</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function orderMatchesInvoiceListFilter(order: Order, f: OrdersInvoiceListFilter): boolean {
@@ -2193,34 +2257,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         → {getNextStatusForOrder(order)}
                      </button>
                    )}
-                   <div className={`text-right ml-auto sm:ml-0 ${ncTotalAnnulled ? 'opacity-55' : ''}`}>
-                     <div className="text-lg font-black text-blue-400">
-                       ${formatMoneyAr(orderNetoSaldoForOrderCard(order))}
-                     </div>
-                     <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Neto (sin IVA)</div>
-                     {order.invoice &&
-                       (() => {
-                         const agip = orderInvoiceApplicableAgip(order);
-                         if (!agip) return null;
-                         const netoPedido = orderNetoSaldoForOrderCard(order);
-                         const cbteTipoOrd = Number(order.invoice?.cbteTipo ?? 6);
-                         const { impTotal } = afipDesdeNeto(netoPedido, cbteTipoOrd, agip.retPer);
-                         const totalConIvaEIibb = Math.round((impTotal + agip.retPer) * 100) / 100;
-                         return (
-                           <div className="mt-1.5 space-y-0.5 text-right">
-                             <div className="text-[11px] text-amber-200/95">
-                               IIBB
-                               {agip.alicuota > 0.005 ? ` (${agip.alicuota.toFixed(2)}%)` : ''}:{' '}
-                               <span className="font-mono font-bold">${formatMoneyAr(agip.retPer)}</span>
-                             </div>
-                             <div className="text-[11px] font-bold text-slate-200">
-                               Total c/ IVA e IIBB:{' '}
-                               <span className="text-emerald-300">${formatMoneyAr(totalConIvaEIibb)}</span>
-                             </div>
-                           </div>
-                         );
-                       })()}
-                   </div>
+                   <OrderCardFiscalAmounts order={order} dimmed={ncTotalAnnulled} />
                 </div>
               </div>
             </div>
