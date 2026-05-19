@@ -18,6 +18,13 @@ import {
 } from 'lucide-react';
 import { Customer, Order, Payment, Role, User } from '../types';
 import { api } from '../services/api';
+import {
+  commissionFromGross,
+  commissionRateLabelForCustomers,
+  effectiveCommissionRate,
+  netWithoutIva,
+  roundMoney2
+} from '../utils/sellerCommission';
 
 interface SellersCommissionsProps {
   orders: Order[];
@@ -26,6 +33,7 @@ interface SellersCommissionsProps {
   role: Role;
   currentUser: User;
   onUpdateUser?: (user: User) => void | Promise<void>;
+  onUpdateCustomer?: (customerId: string, data: Partial<Customer>) => void | Promise<void>;
 }
 
 const fmtMoney = (n: number) =>
@@ -36,12 +44,6 @@ const toYmd = (value?: string) => {
   return String(value).slice(0, 10);
 };
 
-const COMMISSION_FIXED_RATE = 10;
-const IVA_DIVISOR = 1.21;
-const round2 = (n: number) => Math.round(n * 100) / 100;
-const netWithoutIva = (gross: number) => gross / IVA_DIVISOR;
-const commissionFromGross = (gross: number) => round2(netWithoutIva(gross) * (COMMISSION_FIXED_RATE / 100));
-
 const salesTotalForSeller = (olist: Order[], sellerId: string) =>
   olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
@@ -51,7 +53,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   customers,
   role,
   currentUser,
-  onUpdateUser
+  onUpdateUser,
+  onUpdateCustomer
 }) => {
   const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const monthStartYmd = useMemo(() => {
@@ -183,6 +186,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     }
   };
 
+  const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
+
   const getCommissionDetailsForSeller = (seller: User, rows: Payment[]) => {
     const customerToSeller = new Map<string, string>();
     for (const c of customers) if (c.sellerId) customerToSeller.set(c.id, c.sellerId);
@@ -190,17 +195,25 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       .filter((p) => (p.sellerId || customerToSeller.get(p.customerId) || '') === seller.id)
       .map((p) => {
         const amount = Number(p.amount) || 0;
+        const cust = customerById.get(p.customerId);
+        const rate = effectiveCommissionRate(cust, seller);
         return {
           id: p.id,
           date: toYmd(p.date),
-          customerName: p.customerBusinessName || p.customerId || '',
+          customerName: p.customerBusinessName || cust?.businessName || p.customerId || '',
           receiptNumber: p.receiptNumber || '',
           amount,
-          commissionAmount: commissionFromGross(amount)
+          commissionRate: rate,
+          commissionAmount: commissionFromGross(amount, rate)
         };
       })
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   };
+
+  const totalCommissionForSeller = (seller: User, rows: Payment[]) =>
+    roundMoney2(
+      getCommissionDetailsForSeller(seller, rows).reduce((sum, r) => sum + r.commissionAmount, 0)
+    );
 
   const downloadCommissionWorkbook = async (opts: {
     sellersToExport: User[];
@@ -212,7 +225,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const { sellersToExport, from, to, rows, fileName } = opts;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Detalle comisiones');
-    ws.columns = [{ width: 14 }, { width: 34 }, { width: 18 }, { width: 14 }, { width: 14 }];
+    ws.columns = [{ width: 14 }, { width: 34 }, { width: 18 }, { width: 14 }, { width: 12 }, { width: 14 }];
     let rowIdx = 1;
     let grandTotalAmount = 0;
     let grandTotalCommission = 0;
@@ -232,7 +245,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       rowIdx += 1;
 
       const header = ws.getRow(rowIdx);
-      header.values = ['Fecha', 'Cliente', 'Recibo', 'Monto', 'Comision'];
+      header.values = ['Fecha', 'Cliente', 'Recibo', 'Monto', '% Comisión', 'Comisión'];
       header.font = { bold: true };
       for (let c = 1; c <= 5; c++) {
         const cell = header.getCell(c);
@@ -243,7 +256,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
       for (const r of detailRows) {
         const row = ws.getRow(rowIdx);
-        row.values = [r.date, r.customerName, r.receiptNumber, r.amount, r.commissionAmount];
+        row.values = [r.date, r.customerName, r.receiptNumber, r.amount, r.commissionRate, r.commissionAmount];
         row.getCell(4).numFmt = '#,##0.00';
         row.getCell(5).numFmt = '#,##0.00';
         rowIdx += 1;
@@ -257,7 +270,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       }
 
       const totalRow = ws.getRow(rowIdx);
-      totalRow.values = ['', '', 'TOTAL VENDEDOR', sellerTotalAmount, sellerTotalCommission];
+      totalRow.values = ['', '', 'TOTAL VENDEDOR', sellerTotalAmount, '', sellerTotalCommission];
       totalRow.font = { bold: true };
       totalRow.getCell(3).alignment = { horizontal: 'right' };
       totalRow.getCell(4).numFmt = '#,##0.00';
@@ -271,7 +284,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     }
 
     const grandRow = ws.getRow(rowIdx);
-    grandRow.values = ['', '', 'TOTAL GENERAL', grandTotalAmount, grandTotalCommission];
+    grandRow.values = ['', '', 'TOTAL GENERAL', grandTotalAmount, '', grandTotalCommission];
     grandRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     grandRow.getCell(3).alignment = { horizontal: 'right' };
     grandRow.getCell(4).numFmt = '#,##0.00';
@@ -326,23 +339,21 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const ords = ordersForSeller(sid).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const sales = salesTotalForSeller(orders, sid);
     const u = users.find((x) => x.id === sid);
-    const rate = COMMISSION_FIXED_RATE;
+    const sellerUser = u || currentUser;
     const commissionBase = netWithoutIva(receiptsMonthForSeller(sid));
-    const commission = round2(commissionBase * (rate / 100));
+    const commission = totalCommissionForSeller(sellerUser, receiptRowsInRange);
+    const rateLabel = commissionRateLabelForCustomers(custs, sellerUser);
     const saldoTotal = totalSaldoCarteraForSeller(sid);
-    const commissionDetails = getCommissionDetailsForSeller(
-      u || currentUser,
-      receiptRowsInRange
-    );
-    return { custs, ords, sales, rate, commission, saldoTotal, commissionBase, commissionDetails };
-  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller, receiptRowsInRange]);
+    const commissionDetails = getCommissionDetailsForSeller(sellerUser, receiptRowsInRange);
+    return { custs, ords, sales, rateLabel, commission, saldoTotal, commissionBase, commissionDetails, sellerUser };
+  }, [selectedSellerId, orders, users, customers, carteraByCustomer, currentUser, receiptsMonthBySeller, receiptRowsInRange, customerById]);
 
   if (role === Role.SELLER) {
     const sellerSales = salesTotalForSeller(orders, currentUser.id);
-    const rate = COMMISSION_FIXED_RATE;
     const sid = currentUser.id;
-    const commissionBase = netWithoutIva(receiptsMonthForSeller(sid));
-    const commissionAmount = round2(commissionBase * (rate / 100));
+    const myCusts = customersForSeller(sid);
+    const rateLabel = commissionRateLabelForCustomers(myCusts, currentUser);
+    const commissionAmount = totalCommissionForSeller(currentUser, receiptRowsInRange);
 
     if (selectedSellerId === sid && sellerDetail) {
       return (
@@ -367,6 +378,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           onRefreshSaldos={loadSaldosCartera}
           commissionEditable={false}
           onUpdateCommission={updateCommission}
+          onUpdateCustomer={onUpdateCustomer}
         />
       );
     }
@@ -397,7 +409,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
               </div>
               <div className="bg-slate-900/60 rounded-xl py-2 border border-slate-700/50">
                 <p className="text-[9px] font-black text-slate-500 uppercase">%</p>
-                <p className="text-sm font-bold text-amber-200">{rate}%</p>
+                <p className="text-sm font-bold text-amber-200">{rateLabel}</p>
               </div>
               <div className="bg-indigo-950/40 rounded-xl py-2 border border-indigo-800/40">
                 <p className="text-[9px] font-black text-indigo-400 uppercase">Est.</p>
@@ -441,6 +453,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         onRefreshSaldos={loadSaldosCartera}
         commissionEditable
         onUpdateCommission={updateCommission}
+        onUpdateCustomer={onUpdateCustomer}
       />
     );
   }
@@ -488,7 +501,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-400">
-          Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Los vendedores se administran en{' '}
+          Elegí un vendedor para ver sus clientes, pedidos, saldo pendiente de cartera (unificado) y comisión. Podés definir un % por defecto del vendedor y un % distinto por cliente. Los vendedores se administran en{' '}
           <strong className="text-slate-300">Configuración → Usuarios</strong> o importación Excel.
         </p>
         <button
@@ -523,9 +536,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {sellers.map((seller) => {
           const sellerSales = salesTotalForSeller(orders, seller.id);
-          const commissionRate = COMMISSION_FIXED_RATE;
+          const custsForCard = customersForSeller(seller.id);
           const commissionBase = netWithoutIva(receiptsMonthForSeller(seller.id));
-          const commissionAmount = round2(commissionBase * (commissionRate / 100));
+          const commissionAmount = totalCommissionForSeller(seller, receiptRowsInRange);
+          const commissionRateLabel = commissionRateLabelForCustomers(custsForCard, seller);
           const nCli = customersForSeller(seller.id).length;
           const nOrd = ordersForSeller(seller.id).length;
 
@@ -563,7 +577,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                 </div>
                 <div className="bg-slate-900/60 rounded-xl py-2.5 border border-slate-700/50">
                   <p className="text-[9px] font-black text-slate-500 uppercase mb-0.5">Comisión</p>
-                  <p className="text-sm font-bold text-amber-200">{commissionRate}%</p>
+                  <p className="text-sm font-bold text-amber-200">{commissionRateLabel}</p>
                 </div>
                 <div className="bg-indigo-950/40 rounded-xl py-2.5 border border-indigo-800/40">
                   <p className="text-[9px] font-black text-indigo-400 uppercase mb-0.5">Estimado</p>
@@ -687,7 +701,7 @@ type DetailShape = {
   custs: Customer[];
   ords: Order[];
   sales: number;
-  rate: number;
+  rateLabel: string;
   commission: number;
   commissionBase: number;
   saldoTotal: number;
@@ -697,6 +711,7 @@ type DetailShape = {
     customerName: string;
     receiptNumber: string;
     amount: number;
+    commissionRate: number;
     commissionAmount: number;
   }>;
 };
@@ -712,7 +727,8 @@ function SellerDetailView({
   onBack,
   onRefreshSaldos,
   commissionEditable,
-  onUpdateCommission
+  onUpdateCommission,
+  onUpdateCustomer
 }: {
   seller: User;
   detail: DetailShape;
@@ -725,8 +741,11 @@ function SellerDetailView({
   onRefreshSaldos: () => void;
   commissionEditable: boolean;
   onUpdateCommission: (userId: string, value: string) => void | Promise<void>;
+  onUpdateCustomer?: (customerId: string, data: Partial<Customer>) => void | Promise<void>;
 }) {
-  const { custs, ords, sales, rate, commission, commissionBase, saldoTotal, commissionDetails } = detail;
+  const { custs, ords, sales, rateLabel, commission, commissionBase, saldoTotal, commissionDetails } = detail;
+  const defaultSellerRate = seller.commissionPercentage ?? 0;
+  const [savingCustomerCommissionId, setSavingCustomerCommissionId] = useState<string | null>(null);
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
   const [commissionExporting, setCommissionExporting] = useState(false);
@@ -881,8 +900,20 @@ function SellerDetailView({
         </div>
         {commissionEditable && (
           <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2">
-            <span className="text-xs text-slate-400">Comisión fija</span>
-            <span className="text-sm font-bold text-indigo-200">{COMMISSION_FIXED_RATE}%</span>
+            <span className="text-xs text-slate-400 whitespace-nowrap">Comisión por defecto</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              key={`seller-rate-${seller.id}-${defaultSellerRate}`}
+              defaultValue={defaultSellerRate}
+              onBlur={(e) => {
+                void onUpdateCommission(seller.id, e.target.value);
+              }}
+              className="w-20 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-sm text-indigo-200 font-bold text-right outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-xs text-slate-500">%</span>
           </div>
         )}
       </div>
@@ -921,7 +952,7 @@ function SellerDetailView({
           </div>
           <p className="text-xl font-black text-indigo-200 tabular-nums">{fmtMoney(commission)}</p>
           <p className="text-[10px] text-slate-500 mt-1">
-            {rate}% sobre neto sin IVA ({fmtMoney(commissionBase)})
+            {rateLabel} sobre neto sin IVA ({fmtMoney(commissionBase)})
           </p>
         </div>
       </div>
@@ -949,9 +980,10 @@ function SellerDetailView({
             commissionDetails.map((r) => (
               <div key={r.id} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-sm">
                 <div className="col-span-2 text-slate-400">{r.date}</div>
-                <div className="col-span-4 text-white truncate">{r.customerName}</div>
+                <div className="col-span-3 text-white truncate">{r.customerName}</div>
                 <div className="col-span-2 text-slate-300 truncate">{r.receiptNumber}</div>
                 <div className="col-span-2 text-right text-emerald-300 tabular-nums">{fmtMoney(r.amount)}</div>
+                <div className="col-span-1 text-right text-amber-200/90 tabular-nums text-xs">{r.commissionRate}%</div>
                 <div className="col-span-2 text-right text-indigo-300 tabular-nums">{fmtMoney(r.commissionAmount)}</div>
               </div>
             ))
@@ -971,9 +1003,14 @@ function SellerDetailView({
             ) : (
               custs.map((c) => {
                 const sal = unifiedSaldoForCustomer(c.id);
+                const effectiveRate = effectiveCommissionRate(c, seller);
+                const pctValue =
+                  c.sellerCommissionPercentage != null && Number.isFinite(c.sellerCommissionPercentage)
+                    ? String(c.sellerCommissionPercentage)
+                    : '';
                 return (
-                  <div key={c.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-800/40">
-                    <div className="min-w-0">
+                  <div key={c.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-800/40">
+                    <div className="min-w-0 flex-1">
                       <p className="font-semibold text-white truncate">{c.businessName}</p>
                       <p className="text-xs text-slate-500 flex items-center gap-2 truncate">
                         <Mail size={11} className="shrink-0" /> {c.email}
@@ -983,6 +1020,41 @@ function SellerDetailView({
                           <MapPin size={11} /> {c.city}
                         </p>
                       ) : null}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[10px] text-slate-500 uppercase">Comisión</p>
+                      {commissionEditable && onUpdateCustomer ? (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          defaultValue={pctValue}
+                          placeholder={String(defaultSellerRate)}
+                          disabled={savingCustomerCommissionId === c.id}
+                          title={`Vacío = comisión por defecto del vendedor (${defaultSellerRate}%)`}
+                          onBlur={async (e) => {
+                            const raw = e.target.value.trim();
+                            const next =
+                              raw === '' ? null : Math.min(100, Math.max(0, parseFloat(raw) || 0));
+                            if (
+                              (next == null && c.sellerCommissionPercentage == null) ||
+                              (next != null && c.sellerCommissionPercentage === next)
+                            ) {
+                              return;
+                            }
+                            setSavingCustomerCommissionId(c.id);
+                            try {
+                              await onUpdateCustomer(c.id, { sellerCommissionPercentage: next });
+                            } finally {
+                              setSavingCustomerCommissionId(null);
+                            }
+                          }}
+                          className="mt-0.5 w-16 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-sm text-amber-200 font-bold text-right outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      ) : (
+                        <p className="text-sm font-bold text-amber-200 tabular-nums">{effectiveRate}%</p>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[10px] text-slate-500 uppercase">Saldo</p>

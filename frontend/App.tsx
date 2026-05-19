@@ -1109,6 +1109,7 @@ const App: React.FC = () => {
                 role={currentUser.role}
                 currentUser={currentUser}
                 onUpdateUser={currentUser.role === Role.ADMIN ? handleUpdateUser : undefined}
+                onUpdateCustomer={currentUser.role === Role.ADMIN ? handleUpdateCustomer : undefined}
               />
             </Suspense>
           )}

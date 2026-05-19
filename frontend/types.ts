@@ -108,6 +108,8 @@ export interface RemitenteConfig {
 export interface Customer {
   id: string;
   sellerId?: string;
+  /** % de comisión del vendedor asignado para este cliente. Si no se define, usa users.commission_percentage. */
+  sellerCommissionPercentage?: number | null;
   userId?: string;
   name: string;
   businessName: string; // Razón Social

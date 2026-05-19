@@ -60,6 +60,7 @@ import { addCompanyFinanceFixedExpensesTable } from './database/add_company_fina
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
+import { addCustomerSellerCommission } from './database/add_customer_seller_commission';
 import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
@@ -205,6 +206,7 @@ async function initDatabase() {
       await addCompanyFinanceFixedExpensesTable();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
+      await addCustomerSellerCommission();
       await addOrdersPerformanceIndexes();
       console.log('[DB] Tablas inicializadas correctamente');
       return;

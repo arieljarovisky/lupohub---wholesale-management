@@ -59,6 +59,12 @@ function mapCustomerFromApi(r: any): Customer {
   return {
     id: r.id,
     sellerId: r.sellerId ?? r.seller_id ?? '',
+    sellerCommissionPercentage:
+      r.sellerCommissionPercentage != null
+        ? Number(r.sellerCommissionPercentage)
+        : r.seller_commission_percentage != null
+          ? Number(r.seller_commission_percentage)
+          : undefined,
     userId: r.userId ?? r.user_id ?? undefined,
     name: r.name ?? '',
     businessName: r.businessName ?? r.business_name ?? '',
@@ -1506,6 +1512,7 @@ export const api = {
       const created = await request<any>('/customers', 'POST', {
         id: customer.id,
         sellerId: customer.sellerId,
+        sellerCommissionPercentage: customer.sellerCommissionPercentage,
         name: customer.name,
         businessName: customer.businessName,
         email: customer.email,

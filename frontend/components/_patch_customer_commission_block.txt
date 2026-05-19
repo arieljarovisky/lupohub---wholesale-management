@@ -1,0 +1,69 @@
+              custs.map((c) => {
+                const sal = unifiedSaldoForCustomer(c.id);
+                const effectiveRate = effectiveCommissionRate(c, seller);
+                const pctValue =
+                  c.sellerCommissionPercentage != null && Number.isFinite(c.sellerCommissionPercentage)
+                    ? String(c.sellerCommissionPercentage)
+                    : '';
+                return (
+                  <motion key={c.id} className="px-4 py-3 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-800/40">
+                    <motion className="min-w-0 flex-1">
+                      <p className="font-semibold text-white truncate">{c.businessName}</p>
+                      <p className="text-xs text-slate-500 flex items-center gap-2 truncate">
+                        <Mail size={11} className="shrink-0" /> {c.email}
+                      </p>
+                      {c.city ? (
+                        <p className="text-[11px] text-slate-600 flex items-center gap-1 mt-0.5">
+                          <MapPin size={11} /> {c.city}
+                        </p>
+                      ) : null}
+                    </motion>
+                    <motion className="text-right shrink-0">
+                      <p className="text-[10px] text-slate-500 uppercase">Comisión</p>
+                      {commissionEditable && onUpdateCustomer ? (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          defaultValue={pctValue}
+                          placeholder={String(defaultSellerRate)}
+                          disabled={savingCustomerCommissionId === c.id}
+                          title={`Vacío = comisión por defecto del vendedor (${defaultSellerRate}%)`}
+                          onBlur={async (e) => {
+                            const raw = e.target.value.trim();
+                            const next =
+                              raw === '' ? null : Math.min(100, Math.max(0, parseFloat(raw) || 0));
+                            if (
+                              (next == null && c.sellerCommissionPercentage == null) ||
+                              (next != null && c.sellerCommissionPercentage === next)
+                            ) {
+                              return;
+                            }
+                            setSavingCustomerCommissionId(c.id);
+                            try {
+                              await onUpdateCustomer(c.id, { sellerCommissionPercentage: next });
+                            } finally {
+                              setSavingCustomerCommissionId(null);
+                            }
+                          }}
+                          className="mt-0.5 w-16 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-sm text-amber-200 font-bold text-right outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      ) : (
+                        <p className="text-sm font-bold text-amber-200 tabular-nums">{effectiveRate}%</p>
+                      )}
+                    </motion>
+                    <motion className="text-right shrink-0">
+                      <p className="text-[10px] text-slate-500 uppercase">Saldo</p>
+                      <p
+                        className={`text-sm font-bold tabular-nums ${
+                          sal < -0.01 ? 'text-emerald-300' : sal > 0.01 ? 'text-amber-200/95' : 'text-slate-400'
+                        }`}
+                        title={sal < -0.01 ? 'Saldo a favor del cliente (le debés)' : undefined}
+                      >
+                        {saldosLoading ? '…' : fmtMoney(sal)}
+                      </p>
+                    </motion>
+                  </motion>
+                );
+              })

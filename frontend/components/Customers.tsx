@@ -1418,6 +1418,55 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             )}
 
+            {onUpdateCustomer && selectedCustomer.sellerId && (
+              <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-2">
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2">
+                  Comisión del vendedor (%)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={
+                    selectedCustomer.sellerCommissionPercentage != null &&
+                    Number.isFinite(selectedCustomer.sellerCommissionPercentage)
+                      ? selectedCustomer.sellerCommissionPercentage
+                      : ''
+                  }
+                  placeholder={
+                    users.find((u) => u.id === selectedCustomer.sellerId)?.commissionPercentage != null
+                      ? String(users.find((u) => u.id === selectedCustomer.sellerId)?.commissionPercentage)
+                      : '0'
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const parsed = raw === '' ? null : Math.min(100, Math.max(0, parseFloat(raw) || 0));
+                    setSelectedCustomer((prev) =>
+                      prev ? { ...prev, sellerCommissionPercentage: parsed } : null
+                    );
+                  }}
+                  onBlur={async () => {
+                    try {
+                      await Promise.resolve(
+                        onUpdateCustomer(selectedCustomer.id, {
+                          sellerCommissionPercentage:
+                            selectedCustomer.sellerCommissionPercentage ?? null
+                        })
+                      );
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Por cliente: si está vacío, usa el % por defecto del vendedor en{' '}
+                  <strong className="text-slate-300">Vendedores</strong> o Configuración.
+                </p>
+              </div>
+            )}
+
             {/* Acceso directo del cliente */}
             <div className="bg-slate-800 rounded-2xl border border-slate-700 p-4 space-y-3">
               <div className="flex items-center justify-between">

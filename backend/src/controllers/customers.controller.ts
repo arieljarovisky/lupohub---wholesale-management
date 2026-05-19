@@ -97,10 +97,20 @@ function labelTipoSaldoExporter(m: { tipo?: string | null; comprobante?: string 
   return tipo;
 }
 
+function parseSellerCommissionPercentage(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return Math.round(n * 100) / 100;
+}
+
 function toCustomer(row: any, transportes?: { id: string; name: string; address?: string }[]) {
+  const sellerCommissionPct =
+    row.seller_commission_percentage != null ? parseSellerCommissionPercentage(row.seller_commission_percentage) : null;
   return {
     id: row.id,
     sellerId: row.seller_id ?? '',
+    sellerCommissionPercentage: sellerCommissionPct ?? undefined,
     userId: row.user_id ?? undefined,
     name: row.name ?? '',
     businessName: row.business_name ?? '',
@@ -159,7 +169,7 @@ export const getCustomers = async (req: Request, res: Response) => {
         AND apc.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '')`
       : '';
     const rows = await query(
-      `SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
+      `SELECT c.id, c.seller_id, c.seller_commission_percentage, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
               c.legacy_code, c.account_zone, c.account_seller_label, c.delivery_addresses
               ${agipSelect}
        FROM customers c
@@ -564,6 +574,7 @@ export const createCustomer = async (req: Request, res: Response) => {
       accountZone?: string;
       accountSellerLabel?: string;
       deliveryAddresses?: unknown[];
+      sellerCommissionPercentage?: number | null;
     };
     const name = (body.name ?? '').toString().trim();
     const businessName = (body.businessName ?? '').toString().trim();
@@ -597,14 +608,19 @@ export const createCustomer = async (req: Request, res: Response) => {
     const sqlName = name || null;
     const sqlBusinessName = businessName || name || null;
 
+    const sellerCommissionPct =
+      body.sellerCommissionPercentage !== undefined
+        ? parseSellerCommissionPercentage(body.sellerCommissionPercentage)
+        : null;
+
     await execute(
-      `INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]
+      `INSERT INTO customers (id, seller_id, seller_commission_percentage, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, sellerId, sellerCommissionPct, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]
     );
 
     const created = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
       [id]
     );
     const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x: string) => x && typeof x === 'string') : [];
@@ -649,6 +665,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       accountZone?: string;
       accountSellerLabel?: string;
       deliveryAddresses?: unknown[] | null;
+      sellerCommissionPercentage?: number | null;
     };
     const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Cliente no encontrado' });
@@ -666,6 +683,14 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.saleCondition !== undefined) { updates.push('sale_condition = ?'); params.push(body.saleCondition?.trim() || null); }
     if (body.condicionIva !== undefined) { updates.push('condicion_iva = ?'); params.push(body.condicionIva?.trim() || null); }
     if (body.sellerId !== undefined) { updates.push('seller_id = ?'); params.push(body.sellerId?.trim() || null); }
+    if (body.sellerCommissionPercentage !== undefined) {
+      const pct = parseSellerCommissionPercentage(body.sellerCommissionPercentage);
+      if (body.sellerCommissionPercentage != null && pct === null) {
+        return res.status(400).json({ message: 'sellerCommissionPercentage debe estar entre 0 y 100' });
+      }
+      updates.push('seller_commission_percentage = ?');
+      params.push(pct);
+    }
     if (body.priceListId !== undefined) { updates.push('price_list_id = ?'); params.push(body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null); }
     if (body.legacyCode !== undefined) { updates.push('legacy_code = ?'); params.push(body.legacyCode?.trim() || null); }
     if (body.accountZone !== undefined) { updates.push('account_zone = ?'); params.push(body.accountZone?.trim() || null); }
@@ -686,7 +711,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(
