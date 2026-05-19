@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye } from 'lucide-react';
+import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
@@ -176,8 +176,9 @@ function orderInvoiceApplicableAgip(order: Order): { alicuota: number; retPer: n
   return { alicuota, retPer };
 }
 
-/** Importes facturados / NC / saldo en la tarjeta del listado. */
+/** Importes facturados / NC / saldo en la tarjeta del listado (resumen + detalle desplegable). */
 function OrderCardFiscalAmounts({ order, dimmed }: { order: Order; dimmed?: boolean }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const wrap = dimmed ? 'opacity-55' : '';
   const fact = order.invoice ? orderTotalesFacturado(order) : null;
   const nc = fact ? orderTotalesNotaCredito(order) : null;
@@ -202,40 +203,82 @@ function OrderCardFiscalAmounts({ order, dimmed }: { order: Order; dimmed?: bool
     );
   }
 
+  const hasExpandableDetail =
+    fact.iibb > 0.005 ||
+    (fact.discriminaIva && fact.iva > 0.005) ||
+    !!nc;
+
+  const toggleDetail = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDetailOpen((v) => !v);
+  };
+
   return (
-    <div className={`text-right ml-auto sm:ml-0 min-w-[140px] ${wrap}`}>
-      <div className="text-lg font-black text-emerald-300">${formatMoneyAr(fact.total)}</div>
+    <div className={`text-right ml-auto sm:ml-0 min-w-[148px] max-w-[220px] ${wrap}`}>
+      <div className="text-lg font-black text-emerald-300 leading-tight">${formatMoneyAr(fact.total)}</div>
       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total facturado</div>
-      <div className="mt-1.5 space-y-0.5">
-        {line('Neto', `$${formatMoneyAr(fact.neto)}`)}
-        {fact.discriminaIva && fact.iva > 0.005 && line('IVA 21%', `$${formatMoneyAr(fact.iva)}`)}
-        {fact.iibb > 0.005 &&
-          line(
-            'IIBB',
-            `$${formatMoneyAr(fact.iibb)}`,
-            'text-amber-200/90'
-          )}
-      </div>
+
       {nc && ncLabel && (
-        <div className="mt-2 pt-2 border-t border-slate-700/80 space-y-0.5">
+        <div className="mt-1 space-y-0.5">
           <div className="text-[10px] font-bold uppercase tracking-wide text-orange-400/95">{ncLabel}</div>
           <div className="text-[11px] font-bold text-orange-300">−${formatMoneyAr(nc.total)}</div>
-          {line('Neto NC', `$${formatMoneyAr(nc.neto)}`, 'text-orange-200/80')}
-          {nc.discriminaIva && nc.iva > 0.005 && line('IVA NC', `$${formatMoneyAr(nc.iva)}`, 'text-orange-200/70')}
-          {nc.iibb > 0.005 && line('IIBB NC', `$${formatMoneyAr(nc.iibb)}`, 'text-orange-200/70')}
           {!dimmed && saldo > 0.005 && (
-            <div className="text-[11px] font-bold text-slate-200 mt-1 pt-1 border-t border-slate-700/60">
+            <div className="text-[11px] font-bold text-slate-200">
               Saldo: <span className="text-emerald-300 font-mono">${formatMoneyAr(saldo)}</span>
             </div>
           )}
           {dimmed && (
-            <div className="text-[10px] text-orange-300/90 mt-0.5">Factura anulada fiscalmente</div>
+            <div className="text-[10px] text-orange-300/90">Factura anulada fiscalmente</div>
           )}
+        </div>
+      )}
+
+      {hasExpandableDetail && (
+        <>
+          <button
+            type="button"
+            onClick={toggleDetail}
+            className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 hover:text-slate-200 transition ml-auto"
+            aria-expanded={detailOpen}
+          >
+            {detailOpen ? 'Ocultar detalle' : 'Ver detalle'}
+            <ChevronDown
+              size={14}
+              className={`shrink-0 transition-transform ${detailOpen ? 'rotate-180' : ''}`}
+              aria-hidden
+            />
+          </button>
+          {detailOpen && (
+            <div className="mt-1.5 space-y-0.5 rounded-lg border border-slate-700/80 bg-slate-900/50 px-2 py-1.5">
+              <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-0.5">Factura</div>
+              {line('Neto', `$${formatMoneyAr(fact.neto)}`)}
+              {fact.discriminaIva && fact.iva > 0.005 && line('IVA 21%', `$${formatMoneyAr(fact.iva)}`)}
+              {fact.iibb > 0.005 && line('IIBB', `$${formatMoneyAr(fact.iibb)}`, 'text-amber-200/90')}
+              {nc && (
+                <>
+                  <div className="text-[9px] font-bold uppercase tracking-wide text-orange-400/80 mt-1.5 mb-0.5 pt-1 border-t border-slate-700/60">
+                    Nota de crédito
+                  </div>
+                  {line('Neto NC', `$${formatMoneyAr(nc.neto)}`, 'text-orange-200/80')}
+                  {nc.discriminaIva && nc.iva > 0.005 && line('IVA NC', `$${formatMoneyAr(nc.iva)}`, 'text-orange-200/70')}
+                  {nc.iibb > 0.005 && line('IIBB NC', `$${formatMoneyAr(nc.iibb)}`, 'text-orange-200/70')}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {!hasExpandableDetail && (
+        <div className="mt-1.5 space-y-0.5">
+          {line('Neto', `$${formatMoneyAr(fact.neto)}`)}
+          {fact.discriminaIva && fact.iva > 0.005 && line('IVA 21%', `$${formatMoneyAr(fact.iva)}`)}
         </div>
       )}
     </div>
   );
 }
+
 
 function orderMatchesInvoiceListFilter(order: Order, f: OrdersInvoiceListFilter): boolean {
   if (f === 'all') return true;
