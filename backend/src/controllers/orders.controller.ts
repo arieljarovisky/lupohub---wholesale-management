@@ -214,7 +214,8 @@ async function getItemLabelForWarning(item: any, variantId: string): Promise<str
       `SELECT p.name AS productName,
               COALESCE(pv.sku, p.sku) AS sku,
               s.size_code AS sizeCode,
-              c.name AS colorName
+              c.name AS colorName,
+              c.code AS colorCode
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
@@ -366,6 +367,7 @@ export const getOrders = async (req: any, res: any) => {
              p.name AS productName,
              s.size_code AS sizeCode,
              c.name AS colorName,
+             c.code AS colorCode,
              COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -398,6 +400,7 @@ export const getOrders = async (req: any, res: any) => {
           productName: row.productName ?? undefined,
           sizeCode: row.sizeCode ?? undefined,
           colorName: row.colorName ?? undefined,
+          colorCode: row.colorCode ?? undefined,
           numeroDespacho: row.numeroDespacho ?? row.numero_despacho ?? undefined
         });
       }
@@ -763,7 +766,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
            COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
            pc.product_id AS productId,
-           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
            COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
     FROM order_items i
     JOIN product_variants pv ON pv.id = i.variant_id
@@ -790,6 +793,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     productName: row.productName ?? undefined,
     sizeCode: row.sizeCode ?? undefined,
     colorName: row.colorName ?? undefined,
+    colorCode: row.colorCode ?? undefined,
     numeroDespacho: row.numeroDespacho ?? undefined,
   }));
   return {
@@ -1297,7 +1301,7 @@ export const updateOrder = async (req: any, res: any) => {
       SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
              COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
              pc.product_id AS productId,
-             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName,
+             COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
              COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
       FROM order_items i
       JOIN product_variants pv ON pv.id = i.variant_id
@@ -1322,6 +1326,7 @@ export const updateOrder = async (req: any, res: any) => {
       productName: row.productName ?? undefined,
       sizeCode: row.sizeCode ?? undefined,
       colorName: row.colorName ?? undefined,
+      colorCode: row.colorCode ?? undefined,
       numeroDespacho: row.numeroDespacho ?? undefined
     }));
     res.json({

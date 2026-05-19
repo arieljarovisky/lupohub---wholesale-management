@@ -9,6 +9,7 @@ import {
   enrichOrderItem,
   sortOrderItemsForPrint as sortItemsForFacturaPrint,
   groupOrderItemsByArticleAndSize,
+  descriptionForPrintLine,
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   normalizeSkuForPrint,
@@ -625,11 +626,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       slice
         .map((i) => {
           const qty = Number(i.quantity || 0);
-          const sku = localSkuOf(i);
-          const desc = (i.productName ?? '').toString().trim() || '—';
+          const desc = descriptionForPrintLine(i);
           const despacho = (i as any).numeroDespacho ?? (i as any).numero_despacho ?? null;
           const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-          const codePrint = normalizeSkuForPrint(sku);
+          const codePrint = normalizeSkuForPrint((i.sku ?? localSkuOf(i)).toString().trim());
           const unit = Number(i.priceAtMoment ?? 0);
           const importe = Math.round(qty * unit * 100) / 100;
           return `<tr>

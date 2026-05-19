@@ -5,7 +5,7 @@
 import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
 import { calcTotalesDesdeNetoGravado } from './afipComprobante';
 import { formatMoneyAr } from './moneyFormat';
-import { nombreTalleDesdeCodigo } from './tallesTango';
+import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
 
 export type FacturaRemitente = Record<string, unknown> & {
   businessName?: string;
@@ -21,18 +21,41 @@ export type FacturaRemitente = Record<string, unknown> & {
   condicion_iva?: string;
 };
 
+/** Código de color Tango (tabla colors / tercer segmento del SKU). */
+export function colorCodeForPrintItem(item: OrderItem, variantSku?: string): string {
+  const fromItem = String(item.colorCode ?? '').trim();
+  if (fromItem) return fromItem.replace(/\D/g, '') || fromItem;
+  const sku = String(variantSku ?? item.sku ?? '').trim();
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 3) {
+    const c = parts[parts.length - 1].trim();
+    return c.replace(/\D/g, '') || c;
+  }
+  return '';
+}
+
 export function enrichOrderItem(item: OrderItem, products: Product[]): OrderItem {
-  if (item.sku != null && item.productName != null) return item;
   const variantId = item.variantId ?? item.productId;
-  if (!variantId) return item;
-  const p = products.find((x: Product) => x.id === variantId);
-  if (!p) return item;
+  const p = variantId ? products.find((x: Product) => x.id === variantId) : undefined;
+  const variantSku = (p?.sku ?? item.sku ?? '').toString().trim();
+  const resolvedColorCode =
+    String(item.colorCode ?? '').trim() || (variantSku ? colorCodeForPrintItem(item, variantSku) : '');
+  if (item.sku != null && item.productName != null) {
+    return {
+      ...item,
+      colorCode: item.colorCode ?? (resolvedColorCode || undefined),
+    };
+  }
+  if (!p) {
+    return resolvedColorCode ? { ...item, colorCode: resolvedColorCode } : item;
+  }
   return {
     ...item,
     sku: item.sku ?? p.sku,
     productName: item.productName ?? p.name,
     sizeCode: item.sizeCode ?? p.size,
     colorName: item.colorName ?? p.color,
+    colorCode: item.colorCode ?? (resolvedColorCode || undefined),
   };
 }
 
@@ -67,9 +90,35 @@ function sizeLabelForPrintGroup(sizeCode: string): string {
   return letter && letter !== code ? letter : code;
 }
 
+/** Código impreso: artículo + talle + código de color (ej. 4180501 + 140 + 111 → 4180501140111). */
+export function printCodeArticleSizeColor(
+  articleCode: string,
+  sizeCode: string,
+  colorCode: string
+): string {
+  const art = stripLeadingZerosArticle(String(articleCode || '').replace(/\D/g, ''));
+  const talle = codigoTalleParaSku(sizeCode) || String(sizeCode || '').replace(/\D/g, '');
+  const color = String(colorCode || '').replace(/\D/g, '') || String(colorCode || '').trim();
+  const parts = [art, talle, color].filter(Boolean);
+  if (parts.length === 0) return '';
+  return normalizeSkuForPrint(parts.join(''));
+}
+
+/** @deprecated Use printCodeArticleSizeColor */
+export function printCodeArticleAndSize(articleCode: string, sizeCode: string): string {
+  return printCodeArticleSizeColor(articleCode, sizeCode, '');
+}
+
+/** Descripción: nombre del producto (+ talle legible); el color va en la columna código. */
+export function descriptionForPrintLine(item: OrderItem): string {
+  const name = String(item.productName ?? '').trim();
+  const size = sizeLabelForPrintGroup(String(item.sizeCode ?? ''));
+  return [name, size].filter(Boolean).join(' ') || '—';
+}
+
 /**
- * Agrupa líneas del mismo artículo y talle (suma cantidades; unifica despachos).
- * Si el mismo artículo+talle tiene precios distintos, quedan en líneas separadas.
+ * Agrupa por artículo + talle + color: una fila por color (mismo código artículo+talle).
+ * Varias líneas seguidas si hay más de un color en el mismo talle.
  */
 export function groupOrderItemsByArticleAndSize(
   items: OrderItem[],
@@ -83,6 +132,7 @@ export function groupOrderItemsByArticleAndSize(
     despachos: Set<string>;
     articleCode: string;
     sizeCode: string;
+    colorCode: string;
   };
   const map = new Map<string, Acc>();
 
@@ -95,8 +145,9 @@ export function groupOrderItemsByArticleAndSize(
     const articleCode = articleCodeForPrintGroup(variantSku);
     const sizeCode = String(item.sizeCode ?? localProduct?.size ?? '').trim();
     const sizeKey = sizeKeyForGroup(sizeCode);
+    const colorCode = colorCodeForPrintItem(item, variantSku);
     const unit = Number(item.priceAtMoment ?? 0);
-    const groupKey = `${articleCode}|${sizeKey}|${Math.round(unit * 100)}`;
+    const groupKey = `${articleCode}|${sizeKey}|${colorCode}|${Math.round(unit * 100)}`;
 
     const despachoRaw =
       (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
@@ -112,6 +163,7 @@ export function groupOrderItemsByArticleAndSize(
         despachos: new Set(),
         articleCode,
         sizeCode,
+        colorCode,
       };
       map.set(groupKey, acc);
     }
@@ -125,9 +177,8 @@ export function groupOrderItemsByArticleAndSize(
     const qty = acc.qty;
     if (qty <= 0) continue;
     const unit = Math.round((acc.lineNeto / qty) * 100) / 100;
-    const sizeLabel = sizeLabelForPrintGroup(acc.sizeCode);
     const baseName = String(acc.template.productName ?? '').trim();
-    const productName = [baseName, sizeLabel].filter(Boolean).join(' ') || baseName || '—';
+    const printCode = printCodeArticleSizeColor(acc.articleCode, acc.sizeCode, acc.colorCode);
     const despachos = [...acc.despachos];
     const numeroDespacho =
       despachos.length === 0 ? undefined : despachos.length === 1 ? despachos[0] : despachos.join(', ');
@@ -136,10 +187,10 @@ export function groupOrderItemsByArticleAndSize(
       ...acc.template,
       quantity: qty,
       priceAtMoment: unit,
-      productName,
-      sku: acc.articleCode,
+      productName: baseName || '—',
+      sku: printCode,
       sizeCode: acc.sizeCode,
-      colorName: undefined,
+      colorCode: acc.colorCode || undefined,
       ...(numeroDespacho
         ? ({ numeroDespacho, numero_despacho: numeroDespacho } as OrderItem & {
             numeroDespacho: string;
@@ -301,12 +352,16 @@ export function buildWholesaleFacturaHtml(params: {
       const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
       const variantSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
       const sku = normalizeSkuForPrint(
-        articleCodeForPrintGroup(variantSku) || variantSku
+        (i.sku ?? '').toString().trim() ||
+          printCodeArticleSizeColor(
+            articleCodeForPrintGroup(variantSku),
+            String(i.sizeCode ?? ''),
+            colorCodeForPrintItem(i, variantSku)
+          )
       );
-      const name = (i.productName ?? '').toString().trim();
       const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
-      const desc = name || '—';
+      const desc = descriptionForPrintLine(i);
       return `<tr>
         <td class="col-c">${qty.toLocaleString('es-AR')}</td>
         <td class="col-c col-code">${sku || '—'}</td>

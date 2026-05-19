@@ -163,6 +163,8 @@ export interface OrderItem {
   productName?: string;
   sizeCode?: string;
   colorName?: string;
+  /** Código Tango del color (tabla colors.code), ej. 111 */
+  colorCode?: string;
   /** Despacho de importación elegido para esta línea (varias líneas mismo SKU con distinto despacho) */
   despachoId?: string;
   /** Número de despacho (línea o, si no hay, el último del producto) */
