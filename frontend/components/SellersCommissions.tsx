@@ -83,7 +83,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       .then((rows) => {
         const m: Record<string, number> = {};
         for (const r of rows) {
-          m[r.customerId] = Number(r.saldoPendienteUnificado) || 0;
+          const n = Number(r.saldoPendienteUnificado);
+          m[r.customerId] = Number.isFinite(n) ? n : 0;
         }
         setCarteraByCustomer(m);
       })
@@ -985,7 +986,12 @@ function SellerDetailView({
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[10px] text-slate-500 uppercase">Saldo</p>
-                      <p className="text-sm font-bold text-amber-200/95 tabular-nums">
+                      <p
+                        className={`text-sm font-bold tabular-nums ${
+                          sal < -0.01 ? 'text-emerald-300' : sal > 0.01 ? 'text-amber-200/95' : 'text-slate-400'
+                        }`}
+                        title={sal < -0.01 ? 'Saldo a favor del cliente (le debés)' : undefined}
+                      >
                         {saldosLoading ? '…' : fmtMoney(sal)}
                       </p>
                     </div>

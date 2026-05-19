@@ -99,7 +99,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         > = {};
         for (const r of rows) {
           m[r.customerId] = {
-            saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0,
+            saldoPendienteUnificado: (() => {
+              const n = Number(r.saldoPendienteUnificado);
+              return Number.isFinite(n) ? n : 0;
+            })(),
             orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
             totalNotasCredito: Number(r.totalNotasCredito) || 0,
             multimediaSaldo: Number(r.multimediaSaldo) || 0,
@@ -254,7 +257,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   /** Saldo unificado API: cuenta importada + facturas/pedidos (IVA) − NC (IVA) − recibos. */
   const getSaldoPendienteTotal = (c: Customer) => {
     const t = carteraById[c.id];
-    return t != null ? Number(t.saldoPendienteUnificado) || 0 : 0;
+    if (t == null) return 0;
+    const n = Number(t.saldoPendienteUnificado);
+    return Number.isFinite(n) ? n : 0;
   };
 
   const displayCustomers = useMemo(() => {
@@ -1323,7 +1328,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 )}
               </div>
-              <p className="text-3xl font-black text-white tabular-nums sm:text-right shrink-0">
+              <p
+                className={`text-3xl font-black tabular-nums sm:text-right shrink-0 ${
+                  getSaldoPendienteTotal(selectedCustomer) < -0.01
+                    ? 'text-emerald-300'
+                    : 'text-white'
+                }`}
+              >
                 $
                 {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
                   minimumFractionDigits: 2,
@@ -2155,7 +2166,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         <Wallet size={12} className="text-slate-500 shrink-0" />
                         Saldo pendiente
                       </div>
-                      <span className="text-white font-bold tabular-nums text-right">
+                      <span
+                        className={`font-bold tabular-nums text-right ${
+                          saldoPendienteTotal < -0.01
+                            ? 'text-emerald-300'
+                            : saldoPendienteTotal > 0.01
+                              ? 'text-white'
+                              : 'text-slate-400'
+                        }`}
+                        title={
+                          saldoPendienteTotal < -0.01 ? 'Saldo a favor del cliente (le debés)' : undefined
+                        }
+                      >
                         {saldosLoading
                           ? '...'
                           : `$${saldoPendienteTotal.toLocaleString('es-AR', {

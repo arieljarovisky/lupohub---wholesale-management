@@ -945,6 +945,130 @@ function roleCanViewSaldos(role: string | undefined): boolean {
   return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
 
+function parseSaldoNumero(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Último saldo de columna en import Multimedia/Tango (arrastre de cuenta). */
+const CARTERA_MM_LAST_SALDO_SUBQUERY = `
+  SELECT
+    agg.customer_id,
+    CAST(COALESCE(
+      (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+       FROM customer_multimedia_entries e_lo
+       WHERE e_lo.customer_id = agg.customer_id
+       ORDER BY e_lo.line_order DESC
+       LIMIT 1),
+      (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+       FROM customer_multimedia_entries e2
+       WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+       ORDER BY e2.line_order DESC
+       LIMIT 1),
+      0
+    ) AS DECIMAL(16,2)) AS last_saldo
+  FROM (
+    SELECT customer_id
+    FROM customer_multimedia_entries
+    GROUP BY customer_id
+  ) agg`;
+
+/**
+ * Pagos en Facturación que coinciden con un REC importado (se excluyen de pay deduplicado).
+ * Si el arrastre importado (last_saldo) es 0, hay que restarlos igual para no quedar en saldo 0.
+ */
+function sqlCarteraPagosMatchedImportSubquery(sellerScoped: boolean): string {
+  const sellerWhere = sellerScoped ? ' AND (p.seller_id = ? OR c2.seller_id = ?)' : '';
+  return `
+    SELECT d.customer_id, SUM(d.amount) AS total_matched
+    FROM (
+      SELECT
+        p.customer_id,
+        ROUND(COALESCE(p.amount, 0), 2) AS amount
+      FROM payments p
+      ${sellerScoped ? 'INNER JOIN customers c2 ON c2.id = p.customer_id' : ''}
+      INNER JOIN (
+        SELECT
+          e.customer_id,
+          DATE(e.line_date) AS line_date,
+          ROUND(COALESCE(e.importe, 0), 2) AS amount,
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          ) AS receipt_norm
+        FROM customer_multimedia_entries e
+        WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+          AND TRIM(COALESCE(e.numero, '')) <> ''
+        GROUP BY
+          e.customer_id,
+          DATE(e.line_date),
+          ROUND(COALESCE(e.importe, 0), 2),
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+      ) me_rec
+        ON me_rec.customer_id = p.customer_id
+       AND me_rec.line_date = DATE(p.date)
+       AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+       AND me_rec.receipt_norm = CASE
+         WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+         ELSE UPPER(
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+         )
+       END
+      WHERE 1=1${sellerWhere}
+      GROUP BY
+        p.customer_id,
+        DATE(p.date),
+        ROUND(COALESCE(p.amount, 0), 2),
+        CASE
+          WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+          ELSE UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+        END
+    ) d
+    GROUP BY d.customer_id`;
+}
+
+/** REC importados sin pago equivalente en Facturación (solo si last_saldo importado es 0). */
+const SQL_CARTERA_MM_REC_SIN_PAGO = `
+  SELECT e.customer_id, SUM(ROUND(ABS(COALESCE(e.importe, 0)), 2)) AS total_orphan
+  FROM customer_multimedia_entries e
+  WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+    AND TRIM(COALESCE(e.numero, '')) <> ''
+    AND NOT EXISTS (
+      SELECT 1
+      FROM payments p
+      WHERE p.customer_id = e.customer_id
+        AND DATE(p.date) = DATE(e.line_date)
+        AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+        AND UPPER(
+          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+        ) = CASE
+          WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+          ELSE UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+        END
+    )
+  GROUP BY e.customer_id`;
+
+/** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
+function carteraSaldoSqlExpr(): string {
+  return `ROUND(
+    COALESCE(ob.facturas_bruto, 0)
+    + COALESCE(mm.last_saldo, 0)
+    - COALESCE(ncv.nc_iva, 0)
+    - COALESCE(pay.total_pagos, 0)
+    - CASE
+        WHEN ABS(COALESCE(mm.last_saldo, 0)) < 0.005 THEN
+          COALESCE(pay_mm.total_matched, 0) + COALESCE(mm_orphan.total_orphan, 0)
+        ELSE 0
+      END,
+    2
+  )`;
+}
+
 /** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
 export const getSaldosPendientes = async (req: Request, res: Response) => {
   const user = (req as any).user;
@@ -981,7 +1105,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       cuit: r.cuit ?? '',
       city: r.city ?? '',
       email: r.email ?? '',
-      saldoPendiente: Number(r.saldoPendiente) || 0,
+      saldoPendiente: parseSaldoNumero(r.saldoPendiente),
       totalCargosPendiente: Number(r.totalCargosPendiente) || 0,
       totalPagos: Number(r.totalPagos) || 0,
       pedidosPendientes: Number(r.pedidosPendientes) || 0
@@ -995,7 +1119,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1023,7 +1147,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -1035,7 +1159,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1058,7 +1182,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -1202,32 +1326,12 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
              END
          ) d
          GROUP BY d.customer_id`;
+  const payMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(user.role === 'SELLER');
   const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
-  const paramsWithNc = [...baseParams, ...payParams];
-  const paramsSimple = [...baseParams, ...payParams];
-
-  /** Preferir saldo de la última fila (import PDF escribe ahí SALDO DEL CLIENTE); si NULL, último saldo intermedio. */
-  const mmSubquery = `
-    SELECT
-      agg.customer_id,
-      CAST(COALESCE(
-        (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
-         FROM customer_multimedia_entries e_lo
-         WHERE e_lo.customer_id = agg.customer_id
-         ORDER BY e_lo.line_order DESC
-         LIMIT 1),
-        (SELECT CAST(e2.saldo AS DECIMAL(16,2))
-         FROM customer_multimedia_entries e2
-         WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-         ORDER BY e2.line_order DESC
-         LIMIT 1),
-        0
-      ) AS DECIMAL(16,2)) AS last_saldo
-    FROM (
-      SELECT customer_id
-      FROM customer_multimedia_entries
-      GROUP BY customer_id
-    ) agg`;
+  const payMatchedParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
+  const paramsWithNc = [...baseParams, ...payParams, ...payMatchedParams];
+  const paramsSimple = [...baseParams, ...payParams, ...payMatchedParams];
+  const saldoExpr = carteraSaldoSqlExpr();
 
   const sqlWithNc = `
     SELECT
@@ -1236,13 +1340,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(
-        COALESCE(ob.facturas_bruto, 0)
-        + COALESCE(mm.last_saldo, 0)
-        - COALESCE(ncv.nc_iva, 0)
-        - COALESCE(pay.total_pagos, 0),
-        2
-      ) AS saldoPendienteUnificado
+      ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1269,15 +1367,12 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
-      AND (
-        COALESCE(ob.facturas_bruto, 0) > 0.005
-        OR COALESCE(ncv.nc_iva, 0) > 0.005
-        OR COALESCE(mm.last_saldo, 0) > 0.005
-        OR COALESCE(pay.total_pagos, 0) > 0.005
-      )
+      AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
   `;
 
@@ -1289,13 +1384,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(
-        COALESCE(ob.facturas_bruto, 0)
-        + COALESCE(mm.last_saldo, 0)
-        - COALESCE(ncv.nc_iva, 0)
-        - COALESCE(pay.total_pagos, 0),
-        2
-      ) AS saldoPendienteUnificado
+      ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1322,15 +1411,12 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
-      AND (
-        COALESCE(ob.facturas_bruto, 0) > 0.005
-        OR COALESCE(ncv.nc_iva, 0) > 0.005
-        OR COALESCE(mm.last_saldo, 0) > 0.005
-        OR COALESCE(pay.total_pagos, 0) > 0.005
-      )
+      AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
   `;
 
@@ -1339,11 +1425,11 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     return res.json(
       (rows as any[]).map((r) => ({
         customerId: r.customerId,
-        orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
-        totalNotasCredito: Number(r.totalNotasCredito) || 0,
-        multimediaSaldo: Number(r.multimediaSaldo) || 0,
-        totalPagos: Number(r.totalPagos) || 0,
-        saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+        orderCargosPendientes: parseSaldoNumero(r.orderCargosPendientes),
+        totalNotasCredito: parseSaldoNumero(r.totalNotasCredito),
+        multimediaSaldo: parseSaldoNumero(r.multimediaSaldo),
+        totalPagos: parseSaldoNumero(r.totalPagos),
+        saldoPendienteUnificado: parseSaldoNumero(r.saldoPendienteUnificado)
       }))
     );
   } catch (e: any) {
@@ -1353,11 +1439,11 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       return res.json(
         (rows as any[]).map((r) => ({
           customerId: r.customerId,
-          orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
-          totalNotasCredito: Number(r.totalNotasCredito) || 0,
-          multimediaSaldo: Number(r.multimediaSaldo) || 0,
-          totalPagos: Number(r.totalPagos) || 0,
-          saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+          orderCargosPendientes: parseSaldoNumero(r.orderCargosPendientes),
+          totalNotasCredito: parseSaldoNumero(r.totalNotasCredito),
+          multimediaSaldo: parseSaldoNumero(r.multimediaSaldo),
+          totalPagos: parseSaldoNumero(r.totalPagos),
+          saldoPendienteUnificado: parseSaldoNumero(r.saldoPendienteUnificado)
         }))
       );
     } catch (e2: any) {
@@ -1445,7 +1531,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1473,7 +1559,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -1485,7 +1571,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1508,7 +1594,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
 
@@ -1804,8 +1890,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         });
       }
 
-      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-      if (saldoPendiente > 0.01) {
+      const saldoPendiente = Math.round(running * 100) / 100;
+      if (Math.abs(saldoPendiente) > 0.01) {
         wsSummary.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
@@ -2034,8 +2120,8 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
         });
       }
 
-      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-      if (saldoPendiente > 0.01) {
+      const saldoPendiente = Math.round(running * 100) / 100;
+      if (Math.abs(saldoPendiente) > 0.01) {
         wsSummary.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
@@ -2709,40 +2795,16 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
                END
            ) d
            GROUP BY d.customer_id`;
+    const carteraPayMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(!!sellerIdFilter);
     const carteraPayParams: any[] = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
-    const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams];
-    const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams];
-    const mmSubquery = `
-      SELECT
-        agg.customer_id,
-        CAST(COALESCE(
-          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
-           FROM customer_multimedia_entries e_lo
-           WHERE e_lo.customer_id = agg.customer_id
-           ORDER BY e_lo.line_order DESC
-           LIMIT 1),
-          (SELECT CAST(e2.saldo AS DECIMAL(16,2))
-           FROM customer_multimedia_entries e2
-           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-           ORDER BY e2.line_order DESC
-           LIMIT 1),
-          0
-        ) AS DECIMAL(16,2)) AS last_saldo
-      FROM (
-        SELECT customer_id
-        FROM customer_multimedia_entries
-        GROUP BY customer_id
-      ) agg`;
+    const carteraPayMatchedParams: any[] = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
+    const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
+    const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
+    const carteraSaldoExpr = carteraSaldoSqlExpr();
     const carteraSqlWithNc = `
       SELECT
         c.id AS customerId,
-        ROUND(
-          COALESCE(ob.facturas_bruto, 0)
-          + COALESCE(mm.last_saldo, 0)
-          - COALESCE(ncv.nc_iva, 0)
-          - COALESCE(pay.total_pagos, 0),
-          2
-        ) AS saldoPendienteUnificado
+        ${carteraSaldoExpr} AS saldoPendienteUnificado
       FROM customers c
       LEFT JOIN (
         SELECT
@@ -2769,50 +2831,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           AND (o.archived = 0 OR o.archived IS NULL)
         GROUP BY o.customer_id
       ) ncv ON ncv.customer_id = c.id
-      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
       LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      LEFT JOIN (${carteraPayMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+      LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
       WHERE 1=1 ${carteraSellerFilter}
     `;
-    const carteraSqlSimple = `
-      SELECT
-        c.id AS customerId,
-        ROUND(
-          COALESCE(ob.facturas_bruto, 0)
-          + COALESCE(mm.last_saldo, 0)
-          - COALESCE(ncv.nc_iva, 0)
-          - COALESCE(pay.total_pagos, 0),
-          2
-        ) AS saldoPendienteUnificado
-      FROM customers c
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
-        FROM orders o
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ob ON ob.customer_id = c.id
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
-        FROM orders o
-        LEFT JOIN (
-          SELECT order_id, SUM(amount_credited) AS cn_total
-          FROM credit_notes
-          GROUP BY order_id
-        ) cn ON cn.order_id = o.id
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ncv ON ncv.customer_id = c.id
-      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
-      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-      WHERE 1=1 ${carteraSellerFilter}
-    `;
+    const carteraSqlSimple = carteraSqlWithNc;
     let carteraRows: Array<{ customerId: string; saldoPendienteUnificado: number }> = [];
     try {
       carteraRows = (await query(carteraSqlWithNc, carteraParamsWithNc)) as Array<{ customerId: string; saldoPendienteUnificado: number }>;
@@ -2821,7 +2846,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     }
     const saldoUnificadoByCustomer = new Map<string, number>();
     for (const r of carteraRows) {
-      saldoUnificadoByCustomer.set(r.customerId, Number(r.saldoPendienteUnificado) || 0);
+      saldoUnificadoByCustomer.set(r.customerId, parseSaldoNumero(r.saldoPendienteUnificado));
     }
 
     const byCustomer = new Map<string, typeof movements>();
@@ -2877,13 +2902,15 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
       // Saldo final = mismo criterio que historial (debe/haber acumulados), con arrastre previo al "desde".
-      const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
+      const saldoPendiente = Math.round(running * 100) / 100;
 
-      wsSummary.addRow({
-        cliente: c.customer_name,
-        vendedor: c.seller_name ?? c.seller_id ?? '',
-        saldo: saldoPendiente
-      });
+      if (Math.abs(saldoPendiente) > 0.01) {
+        wsSummary.addRow({
+          cliente: c.customer_name,
+          vendedor: c.seller_name ?? c.seller_id ?? '',
+          saldo: saldoPendiente
+        });
+      }
 
       // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
       if (!sellerIdFilter) {
@@ -2954,7 +2981,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
       wsDetalle.addRow(['Saldo neto del período (debe − haber)', '', '', '', '', '', netoPeriodo]);
       wsDetalle.addRow(['Saldo acumulado al cierre del período (arrastre + período)', '', '', '', '', '', saldo]);
-      wsDetalle.addRow(['Saldo final (máx. 0)', '', '', '', '', '', saldoPendiente]);
+      wsDetalle.addRow(['Saldo pendiente (debe − haber)', '', '', '', '', '', saldoPendiente]);
       for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
         wsDetalle.mergeCells(r, 1, r, 4);
         const row = wsDetalle.getRow(r);
@@ -3069,7 +3096,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       t.businessName,
       t.contactName,
       t.cuit,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes,
@@ -3114,7 +3141,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       t.businessName,
       t.contactName,
       t.cuit,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes,
