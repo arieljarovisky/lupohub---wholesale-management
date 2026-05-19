@@ -253,6 +253,18 @@ export type ManualFacturaFields = {
 };
 
 /** Une el snapshot de `GET /orders/:id/invoice` al pedido antes de armar el PDF (IIBB/CAE al día). */
+/** Neto según cantidades pedidas (sin usar `picked`). */
+export function orderNetoFromItemsByQuantity(order: Order): number {
+  if (!order.items?.length) return Number(order.total) || 0;
+  let s = 0;
+  for (const i of order.items) {
+    const q = Number(i.quantity) || 0;
+    const p = Number(i.priceAtMoment ?? 0);
+    s += Math.round(q * p * 100) / 100;
+  }
+  return Math.round(s * 100) / 100;
+}
+
 /** Neto gravado según líneas (alineado con factura AFIP tras picking). */
 export function orderNetoFromItemsForAfip(order: Order): number {
   if (!order.items?.length) return Number(order.total) || 0;
@@ -267,6 +279,24 @@ export function orderNetoFromItemsForAfip(order: Order): number {
     s += Math.round(lineQty * p * 100) / 100;
   }
   return Math.round(s * 100) / 100;
+}
+
+/**
+ * Neto a mostrar en la tarjeta del pedido: lo pickeado (criterio AFIP) menos NC,
+ * o —si ya está facturado pero `picked` está en cero— las cantidades del pedido.
+ */
+export function orderNetoSaldoForOrderCard(order: Order): number {
+  const netoAfip = orderNetoFromItemsForAfip(order);
+  const netoQty = orderNetoFromItemsByQuantity(order);
+  let neto = netoAfip > 0.005 ? netoAfip : netoQty;
+  const postPicking =
+    !order.noStockImpact &&
+    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
+  if (postPicking && order.invoice && netoAfip <= 0.005 && netoQty > 0.005) {
+    neto = netoQty;
+  }
+  const ncNeto = Math.round((Number(order.creditNotesNetoCredited) || 0) * 100) / 100;
+  return Math.max(0, Math.round((neto - ncNeto) * 100) / 100);
 }
 
 /** Prorrateo de percepción IIBB de la factura (`invoices.agip_*`), igual que el backend al emitir NC. */
