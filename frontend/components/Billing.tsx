@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
-import { buildWholesaleCreditNoteHtml, buildWholesaleFacturaHtml, mergeServerInvoiceIntoOrder, type ManualFacturaFields } from '../utils/wholesaleInvoiceHtml';
+import {
+  buildWholesaleCreditNoteHtml,
+  buildWholesaleFacturaHtml,
+  mergeServerInvoiceIntoOrder,
+  type ManualFacturaFields,
+} from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
@@ -410,8 +415,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         }
 
         const customerNc = customers.find((c) => c.id === order.customerId);
+        let orderForPdf = order;
+        try {
+          const latestInv = await api.getOrderInvoice(order.id);
+          if (latestInv) {
+            orderForPdf = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+          }
+        } catch {
+          /* usar factura en memoria */
+        }
         const html = buildWholesaleCreditNoteHtml({
-          order,
+          order: orderForPdf,
           nc,
           customer: customerNc,
           products,

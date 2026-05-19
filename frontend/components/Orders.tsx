@@ -14,6 +14,8 @@ import {
   buildWholesaleCreditNoteHtml,
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
+  orderNetoFromItemsForAfip as orderNetoFromItems,
+  iibbProratedFromInvoiceForNc,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
@@ -149,22 +151,6 @@ function sumCreditedByItemIndex(notes: CreditNote[]): Record<number, number> {
   return out;
 }
 
-/** Neto gravado según líneas (cantidad × precio); tras picking/control usa cantidad pickeada (alineado con factura AFIP). */
-function orderNetoFromItems(order: Order): number {
-  if (!order.items?.length) return Number(order.total) || 0;
-  const postPicking =
-    !order.noStockImpact &&
-    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
-  let s = 0;
-  for (const i of order.items) {
-    const q = Number(i.quantity) || 0;
-    const p = Number(i.priceAtMoment ?? 0);
-    const lineQty = postPicking ? Math.min(q, Math.max(0, Number(i.picked) || 0)) : q;
-    s += Math.round(lineQty * p * 100) / 100;
-  }
-  return Math.round(s * 100) / 100;
-}
-
 /** Mismo criterio que el backend al emitir AFIP: solo tras picking (control / despacho). */
 const AFIP_EMIT_ALLOWED_STATUSES = new Set<string>([
   OrderStatus.PENDING_CONTROL,
@@ -200,24 +186,6 @@ function formatAfipDocLine(puntoVta?: number | null, cbteDesde?: number | null, 
   if (puntoVta == null || cbteDesde == null) return '—';
   const t = cbteTipo != null ? ` · tipo ${cbteTipo}` : '';
   return `${puntoVta}-${cbteDesde}${t}`;
-}
-
-/** Prorrateo de percepción IIBB de la factura guardada (mismo criterio que el backend al emitir NC). */
-function iibbProratedFromInvoiceForNc(
-  inv: Order['invoice'] | undefined,
-  netCredito: number,
-  netoTotalPedido: number
-): { retPer: number; alicuota: number } | undefined {
-  if (!inv) return undefined;
-  const retFull = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
-  if (!(retFull > 0.005)) return undefined;
-  const full = Math.max(Math.round((Number(netoTotalPedido) || 0) * 100) / 100, 0.01);
-  const netC = Math.round((Number(netCredito) || 0) * 100) / 100;
-  const ratio = Math.min(1, Math.max(0, netC / full));
-  const ret = Math.round(retFull * ratio * 100) / 100;
-  if (!(ret > 0.005)) return undefined;
-  const alic = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
-  return { retPer: ret, alicuota: alic };
 }
 
 function ncComprobanteTotalesAfip(
@@ -1396,7 +1364,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         showToast('info', 'No hay notas de crédito para este pedido');
         return;
       }
-      const html = buildCreditNoteHtml(order, nc);
+      let orderForPdf = order;
+      try {
+        const latestInv = await api.getOrderInvoice(order.id);
+        if (latestInv) {
+          orderForPdf = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+        }
+      } catch {
+        /* usar factura en memoria */
+      }
+      const netoPed = orderNetoFromItems(orderForPdf);
+      const agip = iibbProratedFromInvoiceForNc(orderForPdf.invoice, Number(nc.amountCredited || 0), netoPed);
+      const html = buildCreditNoteHtml(orderForPdf, nc, agip);
       if (!html) {
         showToast('error', 'No se pudo generar la nota de crédito');
         return;

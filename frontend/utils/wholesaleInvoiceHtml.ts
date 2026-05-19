@@ -253,6 +253,46 @@ export type ManualFacturaFields = {
 };
 
 /** Une el snapshot de `GET /orders/:id/invoice` al pedido antes de armar el PDF (IIBB/CAE al día). */
+/** Neto gravado según líneas (alineado con factura AFIP tras picking). */
+export function orderNetoFromItemsForAfip(order: Order): number {
+  if (!order.items?.length) return Number(order.total) || 0;
+  const postPicking =
+    !order.noStockImpact &&
+    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
+  let s = 0;
+  for (const i of order.items) {
+    const q = Number(i.quantity) || 0;
+    const p = Number(i.priceAtMoment ?? 0);
+    const lineQty = postPicking ? Math.min(q, Math.max(0, Number(i.picked) || 0)) : q;
+    s += Math.round(lineQty * p * 100) / 100;
+  }
+  return Math.round(s * 100) / 100;
+}
+
+/** Prorrateo de percepción IIBB de la factura (`invoices.agip_*`), igual que el backend al emitir NC. */
+export function iibbProratedFromInvoiceForNc(
+  inv: Order['invoice'] | undefined,
+  netCredito: number,
+  netoTotalPedido: number
+): { retPer: number; alicuota: number } | undefined {
+  if (!inv) return undefined;
+  const retFull = Number((inv as { agipRetPer?: number; agip_ret_per?: number }).agipRetPer
+    ?? (inv as { agip_ret_per?: number }).agip_ret_per
+    ?? 0);
+  if (!(retFull > 0.005)) return undefined;
+  const full = Math.max(Math.round((Number(netoTotalPedido) || 0) * 100) / 100, 0.01);
+  const netC = Math.round((Number(netCredito) || 0) * 100) / 100;
+  const ratio = Math.min(1, Math.max(0, netC / full));
+  const ret = Math.round(retFull * ratio * 100) / 100;
+  if (!(ret > 0.005)) return undefined;
+  const alic = Number(
+    (inv as { agipAlicuota?: number; agip_alicuota?: number }).agipAlicuota
+      ?? (inv as { agip_alicuota?: number }).agip_alicuota
+      ?? 0
+  );
+  return { retPer: ret, alicuota: alic };
+}
+
 export function mergeServerInvoiceIntoOrder(order: Order, latest: Record<string, unknown> | null | undefined): Order {
   if (!order.invoice || !latest) return order;
   const inv = latest;
@@ -636,11 +676,16 @@ export function buildWholesaleCreditNoteHtml(params: {
   const totalNota = Number(nc.amountCredited || 0);
   const netoNc = Math.round(totalNota * 100) / 100;
   const cbteTipoNc = Number((nc as { cbteTipo?: number }).cbteTipo ?? (nc as { cbte_tipo?: number }).cbte_tipo ?? 0);
+  const netoPedidoFull = orderNetoFromItemsForAfip(order);
+  const agipResolved =
+    previewAgip && Number(previewAgip.retPer) > 0.005
+      ? previewAgip
+      : iibbProratedFromInvoiceForNc(order.invoice, netoNc, netoPedidoFull);
   let iibbNc = 0;
   let alicuotaIibbNc = 0;
-  if (previewAgip && Number(previewAgip.retPer) > 0.005) {
-    iibbNc = Math.round(Number(previewAgip.retPer) * 100) / 100;
-    alicuotaIibbNc = Math.round(Number(previewAgip.alicuota || 0) * 100) / 100;
+  if (agipResolved && Number(agipResolved.retPer) > 0.005) {
+    iibbNc = Math.round(Number(agipResolved.retPer) * 100) / 100;
+    alicuotaIibbNc = Math.round(Number(agipResolved.alicuota || 0) * 100) / 100;
   }
   const totalesNc = calcTotalesDesdeNetoGravado(netoNc, cbteTipoNc, iibbNc);
   const { iva: ivaNc, total: totalComprobanteNc, discriminaIva: discriminaIvaNc, factorPrecioImpreso: factorNc } = totalesNc;
