@@ -109,11 +109,9 @@ export function printCodeArticleAndSize(articleCode: string, sizeCode: string): 
   return printCodeArticleSizeColor(articleCode, sizeCode, '');
 }
 
-/** Descripción: nombre del producto (+ talle legible); el color va en la columna código. */
+/** Descripción: solo nombre del producto (talle y color van en la columna código). */
 export function descriptionForPrintLine(item: OrderItem): string {
-  const name = String(item.productName ?? '').trim();
-  const size = sizeLabelForPrintGroup(String(item.sizeCode ?? ''));
-  return [name, size].filter(Boolean).join(' ') || '—';
+  return String(item.productName ?? '').trim() || '—';
 }
 
 /**
