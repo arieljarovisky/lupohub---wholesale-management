@@ -8,6 +8,7 @@ import {
   syncBundleListingStock,
   type PublicationBundlePlatform
 } from '../services/publicationStockBundle.service';
+import { createPackListingAndBundle } from '../services/packListingCreate.service';
 
 export const listBundles = async (_req: Request, res: Response) => {
   try {
@@ -91,6 +92,45 @@ export const removeBundle = async (req: Request, res: Response) => {
   } catch (e: any) {
     console.error('removeBundle:', e);
     res.status(500).json({ message: 'Error eliminando pack' });
+  }
+};
+
+export const createListingFromSource = async (req: Request, res: Response) => {
+  try {
+    const body = req.body as {
+      platform?: PublicationBundlePlatform;
+      sourceExternalProductId?: string;
+      titleSuffix?: string;
+      skuSuffix?: string;
+      label?: string;
+      published?: boolean;
+      items?: Array<{ variantId: string; unitsPerSale?: number }>;
+    };
+    if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
+      return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
+    }
+    if (!body.sourceExternalProductId?.trim()) {
+      return res.status(400).json({ message: 'sourceExternalProductId es requerido (publicación individual)' });
+    }
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      return res.status(400).json({ message: 'items debe tener al menos una variante del pack' });
+    }
+    const result = await createPackListingAndBundle({
+      platform: body.platform,
+      sourceExternalProductId: body.sourceExternalProductId,
+      titleSuffix: body.titleSuffix,
+      skuSuffix: body.skuSuffix,
+      label: body.label,
+      published: body.published,
+      items: body.items
+    });
+    res.status(201).json(result);
+  } catch (e: any) {
+    if (e?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ya existe un pack para esa publicación' });
+    }
+    console.error('createListingFromSource:', e);
+    res.status(500).json({ message: e?.message || 'Error creando publicación pack' });
   }
 };
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createBundle,
+  createListingFromSource,
   getBundle,
   listBundles,
   removeBundle,
@@ -12,8 +13,14 @@ import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 const router = Router();
 
 router.get('/', authMiddleware, listBundles);
-router.get('/:id', authMiddleware, getBundle);
+router.post(
+  '/create-listing-from-source',
+  authMiddleware,
+  adminOrDepositoMiddleware,
+  createListingFromSource
+);
 router.post('/', authMiddleware, adminOrDepositoMiddleware, createBundle);
+router.get('/:id', authMiddleware, getBundle);
 router.patch('/:id', authMiddleware, adminOrDepositoMiddleware, updateBundle);
 router.delete('/:id', authMiddleware, adminOrDepositoMiddleware, removeBundle);
 router.post('/:id/sync-stock', authMiddleware, adminOrDepositoMiddleware, syncBundleStock);

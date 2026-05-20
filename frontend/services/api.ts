@@ -698,6 +698,29 @@ export const api = {
     return mapPublicationBundle(created);
   },
 
+  /** Crea publicación pack en ML/TN copiando fotos de una publicación individual y registra el pack. */
+  createPublicationBundleListingFromSource: async (data: {
+    platform: 'mercadolibre' | 'tiendanube';
+    sourceExternalProductId: string;
+    titleSuffix?: string;
+    skuSuffix?: string;
+    label?: string;
+    published?: boolean;
+    items: Array<{ variantId: string; unitsPerSale?: number }>;
+  }): Promise<{
+    bundle: PublicationBundleDto;
+    newExternalProductId: string;
+    newExternalVariantId?: string;
+    sourceExternalProductId: string;
+    message: string;
+  }> => {
+    const res = await request<any>('/publication-bundles/create-listing-from-source', 'POST', data, undefined, 180000);
+    return {
+      ...res,
+      bundle: mapPublicationBundle(res.bundle)
+    };
+  },
+
   updatePublicationBundle: async (
     id: string,
     data: {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search } from 'lucide-react';
+import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search, Sparkles } from 'lucide-react';
 import { Product, Role } from '../types';
 import { api, PublicationBundleDto } from '../services/api';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
@@ -33,6 +33,12 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const [variantInput, setVariantInput] = useState('');
   const [draftItems, setDraftItems] = useState<DraftItem[]>([]);
   const [variantSearch, setVariantSearch] = useState('');
+  const [linkMode, setLinkMode] = useState<'existing' | 'create'>('create');
+  const [sourceListingInput, setSourceListingInput] = useState('');
+  const [titleSuffix, setTitleSuffix] = useState(' (Pack)');
+  const [skuSuffix, setSkuSuffix] = useState('-PACK');
+  const [publishListing, setPublishListing] = useState(true);
+  const [creatingListing, setCreatingListing] = useState(false);
 
   const flatVariants = useMemo(() => {
     return products.map((p) => {
@@ -74,6 +80,18 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setVariantInput('');
     setDraftItems([]);
     setPlatform('mercadolibre');
+    setLinkMode('create');
+    setSourceListingInput('');
+    setTitleSuffix(' (Pack)');
+    setSkuSuffix('-PACK');
+    setPublishListing(true);
+  };
+
+  const parseSourceListingId = () => {
+    if (platform === 'mercadolibre') {
+      return normalizeMercadoLibreItemId(sourceListingInput) || sourceListingInput.trim();
+    }
+    return normalizeTiendaNubeProductId(sourceListingInput) || sourceListingInput.trim();
   };
 
   const parseListingIds = () => {
@@ -107,6 +125,40 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const addVariantToDraft = (variantId: string, labelText: string) => {
     if (draftItems.some((d) => d.variantId === variantId)) return;
     setDraftItems((prev) => [...prev, { variantId, unitsPerSale: 1, label: labelText }]);
+  };
+
+  const createListingAndBundle = async () => {
+    const sourceId = parseSourceListingId();
+    if (!sourceId) {
+      showToast('error', 'Indicá la publicación individual de origen (un color)');
+      return;
+    }
+    if (draftItems.length === 0) {
+      showToast('error', 'Agregá las variantes del pack (negro, gris, blanco, etc.)');
+      return;
+    }
+    setCreatingListing(true);
+    try {
+      const res = await api.createPublicationBundleListingFromSource({
+        platform,
+        sourceExternalProductId: sourceId,
+        titleSuffix: titleSuffix.trim() || ' (Pack)',
+        skuSuffix: skuSuffix.trim() || '-PACK',
+        label: label.trim() || undefined,
+        published: publishListing,
+        items: draftItems.map((d) => ({ variantId: d.variantId, unitsPerSale: d.unitsPerSale }))
+      });
+      setListingInput(res.newExternalProductId);
+      setVariantInput(res.newExternalVariantId || '');
+      showToast('success', res.message || 'Publicación pack creada');
+      resetForm();
+      setLinkMode('existing');
+      await loadBundles();
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudo crear la publicación pack');
+    } finally {
+      setCreatingListing(false);
+    }
   };
 
   const saveBundle = async () => {
@@ -190,6 +242,84 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
           {canEdit && (
             <div className="rounded-xl border border-violet-800/50 bg-violet-950/20 p-4 space-y-4">
               <h3 className="text-sm font-bold text-violet-200">{editingId ? 'Editar pack' : 'Nuevo pack'}</h3>
+
+              {!editingId && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLinkMode('create')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                      linkMode === 'create'
+                        ? 'bg-violet-600 border-violet-500 text-white'
+                        : 'border-slate-600 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    Crear publicación pack
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLinkMode('existing')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                      linkMode === 'existing'
+                        ? 'bg-violet-600 border-violet-500 text-white'
+                        : 'border-slate-600 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    Vincular publicación existente
+                  </button>
+                </div>
+              )}
+
+              {!editingId && linkMode === 'create' && (
+                <div className="rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-3 space-y-3">
+                  <p className="text-xs text-emerald-200/90">
+                    Tomá una publicación <strong>individual</strong> (ej. boxer negro). El sistema crea una{' '}
+                    <strong>nueva</strong> publicación pack con las <strong>mismas fotos</strong> y registra el pack
+                    para descontar cada color al vender.
+                  </p>
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">
+                      {platform === 'mercadolibre' ? 'Publicación origen (MLA / link)' : 'Producto origen TN'}
+                    </label>
+                    <input
+                      value={sourceListingInput}
+                      onChange={(e) => setSourceListingInput(e.target.value)}
+                      placeholder={platform === 'mercadolibre' ? 'MLA de un color (ej. negro)' : 'ID producto TN de un color'}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] text-slate-500 block mb-1">Sufijo título</label>
+                      <input
+                        value={titleSuffix}
+                        onChange={(e) => setTitleSuffix(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-500 block mb-1">Sufijo SKU</label>
+                      <input
+                        value={skuSuffix}
+                        onChange={(e) => setSkuSuffix(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                      />
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={publishListing}
+                          onChange={(e) => setPublishListing(e.target.checked)}
+                          className="rounded border-slate-600"
+                        />
+                        Publicar activa
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] text-slate-500 block mb-1">Plataforma</label>
@@ -212,30 +342,32 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1">
-                    {platform === 'mercadolibre' ? 'ID o link publicación ML' : 'ID o link producto TN'}
-                  </label>
-                  <input
-                    value={listingInput}
-                    onChange={(e) => setListingInput(e.target.value)}
-                    placeholder={platform === 'mercadolibre' ? 'MLA1234567890' : 'ID producto TN'}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
-                  />
+              {(editingId || linkMode === 'existing') && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">
+                      {platform === 'mercadolibre' ? 'ID o link publicación pack' : 'ID o link producto pack TN'}
+                    </label>
+                    <input
+                      value={listingInput}
+                      onChange={(e) => setListingInput(e.target.value)}
+                      placeholder={platform === 'mercadolibre' ? 'MLA del pack' : 'ID producto pack TN'}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">
+                      {platform === 'mercadolibre' ? 'ID variación ML (opcional)' : 'ID variante TN del pack'}
+                    </label>
+                    <input
+                      value={variantInput}
+                      onChange={(e) => setVariantInput(e.target.value)}
+                      placeholder="Si aplica"
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1">
-                    {platform === 'mercadolibre' ? 'ID variación ML (opcional)' : 'ID variante TN'}
-                  </label>
-                  <input
-                    value={variantInput}
-                    onChange={(e) => setVariantInput(e.target.value)}
-                    placeholder="Si aplica"
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
-                  />
-                </div>
-              </div>
+              )}
 
               <div>
                 <label className="text-[11px] text-slate-500 block mb-1">Componentes del pack</label>
@@ -298,15 +430,27 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void saveBundle()}
-                  disabled={saving}
-                  className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold disabled:opacity-50"
-                >
-                  {saving ? <Loader2 size={16} className="animate-spin inline" /> : null}{' '}
-                  {editingId ? 'Guardar cambios' : 'Crear pack'}
-                </button>
+                {!editingId && linkMode === 'create' ? (
+                  <button
+                    type="button"
+                    onClick={() => void createListingAndBundle()}
+                    disabled={creatingListing || saving}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {creatingListing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    Crear publicación pack + guardar
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void saveBundle()}
+                    disabled={saving}
+                    className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 size={16} className="animate-spin inline" /> : null}{' '}
+                    {editingId ? 'Guardar cambios' : 'Guardar pack'}
+                  </button>
+                )}
                 {editingId ? (
                   <button type="button" onClick={resetForm} className="px-3 py-2 rounded-lg border border-slate-600 text-slate-300 text-sm">
                     Cancelar edición
