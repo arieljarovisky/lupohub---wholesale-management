@@ -5,9 +5,10 @@ import { api, PublicationBundleDto, PublicationBundleGroupDto } from '../service
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 import {
-  suggestAllPublicationPacks,
-  productGroupKey,
-  type SuggestedPublicationPack
+  buildArticlePackMatrix,
+  colorAbbrevLabel,
+  packItemsFromColorOptions,
+  productGroupKey
 } from '../utils/suggestPublicationPacks';
 
 type DraftItem = { variantId: string; unitsPerSale: number; label: string };
@@ -120,6 +121,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionQuery, setSuggestionQuery] = useState('');
   const [selectedArticleKey, setSelectedArticleKey] = useState('');
+  const [suggestionSize, setSuggestionSize] = useState('');
+  const [suggestionPicksBySize, setSuggestionPicksBySize] = useState<Record<string, string[]>>({});
 
   const variantById = useMemo(() => {
     const m = new Map<string, Product>();
@@ -163,14 +166,122 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     return flatVariants.filter((v) => v.articleKey === selectedArticleKey);
   }, [flatVariants, selectedArticleKey]);
 
-  const packSuggestions = useMemo(() => {
-    if (!selectedArticleKey) return [];
-    return suggestAllPublicationPacks(products, {
-      query: suggestionQuery,
-      includeMultiCombo: true,
-      baseSku: selectedArticleKey
+  const articlePackMatrix = useMemo(() => {
+    if (!selectedArticleKey) return null;
+    return buildArticlePackMatrix(products, selectedArticleKey, { query: suggestionQuery });
+  }, [products, selectedArticleKey, suggestionQuery]);
+
+  const activeSizeGroup = useMemo(() => {
+    if (!articlePackMatrix?.sizeGroups.length) return null;
+    const size = suggestionSize || articlePackMatrix.sizeGroups[0]?.size || '';
+    return articlePackMatrix.sizeGroups.find((g) => g.size === size) ?? articlePackMatrix.sizeGroups[0];
+  }, [articlePackMatrix, suggestionSize]);
+
+  const selectedColorIdsForActiveSize = useMemo(() => {
+    const size = activeSizeGroup?.size;
+    if (!size) return new Set<string>();
+    return new Set(suggestionPicksBySize[size] || []);
+  }, [activeSizeGroup, suggestionPicksBySize]);
+
+  useEffect(() => {
+    if (!articlePackMatrix?.sizeGroups.length) {
+      setSuggestionSize('');
+      return;
+    }
+    const sizes = articlePackMatrix.sizeGroups.map((g) => g.size);
+    if (!suggestionSize || !sizes.includes(suggestionSize)) {
+      setSuggestionSize(sizes[0]);
+    }
+  }, [articlePackMatrix, suggestionSize]);
+
+  const resetSuggestionPicks = () => setSuggestionPicksBySize({});
+
+  const toggleSuggestionColor = (size: string, variantId: string) => {
+    setSuggestionPicksBySize((prev) => {
+      const cur = new Set(prev[size] || []);
+      if (cur.has(variantId)) cur.delete(variantId);
+      else cur.add(variantId);
+      return { ...prev, [size]: [...cur] };
     });
-  }, [products, suggestionQuery, selectedArticleKey]);
+  };
+
+  const selectAllColorsWithStockForSize = (size: string) => {
+    const group = articlePackMatrix?.sizeGroups.find((g) => g.size === size);
+    if (!group) return;
+    const ids = group.colors.filter((c) => c.stock > 0).map((c) => c.variantId);
+    setSuggestionPicksBySize((prev) => ({ ...prev, [size]: ids }));
+  };
+
+  const draftItemsFromPickedColors = (size: string, variantIds: string[]) => {
+    const group = articlePackMatrix?.sizeGroups.find((g) => g.size === size);
+    if (!group) return [];
+    return packItemsFromColorOptions(group.colors, variantIds).map((it) => ({
+      variantId: it.variantId,
+      unitsPerSale: it.unitsPerSale,
+      label: it.label
+    }));
+  };
+
+  const appendPackCombination = (label: string, items: DraftItem[]) => {
+    if (items.length < 2) {
+      showToast('error', 'Un pack multicolor necesita al menos 2 colores');
+      return false;
+    }
+    setPackColorVariants((prev) => {
+      const empty = prev.length === 1 && prev[0].items.length === 0 ? prev[0] : null;
+      if (empty) {
+        return prev.map((p) =>
+          p.key === empty.key ? { ...p, label, items, expanded: true } : p
+        );
+      }
+      return [...prev, newPackColorVariant({ label, items, expanded: true })];
+    });
+    return true;
+  };
+
+  const addSelectedColorsAsPackCombination = () => {
+    const size = activeSizeGroup?.size;
+    if (!size) return;
+    const ids = [...selectedColorIdsForActiveSize];
+    const items = draftItemsFromPickedColors(size, ids);
+    const colorNames =
+      activeSizeGroup?.colors.filter((c) => ids.includes(c.variantId)).map((c) => c.color) || [];
+    const label = colorAbbrevLabel(colorNames);
+    if (!appendPackCombination(label, items)) return;
+    showToast('success', `Combinación agregada (${items.length} colores, talle ${size})`);
+  };
+
+  const addFullSizePack = (size: string) => {
+    const group = articlePackMatrix?.sizeGroups.find((g) => g.size === size);
+    if (!group || group.availablePacks < 1) {
+      showToast('error', 'No hay stock suficiente para armar el pack en ese talle');
+      return;
+    }
+    const withStock = group.colors.filter((c) => c.stock > 0);
+    const items = draftItemsFromPickedColors(
+      size,
+      withStock.map((c) => c.variantId)
+    );
+    if (!appendPackCombination(group.packLabel, items)) return;
+    showToast('success', `Pack ${group.packLabel} (talle ${size}) agregado`);
+  };
+
+  const addAllSizesAsPackCombinations = () => {
+    if (!articlePackMatrix) return;
+    let added = 0;
+    for (const group of articlePackMatrix.sizeGroups) {
+      if (group.availablePacks < 1) continue;
+      const withStock = group.colors.filter((c) => c.stock > 0);
+      if (withStock.length < 2) continue;
+      const items = draftItemsFromPickedColors(
+        group.size,
+        withStock.map((c) => c.variantId)
+      );
+      if (appendPackCombination(group.packLabel, items)) added += 1;
+    }
+    if (added === 0) showToast('error', 'No hay talles con al menos 2 colores y stock');
+    else showToast('success', `${added} combinación(es) agregada(s) (una por talle)`);
+  };
 
   const prunePackItemsToArticle = (articleKey: string) => {
     if (!articleKey) return;
@@ -187,32 +298,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
 
   const onArticleSelect = (key: string) => {
     setSelectedArticleKey(key);
+    resetSuggestionPicks();
     if (key) prunePackItemsToArticle(key);
-  };
-
-  const applyPackSuggestion = (s: SuggestedPublicationPack) => {
-    setSelectedArticleKey(s.baseSku);
-    setPackColorVariants(
-      s.packVariants.map((pv) =>
-        newPackColorVariant({
-          label: pv.label,
-          expanded: true,
-          items: pv.items.map((it) => ({
-            variantId: it.variantId,
-            unitsPerSale: it.unitsPerSale,
-            label: it.label
-          }))
-        })
-      )
-    );
-    const suffix = titleSuffix.trim() || ' (Pack)';
-    const autoTitle = `${s.title}${suffix}`;
-    if (!listingLabelTouched.current) setListingLabel(autoTitle);
-    if (publicationDraft && !contentDraftTouched.current) {
-      setPublicationDraft((d) => (d ? { ...d, title: autoTitle } : d));
-    }
-    setShowSuggestions(false);
-    showToast('success', `Sugerencia aplicada: ${s.packVariants.length} combinación(es)`);
   };
 
   const loadBundles = useCallback(async () => {
@@ -319,6 +406,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setShowSuggestions(false);
     setSuggestionQuery('');
     setSelectedArticleKey('');
+    setSuggestionSize('');
+    resetSuggestionPicks();
   };
 
   const buildPublicationContent = () => {
@@ -862,9 +951,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                     >
                       <Wand2 size={14} />
                       Packs sugeridos
-                      {packSuggestions.length > 0 ? (
+                      {articlePackMatrix && articlePackMatrix.sizeGroups.length > 0 ? (
                         <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/30 text-[10px]">
-                          {packSuggestions.length}
+                          {articlePackMatrix.sizeGroups.length} talles
                         </span>
                       ) : null}
                     </button>
@@ -881,56 +970,136 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                 {showSuggestions && selectedArticleKey && (
                   <div className="rounded-xl border border-amber-800/50 bg-amber-950/25 p-3 space-y-3">
                     <p className="text-xs text-amber-200/90">
-                      Packs con <strong>1 unidad de cada color</strong> para el artículo seleccionado (por talle, con
-                      stock). Tocá una sugerencia para cargar las combinaciones abajo.
+                      Elegí el <strong>talle</strong>, marcá los <strong>colores</strong> del pack (1 unidad c/u) y
+                      agregá la combinación. En Mercado Libre la publicación usa variante Color + Talle.
                     </p>
                     <div className="relative">
                       <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
                       <input
                         value={suggestionQuery}
                         onChange={(e) => setSuggestionQuery(e.target.value)}
-                        placeholder="Filtrar por SKU, artículo, color o talle…"
+                        placeholder="Filtrar color o talle…"
                         className="w-full pl-7 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
                       />
                     </div>
-                    {packSuggestions.length === 0 ? (
+                    {!articlePackMatrix?.sizeGroups.length ? (
                       <p className="text-xs text-slate-500 py-2">
-                        No hay sugerencias para este artículo (hacen falta al menos 2 colores con stock en el mismo
-                        talle). Probá otro filtro o agregá colores a mano.
+                        No hay variantes con stock para este artículo. Probá otro filtro.
                       </p>
                     ) : (
-                      <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {packSuggestions.map((s) => (
-                          <li key={s.id}>
+                      <>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1.5">
+                            1 · Talle
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {articlePackMatrix.sizeGroups.map((g) => (
+                              <button
+                                key={g.size}
+                                type="button"
+                                onClick={() => setSuggestionSize(g.size)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
+                                  activeSizeGroup?.size === g.size
+                                    ? 'bg-amber-600/40 border-amber-500 text-amber-50'
+                                    : 'border-slate-600 text-slate-400 hover:bg-slate-800'
+                                }`}
+                              >
+                                {g.size}
+                                {g.availablePacks > 0 ? (
+                                  <span className="ml-1 text-[10px] text-emerald-400/90">({g.availablePacks})</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {activeSizeGroup && (
+                          <div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                                2 · Colores (talle {activeSizeGroup.size})
+                              </label>
+                              <div className="flex gap-2 text-[10px]">
+                                <button
+                                  type="button"
+                                  className="text-amber-300 hover:text-white"
+                                  onClick={() => selectAllColorsWithStockForSize(activeSizeGroup.size)}
+                                >
+                                  Todos con stock
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-slate-400 hover:text-white"
+                                  onClick={() =>
+                                    setSuggestionPicksBySize((prev) => ({ ...prev, [activeSizeGroup.size]: [] }))
+                                  }
+                                >
+                                  Ninguno
+                                </button>
+                              </div>
+                            </div>
+                            <ul className="max-h-40 overflow-y-auto rounded-lg border border-slate-700 divide-y divide-slate-800">
+                              {activeSizeGroup.colors.map((c) => {
+                                const checked = selectedColorIdsForActiveSize.has(c.variantId);
+                                const disabled = c.stock < 1;
+                                return (
+                                  <li key={c.variantId}>
+                                    <label
+                                      className={`flex items-center gap-2 px-2.5 py-2 text-xs cursor-pointer ${
+                                        disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-800/80'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={disabled}
+                                        onChange={() =>
+                                          toggleSuggestionColor(activeSizeGroup.size, c.variantId)
+                                        }
+                                        className="rounded border-slate-600 text-amber-500"
+                                      />
+                                      <span className="flex-1 text-slate-200">{c.color}</span>
+                                      <span className="text-slate-500 shrink-0">stock {c.stock}</span>
+                                    </label>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            {activeSizeGroup.colors.length < 2 && (
+                              <p className="text-[10px] text-amber-400/90 mt-1">
+                                Este talle tiene menos de 2 colores en inventario.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={selectedColorIdsForActiveSize.size < 2}
+                            onClick={addSelectedColorsAsPackCombination}
+                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-40"
+                          >
+                            Agregar colores seleccionados
+                          </button>
+                          {activeSizeGroup && activeSizeGroup.availablePacks > 0 && (
                             <button
                               type="button"
-                              onClick={() => applyPackSuggestion(s)}
-                              className="w-full text-left rounded-lg border border-slate-600 bg-slate-900/80 hover:border-amber-500/60 hover:bg-slate-800 px-3 py-2.5 transition-colors"
+                              onClick={() => addFullSizePack(activeSizeGroup.size)}
+                              className="px-3 py-1.5 rounded-lg border border-amber-700/60 text-amber-200 text-xs hover:bg-amber-950/50"
                             >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-white truncate">{s.title}</p>
-                                  <p className="text-[10px] text-slate-500 font-mono truncate">{s.baseSku}</p>
-                                </div>
-                                <span className="shrink-0 text-[10px] font-bold text-emerald-400/90 uppercase">
-                                  {s.subtitle}
-                                </span>
-                              </div>
-                              <ul className="mt-2 space-y-1">
-                                {s.packVariants.map((pv, i) => (
-                                  <li key={i} className="text-[11px] text-violet-200/90">
-                                    <span className="font-semibold text-violet-300">{pv.label || `Combo ${i + 1}`}</span>
-                                    <span className="text-slate-500">
-                                      {' '}
-                                      — {pv.items.map((it) => it.color).join(' + ')} · {pv.availablePacks} pack(s)
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
+                              Pack completo {activeSizeGroup.packLabel} ({activeSizeGroup.size})
                             </button>
-                          </li>
-                        ))}
-                      </ul>
+                          )}
+                          <button
+                            type="button"
+                            onClick={addAllSizesAsPackCombinations}
+                            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 text-xs hover:bg-slate-800"
+                          >
+                            Un pack por cada talle
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

@@ -1,4 +1,5 @@
 import { Product } from '../types';
+import { SIZE_ORDER } from './inventoryUtils';
 
 export type SuggestedPackItem = {
   variantId: string;
@@ -54,7 +55,7 @@ function variantLabel(p: Product, baseSku: string): string {
   return `${base} · ${p.color || '—'} · ${p.size || '—'} (stock ${p.stock ?? 0})`;
 }
 
-function colorAbbrevLabel(colors: string[]): string {
+export function colorAbbrevLabel(colors: string[]): string {
   const names = colors.map((c) => c.trim()).filter(Boolean);
   if (names.length === 0) return 'Pack';
   if (names.length === 1) return names[0];
@@ -234,4 +235,137 @@ export function suggestAllPublicationPacks(
   }
   merged.sort((a, b) => b.score - a.score);
   return merged.slice(0, 30);
+}
+
+export type ArticlePackColorOption = {
+  variantId: string;
+  color: string;
+  size: string;
+  stock: number;
+};
+
+export type ArticlePackSizeGroup = {
+  size: string;
+  colors: ArticlePackColorOption[];
+  packLabel: string;
+  availablePacks: number;
+};
+
+export type ArticlePackMatrix = {
+  baseSku: string;
+  productName: string;
+  sizeGroups: ArticlePackSizeGroup[];
+};
+
+function compareSizeCodes(a: string, b: string): number {
+  const ca = a.trim().toUpperCase();
+  const cb = b.trim().toUpperCase();
+  const ia = SIZE_ORDER.indexOf(ca);
+  const ib = SIZE_ORDER.indexOf(cb);
+  if (ia !== -1 && ib !== -1) return ia - ib;
+  if (ia !== -1) return -1;
+  if (ib !== -1) return 1;
+  const na = parseInt(ca, 10);
+  const nb = parseInt(cb, 10);
+  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  return ca.localeCompare(cb, 'es');
+}
+
+/** Matriz artículo → talles → colores (para elegir colores y armar combinaciones de pack). */
+export function buildArticlePackMatrix(
+  products: Product[],
+  baseSku: string,
+  opts?: { query?: string; minStock?: number }
+): ArticlePackMatrix | null {
+  const key = baseSku.trim();
+  if (!key) return null;
+  const q = (opts?.query || '').trim().toLowerCase();
+  const minStock = Math.max(0, opts?.minStock ?? 1);
+
+  const rows: VariantRow[] = [];
+  for (const p of products) {
+    if (productGroupKey(p) !== key) continue;
+    const stock = Number(p.stock) || 0;
+    const color = (p.color || '').trim() || 'Sin color';
+    const size = (p.size || '').trim() || 'U';
+    if (q) {
+      const hay = `${color} ${size} ${p.name || ''} ${p.sku || ''}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+    }
+    rows.push({
+      variantId: p.id,
+      baseSku: key,
+      productName: (p.name || '').trim(),
+      color,
+      size,
+      stock,
+      label: variantLabel(p, key)
+    });
+  }
+
+  if (!rows.length) return null;
+
+  const bySize = new Map<string, Map<string, VariantRow>>();
+  for (const r of rows) {
+    let byColor = bySize.get(r.size);
+    if (!byColor) {
+      byColor = new Map();
+      bySize.set(r.size, byColor);
+    }
+    const ck = r.color.toLowerCase();
+    const prev = byColor.get(ck);
+    if (!prev || r.stock > prev.stock) byColor.set(ck, r);
+  }
+
+  const sizeGroups: ArticlePackSizeGroup[] = [];
+  for (const [size, byColor] of bySize) {
+    const colors = [...byColor.values()]
+      .sort((a, b) => a.color.localeCompare(b.color, 'es'))
+      .map((r) => ({
+        variantId: r.variantId,
+        color: r.color,
+        size: r.size,
+        stock: r.stock
+      }));
+    const withStock = colors.filter((c) => c.stock >= minStock);
+    const items: SuggestedPackItem[] = withStock.map((c) => ({
+      variantId: c.variantId,
+      unitsPerSale: 1,
+      label: '',
+      color: c.color,
+      size: c.size,
+      stock: c.stock
+    }));
+    sizeGroups.push({
+      size,
+      colors,
+      packLabel: colorAbbrevLabel(withStock.map((c) => c.color)),
+      availablePacks: computeAvailablePacks(items)
+    });
+  }
+
+  sizeGroups.sort((a, b) => compareSizeCodes(a.size, b.size));
+
+  return {
+    baseSku: key,
+    productName: rows[0]?.productName || key,
+    sizeGroups
+  };
+}
+
+export function packItemsFromColorOptions(
+  colors: ArticlePackColorOption[],
+  variantIds: string[]
+): SuggestedPackItem[] {
+  const pick = new Set(variantIds);
+  return colors
+    .filter((c) => pick.has(c.variantId))
+    .map((c) => ({
+      variantId: c.variantId,
+      unitsPerSale: 1,
+      label: `${c.color} · ${c.size} (stock ${c.stock})`,
+      color: c.color,
+      size: c.size,
+      stock: c.stock
+    }));
 }
