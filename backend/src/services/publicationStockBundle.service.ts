@@ -48,8 +48,141 @@ export async function findBundleByListing(
       [platform, extVar]
     );
   }
+  if (!row?.id && !extVar) {
+    const rows = await query(
+      `SELECT id FROM publication_stock_bundles
+       WHERE platform = ? AND external_product_id = ?`,
+      [platform, extProd]
+    );
+    if ((rows as any[]).length === 1) {
+      row = (rows as any[])[0];
+    }
+  }
   if (!row?.id) return null;
   return loadBundleById(row.id as string);
+}
+
+export async function findBundlesByProduct(
+  platform: PublicationBundlePlatform,
+  externalProductId: string
+): Promise<PublicationBundle[]> {
+  const extProd = String(externalProductId || '').trim();
+  if (!extProd) return [];
+  const rows = await query(
+    `SELECT id FROM publication_stock_bundles
+     WHERE platform = ? AND external_product_id = ?
+     ORDER BY label, external_variant_id`,
+    [platform, extProd]
+  );
+  const out: PublicationBundle[] = [];
+  for (const r of rows as any[]) {
+    const b = await loadBundleById(r.id);
+    if (b) out.push(b);
+  }
+  return out;
+}
+
+export type PublicationBundleGroup = {
+  platform: PublicationBundlePlatform;
+  externalProductId: string;
+  listingLabel: string | null;
+  variants: PublicationBundle[];
+};
+
+export async function listPublicationBundleGroups(): Promise<PublicationBundleGroup[]> {
+  const rows = await query(
+    `SELECT platform, external_product_id FROM publication_stock_bundles
+     GROUP BY platform, external_product_id
+     ORDER BY platform, external_product_id`
+  );
+  const out: PublicationBundleGroup[] = [];
+  for (const r of rows as any[]) {
+    const variants = await findBundlesByProduct(r.platform, r.external_product_id);
+    if (!variants.length) continue;
+    out.push({
+      platform: r.platform as PublicationBundlePlatform,
+      externalProductId: r.external_product_id as string,
+      listingLabel: variants.find((v) => v.label)?.label ?? null,
+      variants
+    });
+  }
+  return out;
+}
+
+export async function syncAllBundlesForProduct(
+  platform: PublicationBundlePlatform,
+  externalProductId: string
+): Promise<void> {
+  const bundles = await findBundlesByProduct(platform, externalProductId);
+  for (const b of bundles) {
+    try {
+      await syncBundleListingStock(b.id);
+    } catch (e: any) {
+      console.warn(`[Bundle sync] ${b.id}:`, e?.message || e);
+    }
+  }
+}
+
+export async function savePublicationBundleGroup(input: {
+  platform: PublicationBundlePlatform;
+  externalProductId: string;
+  listingLabel?: string | null;
+  variants: Array<{
+    id?: string;
+    label?: string | null;
+    externalVariantId?: string;
+    items: Array<{ variantId: string; unitsPerSale?: number }>;
+  }>;
+}): Promise<PublicationBundleGroup> {
+  const extProd = String(input.externalProductId || '').trim();
+  if (!extProd) throw new Error('externalProductId es requerido');
+  if (!input.variants?.length) throw new Error('Agregá al menos una variante de pack (combinación de colores)');
+
+  const existing = await findBundlesByProduct(input.platform, extProd);
+  const existingById = new Map(existing.map((b) => [b.id, b]));
+  const keptIds = new Set<string>();
+
+  for (const v of input.variants) {
+    const items = v.items?.filter((it) => it.variantId?.trim()) || [];
+    if (!items.length) continue;
+
+    const label =
+      v.label?.trim() ||
+      input.listingLabel?.trim() ||
+      null;
+    const payload = {
+      label,
+      externalVariantId: v.externalVariantId,
+      items
+    };
+
+    if (v.id && existingById.has(v.id)) {
+      const updated = await updatePublicationBundle(v.id, payload);
+      if (updated) keptIds.add(v.id);
+    } else {
+      const created = await createPublicationBundle({
+        platform: input.platform,
+        externalProductId: extProd,
+        externalVariantId: v.externalVariantId,
+        label,
+        items
+      });
+      keptIds.add(created.id);
+    }
+  }
+
+  for (const b of existing) {
+    if (!keptIds.has(b.id)) await deletePublicationBundle(b.id);
+  }
+
+  await syncAllBundlesForProduct(input.platform, extProd);
+  const variants = await findBundlesByProduct(input.platform, extProd);
+  return {
+    platform: input.platform,
+    externalProductId: extProd,
+    listingLabel: input.listingLabel?.trim() || variants[0]?.label || null,
+    variants
+  };
 }
 
 async function loadBundleItems(bundleId: string): Promise<PublicationBundleItem[]> {

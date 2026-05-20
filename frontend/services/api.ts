@@ -54,6 +54,13 @@ export type PublicationBundleDto = {
   availableStock?: number;
 };
 
+export type PublicationBundleGroupDto = {
+  platform: 'mercadolibre' | 'tiendanube';
+  externalProductId: string;
+  listingLabel: string | null;
+  variants: PublicationBundleDto[];
+};
+
 function mapPublicationBundle(r: any): PublicationBundleDto {
   return {
     id: r.id,
@@ -687,6 +694,68 @@ export const api = {
     return Array.isArray(res) ? res.map(mapPublicationBundle) : [];
   },
 
+  getPublicationBundleSourcePreview: async (
+    platform: 'mercadolibre' | 'tiendanube',
+    sourceId: string
+  ): Promise<{
+    platform: 'mercadolibre' | 'tiendanube';
+    resolvedId: string;
+    title: string;
+    description: string;
+    images: string[];
+    price?: number;
+  }> => {
+    const q = new URLSearchParams({ platform, sourceId });
+    return await request(`/publication-bundles/source-preview?${q.toString()}`, 'GET');
+  },
+
+  getPublicationBundleGroups: async (): Promise<PublicationBundleGroupDto[]> => {
+    const res = await request<any[]>('/publication-bundles?grouped=1', 'GET');
+    if (!Array.isArray(res)) return [];
+    return res.map((g) => ({
+      platform: g.platform,
+      externalProductId: g.externalProductId ?? g.external_product_id ?? '',
+      listingLabel: g.listingLabel ?? g.listing_label ?? null,
+      variants: Array.isArray(g.variants) ? g.variants.map(mapPublicationBundle) : []
+    }));
+  },
+
+  savePublicationBundleGroup: async (data: {
+    platform: 'mercadolibre' | 'tiendanube';
+    externalProductId: string;
+    listingLabel?: string | null;
+    variants: Array<{
+      id?: string;
+      label?: string | null;
+      externalVariantId?: string;
+      items: Array<{ variantId: string; unitsPerSale?: number }>;
+    }>;
+  }): Promise<PublicationBundleGroupDto> => {
+    const res = await request<any>('/publication-bundles/group', 'POST', data);
+    return {
+      platform: res.platform,
+      externalProductId: res.externalProductId ?? res.external_product_id ?? '',
+      listingLabel: res.listingLabel ?? res.listing_label ?? null,
+      variants: Array.isArray(res.variants) ? res.variants.map(mapPublicationBundle) : []
+    };
+  },
+
+  syncPublicationBundleListingStock: async (
+    platform: 'mercadolibre' | 'tiendanube',
+    externalProductId: string
+  ): Promise<PublicationBundleGroupDto> => {
+    const res = await request<any>('/publication-bundles/sync-listing-stock', 'POST', {
+      platform,
+      externalProductId
+    });
+    return {
+      platform: res.platform,
+      externalProductId: res.externalProductId ?? res.external_product_id ?? '',
+      listingLabel: null,
+      variants: Array.isArray(res.variants) ? res.variants.map(mapPublicationBundle) : []
+    };
+  },
+
   createPublicationBundle: async (data: {
     platform: 'mercadolibre' | 'tiendanube';
     externalProductId: string;
@@ -706,18 +775,27 @@ export const api = {
     skuSuffix?: string;
     label?: string;
     published?: boolean;
-    items: Array<{ variantId: string; unitsPerSale?: number }>;
+    items?: Array<{ variantId: string; unitsPerSale?: number }>;
+    variants?: Array<{
+      label?: string;
+      items: Array<{ variantId: string; unitsPerSale?: number }>;
+    }>;
   }): Promise<{
-    bundle: PublicationBundleDto;
+    group: PublicationBundleGroupDto;
     newExternalProductId: string;
-    newExternalVariantId?: string;
     sourceExternalProductId: string;
     message: string;
   }> => {
     const res = await request<any>('/publication-bundles/create-listing-from-source', 'POST', data, undefined, 180000);
+    const g = res.group || res;
     return {
       ...res,
-      bundle: mapPublicationBundle(res.bundle)
+      group: {
+        platform: g.platform,
+        externalProductId: g.externalProductId ?? g.external_product_id ?? res.newExternalProductId ?? '',
+        listingLabel: g.listingLabel ?? g.listing_label ?? null,
+        variants: Array.isArray(g.variants) ? g.variants.map(mapPublicationBundle) : []
+      }
     };
   },
 
