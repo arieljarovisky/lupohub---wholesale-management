@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search, Sparkles, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
 import { Product, Role } from '../types';
 import { api, PublicationBundleDto, PublicationBundleGroupDto } from '../services/api';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
+import {
+  suggestAllPublicationPacks,
+  type SuggestedPublicationPack
+} from '../utils/suggestPublicationPacks';
 
 type DraftItem = { variantId: string; unitsPerSale: number; label: string };
 
@@ -112,6 +116,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const [newImageUrl, setNewImageUrl] = useState('');
   const listingLabelTouched = useRef(false);
   const contentDraftTouched = useRef(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionQuery, setSuggestionQuery] = useState('');
 
   const flatVariants = useMemo(() => {
     return products.map((p) => {
@@ -122,6 +128,37 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       };
     });
   }, [products]);
+
+  const packSuggestions = useMemo(() => {
+    return suggestAllPublicationPacks(products, {
+      query: suggestionQuery,
+      includeMultiCombo: true
+    });
+  }, [products, suggestionQuery]);
+
+  const applyPackSuggestion = (s: SuggestedPublicationPack) => {
+    setPackColorVariants(
+      s.packVariants.map((pv) =>
+        newPackColorVariant({
+          label: pv.label,
+          expanded: true,
+          items: pv.items.map((it) => ({
+            variantId: it.variantId,
+            unitsPerSale: it.unitsPerSale,
+            label: it.label
+          }))
+        })
+      )
+    );
+    const suffix = titleSuffix.trim() || ' (Pack)';
+    const autoTitle = `${s.title}${suffix}`;
+    if (!listingLabelTouched.current) setListingLabel(autoTitle);
+    if (publicationDraft && !contentDraftTouched.current) {
+      setPublicationDraft((d) => (d ? { ...d, title: autoTitle } : d));
+    }
+    setShowSuggestions(false);
+    showToast('success', `Sugerencia aplicada: ${s.packVariants.length} combinación(es)`);
+  };
 
   const loadBundles = useCallback(async () => {
     setLoading(true);
@@ -224,6 +261,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setNewImageUrl('');
     listingLabelTouched.current = false;
     contentDraftTouched.current = false;
+    setShowSuggestions(false);
+    setSuggestionQuery('');
   };
 
   const buildPublicationContent = () => {
@@ -700,18 +739,94 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
               )}
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-[11px] font-bold text-violet-300 uppercase tracking-wide">
                     Variantes de colores del pack
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setPackColorVariants((prev) => [...prev, newPackColorVariant()])}
-                    className="text-xs text-violet-300 hover:text-white flex items-center gap-1"
-                  >
-                    <Plus size={14} /> Agregar combinación
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowSuggestions((v) => !v)}
+                      className={`text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-semibold ${
+                        showSuggestions
+                          ? 'bg-amber-600/30 border-amber-500/60 text-amber-100'
+                          : 'border-amber-700/50 text-amber-300 hover:bg-amber-950/40 hover:text-amber-100'
+                      }`}
+                    >
+                      <Wand2 size={14} />
+                      Packs sugeridos
+                      {packSuggestions.length > 0 ? (
+                        <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/30 text-[10px]">
+                          {packSuggestions.length}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPackColorVariants((prev) => [...prev, newPackColorVariant()])}
+                      className="text-xs text-violet-300 hover:text-white flex items-center gap-1"
+                    >
+                      <Plus size={14} /> Agregar combinación
+                    </button>
+                  </div>
                 </div>
+
+                {showSuggestions && (
+                  <div className="rounded-xl border border-amber-800/50 bg-amber-950/25 p-3 space-y-3">
+                    <p className="text-xs text-amber-200/90">
+                      Según tu inventario: packs con <strong>1 unidad de cada color</strong> por artículo y talle (con
+                      stock). Tocá una sugerencia para cargar las combinaciones abajo.
+                    </p>
+                    <div className="relative">
+                      <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        value={suggestionQuery}
+                        onChange={(e) => setSuggestionQuery(e.target.value)}
+                        placeholder="Filtrar por SKU, artículo, color o talle…"
+                        className="w-full pl-7 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
+                      />
+                    </div>
+                    {packSuggestions.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-2">
+                        No hay sugerencias con al menos 2 colores con stock en el mismo talle. Revisá el inventario o
+                        probá otro filtro.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {packSuggestions.map((s) => (
+                          <li key={s.id}>
+                            <button
+                              type="button"
+                              onClick={() => applyPackSuggestion(s)}
+                              className="w-full text-left rounded-lg border border-slate-600 bg-slate-900/80 hover:border-amber-500/60 hover:bg-slate-800 px-3 py-2.5 transition-colors"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-white truncate">{s.title}</p>
+                                  <p className="text-[10px] text-slate-500 font-mono truncate">{s.baseSku}</p>
+                                </div>
+                                <span className="shrink-0 text-[10px] font-bold text-emerald-400/90 uppercase">
+                                  {s.subtitle}
+                                </span>
+                              </div>
+                              <ul className="mt-2 space-y-1">
+                                {s.packVariants.map((pv, i) => (
+                                  <li key={i} className="text-[11px] text-violet-200/90">
+                                    <span className="font-semibold text-violet-300">{pv.label || `Combo ${i + 1}`}</span>
+                                    <span className="text-slate-500">
+                                      {' '}
+                                      — {pv.items.map((it) => it.color).join(' + ')} · {pv.availablePacks} pack(s)
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 {packColorVariants.map((pv, idx) => (
                   <div key={pv.key} className="rounded-lg border border-slate-600 bg-slate-800/40 overflow-hidden">
