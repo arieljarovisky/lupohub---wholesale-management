@@ -9,6 +9,8 @@ import {
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 import {
   computeAvailableStockFromItems,
+  createPublicationBundle,
+  findBundlesByProduct,
   savePublicationBundleGroup,
   type PublicationBundleGroup,
   type PublicationBundlePlatform,
@@ -235,12 +237,140 @@ function mlAttributesForDuplicate(item: any, skuSuffix: string): any[] {
   const baseSku = mlSkuFromItem(item);
   const newSku = baseSku ? `${baseSku}${skuSuffix}` : '';
   return item.attributes.map((a: any) => {
-    const id = (a?.id || '').toString().toUpperCase();
+    const id = (a?.id || '').toUpperCase();
     if (id === 'SELLER_SKU' && newSku) {
       return { ...a, value_name: newSku, value: newSku };
     }
     return { ...a };
   });
+}
+
+/** ML User Products / family_name: no admite array `variations` al crear. */
+export function mlItemUsesFamilyNameModel(item: any): boolean {
+  if (mlFamilyNameFromItem(item)) return true;
+  const up = item?.user_product_id;
+  if (up != null && String(up).trim() !== '') return true;
+  if (item?.catalog_listing === true) return true;
+  return false;
+}
+
+function mlFamilyNameFromItem(item: any): string {
+  const direct = String(item?.family_name ?? '').trim();
+  if (direct) return direct;
+  const attr = (Array.isArray(item?.attributes) ? item.attributes : []).find(
+    (a: any) => String(a?.id || '').toUpperCase() === 'FAMILY_NAME'
+  );
+  return (attr?.value_name ?? attr?.value ?? '').toString().trim();
+}
+
+function mlCommonItemFields(
+  sourceItem: any,
+  pictures: Array<{ id?: string; source?: string }>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    category_id: sourceItem.category_id,
+    currency_id: sourceItem.currency_id || 'ARS',
+    buying_mode: sourceItem.buying_mode || 'buy_it_now',
+    listing_type_id: sourceItem.listing_type_id || 'gold_special',
+    condition: sourceItem.condition || 'new',
+    pictures
+  };
+  if (sourceItem.video_id) out.video_id = sourceItem.video_id;
+  if (Array.isArray(sourceItem.sale_terms) && sourceItem.sale_terms.length) {
+    out.sale_terms = sourceItem.sale_terms;
+  }
+  if (sourceItem.shipping && typeof sourceItem.shipping === 'object') {
+    out.shipping = sourceItem.shipping;
+  }
+  return out;
+}
+
+async function postMercadoLibreNewItem(
+  accessToken: string,
+  body: Record<string, unknown>
+): Promise<any> {
+  const postRes = await axios.post('https://api.mercadolibre.com/items', body, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    validateStatus: () => true
+  });
+  if (postRes.status !== 201 && postRes.status !== 200) {
+    throw new Error(`Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}`);
+  }
+  const newItem = postRes.data;
+  const itemId = String(newItem?.id || '');
+  if (!itemId) throw new Error('Mercado Libre no devolvió el ID de la nueva publicación');
+  return newItem;
+}
+
+async function applyDescriptionFromSource(
+  newItemId: string,
+  sourceItem: any,
+  accessToken: string,
+  descriptionOverride?: string
+): Promise<void> {
+  let description = descriptionOverride?.trim() || '';
+  if (!description) {
+    try {
+      const descRes = await axios.get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      });
+      if (descRes.status === 200) description = String(descRes.data?.plain_text || '').trim();
+    } catch {
+      /* opcional */
+    }
+  }
+  await applyMlItemDescription(newItemId, description, accessToken);
+}
+
+async function createMercadoLibrePackListingFamilyName(
+  sourceItem: any,
+  opts: {
+    skuSuffix: string;
+    availableQuantity: number;
+    price: number;
+    status?: 'active' | 'paused';
+    content?: PackListingPublicationContent;
+  }
+): Promise<{ itemId: string; item: any }> {
+  const mlToken = await getValidMLToken();
+  if (!mlToken) throw new Error('No hay integración con Mercado Libre');
+
+  const familyName = mlFamilyNameFromItem(sourceItem);
+  if (!familyName) {
+    throw new Error(
+      'Esta publicación en ML usa el modelo family_name (User Products). La origen no trae family_name; usá una publicación individual del mismo producto como base.'
+    );
+  }
+
+  const pictures = mlPicturesPayload(opts.content, sourceItem);
+  if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
+
+  const body: Record<string, unknown> = {
+    family_name: familyName,
+    price: opts.price,
+    available_quantity: Math.max(0, Math.floor(opts.availableQuantity)),
+    ...mlCommonItemFields(sourceItem, pictures)
+  };
+
+  const attrs = mlAttributesForDuplicate(sourceItem, opts.skuSuffix);
+  if (attrs.length) body.attributes = attrs;
+
+  const sku = mlSkuFromItem(sourceItem);
+  if (sku) body.seller_custom_field = `${sku}${opts.skuSuffix}`;
+
+  if (opts.status === 'paused') body.status = 'paused';
+
+  const newItem = await postMercadoLibreNewItem(mlToken.access_token, body);
+  const itemId = String(newItem.id);
+
+  const description = opts.content?.description?.trim();
+  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, description);
+
+  return { itemId, item: newItem };
 }
 
 export type PublicationSourcePreview = {
@@ -385,17 +515,25 @@ export async function createMercadoLibrePackListingFromItem(
     opts.content?.price != null && Number.isFinite(Number(opts.content.price))
       ? Number(opts.content.price)
       : Number(sourceItem.price) || 0;
+
+  if (mlItemUsesFamilyNameModel(sourceItem)) {
+    return createMercadoLibrePackListingFamilyName(sourceItem, {
+      skuSuffix: opts.skuSuffix,
+      availableQuantity: opts.availableQuantity,
+      price,
+      status: opts.status,
+      content: opts.content
+    });
+  }
+
   const attrTemplates = mlVariationAttrTemplates(sourceItem);
-  const useVariations = attrTemplates.length > 0;
+  const sourceHasVariations =
+    Array.isArray(sourceItem?.variations) && sourceItem.variations.length > 0;
+  const useVariations = sourceHasVariations && attrTemplates.length > 0;
 
   const body: Record<string, unknown> = {
     title,
-    category_id: sourceItem.category_id,
-    currency_id: sourceItem.currency_id || 'ARS',
-    buying_mode: sourceItem.buying_mode || 'buy_it_now',
-    listing_type_id: sourceItem.listing_type_id || 'gold_special',
-    condition: sourceItem.condition || 'new',
-    pictures
+    ...mlCommonItemFields(sourceItem, pictures)
   };
 
   const attrs = mlAttributesForDuplicate(sourceItem, opts.skuSuffix);
@@ -425,42 +563,11 @@ export async function createMercadoLibrePackListingFromItem(
     if (sku) body.seller_custom_field = `${sku}${opts.skuSuffix}`;
   }
 
-  if (sourceItem.video_id) body.video_id = sourceItem.video_id;
-  if (Array.isArray(sourceItem.sale_terms) && sourceItem.sale_terms.length) {
-    body.sale_terms = sourceItem.sale_terms;
-  }
-  if (sourceItem.shipping && typeof sourceItem.shipping === 'object') {
-    body.shipping = sourceItem.shipping;
-  }
   if (opts.status === 'paused') body.status = 'paused';
 
-  const headers = {
-    Authorization: `Bearer ${mlToken.access_token}`,
-    'Content-Type': 'application/json'
-  };
-  const postRes = await axios.post('https://api.mercadolibre.com/items', body, {
-    headers,
-    validateStatus: () => true
-  });
-
-  if (postRes.status !== 201 && postRes.status !== 200) {
-    throw new Error(`Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}`);
-  }
-
-  const newItem = postRes.data;
-  const itemId = String(newItem?.id || '');
-  if (!itemId) throw new Error('Mercado Libre no devolvió el ID de la nueva publicación');
-
-  const description =
-    opts.content?.description?.trim() ||
-    (await axios
-      .get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
-        headers: { Authorization: `Bearer ${mlToken.access_token}` },
-        validateStatus: () => true
-      })
-      .then((r) => (r.status === 200 ? String(r.data?.plain_text || '').trim() : ''))
-      .catch(() => ''));
-  await applyMlItemDescription(itemId, description, mlToken.access_token);
+  const newItem = await postMercadoLibreNewItem(mlToken.access_token, body);
+  const itemId = String(newItem.id);
+  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
 
   return { itemId, item: newItem };
 }
@@ -482,11 +589,32 @@ export async function createMercadoLibrePackListingWithVariants(
   if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
   if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
-  const attrTemplates = mlVariationAttrTemplates(sourceItem);
   const basePrice =
     opts.content?.price != null && Number.isFinite(Number(opts.content.price))
       ? Number(opts.content.price)
       : Number(sourceItem.price) || 0;
+
+  if (mlItemUsesFamilyNameModel(sourceItem)) {
+    const itemIds: string[] = [];
+    for (let idx = 0; idx < packVariants.length; idx++) {
+      const pv = packVariants[idx];
+      const varSkuSuffix =
+        packVariants.length > 1 ? `${opts.skuSuffix}-${idx + 1}` : opts.skuSuffix;
+      const created = await createMercadoLibrePackListingFamilyName(sourceItem, {
+        skuSuffix: varSkuSuffix,
+        availableQuantity: computeAvailableStockFromItems(pv.items),
+        price: basePrice,
+        status: opts.status,
+        content: opts.content
+      });
+      itemIds.push(created.itemId);
+    }
+    const first = itemIds[0];
+    const newItem = { id: first, variations: [] };
+    return { itemId: first, item: newItem, variationIds: itemIds };
+  }
+
+  const attrTemplates = mlVariationAttrTemplates(sourceItem);
   const baseSku = mlSkuFromItem(sourceItem);
   const variations = await Promise.all(
     packVariants.map(async (pv, idx) => {
@@ -512,60 +640,22 @@ export async function createMercadoLibrePackListingWithVariants(
     appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
   const body: Record<string, unknown> = {
     title,
-    category_id: sourceItem.category_id,
-    currency_id: sourceItem.currency_id || 'ARS',
-    buying_mode: sourceItem.buying_mode || 'buy_it_now',
-    listing_type_id: sourceItem.listing_type_id || 'gold_special',
-    condition: sourceItem.condition || 'new',
-    pictures,
+    ...mlCommonItemFields(sourceItem, pictures),
     variations
   };
 
   const attrs = mlAttributesForDuplicate(sourceItem, opts.skuSuffix);
   if (attrs.length) body.attributes = attrs;
-  if (sourceItem.video_id) body.video_id = sourceItem.video_id;
-  if (Array.isArray(sourceItem.sale_terms) && sourceItem.sale_terms.length) {
-    body.sale_terms = sourceItem.sale_terms;
-  }
-  if (sourceItem.shipping && typeof sourceItem.shipping === 'object') {
-    body.shipping = sourceItem.shipping;
-  }
   if (opts.status === 'paused') body.status = 'paused';
 
-  const headers = {
-    Authorization: `Bearer ${mlToken.access_token}`,
-    'Content-Type': 'application/json'
-  };
-  const postRes = await axios.post('https://api.mercadolibre.com/items', body, {
-    headers,
-    validateStatus: () => true
-  });
-
-  if (postRes.status !== 201 && postRes.status !== 200) {
-    throw new Error(`Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}`);
-  }
-
-  const newItem = postRes.data;
-  const itemId = String(newItem?.id || '');
-  if (!itemId) throw new Error('Mercado Libre no devolvió el ID de la nueva publicación');
+  const newItem = await postMercadoLibreNewItem(mlToken.access_token, body);
+  const itemId = String(newItem.id);
 
   const variationIds = (Array.isArray(newItem.variations) ? newItem.variations : []).map((v: any) =>
     String(v?.id || '')
   );
 
-  let description = opts.content?.description?.trim() || '';
-  if (!description) {
-    try {
-      const descRes = await axios.get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
-        headers: { Authorization: `Bearer ${mlToken.access_token}` },
-        validateStatus: () => true
-      });
-      if (descRes.status === 200) description = String(descRes.data?.plain_text || '').trim();
-    } catch {
-      /* opcional */
-    }
-  }
-  await applyMlItemDescription(itemId, description, mlToken.access_token);
+  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
 
   return { itemId, item: newItem, variationIds };
 }
@@ -935,6 +1025,38 @@ export async function createPackListingAndBundle(input: {
         status: input.published === false ? 'paused' : 'active',
         content: input.publicationContent
       });
+      const familyMulti =
+        mlItemUsesFamilyNameModel(resolved.item) && packVariants.length > 1;
+
+      if (familyMulti) {
+        for (let idx = 0; idx < packVariants.length; idx++) {
+          const mlaId = created.variationIds[idx];
+          if (!mlaId) continue;
+          await createPublicationBundle({
+            platform: 'mercadolibre',
+            externalProductId: mlaId,
+            externalVariantId: '',
+            label: packVariants[idx].label,
+            items: packVariants[idx].rawItems
+          });
+        }
+        const allBundles = [];
+        for (const mlaId of created.variationIds) {
+          allBundles.push(...(await findBundlesByProduct('mercadolibre', mlaId)));
+        }
+        return {
+          group: {
+            platform: 'mercadolibre',
+            externalProductId: created.itemId,
+            listingLabel: input.label?.trim() || null,
+            variants: allBundles
+          },
+          newExternalProductId: created.itemId,
+          sourceExternalProductId: normalizeMercadoLibreItemId(sourceId) || sourceId,
+          message: `Se crearon ${packVariants.length} publicaciones ML (family_name): ${created.variationIds.join(', ')}`
+        };
+      }
+
       newProductId = created.itemId;
       packVariants.forEach((pv, idx) => {
         bundleVariants.push({
