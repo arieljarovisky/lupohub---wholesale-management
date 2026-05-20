@@ -1,0 +1,11 @@
+# Monorepo: si el build corre desde la raíz, no subir frontend ni node_modules al daemon.
+frontend
+**/node_modules
+**/.git
+.git
+.cursor
+agent-tools
+assets
+**/*.log
+.env
+.env.*

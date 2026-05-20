@@ -1,7 +1,8 @@
-# Railway: configurar en el servicio Root Directory = "backend".
-# Así Railpack detecta Node y usa package.json de esta carpeta.
+# Railway: en el servicio → Settings → Root Directory = "backend" (obligatorio).
+# Si el build corre desde la raíz del repo, sube frontend + backend y puede agotar disco.
 
 [build]
+# npm ci lo ejecuta Railpack antes; prune en build reduce node_modules post-tsc.
 buildCommand = "npm run build"
 
 [deploy]

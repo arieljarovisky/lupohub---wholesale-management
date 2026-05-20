@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "cross-env PORT=3010 nodemon src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm prune --omit=dev",
     "init-db": "ts-node src/database/init.ts",
     "merge-trifil": "ts-node scripts/merge-trifil-products.ts",
     "merge-trifil:prod": "cross-env NODE_ENV=production ts-node scripts/merge-trifil-products.ts",
