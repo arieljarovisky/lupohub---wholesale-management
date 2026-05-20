@@ -7,6 +7,56 @@ import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '.
 
 type DraftItem = { variantId: string; unitsPerSale: number; label: string };
 
+type DraftPublicationImage = {
+  key: string;
+  url: string;
+  pictureId?: string;
+  selected: boolean;
+};
+
+type PublicationDraft = {
+  resolvedId: string;
+  title: string;
+  description: string;
+  price: string;
+  images: DraftPublicationImage[];
+};
+
+const PreviewThumb: React.FC<{
+  url: string;
+  selected?: boolean;
+  onToggle?: () => void;
+}> = ({ url, selected = true, onToggle }) => {
+  const [src, setSrc] = useState(url);
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`relative rounded-lg overflow-hidden border-2 ${
+        selected ? 'border-violet-500' : 'border-slate-700 opacity-50'
+      }`}
+      title={selected ? 'Quitar de la publicación' : 'Incluir en la publicación'}
+    >
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        onError={() => {
+          if (src !== url) setSrc(url);
+          else if (url.includes('-O.')) setSrc(url.replace(/-O\./i, '-I.'));
+        }}
+        className="h-24 w-24 object-cover bg-slate-900"
+      />
+      <span
+        className={`absolute top-1 right-1 w-4 h-4 rounded-full border ${
+          selected ? 'bg-violet-500 border-violet-300' : 'bg-slate-800 border-slate-600'
+        }`}
+      />
+    </button>
+  );
+};
+
 type PackColorVariant = {
   key: string;
   bundleId?: string;
@@ -56,16 +106,12 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const [skuSuffix, setSkuSuffix] = useState('-PACK');
   const [publishListing, setPublishListing] = useState(true);
   const [creatingListing, setCreatingListing] = useState(false);
-  const [sourcePreview, setSourcePreview] = useState<{
-    resolvedId: string;
-    title: string;
-    description: string;
-    images: string[];
-    price?: number;
-  } | null>(null);
+  const [publicationDraft, setPublicationDraft] = useState<PublicationDraft | null>(null);
   const [loadingSourcePreview, setLoadingSourcePreview] = useState(false);
   const [sourcePreviewError, setSourcePreviewError] = useState('');
+  const [newImageUrl, setNewImageUrl] = useState('');
   const listingLabelTouched = useRef(false);
+  const contentDraftTouched = useRef(false);
 
   const flatVariants = useMemo(() => {
     return products.map((p) => {
@@ -114,7 +160,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
 
   useEffect(() => {
     if (!open || !previewSourceId || previewSourceId.length < 4) {
-      setSourcePreview(null);
+      setPublicationDraft(null);
       setSourcePreviewError('');
       return;
     }
@@ -126,13 +172,31 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
         try {
           const p = await api.getPublicationBundleSourcePreview(platform, previewSourceId);
           if (cancelled) return;
-          setSourcePreview(p);
-          if (!listingLabelTouched.current && p.title) {
-            setListingLabel(p.title);
+          if (!contentDraftTouched.current) {
+            const suffix = titleSuffix.trim() || ' (Pack)';
+            const baseTitle = p.title || '';
+            const fullTitle =
+              baseTitle && !baseTitle.toLowerCase().includes(suffix.trim().toLowerCase())
+                ? `${baseTitle}${suffix}`
+                : baseTitle || suffix.trim();
+            const images: DraftPublicationImage[] = (p.images || []).map((im: { url: string; pictureId?: string }) => ({
+              key: Math.random().toString(36).slice(2),
+              url: im.url,
+              pictureId: im.pictureId,
+              selected: true
+            }));
+            setPublicationDraft({
+              resolvedId: p.resolvedId,
+              title: fullTitle,
+              description: p.description || '',
+              price: p.price != null ? String(p.price) : '',
+              images
+            });
+            if (!listingLabelTouched.current) setListingLabel(fullTitle);
           }
         } catch (e: any) {
           if (cancelled) return;
-          setSourcePreview(null);
+          setPublicationDraft(null);
           setSourcePreviewError(e?.message || 'No se encontró la publicación');
         } finally {
           if (!cancelled) setLoadingSourcePreview(false);
@@ -155,9 +219,32 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setTitleSuffix(' (Pack)');
     setSkuSuffix('-PACK');
     setPublishListing(true);
-    setSourcePreview(null);
+    setPublicationDraft(null);
     setSourcePreviewError('');
+    setNewImageUrl('');
     listingLabelTouched.current = false;
+    contentDraftTouched.current = false;
+  };
+
+  const buildPublicationContent = () => {
+    if (!publicationDraft) return undefined;
+    const selected = publicationDraft.images.filter((im) => im.selected);
+    if (!selected.length) return undefined;
+    const price = parseFloat(publicationDraft.price.replace(',', '.'));
+    return {
+      title: publicationDraft.title.trim() || undefined,
+      description: publicationDraft.description,
+      price: Number.isFinite(price) ? price : undefined,
+      pictures: selected.map((im) => ({
+        url: im.url,
+        pictureId: im.pictureId,
+        selected: true
+      }))
+    };
+  };
+
+  const markContentTouched = () => {
+    contentDraftTouched.current = true;
   };
 
   const parseExternalVariantId = (raw: string) => {
@@ -235,6 +322,11 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       showToast('error', 'Configurá al menos una combinación con colores');
       return;
     }
+    const publicationContent = buildPublicationContent();
+    if (!publicationContent?.pictures?.length) {
+      showToast('error', 'Seleccioná al menos una imagen para la nueva publicación');
+      return;
+    }
     setCreatingListing(true);
     try {
       const res = await api.createPublicationBundleListingFromSource({
@@ -242,8 +334,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
         sourceExternalProductId: sourceId,
         titleSuffix: titleSuffix.trim() || ' (Pack)',
         skuSuffix: skuSuffix.trim() || '-PACK',
-        label: listingLabel.trim() || undefined,
+        label: (publicationDraft?.title || listingLabel).trim() || undefined,
         published: publishListing,
+        publicationContent,
         variants: variants.map((v) => ({
           label: v.label,
           items: v.items
@@ -429,18 +522,20 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                     <option value="tiendanube">Tienda Nube</option>
                   </select>
                 </div>
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1">Nombre publicación (opcional)</label>
-                  <input
-                    value={listingLabel}
-                    onChange={(e) => {
-                      listingLabelTouched.current = true;
-                      setListingLabel(e.target.value);
-                    }}
-                    placeholder="Pack 3 boxer"
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
-                  />
-                </div>
+                {linkMode !== 'create' && (
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">Nombre publicación (opcional)</label>
+                    <input
+                      value={listingLabel}
+                      onChange={(e) => {
+                        listingLabelTouched.current = true;
+                        setListingLabel(e.target.value);
+                      }}
+                      placeholder="Pack 3 boxer"
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                    />
+                  </div>
+                )}
               </div>
 
               {linkMode === 'existing' && (
@@ -456,48 +551,149 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                 </div>
               )}
 
-              {(loadingSourcePreview || sourcePreview || sourcePreviewError) && (
-                <div className="rounded-lg border border-slate-600 bg-slate-800/60 p-3 space-y-3">
+              {(loadingSourcePreview || publicationDraft || sourcePreviewError) && linkMode === 'create' && (
+                <div className="rounded-lg border border-slate-600 bg-slate-800/60 p-3 space-y-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-bold text-slate-300 uppercase tracking-wide">Vista previa publicación base</p>
+                    <p className="text-xs font-bold text-emerald-300 uppercase tracking-wide">
+                      Nueva publicación pack (editable)
+                    </p>
                     {loadingSourcePreview && <Loader2 size={14} className="animate-spin text-slate-400" />}
                   </div>
                   {sourcePreviewError && !loadingSourcePreview && (
                     <p className="text-xs text-amber-400">{sourcePreviewError}</p>
                   )}
-                  {sourcePreview && !loadingSourcePreview && (
+                  {publicationDraft && !loadingSourcePreview && (
                     <>
+                      <p className="text-[10px] font-mono text-slate-500">
+                        Base {publicationDraft.resolvedId} · {publicationDraft.images.filter((i) => i.selected).length}/
+                        {publicationDraft.images.length} fotos seleccionadas
+                      </p>
                       <div>
-                        <p className="text-sm font-semibold text-white leading-snug">{sourcePreview.title || 'Sin título'}</p>
-                        <p className="text-[10px] font-mono text-slate-500 mt-0.5">
-                          ID {sourcePreview.resolvedId}
-                          {sourcePreview.price != null ? ` · $${sourcePreview.price}` : ''}
-                        </p>
+                        <label className="text-[11px] text-slate-500 block mb-1">Título</label>
+                        <input
+                          value={publicationDraft.title}
+                          onChange={(e) => {
+                            markContentTouched();
+                            listingLabelTouched.current = true;
+                            const v = e.target.value;
+                            setPublicationDraft((d) => (d ? { ...d, title: v } : d));
+                            setListingLabel(v);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                        />
                       </div>
-                      {sourcePreview.images.length > 0 ? (
-                        <div className="flex gap-2 overflow-x-auto pb-1">
-                          {sourcePreview.images.map((url, i) => (
-                            <img
-                              key={`${url}-${i}`}
-                              src={url}
-                              alt=""
-                              className="h-20 w-20 shrink-0 rounded-lg object-cover border border-slate-600 bg-slate-900"
+                      <div>
+                        <label className="text-[11px] text-slate-500 block mb-1">Precio</label>
+                        <input
+                          value={publicationDraft.price}
+                          onChange={(e) => {
+                            markContentTouched();
+                            setPublicationDraft((d) => (d ? { ...d, price: e.target.value } : d));
+                          }}
+                          type="text"
+                          inputMode="decimal"
+                          className="w-full max-w-[200px] bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <label className="text-[11px] text-slate-500">Fotos (clic para incluir / quitar)</label>
+                          <div className="flex gap-2 text-[10px]">
+                            <button
+                              type="button"
+                              className="text-violet-300 hover:text-white"
+                              onClick={() => {
+                                markContentTouched();
+                                setPublicationDraft((d) =>
+                                  d ? { ...d, images: d.images.map((im) => ({ ...im, selected: true })) } : d
+                                );
+                              }}
+                            >
+                              Todas
+                            </button>
+                            <button
+                              type="button"
+                              className="text-slate-400 hover:text-white"
+                              onClick={() => {
+                                markContentTouched();
+                                setPublicationDraft((d) =>
+                                  d ? { ...d, images: d.images.map((im) => ({ ...im, selected: false })) } : d
+                                );
+                              }}
+                            >
+                              Ninguna
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 max-h-64 overflow-y-auto p-1">
+                          {publicationDraft.images.map((im) => (
+                            <PreviewThumb
+                              key={im.key}
+                              url={im.url}
+                              selected={im.selected}
+                              onToggle={() => {
+                                markContentTouched();
+                                setPublicationDraft((d) =>
+                                  d
+                                    ? {
+                                        ...d,
+                                        images: d.images.map((x) =>
+                                          x.key === im.key ? { ...x, selected: !x.selected } : x
+                                        )
+                                      }
+                                    : d
+                                );
+                              }}
                             />
                           ))}
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">Sin imágenes en la publicación</p>
-                      )}
-                      {sourcePreview.description ? (
-                        <div>
-                          <p className="text-[10px] text-slate-500 mb-1">Descripción (se copiará al crear el pack)</p>
-                          <div className="max-h-36 overflow-y-auto rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs text-slate-300 whitespace-pre-wrap">
-                            {sourcePreview.description}
-                          </div>
+                        <div className="flex gap-2 mt-2">
+                          <input
+                            value={newImageUrl}
+                            onChange={(e) => setNewImageUrl(e.target.value)}
+                            placeholder="https://… agregar foto por URL"
+                            className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const u = newImageUrl.trim();
+                              if (!u.startsWith('http')) {
+                                showToast('error', 'URL de imagen inválida');
+                                return;
+                              }
+                              markContentTouched();
+                              setPublicationDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      images: [
+                                        ...d.images,
+                                        { key: Math.random().toString(36).slice(2), url: u, selected: true }
+                                      ]
+                                    }
+                                  : d
+                              );
+                              setNewImageUrl('');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-slate-700 text-xs text-white hover:bg-slate-600"
+                          >
+                            Agregar
+                          </button>
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">Sin descripción</p>
-                      )}
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-500 block mb-1">Descripción</label>
+                        <textarea
+                          value={publicationDraft.description}
+                          onChange={(e) => {
+                            markContentTouched();
+                            setPublicationDraft((d) => (d ? { ...d, description: e.target.value } : d));
+                          }}
+                          rows={8}
+                          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm whitespace-pre-wrap resize-y min-h-[120px]"
+                        />
+                      </div>
                     </>
                   )}
                 </div>

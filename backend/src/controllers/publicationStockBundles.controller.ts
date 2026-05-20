@@ -214,6 +214,12 @@ export const createListingFromSource = async (req: Request, res: Response) => {
         label?: string;
         items?: Array<{ variantId: string; unitsPerSale?: number }>;
       }>;
+      publicationContent?: {
+        title?: string;
+        description?: string;
+        price?: number;
+        pictures?: Array<{ url?: string; pictureId?: string; selected?: boolean }>;
+      };
     };
     if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
       return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
@@ -237,7 +243,8 @@ export const createListingFromSource = async (req: Request, res: Response) => {
       variants: body.variants?.map((v) => ({
         label: v.label,
         items: v.items ?? []
-      }))
+      })),
+      publicationContent: body.publicationContent
     });
     res.status(201).json(result);
   } catch (e: any) {

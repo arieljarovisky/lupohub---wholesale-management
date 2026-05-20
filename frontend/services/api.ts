@@ -702,11 +702,17 @@ export const api = {
     resolvedId: string;
     title: string;
     description: string;
-    images: string[];
+    images: Array<{ url: string; pictureId?: string } | string>;
     price?: number;
   }> => {
     const q = new URLSearchParams({ platform, sourceId });
-    return await request(`/publication-bundles/source-preview?${q.toString()}`, 'GET');
+    const res = await request<any>(`/publication-bundles/source-preview?${q.toString()}`, 'GET');
+    const images = Array.isArray(res.images)
+      ? res.images.map((im: any) =>
+          typeof im === 'string' ? { url: im } : { url: im.url ?? '', pictureId: im.pictureId }
+        )
+      : [];
+    return { ...res, images };
   },
 
   getPublicationBundleGroups: async (): Promise<PublicationBundleGroupDto[]> => {
@@ -780,6 +786,12 @@ export const api = {
       label?: string;
       items: Array<{ variantId: string; unitsPerSale?: number }>;
     }>;
+    publicationContent?: {
+      title?: string;
+      description?: string;
+      price?: number;
+      pictures?: Array<{ url?: string; pictureId?: string; selected?: boolean }>;
+    };
   }): Promise<{
     group: PublicationBundleGroupDto;
     newExternalProductId: string;

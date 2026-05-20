@@ -218,7 +218,8 @@ const createListingFromSource = (req, res) => __awaiter(void 0, void 0, void 0, 
                     label: v.label,
                     items: (_a = v.items) !== null && _a !== void 0 ? _a : []
                 });
-            })
+            }),
+            publicationContent: body.publicationContent
         });
         res.status(201).json(result);
     }

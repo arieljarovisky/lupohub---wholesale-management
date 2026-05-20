@@ -24,16 +24,89 @@ function appendTitleSuffix(title: string, suffix: string): string {
   return `${t}${s}`;
 }
 
+export type PreviewImageDto = { url: string; pictureId?: string };
+
+export type PackListingPublicationContent = {
+  title?: string;
+  description?: string;
+  price?: number;
+  pictures?: Array<{ url?: string; pictureId?: string; selected?: boolean }>;
+};
+
+/** URL de mejor calidad para mostrar y publicar (ML suele entregar -I; usamos -O). */
+export function mlBestPictureUrl(p: any): string {
+  const candidates: unknown[] = [p?.secure_url, p?.url, p?.max_size];
+  if (p?.size && typeof p.size === 'object') {
+    candidates.push(...Object.values(p.size));
+  }
+  for (const raw of candidates) {
+    let u = String(raw ?? '').trim();
+    if (!u.startsWith('http')) continue;
+    if (/mlstatic\.com/i.test(u)) {
+      u = u.replace(/-([A-Z])\.(jpe?g|png|webp)/gi, '-O.$2');
+    }
+    return u;
+  }
+  return '';
+}
+
+function collectMlPicturesFromItem(item: any): PreviewImageDto[] {
+  const seen = new Set<string>();
+  const out: PreviewImageDto[] = [];
+  for (const p of Array.isArray(item?.pictures) ? item.pictures : []) {
+    const url = mlBestPictureUrl(p);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, pictureId: p?.id != null ? String(p.id) : undefined });
+  }
+  return out;
+}
+
+function mlPicturesPayload(
+  content?: PackListingPublicationContent,
+  fallbackItem?: any
+): Array<{ id?: string; source?: string }> {
+  if (content?.pictures?.length) {
+    const selected = content.pictures.filter((p) => p.selected !== false);
+    const payload = selected
+      .map((p) => {
+        if (p.pictureId?.trim()) return { id: p.pictureId.trim() };
+        const url = String(p.url || '').trim();
+        if (url.startsWith('http')) return { source: url };
+        return null;
+      })
+      .filter(Boolean) as Array<{ id?: string; source?: string }>;
+    if (payload.length) return payload;
+  }
+  if (fallbackItem) return mlPicturesFromItem(fallbackItem);
+  return [];
+}
+
 function mlPicturesFromItem(item: any): Array<{ id?: string; source?: string }> {
-  return (Array.isArray(item?.pictures) ? item.pictures : [])
-    .slice(0, 12)
-    .map((p: any) => {
-      if (p?.id) return { id: String(p.id) };
-      const url = p?.secure_url || p?.url;
-      if (url && String(url).startsWith('http')) return { source: String(url) };
-      return null;
+  return collectMlPicturesFromItem(item)
+    .map((p) => {
+      if (p.pictureId) return { id: p.pictureId };
+      return { source: p.url };
     })
-    .filter(Boolean) as Array<{ id?: string; source?: string }>;
+    .filter((x) => x.id || x.source);
+}
+
+async function applyMlItemDescription(
+  itemId: string,
+  description: string,
+  accessToken: string
+): Promise<void> {
+  const text = String(description || '').trim();
+  if (!text) return;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  };
+  await axios.post(
+    `https://api.mercadolibre.com/items/${itemId}/description`,
+    { plain_text: text },
+    { headers, validateStatus: () => true }
+  );
 }
 
 function mlSkuFromItem(item: any): string {
@@ -63,7 +136,7 @@ export type PublicationSourcePreview = {
   resolvedId: string;
   title: string;
   description: string;
-  images: string[];
+  images: PreviewImageDto[];
   price?: number;
 };
 
@@ -109,10 +182,7 @@ export async function fetchPublicationSourcePreview(
       }
     }
     if (!description && item.subtitle) description = String(item.subtitle).trim();
-    const images = (Array.isArray(item.pictures) ? item.pictures : [])
-      .map((p: any) => p?.secure_url || p?.url)
-      .filter((u: unknown) => typeof u === 'string' && String(u).startsWith('http'))
-      .slice(0, 12) as string[];
+    const images = collectMlPicturesFromItem(item);
     return {
       platform: 'mercadolibre',
       resolvedId: itemId,
@@ -136,10 +206,12 @@ export async function fetchPublicationSourcePreview(
   if (productRes.status !== 200 || !productRes.data) return null;
   const p = productRes.data;
   const description = localizedTnText(p.description) || localizedTnText(p.seo_description);
-  const images = (Array.isArray(p.images) ? p.images : [])
-    .map((im: any) => im?.src)
-    .filter((u: unknown) => typeof u === 'string' && String(u).startsWith('http'))
-    .slice(0, 12) as string[];
+  const images: PreviewImageDto[] = (Array.isArray(p.images) ? p.images : [])
+    .map((im: any) => {
+      const url = im?.src ? String(im.src).trim() : '';
+      return url.startsWith('http') ? { url, pictureId: im?.id != null ? String(im.id) : undefined } : null;
+    })
+    .filter(Boolean) as PreviewImageDto[];
   const variants = await fetchAllTnVariants(storeId, integration.access_token, String(tnId));
   const price = variants[0]?.price != null ? Number(variants[0].price) : undefined;
   return {
@@ -176,21 +248,33 @@ export async function fetchMercadoLibreItemResolved(rawItemId: string): Promise<
 
 export async function createMercadoLibrePackListingFromItem(
   sourceItem: any,
-  opts: { titleSuffix: string; skuSuffix: string; availableQuantity: number; status?: 'active' | 'paused' }
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    availableQuantity: number;
+    status?: 'active' | 'paused';
+    content?: PackListingPublicationContent;
+  }
 ): Promise<{ itemId: string; item: any }> {
   const mlToken = await getValidMLToken();
   if (!mlToken) throw new Error('No hay integración con Mercado Libre');
 
-  const pictures = mlPicturesFromItem(sourceItem);
+  const pictures = mlPicturesPayload(opts.content, sourceItem);
   if (!pictures.length) {
-    throw new Error('La publicación origen no tiene fotos para copiar');
+    throw new Error('Seleccioná al menos una foto para la publicación');
   }
 
-  const title = appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
+  const title =
+    opts.content?.title?.trim() ||
+    appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
+  const price =
+    opts.content?.price != null && Number.isFinite(Number(opts.content.price))
+      ? Number(opts.content.price)
+      : Number(sourceItem.price) || 0;
   const body: Record<string, unknown> = {
     title,
     category_id: sourceItem.category_id,
-    price: Number(sourceItem.price) || 0,
+    price,
     currency_id: sourceItem.currency_id || 'ARS',
     available_quantity: Math.max(0, Math.floor(opts.availableQuantity)),
     buying_mode: sourceItem.buying_mode || 'buy_it_now',
@@ -236,21 +320,16 @@ export async function createMercadoLibrePackListingFromItem(
   const itemId = String(newItem?.id || '');
   if (!itemId) throw new Error('Mercado Libre no devolvió el ID de la nueva publicación');
 
-  try {
-    const descRes = await axios.get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
-      headers: { Authorization: `Bearer ${mlToken.access_token}` },
-      validateStatus: () => true
-    });
-    if (descRes.status === 200 && descRes.data?.plain_text) {
-      await axios.post(
-        `https://api.mercadolibre.com/items/${itemId}/description`,
-        { plain_text: descRes.data.plain_text },
-        { headers, validateStatus: () => true }
-      );
-    }
-  } catch {
-    /* descripción opcional */
-  }
+  const description =
+    opts.content?.description?.trim() ||
+    (await axios
+      .get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
+        headers: { Authorization: `Bearer ${mlToken.access_token}` },
+        validateStatus: () => true
+      })
+      .then((r) => (r.status === 200 ? String(r.data?.plain_text || '').trim() : ''))
+      .catch(() => ''));
+  await applyMlItemDescription(itemId, description, mlToken.access_token);
 
   return { itemId, item: newItem };
 }
@@ -265,17 +344,25 @@ function mlPrimaryVariationAttr(sourceItem: any): { id: string; name?: string } 
 export async function createMercadoLibrePackListingWithVariants(
   sourceItem: any,
   packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
-  opts: { titleSuffix: string; skuSuffix: string; status?: 'active' | 'paused' }
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    status?: 'active' | 'paused';
+    content?: PackListingPublicationContent;
+  }
 ): Promise<{ itemId: string; item: any; variationIds: string[] }> {
   const mlToken = await getValidMLToken();
   if (!mlToken) throw new Error('No hay integración con Mercado Libre');
 
-  const pictures = mlPicturesFromItem(sourceItem);
-  if (!pictures.length) throw new Error('La publicación origen no tiene fotos para copiar');
+  const pictures = mlPicturesPayload(opts.content, sourceItem);
+  if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
   if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
   const attr = mlPrimaryVariationAttr(sourceItem);
-  const basePrice = Number(sourceItem.price) || 0;
+  const basePrice =
+    opts.content?.price != null && Number.isFinite(Number(opts.content.price))
+      ? Number(opts.content.price)
+      : Number(sourceItem.price) || 0;
   const baseSku = mlSkuFromItem(sourceItem);
   const variations = packVariants.map((pv, idx) => {
     const stock = computeAvailableStockFromItems(pv.items);
@@ -289,7 +376,9 @@ export async function createMercadoLibrePackListingWithVariants(
     };
   });
 
-  const title = appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
+  const title =
+    opts.content?.title?.trim() ||
+    appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
   const body: Record<string, unknown> = {
     title,
     category_id: sourceItem.category_id,
@@ -338,23 +427,47 @@ export async function createMercadoLibrePackListingWithVariants(
     String(v?.id || '')
   );
 
-  try {
-    const descRes = await axios.get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
-      headers: { Authorization: `Bearer ${mlToken.access_token}` },
-      validateStatus: () => true
-    });
-    if (descRes.status === 200 && descRes.data?.plain_text) {
-      await axios.post(
-        `https://api.mercadolibre.com/items/${itemId}/description`,
-        { plain_text: descRes.data.plain_text },
-        { headers, validateStatus: () => true }
-      );
+  let description = opts.content?.description?.trim() || '';
+  if (!description) {
+    try {
+      const descRes = await axios.get(`https://api.mercadolibre.com/items/${sourceItem.id}/description`, {
+        headers: { Authorization: `Bearer ${mlToken.access_token}` },
+        validateStatus: () => true
+      });
+      if (descRes.status === 200) description = String(descRes.data?.plain_text || '').trim();
+    } catch {
+      /* opcional */
     }
-  } catch {
-    /* opcional */
   }
+  await applyMlItemDescription(itemId, description, mlToken.access_token);
 
   return { itemId, item: newItem, variationIds };
+}
+
+function tnImagesFromContent(
+  content?: PackListingPublicationContent,
+  product?: any
+): Array<{ src: string }> {
+  if (content?.pictures?.length) {
+    const imgs = content.pictures
+      .filter((p) => p.selected !== false)
+      .map((p) => String(p.url || '').trim())
+      .filter((u) => u.startsWith('http'))
+      .map((src) => ({ src }));
+    if (imgs.length) return imgs;
+  }
+  return (Array.isArray(product?.images) ? product.images : [])
+    .map((im: any) => (im?.src ? { src: String(im.src) } : null))
+    .filter(Boolean) as Array<{ src: string }>;
+}
+
+function tnDescriptionFromContent(content?: PackListingPublicationContent, product?: any): Record<string, string> {
+  const text = content?.description?.trim();
+  if (text) return { es: text, en: text, pt: text };
+  const base = product?.description;
+  if (base && typeof base === 'object') return { ...base };
+  if (typeof base === 'string' && base.trim()) return { es: base.trim(), en: '', pt: '' };
+  return { es: '', en: '', pt: '' };
 }
 
 function appendSuffixToLocalizedName(field: any, suffix: string): any {
@@ -414,7 +527,13 @@ async function fetchAllTnVariants(storeId: string, accessToken: string, productI
 
 export async function createTiendaNubePackListingFromProduct(
   sourceProductId: string,
-  opts: { titleSuffix: string; skuSuffix: string; availableQuantity: number; published: boolean }
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    availableQuantity: number;
+    published: boolean;
+    content?: PackListingPublicationContent;
+  }
 ): Promise<{ productId: number; variantId: number }> {
   const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
   if (!integration?.access_token) throw new Error('No hay integración con Tienda Nube');
@@ -439,10 +558,17 @@ export async function createTiendaNubePackListingFromProduct(
     0,
     opts.availableQuantity
   );
+  if (opts.content?.price != null && Number.isFinite(Number(opts.content.price))) {
+    packVariant.price = String(opts.content.price);
+  }
+
+  const tnName = opts.content?.title?.trim()
+    ? { es: opts.content.title.trim(), en: opts.content.title.trim(), pt: opts.content.title.trim() }
+    : appendSuffixToLocalizedName(p.name, opts.titleSuffix);
 
   const body: any = {
-    name: appendSuffixToLocalizedName(p.name, opts.titleSuffix),
-    description: p.description ?? { es: '', en: '', pt: '' },
+    name: tnName,
+    description: tnDescriptionFromContent(opts.content, p),
     attributes: Array.isArray(p.attributes) ? p.attributes : [],
     categories: tiendaNubeCategoryIdsOnly(p.categories),
     published: opts.published,
@@ -452,12 +578,9 @@ export async function createTiendaNubePackListingFromProduct(
   };
   if (p.brand != null && String(p.brand).trim() !== '') body.brand = p.brand;
   if (p.video_url && String(p.video_url).startsWith('https://')) body.video_url = p.video_url;
-  const imgs = (Array.isArray(p.images) ? p.images : [])
-    .slice(0, 9)
-    .map((im: any) => (im?.src ? { src: im.src } : null))
-    .filter(Boolean);
-  if (imgs.length > 0) body.images = imgs;
-  else throw new Error('El producto origen no tiene imágenes para copiar');
+  const imgs = tnImagesFromContent(opts.content, p);
+  if (imgs.length > 0) body.images = imgs.slice(0, 250);
+  else throw new Error('Seleccioná al menos una imagen para la publicación');
 
   const url = `https://api.tiendanube.com/v1/${storeId}/products`;
   const postHeaders = { ...headers, 'Content-Type': 'application/json' };
@@ -482,7 +605,12 @@ export async function createTiendaNubePackListingFromProduct(
 export async function createTiendaNubePackListingWithVariants(
   sourceProductId: string,
   packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
-  opts: { titleSuffix: string; skuSuffix: string; published: boolean }
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    published: boolean;
+    content?: PackListingPublicationContent;
+  }
 ): Promise<{ productId: number; variantIds: number[] }> {
   const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
   if (!integration?.access_token) throw new Error('No hay integración con Tienda Nube');
@@ -501,6 +629,11 @@ export async function createTiendaNubePackListingWithVariants(
   const baseVariant = variantsList[0] || { price: '0', values: [] };
   const valueTemplate = Array.isArray(baseVariant.values) && baseVariant.values.length > 0 ? baseVariant.values : [];
 
+  const basePrice =
+    opts.content?.price != null && Number.isFinite(Number(opts.content.price))
+      ? String(opts.content.price)
+      : null;
+
   const tnVariants = packVariants.map((pv, idx) => {
     const stock = computeAvailableStockFromItems(pv.items);
     const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
@@ -512,15 +645,21 @@ export async function createTiendaNubePackListingWithVariants(
               : val
           )
         : [{ es: comboLabel }];
-    return {
+    const row = {
       ...stripVariantForTiendaNubeCreate(baseVariant, `${opts.skuSuffix}-${idx + 1}`, idx, stock),
       values
     };
+    if (basePrice) row.price = basePrice;
+    return row;
   });
 
+  const tnName = opts.content?.title?.trim()
+    ? { es: opts.content.title.trim(), en: opts.content.title.trim(), pt: opts.content.title.trim() }
+    : appendSuffixToLocalizedName(p.name, opts.titleSuffix);
+
   const body: any = {
-    name: appendSuffixToLocalizedName(p.name, opts.titleSuffix),
-    description: p.description ?? { es: '', en: '', pt: '' },
+    name: tnName,
+    description: tnDescriptionFromContent(opts.content, p),
     attributes: Array.isArray(p.attributes) ? p.attributes : [],
     categories: tiendaNubeCategoryIdsOnly(p.categories),
     published: opts.published,
@@ -529,12 +668,9 @@ export async function createTiendaNubePackListingWithVariants(
     variants: tnVariants
   };
   if (p.brand != null && String(p.brand).trim() !== '') body.brand = p.brand;
-  const imgs = (Array.isArray(p.images) ? p.images : [])
-    .slice(0, 9)
-    .map((im: any) => (im?.src ? { src: im.src } : null))
-    .filter(Boolean);
-  if (imgs.length > 0) body.images = imgs;
-  else throw new Error('El producto origen no tiene imágenes para copiar');
+  const imgs = tnImagesFromContent(opts.content, p);
+  if (imgs.length > 0) body.images = imgs.slice(0, 250);
+  else throw new Error('Seleccioná al menos una imagen para la publicación');
 
   const url = `https://api.tiendanube.com/v1/${storeId}/products`;
   const postHeaders = { ...headers, 'Content-Type': 'application/json' };
@@ -590,6 +726,7 @@ export async function createPackListingAndBundle(input: {
   published?: boolean;
   items?: Array<{ variantId: string; unitsPerSale?: number }>;
   variants?: PackVariantInput[];
+  publicationContent?: PackListingPublicationContent;
 }): Promise<{
   group: PublicationBundleGroup;
   newExternalProductId: string;
@@ -641,7 +778,8 @@ export async function createPackListingAndBundle(input: {
         titleSuffix,
         skuSuffix,
         availableQuantity: computeAvailableStockFromItems(packVariants[0].items),
-        status: input.published === false ? 'paused' : 'active'
+        status: input.published === false ? 'paused' : 'active',
+        content: input.publicationContent
       });
       newProductId = created.itemId;
       bundleVariants.push({
@@ -653,7 +791,8 @@ export async function createPackListingAndBundle(input: {
       const created = await createMercadoLibrePackListingWithVariants(resolved.item, packVariants, {
         titleSuffix,
         skuSuffix,
-        status: input.published === false ? 'paused' : 'active'
+        status: input.published === false ? 'paused' : 'active',
+        content: input.publicationContent
       });
       newProductId = created.itemId;
       packVariants.forEach((pv, idx) => {
@@ -671,7 +810,8 @@ export async function createPackListingAndBundle(input: {
         titleSuffix,
         skuSuffix,
         availableQuantity: computeAvailableStockFromItems(packVariants[0].items),
-        published: input.published !== false
+        published: input.published !== false,
+        content: input.publicationContent
       });
       newProductId = String(created.productId);
       bundleVariants.push({
@@ -683,7 +823,8 @@ export async function createPackListingAndBundle(input: {
       const created = await createTiendaNubePackListingWithVariants(tnSourceId, packVariants, {
         titleSuffix,
         skuSuffix,
-        published: input.published !== false
+        published: input.published !== false,
+        content: input.publicationContent
       });
       newProductId = String(created.productId);
       packVariants.forEach((pv, idx) => {
