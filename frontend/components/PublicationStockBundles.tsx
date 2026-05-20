@@ -6,6 +6,7 @@ import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } fr
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 import {
   suggestAllPublicationPacks,
+  productGroupKey,
   type SuggestedPublicationPack
 } from '../utils/suggestPublicationPacks';
 
@@ -118,25 +119,79 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const contentDraftTouched = useRef(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionQuery, setSuggestionQuery] = useState('');
+  const [selectedArticleKey, setSelectedArticleKey] = useState('');
+
+  const variantById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const articleOptions = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; variantCount: number }>();
+    for (const p of products) {
+      const key = productGroupKey(p);
+      const name = (p.name || '').trim();
+      const label = name ? `${key} — ${name}` : key;
+      const prev = map.get(key);
+      if (prev) prev.variantCount += 1;
+      else map.set(key, { key, label, variantCount: 1 });
+    }
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  }, [products]);
 
   const flatVariants = useMemo(() => {
     return products.map((p) => {
-      const base = p.base_sku || p.sku?.split('-').slice(0, -2).join('-') || p.sku || '';
+      const articleKey = productGroupKey(p);
+      const color = p.color || '—';
+      const size = p.size || '—';
+      const shortLabel = `${color} · ${size} (stock ${p.stock ?? 0})`;
+      const fullLabel = `${articleKey} · ${shortLabel}`;
       return {
         variantId: p.id,
-        label: `${base} · ${p.color || '—'} · ${p.size || '—'} (stock ${p.stock ?? 0})`
+        articleKey,
+        color,
+        size,
+        label: fullLabel,
+        shortLabel
       };
     });
   }, [products]);
 
+  const articleVariants = useMemo(() => {
+    if (!selectedArticleKey) return [];
+    return flatVariants.filter((v) => v.articleKey === selectedArticleKey);
+  }, [flatVariants, selectedArticleKey]);
+
   const packSuggestions = useMemo(() => {
+    if (!selectedArticleKey) return [];
     return suggestAllPublicationPacks(products, {
       query: suggestionQuery,
-      includeMultiCombo: true
+      includeMultiCombo: true,
+      baseSku: selectedArticleKey
     });
-  }, [products, suggestionQuery]);
+  }, [products, suggestionQuery, selectedArticleKey]);
+
+  const prunePackItemsToArticle = (articleKey: string) => {
+    if (!articleKey) return;
+    setPackColorVariants((prev) =>
+      prev.map((pv) => ({
+        ...pv,
+        items: pv.items.filter((it) => {
+          const p = variantById.get(it.variantId);
+          return p && productGroupKey(p) === articleKey;
+        })
+      }))
+    );
+  };
+
+  const onArticleSelect = (key: string) => {
+    setSelectedArticleKey(key);
+    if (key) prunePackItemsToArticle(key);
+  };
 
   const applyPackSuggestion = (s: SuggestedPublicationPack) => {
+    setSelectedArticleKey(s.baseSku);
     setPackColorVariants(
       s.packVariants.map((pv) =>
         newPackColorVariant({
@@ -263,6 +318,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     contentDraftTouched.current = false;
     setShowSuggestions(false);
     setSuggestionQuery('');
+    setSelectedArticleKey('');
   };
 
   const buildPublicationContent = () => {
@@ -301,6 +357,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setListingLabel(g.listingLabel || '');
     setListingInput(g.externalProductId);
     setLinkMode('existing');
+    const firstVariantId = g.variants[0]?.items[0]?.variantId;
+    const firstProduct = firstVariantId ? variantById.get(firstVariantId) : undefined;
+    if (firstProduct) setSelectedArticleKey(productGroupKey(firstProduct));
     setPackColorVariants(
       g.variants.map((b) =>
         newPackColorVariant({
@@ -332,6 +391,15 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   };
 
   const addItemToColorVariant = (key: string, variantId: string, labelText: string) => {
+    const p = variantById.get(variantId);
+    if (!p) return;
+    const articleKey = productGroupKey(p);
+    if (!selectedArticleKey) {
+      setSelectedArticleKey(articleKey);
+    } else if (articleKey !== selectedArticleKey) {
+      showToast('error', 'Elegí colores del mismo artículo que el seleccionado arriba');
+      return;
+    }
     setPackColorVariants((prev) =>
       prev.map((v) => {
         if (v.key !== key || v.items.some((d) => d.variantId === variantId)) return v;
@@ -354,6 +422,10 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     const sourceId = parseSourceListingId();
     if (!sourceId) {
       showToast('error', 'Indicá la publicación individual de origen (un color)');
+      return;
+    }
+    if (!selectedArticleKey) {
+      showToast('error', 'Seleccioná el artículo del pack');
       return;
     }
     const variants = buildVariantsPayload();
@@ -400,6 +472,10 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     const productId = parseListingProductId();
     if (!productId) {
       showToast('error', 'Indicá el ID o link de la publicación pack');
+      return;
+    }
+    if (!selectedArticleKey) {
+      showToast('error', 'Seleccioná el artículo del pack');
       return;
     }
     const variants = buildVariantsPayload();
@@ -450,9 +526,18 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   };
 
   const filterVariantsForSearch = (q: string) => {
+    if (!selectedArticleKey) return [];
+    const pool = articleVariants;
     const query = q.trim().toLowerCase();
-    if (!query) return flatVariants.slice(0, 40);
-    return flatVariants.filter((v) => v.label.toLowerCase().includes(query)).slice(0, 40);
+    if (!query) return pool.slice(0, 40);
+    return pool
+      .filter(
+        (v) =>
+          v.shortLabel.toLowerCase().includes(query) ||
+          v.color.toLowerCase().includes(query) ||
+          v.size.toLowerCase().includes(query)
+      )
+      .slice(0, 40);
   };
 
   if (!open) return null;
@@ -739,6 +824,27 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
               )}
 
               <div className="space-y-3">
+                <div className="rounded-lg border border-slate-600 bg-slate-800/50 p-3">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block mb-2">
+                    Artículo del pack
+                  </label>
+                  <select
+                    value={selectedArticleKey}
+                    onChange={(e) => onArticleSelect(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm"
+                  >
+                    <option value="">— Seleccioná un artículo —</option>
+                    {articleOptions.map((a) => (
+                      <option key={a.key} value={a.key}>
+                        {a.label} ({a.variantCount} variantes)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-1.5">
+                    Todas las combinaciones del pack usan variantes de este artículo (mismo código base).
+                  </p>
+                </div>
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-[11px] font-bold text-violet-300 uppercase tracking-wide">
                     Variantes de colores del pack
@@ -746,8 +852,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      disabled={!selectedArticleKey}
                       onClick={() => setShowSuggestions((v) => !v)}
-                      className={`text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-semibold ${
+                      className={`text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-semibold disabled:opacity-40 disabled:cursor-not-allowed ${
                         showSuggestions
                           ? 'bg-amber-600/30 border-amber-500/60 text-amber-100'
                           : 'border-amber-700/50 text-amber-300 hover:bg-amber-950/40 hover:text-amber-100'
@@ -771,10 +878,10 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                   </div>
                 </div>
 
-                {showSuggestions && (
+                {showSuggestions && selectedArticleKey && (
                   <div className="rounded-xl border border-amber-800/50 bg-amber-950/25 p-3 space-y-3">
                     <p className="text-xs text-amber-200/90">
-                      Según tu inventario: packs con <strong>1 unidad de cada color</strong> por artículo y talle (con
+                      Packs con <strong>1 unidad de cada color</strong> para el artículo seleccionado (por talle, con
                       stock). Tocá una sugerencia para cargar las combinaciones abajo.
                     </p>
                     <div className="relative">
@@ -788,8 +895,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                     </div>
                     {packSuggestions.length === 0 ? (
                       <p className="text-xs text-slate-500 py-2">
-                        No hay sugerencias con al menos 2 colores con stock en el mismo talle. Revisá el inventario o
-                        probá otro filtro.
+                        No hay sugerencias para este artículo (hacen falta al menos 2 colores con stock en el mismo
+                        talle). Probá otro filtro o agregá colores a mano.
                       </p>
                     ) : (
                       <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -930,22 +1037,39 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                           <input
                             value={pv.search}
                             onChange={(e) => updateColorVariant(pv.key, { search: e.target.value })}
-                            placeholder="Buscar color/talle para agregar…"
-                            className="w-full pl-7 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs"
+                            disabled={!selectedArticleKey}
+                            placeholder={
+                              selectedArticleKey
+                                ? 'Buscar color o talle de este artículo…'
+                                : 'Primero seleccioná el artículo arriba'
+                            }
+                            className="w-full pl-7 bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs disabled:opacity-50"
                           />
                         </div>
                         <div className="max-h-28 overflow-y-auto rounded border border-slate-700 divide-y divide-slate-800">
-                          {filterVariantsForSearch(pv.search).map((v) => (
-                            <button
-                              key={v.variantId}
-                              type="button"
-                              onClick={() => addItemToColorVariant(pv.key, v.variantId, v.label)}
-                              className="w-full text-left px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800 flex items-center gap-1"
-                            >
-                              <Plus size={10} className="text-violet-400 shrink-0" />
-                              <span className="truncate">{v.label}</span>
-                            </button>
-                          ))}
+                          {!selectedArticleKey ? (
+                            <p className="px-2 py-3 text-[11px] text-slate-500 text-center">
+                              Seleccioná el artículo del pack para ver colores y talles.
+                            </p>
+                          ) : filterVariantsForSearch(pv.search).length === 0 ? (
+                            <p className="px-2 py-3 text-[11px] text-slate-500 text-center">
+                              Sin variantes con ese filtro.
+                            </p>
+                          ) : (
+                            filterVariantsForSearch(pv.search).map((v) => (
+                              <button
+                                key={v.variantId}
+                                type="button"
+                                onClick={() =>
+                                  addItemToColorVariant(pv.key, v.variantId, v.shortLabel)
+                                }
+                                className="w-full text-left px-2 py-1.5 text-[11px] text-slate-300 hover:bg-slate-800 flex items-center gap-1"
+                              >
+                                <Plus size={10} className="text-violet-400 shrink-0" />
+                                <span className="truncate">{v.shortLabel}</span>
+                              </button>
+                            ))
+                          )}
                         </div>
                       </div>
                     )}

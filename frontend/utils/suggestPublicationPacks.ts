@@ -37,7 +37,7 @@ type VariantRow = {
   label: string;
 };
 
-function productGroupKey(p: Product): string {
+export function productGroupKey(p: Product): string {
   const base = (p.base_sku || '').trim();
   if (base) return base;
   const pid = (p.product_id || '').trim();
@@ -88,16 +88,19 @@ export function suggestPublicationPacks(
     minStockPerColor?: number;
     maxSuggestions?: number;
     query?: string;
+    baseSku?: string;
   }
 ): SuggestedPublicationPack[] {
   const minColors = Math.max(2, opts?.minColors ?? 2);
   const minStock = Math.max(0, opts?.minStockPerColor ?? 1);
   const maxSuggestions = opts?.maxSuggestions ?? 24;
   const q = (opts?.query || '').trim().toLowerCase();
+  const onlyBase = (opts?.baseSku || '').trim();
 
   const rows: VariantRow[] = [];
   for (const p of products) {
     const baseSku = productGroupKey(p);
+    if (onlyBase && baseSku !== onlyBase) continue;
     const stock = Number(p.stock) || 0;
     if (stock < minStock) continue;
     const color = (p.color || '').trim() || 'Sin color';
@@ -174,12 +177,13 @@ export function suggestPublicationPacks(
 /** Variantes de pack con distintas combinaciones de colores (subconjuntos de 3). */
 export function suggestMultiComboPublicationPacks(
   products: Product[],
-  opts?: { minColors?: number; maxCombos?: number; query?: string }
+  opts?: { minColors?: number; maxCombos?: number; query?: string; baseSku?: string }
 ): SuggestedPublicationPack[] {
   const base = suggestPublicationPacks(products, {
     minColors: Math.max(3, opts?.minColors ?? 3),
     maxSuggestions: 12,
-    query: opts?.query
+    query: opts?.query,
+    baseSku: opts?.baseSku
   });
   const maxCombos = opts?.maxCombos ?? 3;
   const multi: SuggestedPublicationPack[] = [];
@@ -215,11 +219,14 @@ export function suggestMultiComboPublicationPacks(
 
 export function suggestAllPublicationPacks(
   products: Product[],
-  opts?: { query?: string; includeMultiCombo?: boolean }
+  opts?: { query?: string; includeMultiCombo?: boolean; baseSku?: string }
 ): SuggestedPublicationPack[] {
-  const simple = suggestPublicationPacks(products, { query: opts?.query });
+  const simple = suggestPublicationPacks(products, { query: opts?.query, baseSku: opts?.baseSku });
   if (opts?.includeMultiCombo === false) return simple;
-  const multi = suggestMultiComboPublicationPacks(products, { query: opts?.query });
+  const multi = suggestMultiComboPublicationPacks(products, {
+    query: opts?.query,
+    baseSku: opts?.baseSku
+  });
   const seen = new Set(simple.map((s) => s.id));
   const merged = [...simple];
   for (const m of multi) {
