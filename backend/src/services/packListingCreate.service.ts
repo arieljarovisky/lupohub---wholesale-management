@@ -206,7 +206,7 @@ async function resolvePackVariantColorSize(
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
     const rows = (await query(
-      `SELECT pv.id, c.name AS color_name, s.code AS size_code
+      `SELECT pv.id, c.name AS color_name, s.size_code AS size_code
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN colors c ON c.id = pc.color_id
