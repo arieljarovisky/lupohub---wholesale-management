@@ -164,7 +164,7 @@ export async function savePublicationBundleGroup(input: {
         platform: input.platform,
         externalProductId: extProd,
         externalVariantId: v.externalVariantId,
-        label,
+        label: label ?? undefined,
         items
       });
       keptIds.add(created.id);
@@ -256,7 +256,7 @@ export function computeAvailableStockFromItems(items: PublicationBundleItem[]): 
 export async function deductStockForBundleListing(
   bundle: PublicationBundle,
   quantitySold: number,
-  movementType: string,
+  movementType: import('../controllers/stock.controller').StockMovementType,
   reference: string
 ): Promise<{ ok: boolean; lines: string[] }> {
   const qty = Math.max(0, Math.floor(Number(quantitySold) || 0));

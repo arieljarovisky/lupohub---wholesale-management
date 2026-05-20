@@ -248,6 +248,8 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
                 scheduleSyncToExternalPlatforms(variantId, newStock);
             }
         }
+        void Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service'))).then((m) => m.syncBundlesContainingVariant(variantId))
+            .catch((err) => console.warn('[Bundle sync]', (err === null || err === void 0 ? void 0 : err.message) || err));
         return true;
     }
     catch (error) {

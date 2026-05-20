@@ -234,7 +234,10 @@ export const createListingFromSource = async (req: Request, res: Response) => {
       label: body.label,
       published: body.published,
       items: body.items,
-      variants: body.variants
+      variants: body.variants?.map((v) => ({
+        label: v.label,
+        items: v.items ?? []
+      }))
     });
     res.status(201).json(result);
   } catch (e: any) {

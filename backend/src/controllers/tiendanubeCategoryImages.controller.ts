@@ -74,7 +74,7 @@ export const downloadTiendaNubeCategoryImagesZip = async (req: Request, res: Res
     }));
 
     const archive = archiver('zip', { zlib: { level: 6 } });
-    archive.on('error', (err) => {
+    archive.on('error', (err: Error) => {
       throw err;
     });
     archive.pipe(res);

@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const publicationStockBundles_controller_1 = require("../controllers/publicationStockBundles.controller");
+const auth_1 = require("../middleware/auth");
+const router = (0, express_1.Router)();
+router.get('/', auth_1.authMiddleware, publicationStockBundles_controller_1.listBundles);
+router.get('/source-preview', auth_1.authMiddleware, publicationStockBundles_controller_1.getSourcePreview);
+router.get('/by-product', auth_1.authMiddleware, publicationStockBundles_controller_1.getBundlesByProduct);
+router.post('/create-listing-from-source', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.createListingFromSource);
+router.post('/group', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.saveBundleGroup);
+router.post('/sync-listing-stock', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.syncListingBundlesStock);
+router.post('/', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.createBundle);
+router.get('/:id', auth_1.authMiddleware, publicationStockBundles_controller_1.getBundle);
+router.patch('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.updateBundle);
+router.delete('/:id', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.removeBundle);
+router.post('/:id/sync-stock', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.syncBundleStock);
+exports.default = router;

@@ -1134,7 +1134,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.handleTiendaNubeWebhook = handleTiendaNubeWebhook;
 // Procesar orden de Tienda Nube y descontar stock
 const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
@@ -1182,16 +1182,28 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
         for (const item of order.products || []) {
             const tnVariantIdRaw = (_a = item.variant_id) !== null && _a !== void 0 ? _a : item.variantId;
             const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
+            const tnProductId = item.product_id != null ? String(item.product_id) : '';
             const quantity = Math.max(0, parseInt(String((_b = item.quantity) !== null && _b !== void 0 ? _b : 0), 10) || 0);
             const itemSku = (item.sku || item.variant_sku || '').toString().trim();
             if (quantity === 0)
                 continue;
+            if (tnProductId || tnVariantId) {
+                const { findBundleByListing, deductStockForBundleListing } = yield Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service')));
+                const bundle = yield findBundleByListing('tiendanube', tnProductId || tnVariantId || '', tnVariantId || '');
+                if ((_c = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _c === void 0 ? void 0 : _c.length) {
+                    const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`);
+                    if (ok)
+                        discountedCount++;
+                    console.log(`[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    continue;
+                }
+            }
             let variant = null;
             if (tnVariantId) {
                 const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`, [tnVariantId]);
                 if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
                     const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-                    variant = { id: fromPub.id, current_stock: Number((_c = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _c !== void 0 ? _c : 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
+                    variant = { id: fromPub.id, current_stock: Number((_d = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _d !== void 0 ? _d : 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
                 }
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && tnVariantId) {
@@ -1561,7 +1573,7 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
 exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     // Lock efímero para evitar doble procesamiento concurrente del mismo orderId (MySQL en prod).
     yield (0, db_1.execute)(`CREATE TABLE IF NOT EXISTS integration_order_locks (
       platform VARCHAR(64) NOT NULL,
@@ -1618,13 +1630,23 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
             if (!itemSku) {
                 itemSku = yield resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
             }
+            if (mlItemId) {
+                const { findBundleByListing, deductStockForBundleListing } = yield Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service')));
+                const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
+                const bundle = yield findBundleByListing('mercadolibre', mlItemId, extVar);
+                if ((_d = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _d === void 0 ? void 0 : _d.length) {
+                    const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`);
+                    console.log(`[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    continue;
+                }
+            }
             let variant = null;
             if (mlItemId) {
                 const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
                 const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`, [mlItemId, extVariantId]);
                 if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
                     const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-                    variant = { id: fromPub.id, current_stock: Number((_d = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _d !== void 0 ? _d : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
+                    variant = { id: fromPub.id, current_stock: Number((_e = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _e !== void 0 ? _e : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
                 }
             }
             // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
@@ -1739,7 +1761,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
             try {
                 yield (0, db_1.execute)(`DELETE FROM integration_order_locks WHERE platform = ? AND external_order_id = ?`, [lockPlatform, orderId]);
             }
-            catch (_e) {
+            catch (_f) {
                 // No romper flujo por falla al limpiar lock efimero.
             }
         }

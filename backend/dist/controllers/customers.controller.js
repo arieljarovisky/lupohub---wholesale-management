@@ -154,11 +154,21 @@ function labelTipoSaldoExporter(m) {
         return 'MOV.';
     return tipo;
 }
+function parseSellerCommissionPercentage(v) {
+    if (v === null || v === undefined || v === '')
+        return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 100)
+        return null;
+    return Math.round(n * 100) / 100;
+}
 function toCustomer(row, transportes) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    const sellerCommissionPct = row.seller_commission_percentage != null ? parseSellerCommissionPercentage(row.seller_commission_percentage) : null;
     return {
         id: row.id,
         sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : '',
+        sellerCommissionPercentage: sellerCommissionPct !== null && sellerCommissionPct !== void 0 ? sellerCommissionPct : undefined,
         userId: (_b = row.user_id) !== null && _b !== void 0 ? _b : undefined,
         name: (_c = row.name) !== null && _c !== void 0 ? _c : '',
         businessName: (_d = row.business_name) !== null && _d !== void 0 ? _d : '',
@@ -214,7 +224,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
          ON apc.period_yyyymm = apm.period_yyyymm
         AND apc.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '')`
             : '';
-        const rows = yield (0, db_1.query)(`SELECT c.id, c.seller_id, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
+        const rows = yield (0, db_1.query)(`SELECT c.id, c.seller_id, c.seller_commission_percentage, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
               c.legacy_code, c.account_zone, c.account_seller_label, c.delivery_addresses
               ${agipSelect}
        FROM customers c
@@ -600,9 +610,12 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
         const sqlName = name || null;
         const sqlBusinessName = businessName || name || null;
-        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]);
-        const created = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
+        const sellerCommissionPct = body.sellerCommissionPercentage !== undefined
+            ? parseSellerCommissionPercentage(body.sellerCommissionPercentage)
+            : null;
+        yield (0, db_1.execute)(`INSERT INTO customers (id, seller_id, seller_commission_percentage, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, sellerId, sellerCommissionPct, sqlName, sqlBusinessName, email, address, city, cuit, phone, transportNumber, remitoNumber, saleCondition, condicionIva, priceListId, legacyCode, accountZone, accountSellerLabel, deliveryJson]);
+        const created = yield (0, db_1.get)(`SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
         const transporteIds = Array.isArray(body.transporteIds) ? body.transporteIds.filter((x) => x && typeof x === 'string') : [];
         for (const tid of transporteIds) {
             yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
@@ -679,6 +692,14 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             updates.push('seller_id = ?');
             params.push(((_l = body.sellerId) === null || _l === void 0 ? void 0 : _l.trim()) || null);
         }
+        if (body.sellerCommissionPercentage !== undefined) {
+            const pct = parseSellerCommissionPercentage(body.sellerCommissionPercentage);
+            if (body.sellerCommissionPercentage != null && pct === null) {
+                return res.status(400).json({ message: 'sellerCommissionPercentage debe estar entre 0 y 100' });
+            }
+            updates.push('seller_commission_percentage = ?');
+            params.push(pct);
+        }
         if (body.priceListId !== undefined) {
             updates.push('price_list_id = ?');
             params.push(body.priceListId && body.priceListId.trim() ? body.priceListId.trim() : null);
@@ -710,7 +731,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 yield (0, db_1.execute)(`INSERT IGNORE INTO customer_transportes (customer_id, transporte_id) VALUES (?, ?)`, [id, tid]);
             }
         }
-        const updated = yield (0, db_1.get)(`SELECT id, seller_id, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
+        const updated = yield (0, db_1.get)(`SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses FROM customers WHERE id = ?`, [id]);
         const links = yield (0, db_1.query)(`SELECT t.id AS transporteId, t.name AS transporteName, t.address AS transporteAddress FROM customer_transportes ct JOIN transportes t ON t.id = ct.transporte_id WHERE ct.customer_id = ? ORDER BY t.name`, [id]);
         const transportes = (links || []).map((l) => { var _a, _b; return ({ id: l.transporteId, name: (_a = l.transporteName) !== null && _a !== void 0 ? _a : l.transporteId, address: (_b = l.transporteAddress) !== null && _b !== void 0 ? _b : undefined }); });
         res.json(toCustomer(updated, transportes));
@@ -936,6 +957,125 @@ exports.bulkUpdateCuit = bulkUpdateCuit;
 function roleCanViewSaldos(role) {
     return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
+function parseSaldoNumero(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+}
+/** Último saldo de columna en import Multimedia/Tango (arrastre de cuenta). */
+const CARTERA_MM_LAST_SALDO_SUBQUERY = `
+  SELECT
+    agg.customer_id,
+    CAST(COALESCE(
+      (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
+       FROM customer_multimedia_entries e_lo
+       WHERE e_lo.customer_id = agg.customer_id
+       ORDER BY e_lo.line_order DESC
+       LIMIT 1),
+      (SELECT CAST(e2.saldo AS DECIMAL(16,2))
+       FROM customer_multimedia_entries e2
+       WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
+       ORDER BY e2.line_order DESC
+       LIMIT 1),
+      0
+    ) AS DECIMAL(16,2)) AS last_saldo
+  FROM (
+    SELECT customer_id
+    FROM customer_multimedia_entries
+    GROUP BY customer_id
+  ) agg`;
+/**
+ * Pagos en Facturación que coinciden con un REC importado (se excluyen de pay deduplicado).
+ * Si el arrastre importado (last_saldo) es 0, hay que restarlos igual para no quedar en saldo 0.
+ */
+function sqlCarteraPagosMatchedImportSubquery(sellerScoped) {
+    const sellerWhere = sellerScoped ? ' AND (p.seller_id = ? OR c2.seller_id = ?)' : '';
+    return `
+    SELECT d.customer_id, SUM(d.amount) AS total_matched
+    FROM (
+      SELECT
+        p.customer_id,
+        ROUND(COALESCE(p.amount, 0), 2) AS amount
+      FROM payments p
+      ${sellerScoped ? 'INNER JOIN customers c2 ON c2.id = p.customer_id' : ''}
+      INNER JOIN (
+        SELECT
+          e.customer_id,
+          DATE(e.line_date) AS line_date,
+          ROUND(COALESCE(e.importe, 0), 2) AS amount,
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          ) AS receipt_norm
+        FROM customer_multimedia_entries e
+        WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+          AND TRIM(COALESCE(e.numero, '')) <> ''
+        GROUP BY
+          e.customer_id,
+          DATE(e.line_date),
+          ROUND(COALESCE(e.importe, 0), 2),
+          UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+      ) me_rec
+        ON me_rec.customer_id = p.customer_id
+       AND me_rec.line_date = DATE(p.date)
+       AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+       AND me_rec.receipt_norm = CASE
+         WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+         ELSE UPPER(
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+         )
+       END
+      WHERE 1=1${sellerWhere}
+      GROUP BY
+        p.customer_id,
+        DATE(p.date),
+        ROUND(COALESCE(p.amount, 0), 2),
+        CASE
+          WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+          ELSE UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+        END
+    ) d
+    GROUP BY d.customer_id`;
+}
+/** REC importados sin pago equivalente en Facturación (solo si last_saldo importado es 0). */
+const SQL_CARTERA_MM_REC_SIN_PAGO = `
+  SELECT e.customer_id, SUM(ROUND(ABS(COALESCE(e.importe, 0)), 2)) AS total_orphan
+  FROM customer_multimedia_entries e
+  WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
+    AND TRIM(COALESCE(e.numero, '')) <> ''
+    AND NOT EXISTS (
+      SELECT 1
+      FROM payments p
+      WHERE p.customer_id = e.customer_id
+        AND DATE(p.date) = DATE(e.line_date)
+        AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+        AND UPPER(
+          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+        ) = CASE
+          WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+          ELSE UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+          )
+        END
+    )
+  GROUP BY e.customer_id`;
+/** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
+function carteraSaldoSqlExpr() {
+    return `ROUND(
+    COALESCE(ob.facturas_bruto, 0)
+    + COALESCE(mm.last_saldo, 0)
+    - COALESCE(ncv.nc_iva, 0)
+    - COALESCE(pay.total_pagos, 0)
+    - CASE
+        WHEN ABS(COALESCE(mm.last_saldo, 0)) < 0.005 THEN
+          COALESCE(pay_mm.total_matched, 0) + COALESCE(mm_orphan.total_orphan, 0)
+        ELSE 0
+      END,
+    2
+  )`;
+}
 /** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
 const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const user = req.user;
@@ -969,7 +1109,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
             cuit: (_c = r.cuit) !== null && _c !== void 0 ? _c : '',
             city: (_d = r.city) !== null && _d !== void 0 ? _d : '',
             email: (_e = r.email) !== null && _e !== void 0 ? _e : '',
-            saldoPendiente: Number(r.saldoPendiente) || 0,
+            saldoPendiente: parseSaldoNumero(r.saldoPendiente),
             totalCargosPendiente: Number(r.totalCargosPendiente) || 0,
             totalPagos: Number(r.totalPagos) || 0,
             pedidosPendientes: Number(r.pedidosPendientes) || 0
@@ -983,7 +1123,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1011,7 +1151,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     const sqlSimple = `
@@ -1022,7 +1162,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1045,7 +1185,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     try {
@@ -1188,31 +1328,12 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
              END
          ) d
          GROUP BY d.customer_id`;
+    const payMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(user.role === 'SELLER');
     const payParams = user.role === 'SELLER' ? [user.id, user.id] : [];
-    const paramsWithNc = [...baseParams, ...payParams];
-    const paramsSimple = [...baseParams, ...payParams];
-    /** Preferir saldo de la última fila (import PDF escribe ahí SALDO DEL CLIENTE); si NULL, último saldo intermedio. */
-    const mmSubquery = `
-    SELECT
-      agg.customer_id,
-      CAST(COALESCE(
-        (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
-         FROM customer_multimedia_entries e_lo
-         WHERE e_lo.customer_id = agg.customer_id
-         ORDER BY e_lo.line_order DESC
-         LIMIT 1),
-        (SELECT CAST(e2.saldo AS DECIMAL(16,2))
-         FROM customer_multimedia_entries e2
-         WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-         ORDER BY e2.line_order DESC
-         LIMIT 1),
-        0
-      ) AS DECIMAL(16,2)) AS last_saldo
-    FROM (
-      SELECT customer_id
-      FROM customer_multimedia_entries
-      GROUP BY customer_id
-    ) agg`;
+    const payMatchedParams = user.role === 'SELLER' ? [user.id, user.id] : [];
+    const paramsWithNc = [...baseParams, ...payParams, ...payMatchedParams];
+    const paramsSimple = [...baseParams, ...payParams, ...payMatchedParams];
+    const saldoExpr = carteraSaldoSqlExpr();
     const sqlWithNc = `
     SELECT
       c.id AS customerId,
@@ -1220,13 +1341,7 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
       ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(
-        COALESCE(ob.facturas_bruto, 0)
-        + COALESCE(mm.last_saldo, 0)
-        - COALESCE(ncv.nc_iva, 0)
-        - COALESCE(pay.total_pagos, 0),
-        2
-      ) AS saldoPendienteUnificado
+      ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1253,15 +1368,12 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
-      AND (
-        COALESCE(ob.facturas_bruto, 0) > 0.005
-        OR COALESCE(ncv.nc_iva, 0) > 0.005
-        OR COALESCE(mm.last_saldo, 0) > 0.005
-        OR COALESCE(pay.total_pagos, 0) > 0.005
-      )
+      AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
   `;
     /** Misma lógica que sqlWithNc; reintento si la consulta anterior falla (p. ej. esquema antiguo). */
@@ -1272,13 +1384,7 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
       ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      ROUND(
-        COALESCE(ob.facturas_bruto, 0)
-        + COALESCE(mm.last_saldo, 0)
-        - COALESCE(ncv.nc_iva, 0)
-        - COALESCE(pay.total_pagos, 0),
-        2
-      ) AS saldoPendienteUnificado
+      ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
@@ -1305,26 +1411,23 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
         AND (o.archived = 0 OR o.archived IS NULL)
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
-      AND (
-        COALESCE(ob.facturas_bruto, 0) > 0.005
-        OR COALESCE(ncv.nc_iva, 0) > 0.005
-        OR COALESCE(mm.last_saldo, 0) > 0.005
-        OR COALESCE(pay.total_pagos, 0) > 0.005
-      )
+      AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
   `;
     try {
         const rows = yield (0, db_1.query)(sqlWithNc, paramsWithNc);
         return res.json(rows.map((r) => ({
             customerId: r.customerId,
-            orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
-            totalNotasCredito: Number(r.totalNotasCredito) || 0,
-            multimediaSaldo: Number(r.multimediaSaldo) || 0,
-            totalPagos: Number(r.totalPagos) || 0,
-            saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+            orderCargosPendientes: parseSaldoNumero(r.orderCargosPendientes),
+            totalNotasCredito: parseSaldoNumero(r.totalNotasCredito),
+            multimediaSaldo: parseSaldoNumero(r.multimediaSaldo),
+            totalPagos: parseSaldoNumero(r.totalPagos),
+            saldoPendienteUnificado: parseSaldoNumero(r.saldoPendienteUnificado)
         })));
     }
     catch (e) {
@@ -1333,11 +1436,11 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
             const rows = yield (0, db_1.query)(sqlSimple, paramsSimple);
             return res.json(rows.map((r) => ({
                 customerId: r.customerId,
-                orderCargosPendientes: Number(r.orderCargosPendientes) || 0,
-                totalNotasCredito: Number(r.totalNotasCredito) || 0,
-                multimediaSaldo: Number(r.multimediaSaldo) || 0,
-                totalPagos: Number(r.totalPagos) || 0,
-                saldoPendienteUnificado: Number(r.saldoPendienteUnificado) || 0
+                orderCargosPendientes: parseSaldoNumero(r.orderCargosPendientes),
+                totalNotasCredito: parseSaldoNumero(r.totalNotasCredito),
+                multimediaSaldo: parseSaldoNumero(r.multimediaSaldo),
+                totalPagos: parseSaldoNumero(r.totalPagos),
+                saldoPendienteUnificado: parseSaldoNumero(r.saldoPendienteUnificado)
             })));
         }
         catch (e2) {
@@ -1424,7 +1527,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1452,7 +1555,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     const sqlSimple = `
@@ -1463,7 +1566,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       t.cuit,
       t.city,
       t.email,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes
@@ -1486,7 +1589,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
     ${paymentsJoin}
-    WHERE ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) > 0.01
+    WHERE ABS(ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2)) > 0.01
     ORDER BY t.businessName ASC, t.contactName ASC
   `;
     let rows;
@@ -1754,8 +1857,8 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     saldo: running
                 });
             }
-            const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-            if (saldoPendiente > 0.01) {
+            const saldoPendiente = Math.round(running * 100) / 100;
+            if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
                     vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
@@ -1958,8 +2061,8 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
                     saldo: running
                 });
             }
-            const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-            if (saldoPendiente > 0.01) {
+            const saldoPendiente = Math.round(running * 100) / 100;
+            if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
                     vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
@@ -2584,40 +2687,16 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                END
            ) d
            GROUP BY d.customer_id`;
+        const carteraPayMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(!!sellerIdFilter);
         const carteraPayParams = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
-        const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams];
-        const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams];
-        const mmSubquery = `
-      SELECT
-        agg.customer_id,
-        CAST(COALESCE(
-          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
-           FROM customer_multimedia_entries e_lo
-           WHERE e_lo.customer_id = agg.customer_id
-           ORDER BY e_lo.line_order DESC
-           LIMIT 1),
-          (SELECT CAST(e2.saldo AS DECIMAL(16,2))
-           FROM customer_multimedia_entries e2
-           WHERE e2.customer_id = agg.customer_id AND e2.saldo IS NOT NULL
-           ORDER BY e2.line_order DESC
-           LIMIT 1),
-          0
-        ) AS DECIMAL(16,2)) AS last_saldo
-      FROM (
-        SELECT customer_id
-        FROM customer_multimedia_entries
-        GROUP BY customer_id
-      ) agg`;
+        const carteraPayMatchedParams = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
+        const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
+        const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
+        const carteraSaldoExpr = carteraSaldoSqlExpr();
         const carteraSqlWithNc = `
       SELECT
         c.id AS customerId,
-        ROUND(
-          COALESCE(ob.facturas_bruto, 0)
-          + COALESCE(mm.last_saldo, 0)
-          - COALESCE(ncv.nc_iva, 0)
-          - COALESCE(pay.total_pagos, 0),
-          2
-        ) AS saldoPendienteUnificado
+        ${carteraSaldoExpr} AS saldoPendienteUnificado
       FROM customers c
       LEFT JOIN (
         SELECT
@@ -2644,50 +2723,13 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
           AND (o.archived = 0 OR o.archived IS NULL)
         GROUP BY o.customer_id
       ) ncv ON ncv.customer_id = c.id
-      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
+      LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
       LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+      LEFT JOIN (${carteraPayMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
+      LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
       WHERE 1=1 ${carteraSellerFilter}
     `;
-        const carteraSqlSimple = `
-      SELECT
-        c.id AS customerId,
-        ROUND(
-          COALESCE(ob.facturas_bruto, 0)
-          + COALESCE(mm.last_saldo, 0)
-          - COALESCE(ncv.nc_iva, 0)
-          - COALESCE(pay.total_pagos, 0),
-          2
-        ) AS saldoPendienteUnificado
-      FROM customers c
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
-        FROM orders o
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ob ON ob.customer_id = c.id
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
-        FROM orders o
-        LEFT JOIN (
-          SELECT order_id, SUM(amount_credited) AS cn_total
-          FROM credit_notes
-          GROUP BY order_id
-        ) cn ON cn.order_id = o.id
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ncv ON ncv.customer_id = c.id
-      LEFT JOIN (${mmSubquery}) mm ON mm.customer_id = c.id
-      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-      WHERE 1=1 ${carteraSellerFilter}
-    `;
+        const carteraSqlSimple = carteraSqlWithNc;
         let carteraRows = [];
         try {
             carteraRows = (yield (0, db_1.query)(carteraSqlWithNc, carteraParamsWithNc));
@@ -2697,7 +2739,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         }
         const saldoUnificadoByCustomer = new Map();
         for (const r of carteraRows) {
-            saldoUnificadoByCustomer.set(r.customerId, Number(r.saldoPendienteUnificado) || 0);
+            saldoUnificadoByCustomer.set(r.customerId, parseSaldoNumero(r.saldoPendienteUnificado));
         }
         const byCustomer = new Map();
         for (const m of movements) {
@@ -2746,12 +2788,14 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
             }
             // Saldo final = mismo criterio que historial (debe/haber acumulados), con arrastre previo al "desde".
-            const saldoPendiente = Math.round(Math.max(0, running) * 100) / 100;
-            wsSummary.addRow({
-                cliente: c.customer_name,
-                vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
-                saldo: saldoPendiente
-            });
+            const saldoPendiente = Math.round(running * 100) / 100;
+            if (Math.abs(saldoPendiente) > 0.01) {
+                wsSummary.addRow({
+                    cliente: c.customer_name,
+                    vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
+                    saldo: saldoPendiente
+                });
+            }
             // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
             if (!sellerIdFilter) {
                 const sellerGroup = String(c.seller_name || c.seller_id || 'Sin vendedor');
@@ -2817,7 +2861,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
             wsDetalle.addRow(['Saldo neto del período (debe − haber)', '', '', '', '', '', netoPeriodo]);
             wsDetalle.addRow(['Saldo acumulado al cierre del período (arrastre + período)', '', '', '', '', '', saldo]);
-            wsDetalle.addRow(['Saldo final (máx. 0)', '', '', '', '', '', saldoPendiente]);
+            wsDetalle.addRow(['Saldo pendiente (debe − haber)', '', '', '', '', '', saldoPendiente]);
             for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
                 wsDetalle.mergeCells(r, 1, r, 4);
                 const row = wsDetalle.getRow(r);
@@ -2905,7 +2949,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
       t.businessName,
       t.contactName,
       t.cuit,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes,
@@ -2949,7 +2993,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
       t.businessName,
       t.contactName,
       t.cuit,
-      ROUND(GREATEST(0, t.cargosPendientes - COALESCE(pay.total_pagos, 0)), 2) AS saldoPendiente,
+      ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       t.pedidosPendientes,
