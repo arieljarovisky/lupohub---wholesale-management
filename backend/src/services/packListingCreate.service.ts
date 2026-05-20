@@ -1,8 +1,9 @@
 import axios from 'axios';
-import { get } from '../database/db';
+import { get, query } from '../database/db';
 import {
   getValidMLToken,
   mercadoLibreItemIdCandidates,
+  mlColorSizeFromTitle,
   normalizeMercadoLibreItemId
 } from '../controllers/integrations.controller';
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
@@ -116,6 +117,117 @@ function mlSkuFromItem(item: any): string {
     s = (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '').toString().trim();
   }
   return s;
+}
+
+const ML_COLOR_ATTR_IDS = new Set(['COLOR', 'COLOUR', 'COR']);
+const ML_SIZE_ATTR_IDS = new Set(['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
+
+function mlAttrIdUpper(id: unknown): string {
+  return String(id || '').trim().toUpperCase();
+}
+
+function mlColorSizeFromVariation(v: any, fallbackTitle?: string): { color: string; size: string } {
+  let color = '';
+  let size = '';
+  (v?.attribute_combinations || []).forEach((attr: any) => {
+    const id = mlAttrIdUpper(attr?.id);
+    const name = (attr?.value_name || attr?.name || '').toString().trim();
+    if (ML_COLOR_ATTR_IDS.has(id)) color = name;
+    if (ML_SIZE_ATTR_IDS.has(id)) size = name;
+  });
+  if ((!color || !size) && fallbackTitle) {
+    const parsed = mlColorSizeFromTitle(fallbackTitle);
+    if (!color) color = parsed.color;
+    if (!size) size = parsed.size;
+  }
+  return { color: color || 'Único', size: size || 'U' };
+}
+
+/** Atributos de variación que exige la publicación origen (p. ej. Color + Talle). */
+function mlVariationAttrTemplates(sourceItem: any): Array<{ id: string; name?: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ id: string; name?: string }> = [];
+  for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
+    for (const ac of Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : []) {
+      const id = String(ac?.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, name: ac?.name });
+    }
+  }
+  if (!out.length) {
+    out.push({ id: 'COLOR', name: 'Color' }, { id: 'SIZE', name: 'Talle' });
+  }
+  return out;
+}
+
+function mlValueForVariationAttr(
+  attrId: string,
+  opts: { color: string; size: string; label: string }
+): string {
+  const id = mlAttrIdUpper(attrId);
+  if (ML_COLOR_ATTR_IDS.has(id)) return opts.color || opts.label || 'Único';
+  if (ML_SIZE_ATTR_IDS.has(id)) return opts.size || 'U';
+  return opts.label || opts.color || 'Único';
+}
+
+function buildMlVariationAttributeCombinations(
+  templates: Array<{ id: string; name?: string }>,
+  opts: { color: string; size: string; label: string }
+): Array<{ id: string; name?: string; value_name: string }> {
+  return templates.map((t) => ({
+    id: t.id,
+    name: t.name,
+    value_name: mlValueForVariationAttr(t.id, opts)
+  }));
+}
+
+function formatMlCreateError(postRes: { data?: any; statusText?: string }): string {
+  const causes = Array.isArray(postRes.data?.cause)
+    ? postRes.data.cause.map((c: any) => c.message || c.code || JSON.stringify(c)).filter(Boolean)
+    : [];
+  const base =
+    postRes.data?.message ||
+    postRes.data?.error ||
+    causes.join('; ') ||
+    postRes.statusText ||
+    'error desconocido';
+  return causes.length ? `${base} (${causes.join('; ')})` : String(base);
+}
+
+async function resolvePackVariantColorSize(
+  packItems: PublicationBundleItem[],
+  sourceItem: any,
+  label: string
+): Promise<{ color: string; size: string }> {
+  let color = '';
+  let size = '';
+  const ids = packItems.map((i) => i.variantId).filter(Boolean);
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = (await query(
+      `SELECT pv.id, c.name AS color_name, s.code AS size_code
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN sizes s ON s.id = pv.size_id
+       WHERE pv.id IN (${placeholders})`,
+      ids
+    )) as Array<{ color_name?: string; size_code?: string }>;
+    if (rows.length) {
+      const sizes = [...new Set(rows.map((r) => String(r.size_code || '').trim()).filter(Boolean))];
+      if (sizes.length === 1) size = sizes[0];
+      else if (sizes.length > 1) size = sizes[0];
+      const colors = rows.map((r) => String(r.color_name || '').trim()).filter(Boolean);
+      if (colors.length === 1) color = colors[0];
+      else if (colors.length > 1) color = label.trim() || colors.join(' / ');
+    }
+  }
+  const title = String(sourceItem?.title || '').trim();
+  const fromSource = mlColorSizeFromVariation(sourceItem?.variations?.[0], title);
+  if (!size) size = fromSource.size;
+  if (!color) color = label.trim() || fromSource.color;
+  return { color: color || 'Único', size: size || 'U' };
 }
 
 function mlAttributesForDuplicate(item: any, skuSuffix: string): any[] {
@@ -254,6 +366,8 @@ export async function createMercadoLibrePackListingFromItem(
     availableQuantity: number;
     status?: 'active' | 'paused';
     content?: PackListingPublicationContent;
+    packItems?: PublicationBundleItem[];
+    packLabel?: string;
   }
 ): Promise<{ itemId: string; item: any }> {
   const mlToken = await getValidMLToken();
@@ -271,12 +385,13 @@ export async function createMercadoLibrePackListingFromItem(
     opts.content?.price != null && Number.isFinite(Number(opts.content.price))
       ? Number(opts.content.price)
       : Number(sourceItem.price) || 0;
+  const attrTemplates = mlVariationAttrTemplates(sourceItem);
+  const useVariations = attrTemplates.length > 0;
+
   const body: Record<string, unknown> = {
     title,
     category_id: sourceItem.category_id,
-    price,
     currency_id: sourceItem.currency_id || 'ARS',
-    available_quantity: Math.max(0, Math.floor(opts.availableQuantity)),
     buying_mode: sourceItem.buying_mode || 'buy_it_now',
     listing_type_id: sourceItem.listing_type_id || 'gold_special',
     condition: sourceItem.condition || 'new',
@@ -287,7 +402,28 @@ export async function createMercadoLibrePackListingFromItem(
   if (attrs.length) body.attributes = attrs;
 
   const sku = mlSkuFromItem(sourceItem);
-  if (sku) body.seller_custom_field = `${sku}${opts.skuSuffix}`;
+  const packLabel = (opts.packLabel || '').trim();
+  const packItems = opts.packItems || [];
+
+  if (useVariations) {
+    const { color, size } = await resolvePackVariantColorSize(packItems, sourceItem, packLabel);
+    body.variations = [
+      {
+        attribute_combinations: buildMlVariationAttributeCombinations(attrTemplates, {
+          color,
+          size,
+          label: packLabel || title
+        }),
+        available_quantity: Math.max(0, Math.floor(opts.availableQuantity)),
+        price,
+        seller_custom_field: sku ? `${sku}${opts.skuSuffix}` : `${opts.skuSuffix}`
+      }
+    ];
+  } else {
+    body.price = price;
+    body.available_quantity = Math.max(0, Math.floor(opts.availableQuantity));
+    if (sku) body.seller_custom_field = `${sku}${opts.skuSuffix}`;
+  }
 
   if (sourceItem.video_id) body.video_id = sourceItem.video_id;
   if (Array.isArray(sourceItem.sale_terms) && sourceItem.sale_terms.length) {
@@ -308,12 +444,7 @@ export async function createMercadoLibrePackListingFromItem(
   });
 
   if (postRes.status !== 201 && postRes.status !== 200) {
-    const msg =
-      postRes.data?.message ||
-      postRes.data?.error ||
-      (Array.isArray(postRes.data?.cause) ? postRes.data.cause.map((c: any) => c.message).join('; ') : null) ||
-      postRes.statusText;
-    throw new Error(`Mercado Libre rechazó la creación: ${msg}`);
+    throw new Error(`Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}`);
   }
 
   const newItem = postRes.data;
@@ -334,13 +465,6 @@ export async function createMercadoLibrePackListingFromItem(
   return { itemId, item: newItem };
 }
 
-function mlPrimaryVariationAttr(sourceItem: any): { id: string; name?: string } {
-  const v0 = sourceItem?.variations?.[0];
-  const combo = Array.isArray(v0?.attribute_combinations) ? v0.attribute_combinations[0] : null;
-  if (combo?.id) return { id: String(combo.id), name: combo.name };
-  return { id: 'COLOR', name: 'Color' };
-}
-
 export async function createMercadoLibrePackListingWithVariants(
   sourceItem: any,
   packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
@@ -358,23 +482,30 @@ export async function createMercadoLibrePackListingWithVariants(
   if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
   if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
-  const attr = mlPrimaryVariationAttr(sourceItem);
+  const attrTemplates = mlVariationAttrTemplates(sourceItem);
   const basePrice =
     opts.content?.price != null && Number.isFinite(Number(opts.content.price))
       ? Number(opts.content.price)
       : Number(sourceItem.price) || 0;
   const baseSku = mlSkuFromItem(sourceItem);
-  const variations = packVariants.map((pv, idx) => {
-    const stock = computeAvailableStockFromItems(pv.items);
-    const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
-    const varSku = baseSku ? `${baseSku}${opts.skuSuffix}-${idx + 1}` : `${opts.skuSuffix}-${idx + 1}`;
-    return {
-      attribute_combinations: [{ id: attr.id, name: attr.name, value_name: comboLabel }],
-      available_quantity: stock,
-      price: basePrice,
-      seller_custom_field: varSku
-    };
-  });
+  const variations = await Promise.all(
+    packVariants.map(async (pv, idx) => {
+      const stock = computeAvailableStockFromItems(pv.items);
+      const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
+      const varSku = baseSku ? `${baseSku}${opts.skuSuffix}-${idx + 1}` : `${opts.skuSuffix}-${idx + 1}`;
+      const { color, size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
+      return {
+        attribute_combinations: buildMlVariationAttributeCombinations(attrTemplates, {
+          color,
+          size,
+          label: comboLabel
+        }),
+        available_quantity: stock,
+        price: basePrice,
+        seller_custom_field: varSku
+      };
+    })
+  );
 
   const title =
     opts.content?.title?.trim() ||
@@ -411,12 +542,7 @@ export async function createMercadoLibrePackListingWithVariants(
   });
 
   if (postRes.status !== 201 && postRes.status !== 200) {
-    const msg =
-      postRes.data?.message ||
-      postRes.data?.error ||
-      (Array.isArray(postRes.data?.cause) ? postRes.data.cause.map((c: any) => c.message).join('; ') : null) ||
-      postRes.statusText;
-    throw new Error(`Mercado Libre rechazó la creación: ${msg}`);
+    throw new Error(`Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}`);
   }
 
   const newItem = postRes.data;
@@ -634,24 +760,37 @@ export async function createTiendaNubePackListingWithVariants(
       ? String(opts.content.price)
       : null;
 
-  const tnVariants = packVariants.map((pv, idx) => {
-    const stock = computeAvailableStockFromItems(pv.items);
-    const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
-    const values =
-      valueTemplate.length > 0
-        ? valueTemplate.map((val: any, i: number) =>
-            i === 0
-              ? { ...val, es: comboLabel, en: comboLabel, pt: comboLabel }
-              : val
-          )
-        : [{ es: comboLabel }];
-    const row = {
-      ...stripVariantForTiendaNubeCreate(baseVariant, `${opts.skuSuffix}-${idx + 1}`, idx, stock),
-      values
-    };
-    if (basePrice) row.price = basePrice;
-    return row;
-  });
+  const attrNames = (Array.isArray(p.attributes) ? p.attributes : []).map((a: any) =>
+    localizedTnText(a).toLowerCase()
+  );
+  const tnVariants = await Promise.all(
+    packVariants.map(async (pv, idx) => {
+      const stock = computeAvailableStockFromItems(pv.items);
+      const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
+      const { color, size } = await resolvePackVariantColorSize(pv.items, {}, comboLabel);
+      const values =
+        valueTemplate.length > 0
+          ? valueTemplate.map((val: any, i: number) => {
+              const attrLabel = attrNames[i] || '';
+              let text = comboLabel;
+              if (/color/i.test(attrLabel)) text = color;
+              else if (/talle|talla|size/i.test(attrLabel)) text = size;
+              else if (i === 0) text = color;
+              else if (i === 1) text = size;
+              return { ...val, es: text, en: text, pt: text };
+            })
+          : [
+              { es: color, en: color, pt: color },
+              { es: size, en: size, pt: size }
+            ];
+      const row = {
+        ...stripVariantForTiendaNubeCreate(baseVariant, `${opts.skuSuffix}-${idx + 1}`, idx, stock),
+        values
+      };
+      if (basePrice) row.price = basePrice;
+      return row;
+    })
+  );
 
   const tnName = opts.content?.title?.trim()
     ? { es: opts.content.title.trim(), en: opts.content.title.trim(), pt: opts.content.title.trim() }
@@ -779,7 +918,9 @@ export async function createPackListingAndBundle(input: {
         skuSuffix,
         availableQuantity: computeAvailableStockFromItems(packVariants[0].items),
         status: input.published === false ? 'paused' : 'active',
-        content: input.publicationContent
+        content: input.publicationContent,
+        packItems: packVariants[0].items,
+        packLabel: packVariants[0].label
       });
       newProductId = created.itemId;
       bundleVariants.push({
