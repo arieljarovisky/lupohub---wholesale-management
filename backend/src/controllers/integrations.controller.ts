@@ -1228,10 +1228,35 @@ const processTiendaNubeOrder = async (orderId: string) => {
     for (const item of order.products || []) {
       const tnVariantIdRaw = item.variant_id ?? item.variantId;
       const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
+      const tnProductId = item.product_id != null ? String(item.product_id) : '';
       const quantity = Math.max(0, parseInt(String(item.quantity ?? 0), 10) || 0);
       const itemSku = (item.sku || item.variant_sku || '').toString().trim();
 
       if (quantity === 0) continue;
+
+      if (tnProductId || tnVariantId) {
+        const { findBundleByListing, deductStockForBundleListing } = await import(
+          '../services/publicationStockBundle.service'
+        );
+        const bundle = await findBundleByListing(
+          'tiendanube',
+          tnProductId || tnVariantId || '',
+          tnVariantId || ''
+        );
+        if (bundle?.items?.length) {
+          const { ok, lines } = await deductStockForBundleListing(
+            bundle,
+            quantity,
+            'VENTA_TIENDA_NUBE',
+            `Orden TN: ${orderId}`
+          );
+          if (ok) discountedCount++;
+          console.log(
+            `[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+          );
+          continue;
+        }
+      }
 
       let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
       if (tnVariantId) {
@@ -1730,6 +1755,26 @@ const processMercadoLibreOrder = async (orderId: string) => {
       let itemSku = (item.item?.sku || item.sku || '').toString().trim();
       if (!itemSku) {
         itemSku = await resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
+      }
+
+      if (mlItemId) {
+        const { findBundleByListing, deductStockForBundleListing } = await import(
+          '../services/publicationStockBundle.service'
+        );
+        const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
+        const bundle = await findBundleByListing('mercadolibre', mlItemId, extVar);
+        if (bundle?.items?.length) {
+          const { ok, lines } = await deductStockForBundleListing(
+            bundle,
+            quantity,
+            'VENTA_MERCADO_LIBRE',
+            `Orden ML: ${orderId}`
+          );
+          console.log(
+            `[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+          );
+          continue;
+        }
       }
 
       let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;

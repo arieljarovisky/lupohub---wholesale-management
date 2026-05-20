@@ -20,6 +20,7 @@ import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
+import PublicationStockBundles from './PublicationStockBundles';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
@@ -235,6 +236,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [stockExcelResult, setStockExcelResult] = useState<{ updated: number; notFoundCount: number; notFound?: string[]; errors?: string[] } | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
+  const [showPublicationBundles, setShowPublicationBundles] = useState(false);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
   const [tnSearchTerm, setTnSearchTerm] = useState('');
   const [tangoImportResult, setTangoImportResult] = useState<{
@@ -282,6 +284,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     filterSync === 'MISMATCH' ? variantExternalStocks : STABLE_EMPTY_EXTERNAL_STOCKS;
 
   const isAdminOrWarehouse = role === Role.ADMIN || role === Role.WAREHOUSE;
+  const canManagePublicationBundles = isAdminOrWarehouse;
 
   // Persistir búsqueda, página, pestaña y filtros para que al actualizar o volver no se pierdan
   useEffect(() => {
@@ -2744,6 +2747,25 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </span>
       </div>
 
+      {canManagePublicationBundles && (
+        <div className="bg-violet-950/30 border border-violet-800/50 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2 text-xs text-slate-300 min-w-0">
+            <Layers size={16} className="text-violet-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-violet-200">Pack multicolor (ML / TN):</strong> configurá publicaciones que al vender 1 pack descuentan varias variantes
+              (ej. pack 3 boxer → 1 negro + 1 gris + 1 blanco). El stock en la publicación se calcula como el mínimo de packs posibles.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPublicationBundles(true)}
+            className="shrink-0 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold"
+          >
+            Gestionar packs
+          </button>
+        </div>
+      )}
+
       <label className="flex items-start gap-2.5 mb-3 px-1 cursor-pointer select-none max-w-3xl">
         <input
           type="checkbox"
@@ -2829,6 +2851,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       Importar stock desde Mercado Libre
                     </button>
                   </>
+                )}
+                {canManagePublicationBundles && (
+                  <button type="button" onClick={() => { setTopDotsOpen(false); setShowPublicationBundles(true); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/15 rounded-lg border-b border-slate-700/50">
+                    <Layers size={18} className="text-violet-400 shrink-0" />
+                    Packs multicolor (publicaciones)
+                  </button>
                 )}
                 {isAdminOrWarehouse && (
                   <button type="button" onClick={() => { setTopDotsOpen(false); openMergeManualModal(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/15 rounded-lg border-b border-slate-700/50">
@@ -2979,6 +3007,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           {exportingExcel ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
           <span className="text-sm font-semibold hidden sm:inline">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
         </button>
+
+        {canManagePublicationBundles && (
+          <button
+            type="button"
+            onClick={() => setShowPublicationBundles(true)}
+            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-violet-900/40 text-violet-200 px-3 sm:px-4 py-2.5 rounded-xl border border-violet-700/60 hover:bg-violet-800/40 shadow-sm min-h-[44px]"
+          >
+            <Layers size={18} />
+            <span className="text-sm font-semibold hidden sm:inline">Packs multicolor</span>
+          </button>
+        )}
 
         {isAdminOrWarehouse && (
           <button
@@ -5200,6 +5239,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         )}
           </>
         )}
+      />
+
+      <PublicationStockBundles
+        open={showPublicationBundles}
+        onClose={() => setShowPublicationBundles(false)}
+        products={products}
+        role={role}
+        showToast={showToast}
       />
     </div>
   );

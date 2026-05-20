@@ -244,6 +244,10 @@ export const updateVariantStock = async (
       }
     }
 
+    void import('../services/publicationStockBundle.service')
+      .then((m) => m.syncBundlesContainingVariant(variantId))
+      .catch((err) => console.warn('[Bundle sync]', err?.message || err));
+
     return true;
   } catch (error) {
     console.error('Error updating variant stock:', error);

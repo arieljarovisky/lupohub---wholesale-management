@@ -32,6 +32,52 @@ const getFilenameFromContentDisposition = (headerValue?: string): string => {
   return plainMatch?.[1]?.trim() || '';
 };
 
+export type PublicationBundleItemDto = {
+  id: string;
+  variantId: string;
+  unitsPerSale: number;
+  sortOrder: number;
+  sku?: string;
+  productName?: string;
+  colorName?: string;
+  sizeCode?: string;
+  stock?: number;
+};
+
+export type PublicationBundleDto = {
+  id: string;
+  platform: 'mercadolibre' | 'tiendanube';
+  externalProductId: string;
+  externalVariantId: string;
+  label: string | null;
+  items: PublicationBundleItemDto[];
+  availableStock?: number;
+};
+
+function mapPublicationBundle(r: any): PublicationBundleDto {
+  return {
+    id: r.id,
+    platform: r.platform,
+    externalProductId: r.externalProductId ?? r.external_product_id ?? '',
+    externalVariantId: r.externalVariantId ?? r.external_variant_id ?? '',
+    label: r.label ?? null,
+    availableStock: r.availableStock != null ? Number(r.availableStock) : undefined,
+    items: Array.isArray(r.items)
+      ? r.items.map((it: any) => ({
+          id: it.id,
+          variantId: it.variantId ?? it.variant_id,
+          unitsPerSale: Number(it.unitsPerSale ?? it.units_per_sale) || 1,
+          sortOrder: Number(it.sortOrder ?? it.sort_order) || 0,
+          sku: it.sku,
+          productName: it.productName ?? it.product_name,
+          colorName: it.colorName ?? it.color_name,
+          sizeCode: it.sizeCode ?? it.size_code,
+          stock: it.stock != null ? Number(it.stock) : undefined
+        }))
+      : []
+  };
+}
+
 function parseDeliveryAddressesFromApi(raw: unknown): CustomerDeliveryAddress[] | undefined {
   if (raw == null || raw === '') return undefined;
   try {
@@ -633,6 +679,45 @@ export const api = {
 
   deleteVariantPublication: async (variantId: string, publicationId: string): Promise<void> => {
     await request<void>(`/products/variants/${encodeURIComponent(variantId)}/publications/${encodeURIComponent(publicationId)}`, 'DELETE');
+  },
+
+  /** Packs multicolor: una publicación ML/TN descuenta varias variantes (ej. pack 3 boxer: 1 negro + 1 gris + 1 blanco). */
+  getPublicationBundles: async (): Promise<PublicationBundleDto[]> => {
+    const res = await request<any[]>('/publication-bundles', 'GET');
+    return Array.isArray(res) ? res.map(mapPublicationBundle) : [];
+  },
+
+  createPublicationBundle: async (data: {
+    platform: 'mercadolibre' | 'tiendanube';
+    externalProductId: string;
+    externalVariantId?: string;
+    label?: string;
+    items: Array<{ variantId: string; unitsPerSale?: number }>;
+  }): Promise<PublicationBundleDto> => {
+    const created = await request<any>('/publication-bundles', 'POST', data);
+    return mapPublicationBundle(created);
+  },
+
+  updatePublicationBundle: async (
+    id: string,
+    data: {
+      label?: string | null;
+      externalProductId?: string;
+      externalVariantId?: string;
+      items?: Array<{ variantId: string; unitsPerSale?: number }>;
+    }
+  ): Promise<PublicationBundleDto> => {
+    const updated = await request<any>(`/publication-bundles/${encodeURIComponent(id)}`, 'PATCH', data);
+    return mapPublicationBundle(updated);
+  },
+
+  deletePublicationBundle: async (id: string): Promise<void> => {
+    await request<void>(`/publication-bundles/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
+  syncPublicationBundleStock: async (id: string): Promise<PublicationBundleDto> => {
+    const res = await request<any>(`/publication-bundles/${encodeURIComponent(id)}/sync-stock`, 'POST', {});
+    return mapPublicationBundle(res);
   },
 
   getColors: async (): Promise<Array<{ id: string; code: string; name: string; hex?: string | null }>> => {
