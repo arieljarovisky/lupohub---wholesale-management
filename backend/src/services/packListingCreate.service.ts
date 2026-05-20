@@ -245,7 +245,7 @@ function mlAttributesForDuplicate(item: any, skuSuffix: string): any[] {
   });
 }
 
-/** ML User Products / family_name: no admite array `variations` al crear. */
+/** Publicaciones catalogadas / User Products: exigen family_name + price + available_quantity y variations con COLOR/Talle. */
 export function mlItemUsesFamilyNameModel(item: any): boolean {
   if (mlFamilyNameFromItem(item)) return true;
   const up = item?.user_product_id;
@@ -326,51 +326,123 @@ async function applyDescriptionFromSource(
   await applyMlItemDescription(newItemId, description, accessToken);
 }
 
-async function createMercadoLibrePackListingFamilyName(
+/** Plantilla COLOR + Talle para family_name (ML catalogado). */
+function mlPackVariationAttrTemplates(sourceItem: any, useFamilyName: boolean): Array<{ id: string; name?: string }> {
+  if (useFamilyName) {
+    return [
+      { id: 'COLOR', name: 'Color' },
+      { id: 'SIZE', name: 'Talle' }
+    ];
+  }
+  return mlVariationAttrTemplates(sourceItem);
+}
+
+async function buildMlPackVariations(
   sourceItem: any,
+  packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
+  opts: { skuSuffix: string; price: number; useFamilyName: boolean }
+): Promise<Array<Record<string, unknown>>> {
+  const attrTemplates = mlPackVariationAttrTemplates(sourceItem, opts.useFamilyName);
+  const baseSku = mlSkuFromItem(sourceItem);
+  return Promise.all(
+    packVariants.map(async (pv, idx) => {
+      const stock = computeAvailableStockFromItems(pv.items);
+      const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
+      const { color, size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
+      const colorForMl = opts.useFamilyName ? comboLabel || color : color;
+      const varSku =
+        baseSku && packVariants.length > 1
+          ? `${baseSku}${opts.skuSuffix}-${idx + 1}`
+          : baseSku
+            ? `${baseSku}${opts.skuSuffix}`
+            : `${opts.skuSuffix}-${idx + 1}`;
+      const row: Record<string, unknown> = {
+        attribute_combinations: buildMlVariationAttributeCombinations(attrTemplates, {
+          color: colorForMl,
+          size,
+          label: comboLabel
+        }),
+        available_quantity: Math.max(0, Math.floor(stock)),
+        price: opts.price
+      };
+      if (varSku) row.seller_custom_field = varSku;
+      return row;
+    })
+  );
+}
+
+async function createMercadoLibrePackListingWithFamilyName(
+  sourceItem: any,
+  packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
   opts: {
+    titleSuffix: string;
     skuSuffix: string;
-    availableQuantity: number;
-    price: number;
     status?: 'active' | 'paused';
     content?: PackListingPublicationContent;
   }
-): Promise<{ itemId: string; item: any }> {
+): Promise<{ itemId: string; item: any; variationIds: string[] }> {
   const mlToken = await getValidMLToken();
   if (!mlToken) throw new Error('No hay integración con Mercado Libre');
+  if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
   const familyName = mlFamilyNameFromItem(sourceItem);
   if (!familyName) {
     throw new Error(
-      'Esta publicación en ML usa el modelo family_name (User Products). La origen no trae family_name; usá una publicación individual del mismo producto como base.'
+      'Esta publicación en ML usa family_name. La publicación origen no trae family_name; elegí una publicación individual del mismo producto como base.'
     );
   }
 
   const pictures = mlPicturesPayload(opts.content, sourceItem);
   if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
 
+  const title =
+    opts.content?.title?.trim() ||
+    appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
+  const price =
+    opts.content?.price != null && Number.isFinite(Number(opts.content.price))
+      ? Number(opts.content.price)
+      : Number(sourceItem.price) || 0;
+
+  const variations = await buildMlPackVariations(sourceItem, packVariants, {
+    skuSuffix: opts.skuSuffix,
+    price,
+    useFamilyName: true
+  });
+
+  const variationQty = variations.reduce(
+    (sum, v) => sum + Math.max(0, Number(v.available_quantity) || 0),
+    0
+  );
+  const itemQty = Math.max(
+    0,
+    packVariants.length === 1
+      ? computeAvailableStockFromItems(packVariants[0].items)
+      : variationQty
+  );
+
   const body: Record<string, unknown> = {
+    title,
     family_name: familyName,
-    price: opts.price,
-    available_quantity: Math.max(0, Math.floor(opts.availableQuantity)),
-    ...mlCommonItemFields(sourceItem, pictures)
+    price,
+    available_quantity: itemQty,
+    ...mlCommonItemFields(sourceItem, pictures),
+    variations
   };
 
   const attrs = mlAttributesForDuplicate(sourceItem, opts.skuSuffix);
   if (attrs.length) body.attributes = attrs;
 
-  const sku = mlSkuFromItem(sourceItem);
-  if (sku) body.seller_custom_field = `${sku}${opts.skuSuffix}`;
-
   if (opts.status === 'paused') body.status = 'paused';
 
   const newItem = await postMercadoLibreNewItem(mlToken.access_token, body);
   const itemId = String(newItem.id);
+  const variationIds = (Array.isArray(newItem.variations) ? newItem.variations : []).map((v: any) =>
+    String(v?.id || '')
+  );
 
-  const description = opts.content?.description?.trim();
-  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, description);
+  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
 
-  return { itemId, item: newItem };
+  return { itemId, item: newItem, variationIds };
 }
 
 export type PublicationSourcePreview = {
@@ -517,13 +589,22 @@ export async function createMercadoLibrePackListingFromItem(
       : Number(sourceItem.price) || 0;
 
   if (mlItemUsesFamilyNameModel(sourceItem)) {
-    return createMercadoLibrePackListingFamilyName(sourceItem, {
-      skuSuffix: opts.skuSuffix,
-      availableQuantity: opts.availableQuantity,
-      price,
-      status: opts.status,
-      content: opts.content
-    });
+    const created = await createMercadoLibrePackListingWithFamilyName(
+      sourceItem,
+      [
+        {
+          label: (opts.packLabel || '').trim(),
+          items: opts.packItems || []
+        }
+      ],
+      {
+        titleSuffix: opts.titleSuffix,
+        skuSuffix: opts.skuSuffix,
+        status: opts.status,
+        content: opts.content
+      }
+    );
+    return { itemId: created.itemId, item: created.item };
   }
 
   const attrTemplates = mlVariationAttrTemplates(sourceItem);
@@ -595,45 +676,19 @@ export async function createMercadoLibrePackListingWithVariants(
       : Number(sourceItem.price) || 0;
 
   if (mlItemUsesFamilyNameModel(sourceItem)) {
-    const itemIds: string[] = [];
-    for (let idx = 0; idx < packVariants.length; idx++) {
-      const pv = packVariants[idx];
-      const varSkuSuffix =
-        packVariants.length > 1 ? `${opts.skuSuffix}-${idx + 1}` : opts.skuSuffix;
-      const created = await createMercadoLibrePackListingFamilyName(sourceItem, {
-        skuSuffix: varSkuSuffix,
-        availableQuantity: computeAvailableStockFromItems(pv.items),
-        price: basePrice,
-        status: opts.status,
-        content: opts.content
-      });
-      itemIds.push(created.itemId);
-    }
-    const first = itemIds[0];
-    const newItem = { id: first, variations: [] };
-    return { itemId: first, item: newItem, variationIds: itemIds };
+    return createMercadoLibrePackListingWithFamilyName(sourceItem, packVariants, {
+      titleSuffix: opts.titleSuffix,
+      skuSuffix: opts.skuSuffix,
+      status: opts.status,
+      content: opts.content
+    });
   }
 
-  const attrTemplates = mlVariationAttrTemplates(sourceItem);
-  const baseSku = mlSkuFromItem(sourceItem);
-  const variations = await Promise.all(
-    packVariants.map(async (pv, idx) => {
-      const stock = computeAvailableStockFromItems(pv.items);
-      const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
-      const varSku = baseSku ? `${baseSku}${opts.skuSuffix}-${idx + 1}` : `${opts.skuSuffix}-${idx + 1}`;
-      const { color, size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
-      return {
-        attribute_combinations: buildMlVariationAttributeCombinations(attrTemplates, {
-          color,
-          size,
-          label: comboLabel
-        }),
-        available_quantity: stock,
-        price: basePrice,
-        seller_custom_field: varSku
-      };
-    })
-  );
+  const variations = await buildMlPackVariations(sourceItem, packVariants, {
+    skuSuffix: opts.skuSuffix,
+    price: basePrice,
+    useFamilyName: false
+  });
 
   const title =
     opts.content?.title?.trim() ||
@@ -1025,38 +1080,6 @@ export async function createPackListingAndBundle(input: {
         status: input.published === false ? 'paused' : 'active',
         content: input.publicationContent
       });
-      const familyMulti =
-        mlItemUsesFamilyNameModel(resolved.item) && packVariants.length > 1;
-
-      if (familyMulti) {
-        for (let idx = 0; idx < packVariants.length; idx++) {
-          const mlaId = created.variationIds[idx];
-          if (!mlaId) continue;
-          await createPublicationBundle({
-            platform: 'mercadolibre',
-            externalProductId: mlaId,
-            externalVariantId: '',
-            label: packVariants[idx].label,
-            items: packVariants[idx].rawItems
-          });
-        }
-        const allBundles = [];
-        for (const mlaId of created.variationIds) {
-          allBundles.push(...(await findBundlesByProduct('mercadolibre', mlaId)));
-        }
-        return {
-          group: {
-            platform: 'mercadolibre',
-            externalProductId: created.itemId,
-            listingLabel: input.label?.trim() || null,
-            variants: allBundles
-          },
-          newExternalProductId: created.itemId,
-          sourceExternalProductId: normalizeMercadoLibreItemId(sourceId) || sourceId,
-          message: `Se crearon ${packVariants.length} publicaciones ML (family_name): ${created.variationIds.join(', ')}`
-        };
-      }
-
       newProductId = created.itemId;
       packVariants.forEach((pv, idx) => {
         bundleVariants.push({
