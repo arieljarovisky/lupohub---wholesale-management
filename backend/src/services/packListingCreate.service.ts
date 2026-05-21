@@ -190,6 +190,47 @@ function sanitizeMlVariationsForApi(raw: unknown): Array<Record<string, unknown>
   return dedupeMlPackVariations(mapped).variations;
 }
 
+/** Claves solo para logs/debug; nunca deben ir al POST de ML. */
+const ML_ITEM_BODY_INTERNAL_KEYS = new Set(['_flags', '_meta', '__debug']);
+
+function stripMlInternalBodyKeys(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (ML_ITEM_BODY_INTERNAL_KEYS.has(key) || key.startsWith('_')) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function sanitizeMlSaleTermsForApi(raw: unknown): Array<Record<string, unknown>> | undefined {
+  if (!Array.isArray(raw) || !raw.length) return undefined;
+  const out = raw
+    .map((st) => {
+      if (!st || typeof st !== 'object') return null;
+      const row: Record<string, unknown> = {};
+      const id = String((st as any).id ?? '').trim();
+      if (id) row.id = id;
+      const valueName = String((st as any).value_name ?? '').trim();
+      if (valueName) row.value_name = valueName;
+      const valueId = (st as any).value_id;
+      if (valueId != null && String(valueId).trim() !== '') row.value_id = valueId;
+      return Object.keys(row).length ? row : null;
+    })
+    .filter(Boolean) as Array<Record<string, unknown>>;
+  return out.length ? out : undefined;
+}
+
+function sanitizeMlShippingForApi(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const s = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (s.mode != null) out.mode = s.mode;
+  if (s.local_pick_up != null) out.local_pick_up = s.local_pick_up;
+  if (s.free_shipping != null) out.free_shipping = s.free_shipping;
+  if (s.logistic_type != null) out.logistic_type = s.logistic_type;
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Body limpio para POST /items: pictures y attributes separados y sin campos extra de la API origen. */
 export function sanitizeMercadoLibreItemCreateBody(
   body: Record<string, unknown>
@@ -226,10 +267,39 @@ export function sanitizeMercadoLibreItemCreateBody(
   if (sku) out.seller_custom_field = sku;
   if (body.status) out.status = body.status;
   if (body.video_id) out.video_id = body.video_id;
-  if (Array.isArray(body.sale_terms) && body.sale_terms.length) out.sale_terms = body.sale_terms;
-  if (body.shipping && typeof body.shipping === 'object') out.shipping = body.shipping;
+  const saleTerms = sanitizeMlSaleTermsForApi(body.sale_terms);
+  if (saleTerms?.length) out.sale_terms = saleTerms;
+  const shipping = sanitizeMlShippingForApi(body.shipping);
+  if (shipping) out.shipping = shipping;
 
-  return out;
+  return stripMlInternalBodyKeys(out);
+}
+
+/** Payload final exclusivo para POST /items (sin _flags ni claves internas). */
+export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): Record<string, unknown> {
+  let safe = sanitizeMercadoLibreItemCreateBody(body);
+  if (Array.isArray(safe.variations) && safe.variations.length > 0) {
+    delete safe.family_name;
+  } else {
+    delete safe.variations;
+  }
+  return stripMlInternalBodyKeys(safe);
+}
+
+function buildMlItemCreateDebugFlags(safe: Record<string, unknown>): Record<string, unknown> {
+  const variations = Array.isArray(safe.variations) ? safe.variations : [];
+  return {
+    user_product_mode: Boolean(String(safe.family_name ?? '').trim()) && variations.length === 0,
+    uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
+    removed_family_name_because_variations: variations.length > 0,
+    removed_variations_for_user_product:
+      variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
+    has_item_price: safe.price != null,
+    has_item_stock: safe.available_quantity != null,
+    variation_count: variations.length,
+    picture_count: Array.isArray(safe.pictures) ? safe.pictures.length : 0,
+    attribute_count: Array.isArray(safe.attributes) ? safe.attributes.length : 0
+  };
 }
 
 function mlPicturesPayload(
@@ -483,23 +553,13 @@ function formatMlCreateError(postRes: { data?: any; statusText?: string }): stri
   return causes.length ? `${base} (${causes.join('; ')})` : String(base);
 }
 
-/** JSON legible para logs/errores (misma forma que el POST real). */
+/** Vista para logs/errores: payload real + _flags aparte (no mezclar en el POST). */
 export function summarizeMlItemCreateBody(body: Record<string, unknown>): Record<string, unknown> {
-  const safe = sanitizeMercadoLibreItemCreateBody(body);
-  const variations = Array.isArray(safe.variations) ? safe.variations : [];
-  return Object.assign({}, safe, {
-    _flags: {
-      user_product_mode: Boolean(String(safe.family_name ?? '').trim()) && variations.length === 0,
-      uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
-      removed_family_name_because_variations: variations.length > 0,
-      removed_variations_for_user_product: variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
-      has_item_price: safe.price != null,
-      has_item_stock: safe.available_quantity != null,
-      variation_count: variations.length,
-      picture_count: Array.isArray(safe.pictures) ? safe.pictures.length : 0,
-      attribute_count: Array.isArray(safe.attributes) ? safe.attributes.length : 0
-    }
-  });
+  const payload = mlPayloadForMercadoLibreApiPost(body);
+  return {
+    payload,
+    _flags: buildMlItemCreateDebugFlags(payload)
+  };
 }
 
 /** Error ML que exige User Product (family_name sin variations en el mismo body). */
@@ -515,18 +575,21 @@ export function mlCreateErrorRequiresUserProduct(message: string): boolean {
 
 function logMlItemCreateBeforePost(
   draftBody: Record<string, unknown>,
-  safeBody: Record<string, unknown>,
+  payloadToSend: Record<string, unknown>,
   debugContext?: string,
   extra?: Record<string, unknown>
 ): void {
   const ctx = debugContext ? ` ${debugContext}` : '';
   const hadFamilyName = Boolean(String(draftBody.family_name ?? '').trim());
   const draftVariations = Array.isArray(draftBody.variations) ? draftBody.variations : [];
-  const safeVariations = Array.isArray(safeBody.variations) ? safeBody.variations : [];
-  const removedFamilyName = hadFamilyName && safeVariations.length > 0;
+  const postedVariations = Array.isArray(payloadToSend.variations) ? payloadToSend.variations : [];
+  const removedFamilyName = hadFamilyName && postedVariations.length > 0;
   const removedVariations =
-    draftVariations.length > 0 && safeVariations.length === 0 && Boolean(safeBody.family_name);
-  const combinations = safeVariations.map((v: any) => ({
+    draftVariations.length > 0 && postedVariations.length === 0 && Boolean(payloadToSend.family_name);
+  const strippedInternalKeys = Object.keys(draftBody).filter(
+    (k) => k.startsWith('_') || ML_ITEM_BODY_INTERNAL_KEYS.has(k)
+  );
+  const combinations = postedVariations.map((v: any) => ({
     price: v?.price,
     available_quantity: v?.available_quantity,
     seller_custom_field: v?.seller_custom_field,
@@ -537,15 +600,17 @@ function logMlItemCreateBeforePost(
     `[ML POST /items]${ctx}`,
     JSON.stringify(
       {
-        user_product_mode: extra?.user_product_mode ?? Boolean(safeBody.family_name && !safeVariations.length),
+        user_product_mode: extra?.user_product_mode ?? Boolean(payloadToSend.family_name && !postedVariations.length),
         publishing_size: extra?.publishing_size,
         removed_variations: removedVariations || extra?.removed_variations === true,
         removed_family_name: removedFamilyName,
+        stripped_internal_keys: strippedInternalKeys,
         had_family_name_in_draft: hadFamilyName,
-        variation_count: safeVariations.length,
+        variation_count: postedVariations.length,
         combinations,
         ...extra,
-        body: summarizeMlItemCreateBody(safeBody)
+        payload: payloadToSend,
+        _flags: buildMlItemCreateDebugFlags(payloadToSend)
       },
       null,
       2
@@ -733,22 +798,16 @@ async function postMercadoLibreNewItem(
   debugContext?: string,
   logExtra?: Record<string, unknown>
 ): Promise<any> {
-  const safeBody = sanitizeMercadoLibreItemCreateBody(body);
-  if (Array.isArray(safeBody.variations) && safeBody.variations.length > 0) {
-    delete safeBody.family_name;
-  } else {
-    delete safeBody.variations;
-  }
-  const pics = safeBody.pictures;
+  const payloadToSend = mlPayloadForMercadoLibreApiPost(body);
+  const pics = payloadToSend.pictures;
   if (!Array.isArray(pics) || !pics.length) {
     throw new Error(
       'No hay fotos válidas para Mercado Libre (revisá que pictureId sea de imagen ML, no un atributo)'
     );
   }
-  logMlItemCreateBeforePost(body, safeBody, debugContext, logExtra);
-  const payloadPreview = summarizeMlItemCreateBody(safeBody);
+  logMlItemCreateBeforePost(body, payloadToSend, debugContext, logExtra);
 
-  const postRes = await axios.post('https://api.mercadolibre.com/items', safeBody, {
+  const postRes = await axios.post('https://api.mercadolibre.com/items', payloadToSend, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
@@ -756,9 +815,9 @@ async function postMercadoLibreNewItem(
     validateStatus: () => true
   });
   if (postRes.status !== 201 && postRes.status !== 200) {
-    const preview = JSON.stringify(payloadPreview);
+    const preview = JSON.stringify(payloadToSend);
     throw new Error(
-      `Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}. Payload enviado: ${preview}`
+      `Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}. Payload enviado a ML: ${preview}`
     );
   }
   const newItem = postRes.data;
