@@ -12,6 +12,7 @@ import {
   syncBundleListingStock,
   type PublicationBundlePlatform
 } from '../services/publicationStockBundle.service';
+import { normalizeMercadoLibreItemId } from './integrations.controller';
 import {
   createPackListingAndBundle,
   fetchPublicationSourcePreview
@@ -43,7 +44,13 @@ export const getSourcePreview = async (req: Request, res: Response) => {
     }
     const preview = await fetchPublicationSourcePreview(platform, sourceId);
     if (!preview) {
-      return res.status(404).json({ message: 'Publicación no encontrada en la plataforma' });
+      const mlauHint =
+        platform === 'mercadolibre' && /^MLAU\d+$/i.test(normalizeMercadoLibreItemId(sourceId))
+          ? ' Verificá que el MLAU sea de tu cuenta ML y tenga publicaciones (activas o pausadas).'
+          : '';
+      return res.status(404).json({
+        message: `Publicación no encontrada en la plataforma.${mlauHint}`
+      });
     }
     res.json(preview);
   } catch (e: any) {

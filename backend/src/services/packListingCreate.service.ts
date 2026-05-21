@@ -4,7 +4,9 @@ import {
   getValidMLToken,
   mercadoLibreItemIdCandidates,
   mlColorSizeFromTitle,
-  normalizeMercadoLibreItemId
+  normalizeMercadoLibreItemId,
+  resolveMercadoLibreCatalogProductItems,
+  resolveMercadoLibreUserProductItems
 } from '../controllers/integrations.controller';
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 import {
@@ -2583,26 +2585,93 @@ async function enrichMercadoLibreItemVariations(item: any, accessToken: string):
   return changed ? { ...item, variations: enriched } : item;
 }
 
-export async function fetchMercadoLibreItemResolved(rawItemId: string): Promise<{ item: any; itemId: string } | null> {
+async function fetchMercadoLibreItemById(
+  candidate: string,
+  accessToken: string
+): Promise<any | null> {
+  const id = String(candidate || '').trim();
+  if (!id) return null;
+  try {
+    const r = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(id)}`, {
+      params: { include_attributes: 'all' },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true
+    });
+    if (r.status === 200 && r.data && !r.data.error) return r.data;
+  } catch {
+    /* siguiente candidato */
+  }
+  return null;
+}
+
+export async function fetchMercadoLibreItemResolved(
+  rawItemId: string
+): Promise<{ item: any; itemId: string; userProductId?: string } | null> {
   const mlToken = await getValidMLToken();
   if (!mlToken) return null;
+  const normalized = normalizeMercadoLibreItemId(rawItemId);
   const candidates = mercadoLibreItemIdCandidates(rawItemId);
-  if (!candidates.length) return null;
-  const headers = { Authorization: `Bearer ${mlToken.access_token}` };
-  for (const candidate of candidates) {
-    try {
-      const r = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
-        headers,
-        validateStatus: () => true
-      });
-      if (r.status === 200 && r.data && !r.data.error) {
-        const item = await enrichMercadoLibreItemVariations(r.data, mlToken.access_token);
-        return { item, itemId: String(item.id || candidate) };
-      }
-    } catch {
-      /* siguiente candidato */
+  if (!normalized && !candidates.length) return null;
+
+  const accessToken = mlToken.access_token;
+  const sellerId = mlToken.user_id;
+
+  const finish = async (
+    raw: any,
+    candidate: string,
+    userProductId?: string
+  ): Promise<{ item: any; itemId: string; userProductId?: string } | null> => {
+    if (!raw) return null;
+    const item = await enrichMercadoLibreItemVariations(raw, accessToken);
+    return {
+      item,
+      itemId: String(item.id || candidate),
+      userProductId: userProductId || undefined
+    };
+  };
+
+  const tryCandidates = async (ids: string[], userProductId?: string) => {
+    const seen = new Set<string>();
+    for (const candidate of ids) {
+      const c = String(candidate || '').trim();
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      const raw = await fetchMercadoLibreItemById(c, accessToken);
+      const done = await finish(raw, c, userProductId);
+      if (done) return done;
     }
+    return null;
+  };
+
+  // MLAU = user_product_id: buscar ítems del vendedor (GET /items/MLAU... suele fallar).
+  if (/^MLAU\d+$/i.test(normalized)) {
+    const upResolved = await resolveMercadoLibreUserProductItems(
+      normalized,
+      sellerId,
+      accessToken
+    );
+    console.log('[ML pack] Resolviendo MLAU', {
+      userProductId: normalized,
+      itemCandidates: upResolved.itemCandidates.length,
+      debug: upResolved.debug
+    });
+    const fromUp = await tryCandidates(upResolved.itemCandidates, normalized);
+    if (fromUp) return fromUp;
   }
+
+  const direct = await tryCandidates(candidates);
+  if (direct) return direct;
+
+  const catalogIds = await resolveMercadoLibreCatalogProductItems(String(rawItemId || ''), accessToken);
+  const fromCatalog = await tryCandidates(catalogIds);
+  if (fromCatalog) return fromCatalog;
+
+  if (normalized && !/^MLAU\d+$/i.test(normalized)) {
+    const upResolved = await resolveMercadoLibreUserProductItems(normalized, sellerId, accessToken);
+    const fromUp = await tryCandidates(upResolved.itemCandidates, /^MLAU/i.test(normalized) ? normalized : undefined);
+    if (fromUp) return fromUp;
+  }
+
   return null;
 }
 

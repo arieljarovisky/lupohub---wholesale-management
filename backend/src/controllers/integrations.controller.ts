@@ -124,7 +124,10 @@ async function resolveMlOrderItemSku(
 }
 
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
-async function resolveMercadoLibreCatalogProductItems(productId: string, accessToken: string): Promise<string[]> {
+export async function resolveMercadoLibreCatalogProductItems(
+  productId: string,
+  accessToken: string
+): Promise<string[]> {
   try {
     const res = await axios.get(
       `https://api.mercadolibre.com/products/${encodeURIComponent(productId)}/items`,
@@ -161,7 +164,7 @@ async function resolveMercadoLibreCatalogProductItems(productId: string, accessT
 }
 
 /** Resuelve IDs de item a partir de un user_product_id (ej. MLAU...). */
-async function resolveMercadoLibreUserProductItems(
+export async function resolveMercadoLibreUserProductItems(
   userProductId: string,
   sellerId: string | number,
   accessToken: string
