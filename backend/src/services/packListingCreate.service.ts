@@ -325,18 +325,16 @@ const ML_ITEM_CREATE_ATTR_ALLOWLIST_CLASSIC = new Set([
   'UNITS_PER_PACK'
 ]);
 
-/** User Product: además guía de talles, impuestos y dimensiones de paquete (exigidos por MLA429740). */
+/** User Product (family_name, sin variations): solo atributos comerciales seguros. */
 const ML_ITEM_CREATE_ATTR_ALLOWLIST_USER_PRODUCT = new Set([
-  ...ML_ITEM_CREATE_ATTR_ALLOWLIST_CLASSIC,
-  'SIZE_GRID_ID',
-  'SIZE_GRID_ROW_ID',
-  'SIZE',
-  'VALUE_ADDED_TAX',
-  'IMPORT_DUTY',
-  'SELLER_PACKAGE_HEIGHT',
-  'SELLER_PACKAGE_LENGTH',
-  'SELLER_PACKAGE_WEIGHT',
-  'SELLER_PACKAGE_WIDTH'
+  'BRAND',
+  'COMPOSITION',
+  'GENDER',
+  'MAIN_MATERIAL',
+  'MALE_UNDERWEAR_TYPE',
+  'MODEL',
+  'SALE_FORMAT',
+  'UNITS_PER_PACK'
 ]);
 
 /** Nunca enviar al crear (metadatos ML / flags internos). */
@@ -349,20 +347,20 @@ const ML_ITEM_CREATE_ATTR_BLOCKLIST = new Set([
   'ITEM_CONDITION'
 ]);
 
-/** En User Product ML ignora AGE_GROUP al crear; no enviar. */
-const ML_ITEM_CREATE_ATTR_OMIT_USER_PRODUCT = new Set(['AGE_GROUP']);
-
-const ML_USER_PRODUCT_REQUIRED_FROM_SOURCE = [
+/** User Product: siempre excluir (guía, logística, impuestos; ML los resuelve o rechaza en POST). */
+const ML_USER_PRODUCT_ATTR_NEVER_SEND = new Set([
   'SIZE_GRID_ID',
   'SIZE_GRID_ROW_ID',
   'SIZE',
-  'VALUE_ADDED_TAX',
+  'COLOR',
   'IMPORT_DUTY',
+  'VALUE_ADDED_TAX',
   'SELLER_PACKAGE_HEIGHT',
   'SELLER_PACKAGE_LENGTH',
   'SELLER_PACKAGE_WEIGHT',
-  'SELLER_PACKAGE_WIDTH'
-] as const;
+  'SELLER_PACKAGE_WIDTH',
+  ...ML_ITEM_CREATE_ATTR_BLOCKLIST
+]);
 
 /** Categorías que publican solo como User Product (family_name, sin variations). */
 const ML_USER_PRODUCT_CATEGORY_IDS = new Set(['MLA429740']);
@@ -409,9 +407,13 @@ function filterMlItemAttributesForCreatePost(
   const out: MlItemCreateAttribute[] = [];
   for (const a of attrs) {
     const upper = mlAttrIdUpper(a.id);
-    if (ML_ITEM_CREATE_ATTR_BLOCKLIST.has(upper)) continue;
-    if (opts?.userProduct && ML_ITEM_CREATE_ATTR_OMIT_USER_PRODUCT.has(upper)) continue;
-    if (!allowlist.has(upper)) continue;
+    if (opts?.userProduct) {
+      if (ML_USER_PRODUCT_ATTR_NEVER_SEND.has(upper)) continue;
+      if (!allowlist.has(upper)) continue;
+    } else {
+      if (ML_ITEM_CREATE_ATTR_BLOCKLIST.has(upper)) continue;
+      if (!allowlist.has(upper)) continue;
+    }
     if (!a.value_name && a.value_id == null) continue;
     if (seen.has(upper)) continue;
     seen.add(upper);
@@ -1455,14 +1457,18 @@ async function postMercadoLibreNewItem(
     validateStatus: () => true
   });
   if (postRes.status !== 201 && postRes.status !== 200) {
+    const cause = postRes.data?.cause;
     console.error('[ML] POST /items rechazado', {
       status: postRes.status,
       debugContext,
       message: postRes.data?.message,
       error: postRes.data?.error,
-      cause: postRes.data?.cause,
       data: postRes.data
     });
+    console.error(
+      '[ML] POST /items cause',
+      JSON.stringify(cause, null, 2)
+    );
     const preview = JSON.stringify(payloadToSend);
     throw new Error(
       `Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}. Payload enviado a ML: ${preview}`
@@ -1600,8 +1606,6 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     content?: PackListingPublicationContent;
     baseTitle: string;
     baseFamilyName: string;
-    accessToken: string;
-    sellerId: string;
   }
 ): Promise<Record<string, unknown>> {
   const pictures = mlPicturesPayload(opts.content, sourceItem);
@@ -1624,40 +1628,13 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
   const itemQty = Math.max(0, Math.floor(computeAvailableStockFromItems(packVariant.items)));
   const sellerField = buildPackListingSellerCustomField(sourceItem, opts.skuSuffix, size);
 
-  let attrs = mlItemAttributesForPackListing(
+  const attrs = mlItemAttributesForPackListing(
     sourceItem,
     opts.skuSuffix,
     opts.baseTitle,
     packVariant.items,
     { withVariations: false }
   );
-  for (const required of await mlUserProductAttrsFromSource(
-    sourceItem,
-    size,
-    opts.accessToken,
-    opts.sellerId
-  )) {
-    attrs = upsertMlCreateAttribute(attrs, required);
-  }
-  const missingRequired = ML_USER_PRODUCT_REQUIRED_FROM_SOURCE.filter(
-    (id) => !mlHasCreateAttribute(attrs, id)
-  );
-  if (missingRequired.length) {
-    const fashionDebug = attrs
-      .filter((a) => ['SIZE_GRID_ID', 'SIZE_GRID_ROW_ID', 'SIZE'].includes(mlAttrIdUpper(a.id)))
-      .map((a) => ({
-        id: a.id,
-        value_name: a.value_name,
-        value_id: a.value_id
-      }));
-    const varCount = Array.isArray(sourceItem?.variations) ? sourceItem.variations.length : 0;
-    throw new Error(
-      `No se pudieron resolver atributos de guía de talles para el talle ${size}: ${missingRequired.join(', ')}. ` +
-        `Se usó domain_discovery + charts/search para el dominio correcto (no copiar SIZE_GRID_ID de otra categoría). ` +
-        `MLA origen: ${sourceItem?.id || '?'}, variaciones en GET: ${varCount}. ` +
-        `Debug: ${JSON.stringify(fashionDebug)}`
-    );
-  }
 
   const body: Record<string, unknown> = {
     ...mlCommonListingFields(sourceItem),
@@ -1704,9 +1681,7 @@ async function createMercadoLibrePackListingUserProduct(
     const body = await buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, pv, {
       ...opts,
       baseTitle,
-      baseFamilyName,
-      accessToken: mlToken.access_token,
-      sellerId: mlToken.user_id
+      baseFamilyName
     });
 
     const newItem = await postMercadoLibreNewItem(
