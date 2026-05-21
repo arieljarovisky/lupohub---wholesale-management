@@ -435,6 +435,233 @@ function sanitizeMlShippingForApi(raw: unknown): Record<string, unknown> | undef
   return Object.keys(out).length ? out : undefined;
 }
 
+/** Entrada explícita para armar POST /items sin spreads del ítem ML origen. */
+export type MlItemPayloadInput = {
+  title?: string;
+  family_name?: string;
+  category_id: string;
+  price: number;
+  available_quantity: number;
+  currency_id?: string;
+  buying_mode?: string;
+  listing_type_id?: string;
+  condition?: string;
+  pictures?: Array<{ id?: string; source?: string }>;
+  attributes?: Array<{ id?: string; value_name?: string; value_id?: string | number }>;
+  seller_custom_field?: string;
+  sale_terms?: unknown;
+  shipping?: unknown;
+  status?: string;
+  video_id?: string;
+  userProduct?: boolean;
+};
+
+function mlPictureIdForPayload(id: unknown): string | null {
+  const s = String(id ?? '').trim();
+  if (!s) return null;
+  if (looksLikeMlPictureId(s)) return s;
+  if (s.includes('MLA')) return s;
+  return null;
+}
+
+function mlAttributesForPayloadInput(
+  raw: unknown,
+  opts?: { userProduct?: boolean }
+): Array<{ id: string; value_name: string }> {
+  if (!Array.isArray(raw)) return [];
+  const normalized: MlItemCreateAttribute[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const id = String(e.id ?? '').trim();
+    if (!id || looksLikeMlPictureId(id) || id.includes('MLA')) continue;
+    const value_name = mlExtractAttributeValueName(e);
+    if (!value_name || value_name === 'null') continue;
+    normalized.push({ id, value_name });
+  }
+  return filterMlItemAttributesForCreatePost(normalized, { userProduct: opts?.userProduct }).map((a) => ({
+    id: a.id,
+    value_name: String(a.value_name ?? '')
+  }));
+}
+
+/** Arma payload POST /items sin mutar ni mezclar objetos de ML. */
+export function buildMercadoLibreItemPayload(input: MlItemPayloadInput): Record<string, unknown> {
+  const userProduct = Boolean(input.userProduct);
+
+  const pictures = (input.pictures || [])
+    .map((p) => mlPictureIdForPayload(p?.id))
+    .filter((id): id is string => Boolean(id))
+    .map((id) => ({ id }));
+
+  const attributes = mlAttributesForPayloadInput(input.attributes, { userProduct });
+
+  const payload: Record<string, unknown> = {
+    category_id: String(input.category_id || '').trim(),
+    price: Number(input.price),
+    available_quantity: Math.max(0, Math.floor(Number(input.available_quantity) || 0)),
+    currency_id: input.currency_id || 'ARS',
+    buying_mode: input.buying_mode || 'buy_it_now',
+    listing_type_id: input.listing_type_id || 'gold_special',
+    condition: input.condition || 'new',
+    pictures,
+    attributes
+  };
+
+  const familyName = String(input.family_name ?? '').trim();
+  if (familyName) payload.family_name = familyName;
+
+  if (!userProduct) {
+    const title = String(input.title ?? '').trim();
+    if (title) payload.title = title;
+  }
+
+  const sku = String(input.seller_custom_field ?? '').trim();
+  if (sku) payload.seller_custom_field = sku;
+
+  if (input.status === 'paused') payload.status = 'paused';
+  const videoId = String(input.video_id ?? '').trim();
+  if (videoId) payload.video_id = videoId;
+
+  const saleTerms = sanitizeMlSaleTermsForApi(input.sale_terms);
+  if (saleTerms?.length) payload.sale_terms = saleTerms;
+
+  const shipping = sanitizeMlShippingForApi(input.shipping);
+  if (shipping) payload.shipping = shipping;
+
+  return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+}
+
+export function validateMlPayload(
+  payload: Record<string, unknown>,
+  opts?: { userProduct?: boolean }
+): void {
+  const categoryId = String(payload.category_id ?? '').trim();
+  if (!categoryId) throw new Error('Missing category_id');
+
+  const price = Number(payload.price);
+  if (!Number.isFinite(price) || price <= 0) throw new Error('Missing price');
+
+  const qty = Number(payload.available_quantity);
+  if (!Number.isFinite(qty) || qty < 0) throw new Error('Missing available_quantity');
+
+  if (opts?.userProduct) {
+    if (!String(payload.family_name ?? '').trim()) throw new Error('Missing family_name');
+    if (payload.title != null && String(payload.title).trim() !== '') {
+      throw new Error('User Product payload must not include title');
+    }
+    if (Array.isArray(payload.variations) && payload.variations.length > 0) {
+      throw new Error('User Product payload must not include variations');
+    }
+  } else {
+    if (!String(payload.title ?? '').trim()) throw new Error('Missing title');
+  }
+
+  for (const p of Array.isArray(payload.pictures) ? payload.pictures : []) {
+    const pic = p as Record<string, unknown>;
+    const id = String(pic.id ?? '').trim();
+    if (!id || !id.includes('MLA')) {
+      throw new Error(`Invalid picture object: ${JSON.stringify(p)}`);
+    }
+    if (Object.keys(pic).some((k) => k !== 'id')) {
+      throw new Error(`Picture must only have id: ${JSON.stringify(p)}`);
+    }
+  }
+
+  for (const a of Array.isArray(payload.attributes) ? payload.attributes : []) {
+    const attr = a as Record<string, unknown>;
+    const id = String(attr.id ?? '').trim();
+    if (!id || id.includes('MLA')) {
+      throw new Error(`Invalid attribute object: ${JSON.stringify(a)}`);
+    }
+    const keys = Object.keys(attr);
+    if (keys.length !== 2 || !keys.includes('id') || !keys.includes('value_name')) {
+      throw new Error(`Attribute must only have id and value_name: ${JSON.stringify(a)}`);
+    }
+    const vn = attr.value_name;
+    if (vn === null || vn === undefined || String(vn).trim() === '') {
+      throw new Error(`Invalid attribute value: ${JSON.stringify(a)}`);
+    }
+  }
+
+  const forbiddenRootInArray = ['_flags', 'user_product_mode', 'publishing_size', 'removed_variations'];
+  for (const key of forbiddenRootInArray) {
+    if (key in payload && Array.isArray((payload as any)[key])) {
+      throw new Error(`Internal field leaked into payload: ${key}`);
+    }
+  }
+}
+
+function mlDraftToPayloadInput(
+  draft: Record<string, unknown>,
+  opts: { userProduct: boolean }
+): MlItemPayloadInput {
+  const pictures: Array<{ id?: string; source?: string }> = [];
+  if (Array.isArray(draft.pictures)) {
+    for (const p of draft.pictures) {
+      if (!p || typeof p !== 'object') continue;
+      const row = p as Record<string, unknown>;
+      pictures.push({
+        id: row.id != null ? String(row.id) : undefined,
+        source: row.source != null ? String(row.source) : undefined
+      });
+    }
+  }
+
+  const attributes: Array<{ id: string; value_name: string }> = [];
+  if (Array.isArray(draft.attributes)) {
+    for (const a of draft.attributes) {
+      if (!a || typeof a !== 'object') continue;
+      const row = a as Record<string, unknown>;
+      const id = String(row.id ?? '').trim();
+      const value_name = String(row.value_name ?? row.value ?? '').trim();
+      if (id && value_name) attributes.push({ id, value_name });
+    }
+  }
+
+  return {
+    title: opts.userProduct ? undefined : String(draft.title ?? '').trim() || undefined,
+    family_name: String(draft.family_name ?? '').trim() || undefined,
+    category_id: String(draft.category_id ?? ''),
+    price: Number(draft.price),
+    available_quantity: Number(draft.available_quantity),
+    currency_id: String(draft.currency_id ?? 'ARS'),
+    buying_mode: String(draft.buying_mode ?? 'buy_it_now'),
+    listing_type_id: String(draft.listing_type_id ?? 'gold_special'),
+    condition: String(draft.condition ?? 'new'),
+    pictures,
+    attributes,
+    seller_custom_field: String(draft.seller_custom_field ?? '').trim() || undefined,
+    sale_terms: draft.sale_terms,
+    shipping: draft.shipping,
+    status: draft.status != null ? String(draft.status) : undefined,
+    video_id: draft.video_id != null ? String(draft.video_id) : undefined,
+    userProduct: opts.userProduct
+  };
+}
+
+function mlListingFieldsFromSourceItem(sourceItem: any): {
+  category_id: string;
+  currency_id: string;
+  buying_mode: string;
+  listing_type_id: string;
+  condition: string;
+  sale_terms?: unknown;
+  shipping?: unknown;
+  video_id?: string;
+} {
+  return {
+    category_id: String(sourceItem?.category_id ?? ''),
+    currency_id: String(sourceItem?.currency_id || 'ARS'),
+    buying_mode: String(sourceItem?.buying_mode || 'buy_it_now'),
+    listing_type_id: String(sourceItem?.listing_type_id || 'gold_special'),
+    condition: String(sourceItem?.condition || 'new'),
+    sale_terms: sourceItem?.sale_terms,
+    shipping: sourceItem?.shipping,
+    video_id: sourceItem?.video_id != null ? String(sourceItem.video_id) : undefined
+  };
+}
+
 /** Body limpio para POST /items: pictures y attributes separados y sin campos extra de la API origen. */
 export function sanitizeMercadoLibreItemCreateBody(
   body: Record<string, unknown>
@@ -490,21 +717,29 @@ function mlIsUserProductPostPayload(body: Record<string, unknown>): boolean {
 
 /** Payload final exclusivo para POST /items (sin _flags ni claves internas). */
 export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): Record<string, unknown> {
-  let safe = sanitizeMercadoLibreItemCreateBody(body);
-  if (Array.isArray(safe.variations) && safe.variations.length > 0) {
-    delete safe.family_name;
-  } else {
-    delete safe.variations;
-    if (mlIsUserProductPostPayload(safe)) {
-      delete safe.title;
+  const draftVariations = Array.isArray(body.variations) ? body.variations : [];
+  const userProduct =
+    body.userProduct === true ||
+    (Boolean(String(body.family_name ?? '').trim()) && draftVariations.length === 0);
+
+  const input = mlDraftToPayloadInput(body, { userProduct });
+  const payload = buildMercadoLibreItemPayload(input);
+
+  if (!userProduct && draftVariations.length > 0) {
+    const variations = sanitizeMlVariationsForApi(draftVariations);
+    if (variations?.length) {
+      const classic = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+      delete classic.family_name;
+      classic.variations = variations;
+      validateMlPayload(classic, { userProduct: false });
+      console.log('[ML PAYLOAD CLEAN]', JSON.stringify(classic, null, 2));
+      return classic;
     }
   }
-  const userProduct = mlIsUserProductPostPayload(safe);
-  const filtered = filterMlItemAttributesForCreatePost(sanitizeMlCreateAttributes(safe.attributes), {
-    userProduct
-  });
-  safe.attributes = mlAttributesForPostPayload(filtered);
-  return stripMlInternalBodyKeys(safe);
+
+  validateMlPayload(payload, { userProduct });
+  console.log('[ML PAYLOAD CLEAN]', JSON.stringify(payload, null, 2));
+  return payload;
 }
 
 function buildMlItemCreateDebugFlags(safe: Record<string, unknown>): Record<string, unknown> {
@@ -1004,24 +1239,6 @@ function mlFamilyNameFromItem(item: any): string {
   return '';
 }
 
-function mlCommonListingFields(sourceItem: any): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    category_id: sourceItem.category_id,
-    currency_id: sourceItem.currency_id || 'ARS',
-    buying_mode: sourceItem.buying_mode || 'buy_it_now',
-    listing_type_id: sourceItem.listing_type_id || 'gold_special',
-    condition: sourceItem.condition || 'new'
-  };
-  if (sourceItem.video_id) out.video_id = sourceItem.video_id;
-  if (Array.isArray(sourceItem.sale_terms) && sourceItem.sale_terms.length) {
-    out.sale_terms = sourceItem.sale_terms;
-  }
-  if (sourceItem.shipping && typeof sourceItem.shipping === 'object') {
-    out.shipping = sourceItem.shipping;
-  }
-  return out;
-}
-
 async function postMercadoLibreNewItem(
   accessToken: string,
   body: Record<string, unknown>,
@@ -1165,22 +1382,28 @@ async function buildMercadoLibrePackListingBodyClassic(
   const attrs = mlItemAttributesForPackListing(sourceItem, opts.skuSuffix, title, allPackItems, {
     withVariations: true
   });
+  const listing = mlListingFieldsFromSourceItem(sourceItem);
+  const pictureRows = sanitizeMlPicturesForApi(pictures);
 
-  const body: Record<string, unknown> = {
-    ...mlCommonListingFields(sourceItem),
+  const draft: Record<string, unknown> = {
+    category_id: listing.category_id,
+    currency_id: listing.currency_id,
+    buying_mode: listing.buying_mode,
+    listing_type_id: listing.listing_type_id,
+    condition: listing.condition,
     title,
     price,
     available_quantity: itemQty,
-    pictures: sanitizeMlPicturesForApi(pictures),
-    attributes: attrs,
+    pictures: pictureRows,
+    attributes: attrs.map((a) => ({ id: a.id, value_name: a.value_name ?? '' })),
     variations
   };
-  // Nunca mezclar family_name con variations (lo quita sanitize + POST).
-  delete body.family_name;
+  if (listing.video_id) draft.video_id = listing.video_id;
+  if (listing.sale_terms) draft.sale_terms = listing.sale_terms;
+  if (listing.shipping) draft.shipping = listing.shipping;
+  if (opts.status === 'paused') draft.status = 'paused';
 
-  if (opts.status === 'paused') body.status = 'paused';
-
-  return body;
+  return draft;
 }
 
 /** User Product: una publicación por talle, con family_name y sin variations. */
@@ -1223,19 +1446,29 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     packVariant.items,
     { withVariations: false }
   );
+  const listing = mlListingFieldsFromSourceItem(sourceItem);
+  const pictureRows = sanitizeMlPicturesForApi(pictures);
 
-  const body: Record<string, unknown> = {
-    ...mlCommonListingFields(sourceItem),
+  const draft: Record<string, unknown> = {
+    category_id: listing.category_id,
+    currency_id: listing.currency_id,
+    buying_mode: listing.buying_mode,
+    listing_type_id: listing.listing_type_id,
+    condition: listing.condition,
     family_name: opts.baseFamilyName,
     price,
     available_quantity: itemQty,
-    pictures: sanitizeMlPicturesForApi(pictures),
-    attributes: attrs,
-    seller_custom_field: sellerField
+    pictures: pictureRows,
+    attributes: attrs.map((a) => ({ id: a.id, value_name: a.value_name ?? '' })),
+    seller_custom_field: sellerField,
+    userProduct: true
   };
+  if (listing.video_id) draft.video_id = listing.video_id;
+  if (listing.sale_terms) draft.sale_terms = listing.sale_terms;
+  if (listing.shipping) draft.shipping = listing.shipping;
+  if (opts.status === 'paused') draft.status = 'paused';
 
-  if (opts.status === 'paused') body.status = 'paused';
-  return body;
+  return draft;
 }
 
 async function createMercadoLibrePackListingUserProduct(
