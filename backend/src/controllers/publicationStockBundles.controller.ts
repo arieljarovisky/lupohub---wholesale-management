@@ -28,7 +28,11 @@ export const listBundles = async (req: Request, res: Response) => {
     res.json(rows);
   } catch (e: any) {
     console.error('listBundles:', e);
-    res.status(500).json({ message: 'Error listando packs de publicación' });
+    const msg = String(e?.message || '');
+    if (msg.includes("doesn't exist") || e?.code === 'ER_NO_SUCH_TABLE') {
+      return res.json([]);
+    }
+    res.status(500).json({ message: 'Error listando packs de publicación', detail: msg });
   }
 };
 

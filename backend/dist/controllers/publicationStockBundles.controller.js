@@ -11,6 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncBundleStock = exports.createListingFromSource = exports.removeBundle = exports.updateBundle = exports.createBundle = exports.getBundle = exports.syncListingBundlesStock = exports.saveBundleGroup = exports.getBundlesByProduct = exports.getSourcePreview = exports.listBundles = void 0;
 const publicationStockBundle_service_1 = require("../services/publicationStockBundle.service");
+const integrations_controller_1 = require("./integrations.controller");
 const packListingCreate_service_1 = require("../services/packListingCreate.service");
 const listBundles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -23,7 +24,11 @@ const listBundles = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
     catch (e) {
         console.error('listBundles:', e);
-        res.status(500).json({ message: 'Error listando packs de publicación' });
+        const msg = String((e === null || e === void 0 ? void 0 : e.message) || '');
+        if (msg.includes("doesn't exist") || (e === null || e === void 0 ? void 0 : e.code) === 'ER_NO_SUCH_TABLE') {
+            return res.json([]);
+        }
+        res.status(500).json({ message: 'Error listando packs de publicación', detail: msg });
     }
 });
 exports.listBundles = listBundles;
@@ -39,7 +44,12 @@ const getSourcePreview = (req, res) => __awaiter(void 0, void 0, void 0, functio
         }
         const preview = yield (0, packListingCreate_service_1.fetchPublicationSourcePreview)(platform, sourceId);
         if (!preview) {
-            return res.status(404).json({ message: 'Publicación no encontrada en la plataforma' });
+            const mlauHint = platform === 'mercadolibre' && /^MLAU\d+$/i.test((0, integrations_controller_1.normalizeMercadoLibreItemId)(sourceId))
+                ? ' Verificá que el MLAU sea de tu cuenta ML y tenga publicaciones (activas o pausadas).'
+                : '';
+            return res.status(404).json({
+                message: `Publicación no encontrada en la plataforma.${mlauHint}`
+            });
         }
         res.json(preview);
     }

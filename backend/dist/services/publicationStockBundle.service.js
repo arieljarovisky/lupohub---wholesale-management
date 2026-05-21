@@ -103,22 +103,36 @@ function findBundlesByProduct(platform, externalProductId) {
 function listPublicationBundleGroups() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
-        const rows = yield (0, db_1.query)(`SELECT platform, external_product_id FROM publication_stock_bundles
-     GROUP BY platform, external_product_id
-     ORDER BY platform, external_product_id`);
-        const out = [];
-        for (const r of rows) {
-            const variants = yield findBundlesByProduct(r.platform, r.external_product_id);
-            if (!variants.length)
-                continue;
-            out.push({
-                platform: r.platform,
-                externalProductId: r.external_product_id,
-                listingLabel: (_b = (_a = variants.find((v) => v.label)) === null || _a === void 0 ? void 0 : _a.label) !== null && _b !== void 0 ? _b : null,
-                variants
-            });
+        try {
+            const rows = yield (0, db_1.query)(`SELECT platform, external_product_id FROM publication_stock_bundles
+       GROUP BY platform, external_product_id
+       ORDER BY platform, external_product_id`);
+            const out = [];
+            for (const r of rows) {
+                try {
+                    const variants = yield findBundlesByProduct(r.platform, r.external_product_id);
+                    if (!variants.length)
+                        continue;
+                    out.push({
+                        platform: r.platform,
+                        externalProductId: r.external_product_id,
+                        listingLabel: (_b = (_a = variants.find((v) => v.label)) === null || _a === void 0 ? void 0 : _a.label) !== null && _b !== void 0 ? _b : null,
+                        variants
+                    });
+                }
+                catch (e) {
+                    console.warn('[Bundle] omitiendo grupo', r.external_product_id, (e === null || e === void 0 ? void 0 : e.message) || e);
+                }
+            }
+            return out;
         }
-        return out;
+        catch (e) {
+            const msg = String((e === null || e === void 0 ? void 0 : e.message) || (e === null || e === void 0 ? void 0 : e.code) || '');
+            if (msg.includes("doesn't exist") || (e === null || e === void 0 ? void 0 : e.code) === 'ER_NO_SUCH_TABLE') {
+                return [];
+            }
+            throw e;
+        }
     });
 }
 function syncAllBundlesForProduct(platform, externalProductId) {
@@ -198,13 +212,13 @@ function loadBundleItems(bundleId) {
       pv.sku,
       p.name AS product_name,
       pc.name AS color_name,
-      sc.code AS size_code,
+      COALESCE(sz.size_code, sz.name, '') AS size_code,
       COALESCE(s.stock, 0) AS stock
     FROM publication_stock_bundle_items bi
     JOIN product_variants pv ON pv.id = bi.variant_id
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
-    LEFT JOIN size_codes sc ON sc.id = pv.size_code_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
     LEFT JOIN stocks s ON s.variant_id = bi.variant_id
     WHERE bi.bundle_id = ?
     ORDER BY bi.sort_order ASC, bi.id ASC

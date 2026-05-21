@@ -90,23 +90,35 @@ export type PublicationBundleGroup = {
 };
 
 export async function listPublicationBundleGroups(): Promise<PublicationBundleGroup[]> {
-  const rows = await query(
-    `SELECT platform, external_product_id FROM publication_stock_bundles
-     GROUP BY platform, external_product_id
-     ORDER BY platform, external_product_id`
-  );
-  const out: PublicationBundleGroup[] = [];
-  for (const r of rows as any[]) {
-    const variants = await findBundlesByProduct(r.platform, r.external_product_id);
-    if (!variants.length) continue;
-    out.push({
-      platform: r.platform as PublicationBundlePlatform,
-      externalProductId: r.external_product_id as string,
-      listingLabel: variants.find((v) => v.label)?.label ?? null,
-      variants
-    });
+  try {
+    const rows = await query(
+      `SELECT platform, external_product_id FROM publication_stock_bundles
+       GROUP BY platform, external_product_id
+       ORDER BY platform, external_product_id`
+    );
+    const out: PublicationBundleGroup[] = [];
+    for (const r of rows as any[]) {
+      try {
+        const variants = await findBundlesByProduct(r.platform, r.external_product_id);
+        if (!variants.length) continue;
+        out.push({
+          platform: r.platform as PublicationBundlePlatform,
+          externalProductId: r.external_product_id as string,
+          listingLabel: variants.find((v) => v.label)?.label ?? null,
+          variants
+        });
+      } catch (e: any) {
+        console.warn('[Bundle] omitiendo grupo', r.external_product_id, e?.message || e);
+      }
+    }
+    return out;
+  } catch (e: any) {
+    const msg = String(e?.message || e?.code || '');
+    if (msg.includes("doesn't exist") || e?.code === 'ER_NO_SUCH_TABLE') {
+      return [];
+    }
+    throw e;
   }
-  return out;
 }
 
 export async function syncAllBundlesForProduct(
@@ -196,13 +208,13 @@ async function loadBundleItems(bundleId: string): Promise<PublicationBundleItem[
       pv.sku,
       p.name AS product_name,
       pc.name AS color_name,
-      sc.code AS size_code,
+      COALESCE(sz.size_code, sz.name, '') AS size_code,
       COALESCE(s.stock, 0) AS stock
     FROM publication_stock_bundle_items bi
     JOIN product_variants pv ON pv.id = bi.variant_id
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
-    LEFT JOIN size_codes sc ON sc.id = pv.size_code_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
     LEFT JOIN stocks s ON s.variant_id = bi.variant_id
     WHERE bi.bundle_id = ?
     ORDER BY bi.sort_order ASC, bi.id ASC

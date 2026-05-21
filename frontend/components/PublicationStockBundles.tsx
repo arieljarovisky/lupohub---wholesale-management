@@ -357,13 +357,37 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     if (key) prunePackItemsToArticle(key);
   };
 
+  const groupBundlesClientSide = (flat: PublicationBundleDto[]): PublicationBundleGroupDto[] => {
+    const map = new Map<string, PublicationBundleGroupDto>();
+    for (const b of flat) {
+      const key = `${b.platform}:${b.externalProductId}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          platform: b.platform,
+          externalProductId: b.externalProductId,
+          listingLabel: b.label,
+          variants: []
+        });
+      }
+      map.get(key)!.variants.push(b);
+    }
+    return Array.from(map.values());
+  };
+
   const loadBundles = useCallback(async () => {
     setLoading(true);
     try {
       const rows = await api.getPublicationBundleGroups();
       setGroups(rows);
-    } catch {
-      showToast('error', 'No se pudieron cargar los packs');
+    } catch (firstErr: any) {
+      try {
+        const flat = await api.getPublicationBundles();
+        setGroups(groupBundlesClientSide(flat));
+      } catch {
+        const detail = firstErr?.message ? `: ${firstErr.message}` : '';
+        showToast('error', `No se pudieron cargar los packs${detail}`);
+        setGroups([]);
+      }
     } finally {
       setLoading(false);
     }

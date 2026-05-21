@@ -49,6 +49,8 @@ exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaign
 exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = void 0;
 exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
 exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
+exports.resolveMercadoLibreCatalogProductItems = resolveMercadoLibreCatalogProductItems;
+exports.resolveMercadoLibreUserProductItems = resolveMercadoLibreUserProductItems;
 exports.getValidMLToken = getValidMLToken;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 exports.mlBaseTitle = mlBaseTitle;
