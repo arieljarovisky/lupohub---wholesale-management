@@ -15,6 +15,20 @@ export const TALLE_CODIGO_A_NOMBRE: Record<string, string> = {
   '250': 'XXXG',
 };
 
+/** Rango numérico en guías ML (ej. "Talle P 38-40" en la tabla de talles). */
+export const TALLE_CODIGO_A_RANGO_ML: Record<string, string> = {
+  '130': '38-40',
+  '140': '42-44',
+  '150': '46-48',
+  '160': '50-52',
+  '170': '38-40',
+  '180': '46-48',
+  '200': '50-52',
+  '220': '50-52',
+  '240': '50-52',
+  '250': '50-52'
+};
+
 export function nombreTalleDesdeCodigo(codigo: string): string {
   const c = (codigo || '').trim();
   return TALLE_CODIGO_A_NOMBRE[c] ?? c;

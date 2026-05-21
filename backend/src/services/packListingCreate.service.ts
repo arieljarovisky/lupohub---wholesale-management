@@ -9,6 +9,8 @@ import {
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 import {
   nombreTalleDesdeCodigo,
+  TALLE_CODIGO_A_NOMBRE,
+  TALLE_CODIGO_A_RANGO_ML,
   TALLE_LETRAS_EQUIVALENTES
 } from '../talles-tango';
 import {
@@ -136,10 +138,74 @@ function mlSizeLabelsForMatch(size: string): string[] {
     const letter = nombreTalleDesdeCodigo(raw);
     push(letter);
     for (const alias of TALLE_LETRAS_EQUIVALENTES[raw] || []) push(alias);
+    const range = TALLE_CODIGO_A_RANGO_ML[raw];
+    if (range) {
+      push(range);
+      push(range.replace(/-/g, ' '));
+      const parts = range.split('-').map((p) => p.trim()).filter(Boolean);
+      for (const p of parts) push(p);
+      push(`${letter} ${range}`);
+      push(`talle ${letter} ${range}`);
+    }
   } else {
     push(nombreTalleDesdeCodigo(raw));
+    const code = Object.entries(TALLE_CODIGO_A_NOMBRE).find(([, name]) => name.toLowerCase() === raw.toLowerCase())?.[0];
+    if (code && TALLE_CODIGO_A_RANGO_ML[code]) {
+      const range = TALLE_CODIGO_A_RANGO_ML[code];
+      push(range);
+      push(`${raw} ${range}`);
+    }
   }
   return [...out];
+}
+
+function mlLabelMatchesChartToken(label: string, token: string): boolean {
+  if (!label || !token) return false;
+  if (label === token) return true;
+  if (token.includes(label) || label.includes(token)) return true;
+  if (label.length >= 1 && (token.startsWith(`${label} `) || token.startsWith(`${label}-`))) return true;
+  return false;
+}
+
+function mlChartRowTextTokens(row: any): Set<string> {
+  const tokens = new Set<string>();
+  const visit = (node: unknown, depth = 0): void => {
+    if (depth > 10 || node == null) return;
+    if (typeof node === 'string' || typeof node === 'number') {
+      const raw = String(node).trim();
+      if (!raw || raw.length > 120) return;
+      const norm = mlNormalizeSizeLabel(raw);
+      if (norm) tokens.add(norm);
+      for (const part of raw.split(/[\s,;/\-–—]+/)) {
+        const p = mlNormalizeSizeLabel(part);
+        if (p) tokens.add(p);
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const entry of node) visit(entry, depth + 1);
+      return;
+    }
+    if (typeof node === 'object') {
+      for (const value of Object.values(node as Record<string, unknown>)) visit(value, depth + 1);
+    }
+  };
+  visit(row);
+  return tokens;
+}
+
+function mlSizeValueFromChartRow(row: any, sizeLabel: string): string {
+  const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
+  for (const att of attrs) {
+    const attId = mlAttrIdUpper(att?.id ?? att?.name);
+    if (attId !== 'SIZE' && !ML_SIZE_ATTR_IDS.has(attId)) continue;
+    const vals = Array.isArray(att?.values) ? att.values : [];
+    for (const v of vals) {
+      const name = String(v?.name ?? v?.value_name ?? '').trim();
+      if (name) return name;
+    }
+  }
+  return mlSizeValueNameForMercadoLibre(sizeLabel);
 }
 
 /** Valor SIZE para POST ML: letra de catálogo (M), no código Tango (140). */
@@ -614,6 +680,12 @@ function mlChartSizeCandidates(v: any): string[] {
 function mlChartRowMatchesSizeLabel(row: any, sizeLabel: string): boolean {
   const labels = mlSizeLabelsForMatch(sizeLabel);
   if (!labels.length) return false;
+  const rowTokens = mlChartRowTextTokens(row);
+  for (const label of labels) {
+    for (const token of rowTokens) {
+      if (mlLabelMatchesChartToken(label, token)) return true;
+    }
+  }
   const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
   for (const att of attrs) {
     const attId = mlAttrIdUpper(att?.id ?? att?.name);
@@ -621,20 +693,22 @@ function mlChartRowMatchesSizeLabel(row: any, sizeLabel: string): boolean {
     const vals = Array.isArray(att?.values) ? att.values : [];
     for (const v of vals) {
       for (const candidate of mlChartSizeCandidates(v)) {
-        if (labels.includes(candidate)) return true;
+        for (const label of labels) {
+          if (mlLabelMatchesChartToken(label, candidate)) return true;
+        }
       }
     }
   }
   return false;
 }
 
-async function mlFetchSizeGridRowIdForSize(
+async function mlFetchSizeGridRowForSize(
   accessToken: string,
   chartId: string | number,
   sizeLabel: string
-): Promise<string> {
+): Promise<{ rowId: string; row?: any } | null> {
   const chartKey = String(chartId ?? '').trim();
-  if (!chartKey) return '';
+  if (!chartKey) return null;
   try {
     const res = await axios.get(
       `https://api.mercadolibre.com/catalog/charts/${encodeURIComponent(chartKey)}`,
@@ -645,19 +719,39 @@ async function mlFetchSizeGridRowIdForSize(
     );
     if (res.status !== 200 || !res.data) {
       console.warn('[ML pack] Guía de talles HTTP', chartKey, res.status, res.data?.message || res.data?.error);
-      return '';
+      return null;
     }
     const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
     for (const row of rows) {
       if (!mlChartRowMatchesSizeLabel(row, sizeLabel)) continue;
       const rowId = String(row.id ?? '').trim();
-      if (rowId) return rowId;
+      if (rowId) return { rowId, row };
     }
-    console.warn('[ML pack] Guía sin fila para talle', chartKey, sizeLabel, `(${rows.length} filas)`);
+    const wanted = mlSizeLabelsForMatch(sizeLabel);
+    const summaries = rows.slice(0, 12).map((row: any) => ({
+      id: row.id,
+      tokens: [...mlChartRowTextTokens(row)].slice(0, 10)
+    }));
+    console.warn('[ML pack] Guía sin fila para talle', {
+      chartKey,
+      sizeLabel,
+      wanted,
+      rowCount: rows.length,
+      rows: summaries
+    });
   } catch (err: any) {
     console.warn('[ML pack] No se pudo leer guía de talles', chartKey, err?.message || err);
   }
-  return '';
+  return null;
+}
+
+async function mlFetchSizeGridRowIdForSize(
+  accessToken: string,
+  chartId: string | number,
+  sizeLabel: string
+): Promise<string> {
+  const found = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
+  return found?.rowId ?? '';
 }
 
 function mlSiteIdFromItem(sourceItem: any): string {
@@ -872,16 +966,18 @@ async function mlResolveFashionGridViaMercadoLibreApi(
   }
 
   const sizeLabel = String(size || '').trim();
-  const rowId = sizeLabel ? await mlFetchSizeGridRowIdForSize(accessToken, chartId, sizeLabel) : '';
+  const rowMatch = sizeLabel ? await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel) : null;
+  const rowId = rowMatch?.rowId ?? '';
+  const sizeName = rowMatch?.row
+    ? mlSizeValueFromChartRow(rowMatch.row, sizeLabel)
+    : mlSizeValueNameForMercadoLibre(sizeLabel);
 
   return {
     domainId,
     chartId,
     grid: { id: 'SIZE_GRID_ID', value_id: String(chartId) },
     row: rowId ? { id: 'SIZE_GRID_ROW_ID', value_name: rowId } : undefined,
-    size: sizeLabel
-      ? { id: 'SIZE', value_name: mlSizeValueNameForMercadoLibre(sizeLabel) }
-      : undefined
+    size: sizeLabel ? { id: 'SIZE', value_name: sizeName } : undefined
   };
 }
 
@@ -921,21 +1017,47 @@ async function mlUserProductFashionAttrsFromSource(
     ? mlNormalizeSizeGridRowAttr(fromApi.row)
     : undefined;
 
+  let chartRow: any = null;
   if (!mlSizeGridRowMatchesChart(row, chartId) && sizeLabel) {
-    const rowId = await mlFetchSizeGridRowIdForSize(accessToken, chartId, sizeLabel);
-    if (rowId) row = { id: 'SIZE_GRID_ROW_ID', value_name: rowId };
+    const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
+    if (rowMatch?.rowId) {
+      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
+      chartRow = rowMatch.row;
+    }
   }
 
   if (!row?.value_name) {
+    const fromSource = mlSizeGridRowFromSourceItem(sourceItem, sizeLabel);
+    if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
+      row = mlNormalizeSizeGridRowAttr(fromSource);
+      console.log('[ML pack] SIZE_GRID_ROW_ID desde variación origen', row.value_name);
+    }
+  }
+
+  if (!row?.value_name) {
+    const letter = mlSizeValueNameForMercadoLibre(sizeLabel);
+    const range = TALLE_CODIGO_A_RANGO_ML[sizeLabel] || TALLE_CODIGO_A_RANGO_ML[Object.keys(TALLE_CODIGO_A_NOMBRE).find((k) => TALLE_CODIGO_A_NOMBRE[k] === letter) || ''];
     throw new Error(
-      `No hay fila en la guía ${chartId} para el talle ${sizeLabel} (${mlSizeValueNameForMercadoLibre(sizeLabel)}). ` +
-        'Revisá GET /catalog/charts/{id} en ML.'
+      `No hay fila en la guía ${chartId} para el talle ${sizeLabel} (${letter}${range ? ` / ${range}` : ''}). ` +
+        'En ML la guía muestra talles como "P 38-40", "M 42-44", etc. Revisá GET /catalog/charts/{id}.'
     );
   }
 
-  const sizeAttr = mlSizeAttrForUserProduct(sizeLabel);
-  if (!sizeAttr) {
-    throw new Error(`No se pudo determinar SIZE para el talle ${sizeLabel}`);
+  let sizeAttr: MlItemCreateAttribute;
+  if (chartRow) {
+    sizeAttr = { id: 'SIZE', value_name: mlSizeValueFromChartRow(chartRow, sizeLabel) };
+  } else {
+    const variation = mlFindSourceVariationBySize(sourceItem, sizeLabel);
+    const fromVar = mlPickCreateAttributeFromList(variation?.attributes, 'SIZE');
+    if (fromVar?.value_name) {
+      sizeAttr = { id: 'SIZE', value_name: String(fromVar.value_name) };
+    } else {
+      sizeAttr =
+        mlSizeAttrForUserProduct(sizeLabel) ?? {
+          id: 'SIZE',
+          value_name: mlSizeValueNameForMercadoLibre(sizeLabel)
+        };
+    }
   }
 
   console.log('[ML pack] fashion grid resolved', {
