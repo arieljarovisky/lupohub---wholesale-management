@@ -650,16 +650,19 @@ async function mlChartSearchAttributesForDomain(
   sourceItem: any
 ): Promise<Array<{ id: string; values: Array<{ name: string }> }>> {
   const requiredIds = await mlFetchGridTemplateRequiredAttrIds(accessToken, domainId);
-  const filterIds = requiredIds.length ? requiredIds : ['GENDER', 'BRAND'];
+  const filterIdSet = new Set<string>(requiredIds.length ? requiredIds : ['GENDER', 'BRAND']);
+  // ML suele exigir BRAND+GENDER en charts/search aunque solo GENDER sea grid_template_required.
+  filterIdSet.add('GENDER');
+  filterIdSet.add('BRAND');
   const fromItem = sanitizeMlCreateAttributes(sourceItem?.attributes);
   const out: Array<{ id: string; values: Array<{ name: string }> }> = [];
-  for (const fid of filterIds) {
+  for (const fid of filterIdSet) {
     const a = fromItem.find((x) => mlAttrIdUpper(x.id) === fid);
     if (!a?.value_name) continue;
     out.push({ id: fid, values: [{ name: a.value_name }] });
   }
   if (!out.length) {
-    console.warn('[ML pack] charts/search sin filtros (faltan attrs en origen)', filterIds);
+    console.warn('[ML pack] charts/search sin filtros (faltan attrs en origen)', [...filterIdSet]);
   }
   return out;
 }
@@ -826,27 +829,31 @@ async function mlDomainSupportsSizeGrid(accessToken: string, domainId: string): 
   }
 }
 
-function mlPickChartIdFromSearchResponse(data: any, preferredChartId?: string): string {
+function mlChartSummariesFromSearchResponse(data: any): Array<{ id: string; type: string }> {
   const charts = Array.isArray(data?.charts) ? data.charts : [];
-  const preferred = String(preferredChartId ?? '').trim();
-  if (preferred && /^\d+$/.test(preferred)) {
-    for (const c of charts) {
-      if (String(c?.id ?? '').trim() === preferred) return preferred;
-    }
+  const out: Array<{ id: string; type: string }> = [];
+  for (const c of charts) {
+    const id = String(c?.id ?? '').trim();
+    if (!id || !/^\d+$/.test(id)) continue;
+    out.push({ id, type: String(c?.type || '').toUpperCase() });
   }
-  const pick = (pred: (c: any) => boolean) => {
-    for (const c of charts) {
-      if (!pred(c)) continue;
-      const id = String(c?.id ?? '').trim();
-      if (id && /^\d+$/.test(id)) return id;
-    }
-    return '';
-  };
-  const specific = pick((c) => String(c?.type || '').toUpperCase() === 'SPECIFIC');
-  if (specific) return specific;
-  const brand = pick((c) => String(c?.type || '').toUpperCase() === 'BRAND');
+  return out;
+}
+
+/** Solo chart_id devueltos por POST /catalog/charts/search (válidos para POST /items del vendedor). */
+function mlPickChartIdFromSearchResponse(data: any, preferredChartId?: string): string {
+  const charts = mlChartSummariesFromSearchResponse(data);
+  const preferred = String(preferredChartId ?? '').trim();
+  if (preferred && charts.some((c) => c.id === preferred)) return preferred;
+
+  const pickType = (type: string) => charts.find((c) => c.type === type)?.id ?? '';
+  const brand = pickType('BRAND');
   if (brand) return brand;
-  return pick(() => true);
+  const specific = pickType('SPECIFIC');
+  if (specific) return specific;
+  const standard = pickType('STANDARD');
+  if (standard) return standard;
+  return charts[0]?.id ?? '';
 }
 
 async function mlSearchCatalogChartId(
@@ -884,7 +891,7 @@ async function mlSearchCatalogChartId(
 
   for (const domain_id of domainCandidates) {
     for (const attributes of attrSets) {
-      for (const type of ['SPECIFIC', undefined] as const) {
+      for (const type of ['BRAND', 'SPECIFIC', undefined] as const) {
         const body: Record<string, unknown> = {
           domain_id,
           site_id: opts.siteId,
@@ -911,12 +918,14 @@ async function mlSearchCatalogChartId(
           }
           const chartId = mlPickChartIdFromSearchResponse(res.data, opts.preferredChartId);
           if (chartId) {
+            const available = mlChartSummariesFromSearchResponse(res.data).map((c) => `${c.id}:${c.type}`);
             console.log('[ML pack] charts/search OK', {
               chartId,
               domain_id,
               type: type || 'all',
               attrCount: attributes.length,
-              preferred: opts.preferredChartId || undefined
+              preferred: opts.preferredChartId || undefined,
+              availableCharts: available.slice(0, 12)
             });
             return chartId;
           }
@@ -1020,48 +1029,10 @@ function mlFashionSizeAttrForPack(
   );
 }
 
-/** Reutiliza SIZE_GRID_ID del ítem MLA origen si hay fila válida (evita charts/search genérico inválido). */
-async function mlTryFashionGridFromSourceListing(
-  sourceItem: any,
-  sizeLabel: string,
-  accessToken: string
-): Promise<MlItemCreateAttribute[] | null> {
-  const sourceGrid = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID');
-  const chartId = String(sourceGrid?.value_id ?? '').trim();
-  if (!chartId || !/^\d+$/.test(chartId)) return null;
-
-  let row: MlItemCreateAttribute | undefined;
-  let chartRow: any = null;
-  const fromSource = mlSizeGridRowFromSourceItem(sourceItem, sizeLabel);
-  if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
-    row = mlNormalizeSizeGridRowAttr(fromSource);
-  }
-  if (!row?.value_name && sizeLabel) {
-    const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
-    if (rowMatch?.rowId) {
-      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
-      chartRow = rowMatch.row;
-    }
-  }
-  if (!row?.value_name) {
-    console.warn('[ML pack] Guía origen sin fila para talle; fallback charts/search', {
-      chartId,
-      size: sizeLabel
-    });
-    return null;
-  }
-
-  const sizeAttr = mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow);
-  console.log('[ML pack] fashion grid from source listing', {
-    chartId,
-    size: sizeLabel,
-    sizeName: sizeAttr.value_name,
-    row: row.value_name
-  });
-  return [{ id: 'SIZE_GRID_ID', value_id: chartId }, row, sizeAttr];
-}
-
-/** SIZE_GRID_ID + SIZE_GRID_ROW_ID + SIZE: primero guía del MLA origen; si no, charts/search del dominio. */
+/**
+ * SIZE_GRID_ID para POST /items: solo guías devueltas por POST /catalog/charts/search (seller_id).
+ * El SIZE_GRID_ID del GET /items/{id} origen es referencia; ML lo rechaza si no está en esa búsqueda.
+ */
 async function mlUserProductFashionAttrsFromSource(
   sourceItem: any,
   size: string,
@@ -1070,12 +1041,9 @@ async function mlUserProductFashionAttrsFromSource(
   familyName?: string
 ): Promise<MlItemCreateAttribute[]> {
   const sizeLabel = String(size || '').trim();
-  const fromSourceListing = await mlTryFashionGridFromSourceListing(
-    sourceItem,
-    sizeLabel,
-    accessToken
-  );
-  if (fromSourceListing) return fromSourceListing;
+  const sourceGridId = String(
+    mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID')?.value_id ?? ''
+  ).trim();
 
   const fromApi = await mlResolveFashionGridViaMercadoLibreApi(
     sourceItem,
@@ -1089,8 +1057,15 @@ async function mlUserProductFashionAttrsFromSource(
   if (!chartId) {
     throw new Error(
       `No se encontró guía de talles (charts/search) para el dominio ${fromApi?.domainId || '?'}. ` +
-        `Verificá BRAND y GENDER en la publicación origen y que exista guía SPECIFIC/BRAND en ML para ${familyName || 'este producto'}.`
+        `Verificá BRAND y GENDER en la publicación origen y que exista guía BRAND/SPECIFIC en ML para ${familyName || 'este producto'}.`
     );
+  }
+  if (sourceGridId && sourceGridId !== chartId) {
+    console.warn('[ML pack] SIZE_GRID_ID origen no usable en POST; usando charts/search', {
+      sourceGridId,
+      chartId,
+      domainId: fromApi?.domainId
+    });
   }
 
   const grid: MlItemCreateAttribute = { id: 'SIZE_GRID_ID', value_id: chartId };
@@ -1126,15 +1101,14 @@ async function mlUserProductFashionAttrsFromSource(
 
   const sizeAttr = mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow);
 
-  console.log('[ML pack] fashion grid resolved via charts/search', {
+  console.log('[ML pack] fashion grid resolved', {
     chartId,
+    source: 'catalog/charts/search',
     domainId: fromApi?.domainId,
     size: sizeLabel,
     sizeName: sizeAttr.value_name,
     row: row.value_name,
-    sourceGridId: String(
-      mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID')?.value_id ?? ''
-    )
+    sourceListingGridId: sourceGridId || undefined
   });
 
   return [grid, row, sizeAttr];
