@@ -1251,10 +1251,8 @@ export function buildMercadoLibreItemPayload(input: MlItemPayloadInput): Record<
   const familyName = String(input.family_name ?? '').trim();
   if (familyName) payload.family_name = familyName;
 
-  if (!userProduct) {
-    const title = String(input.title ?? '').trim();
-    if (title) payload.title = title;
-  }
+  const title = String(input.title ?? '').trim();
+  if (title) payload.title = title;
 
   const sku = String(input.seller_custom_field ?? '').trim();
   if (sku) payload.seller_custom_field = sku;
@@ -1287,9 +1285,6 @@ export function validateMlPayload(
 
   if (opts?.userProduct) {
     if (!String(payload.family_name ?? '').trim()) throw new Error('Missing family_name');
-    if (payload.title != null && String(payload.title).trim() !== '') {
-      throw new Error('User Product payload must not include title');
-    }
     if (Array.isArray(payload.variations) && payload.variations.length > 0) {
       throw new Error('User Product payload must not include variations');
     }
@@ -1387,7 +1382,7 @@ function mlDraftToPayloadInput(
   }
 
   return {
-    title: opts.userProduct ? undefined : String(draft.title ?? '').trim() || undefined,
+    title: String(draft.title ?? '').trim() || undefined,
     family_name: String(draft.family_name ?? '').trim() || undefined,
     category_id: String(draft.category_id ?? ''),
     price: Number(draft.price),
@@ -1458,8 +1453,9 @@ export function sanitizeMercadoLibreItemCreateBody(
     const title = String(body.title ?? '').trim();
     if (title) out.title = title;
   } else if (familyName) {
-    // User Product: solo family_name; title invalida el POST.
     out.family_name = familyName;
+    const title = String(body.title ?? '').trim();
+    if (title) out.title = title;
   } else {
     const title = String(body.title ?? '').trim();
     if (title) out.title = title;
@@ -1514,14 +1510,15 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
 
 function buildMlItemCreateDebugFlags(safe: Record<string, unknown>): Record<string, unknown> {
   const variations = Array.isArray(safe.variations) ? safe.variations : [];
+  const hasFamilyName = Boolean(String(safe.family_name ?? '').trim());
+  const hasTitle = Boolean(String(safe.title ?? '').trim());
+  const userProductMode = hasFamilyName && variations.length === 0;
   return {
-    user_product_mode: Boolean(String(safe.family_name ?? '').trim()) && variations.length === 0,
-    uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
+    user_product_mode: userProductMode,
+    uses_family_name_field: hasFamilyName,
     removed_family_name_because_variations: variations.length > 0,
-    removed_variations_for_user_product:
-      variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
-    removed_title_for_user_product:
-      variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
+    removed_variations_for_user_product: userProductMode,
+    removed_title_for_user_product: userProductMode && !hasTitle,
     has_item_price: safe.price != null,
     has_item_stock: safe.available_quantity != null,
     variation_count: variations.length,
@@ -1801,6 +1798,26 @@ export function mlCreateErrorRequiresUserProduct(message: string): boolean {
   );
 }
 
+function mlPostPayloadFashionFields(payload: Record<string, unknown>): Record<string, unknown> {
+  const attrs = Array.isArray(payload.attributes) ? payload.attributes : [];
+  const pick = (attrId: string) => {
+    const row = attrs.find(
+      (a) => mlAttrIdUpper(String((a as Record<string, unknown>).id ?? '')) === attrId
+    ) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    if (attrId === 'SIZE_GRID_ID') return { value_id: row.value_id };
+    if (attrId === 'SIZE_GRID_ROW_ID') return { value_id: row.value_id };
+    return { value_name: row.value_name };
+  };
+  return {
+    title: String(payload.title ?? '').trim() || undefined,
+    family_name: String(payload.family_name ?? '').trim() || undefined,
+    SIZE_GRID_ID: pick('SIZE_GRID_ID'),
+    SIZE_GRID_ROW_ID: pick('SIZE_GRID_ROW_ID'),
+    SIZE: pick('SIZE')
+  };
+}
+
 function logMlItemCreateBeforePost(
   draftBody: Record<string, unknown>,
   payloadToSend: Record<string, unknown>,
@@ -1808,6 +1825,7 @@ function logMlItemCreateBeforePost(
   extra?: Record<string, unknown>
 ): void {
   const ctx = debugContext ? ` ${debugContext}` : '';
+  console.log(`[ML POST /items] campos pack${ctx}`, mlPostPayloadFashionFields(payloadToSend));
   const hadFamilyName = Boolean(String(draftBody.family_name ?? '').trim());
   const draftVariations = Array.isArray(draftBody.variations) ? draftBody.variations : [];
   const postedVariations = Array.isArray(payloadToSend.variations) ? payloadToSend.variations : [];
@@ -1938,20 +1956,6 @@ export function mlItemUsesFamilyNameModel(item: any): boolean {
   return false;
 }
 
-function mlFamilyNameForPackListing(sourceItem: any, baseTitle?: string): string {
-  const fn = mlFamilyNameFromItem(sourceItem);
-  if (fn) return fn;
-  const title = String(baseTitle || sourceItem?.title || '')
-    .trim()
-    .replace(/\s*Talle\s+[\w\d]+.*$/i, '')
-    .replace(/\s*\(Pack\).*$/i, '')
-    .trim();
-  if (title) return title;
-  throw new Error(
-    'No se pudo obtener family_name de la publicación origen. Usá una publicación individual del mismo producto.'
-  );
-}
-
 function packListingBaseTitle(
   sourceItem: any,
   opts: { titleSuffix: string; content?: PackListingPublicationContent }
@@ -1970,6 +1974,40 @@ function packListingTitleForSize(baseTitle: string, size: string): string {
   const sz = String(size || '').trim() || 'U';
   if (base.toLowerCase().includes(`talle ${sz.toLowerCase()}`)) return base;
   return `${base} Talle ${sz}`;
+}
+
+/** family_name del pack (no el de la unidad origen): "Base Pack X3". */
+function mlPackFamilyNameForListing(
+  baseTitle: string,
+  packItems?: PublicationBundleItem[],
+  titleForInfer?: string
+): string {
+  const clean = String(baseTitle || '')
+    .trim()
+    .replace(/\s*Talle\s+.+$/i, '')
+    .replace(/\s*\(Pack\)\s*$/i, '')
+    .replace(/\s*Pack\s*X\d+\s*$/i, '')
+    .trim();
+  const units = inferPackUnitsPerSale(titleForInfer || clean, packItems);
+  return `${clean || 'Pack'} Pack X${units}`;
+}
+
+/** Título por talle en User Product pack: "Base Pack X3 Talle P 38-40". */
+function mlPackTitleForUserProductListing(
+  baseTitle: string,
+  sizeName: string,
+  packItems?: PublicationBundleItem[],
+  titleForInfer?: string
+): string {
+  const clean = String(baseTitle || '')
+    .trim()
+    .replace(/\s*Talle\s+.+$/i, '')
+    .replace(/\s*\(Pack\)\s*$/i, '')
+    .replace(/\s*Pack\s*X\d+\s*$/i, '')
+    .trim();
+  const units = inferPackUnitsPerSale(titleForInfer || clean, packItems);
+  const size = String(sizeName || '').trim() || 'U';
+  return `${clean || 'Pack'} Pack X${units} Talle ${size}`;
 }
 
 function buildPackListingSellerCustomField(
@@ -2202,7 +2240,7 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     status?: 'active' | 'paused';
     content?: PackListingPublicationContent;
     baseTitle: string;
-    baseFamilyName: string;
+    packFamilyName: string;
     accessToken: string;
     sellerId?: string;
   }
@@ -2243,11 +2281,20 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     size,
     opts.accessToken,
     sellerId,
-    opts.baseFamilyName
+    opts.packFamilyName
   );
   for (const fa of fashionAttrs) {
     attrs = upsertMlCreateAttribute(attrs, fa);
   }
+
+  const sizeAttr = fashionAttrs.find((a) => mlAttrIdUpper(a.id) === 'SIZE');
+  const sizeName = String(sizeAttr?.value_name ?? '').trim() || mlSizeValueNameForMercadoLibre(size);
+  const listingTitle = mlPackTitleForUserProductListing(
+    opts.baseTitle,
+    sizeName,
+    packVariant.items,
+    opts.baseTitle
+  );
 
   const listing = mlListingFieldsFromSourceItem(sourceItem);
   const pictureRows = sanitizeMlPicturesForApi(pictures);
@@ -2258,7 +2305,8 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     buying_mode: listing.buying_mode,
     listing_type_id: listing.listing_type_id,
     condition: listing.condition,
-    family_name: opts.baseFamilyName,
+    title: listingTitle,
+    family_name: opts.packFamilyName,
     price,
     available_quantity: itemQty,
     pictures: pictureRows,
@@ -2290,13 +2338,14 @@ async function createMercadoLibrePackListingUserProduct(
   if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
   const baseTitle = packListingBaseTitle(sourceItem, opts);
-  const baseFamilyName = mlFamilyNameForPackListing(sourceItem, baseTitle);
+  const allPackItems = packVariants.flatMap((pv) => pv.items);
+  const packFamilyName = mlPackFamilyNameForListing(baseTitle, allPackItems, baseTitle);
   const sellerId = await mlMercadoLibreSellerId(sourceItem, mlToken.access_token);
   const listingIds: string[] = [];
   let lastItem: any = null;
 
   console.log(
-    `[ML pack User Product] Creando ${packVariants.length} publicación(es) separada(s) (sin variations). family_name="${baseFamilyName}"`
+    `[ML pack User Product] Creando ${packVariants.length} publicación(es) separada(s) (sin variations). pack family_name="${packFamilyName}"`
   );
 
   for (let idx = 0; idx < packVariants.length; idx++) {
@@ -2307,7 +2356,7 @@ async function createMercadoLibrePackListingUserProduct(
     const body = await buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, pv, {
       ...opts,
       baseTitle,
-      baseFamilyName,
+      packFamilyName,
       accessToken: mlToken.access_token,
       sellerId
     });
@@ -2319,6 +2368,7 @@ async function createMercadoLibrePackListingUserProduct(
       {
         user_product_mode: true,
         removed_variations: true,
+        removed_title_for_user_product: false,
         publishing_size: size,
         pack_combo_label: comboLabel
       }
