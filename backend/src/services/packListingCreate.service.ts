@@ -340,20 +340,34 @@ const ML_ITEM_CREATE_ATTR_BLOCKLIST = new Set([
   'ITEM_CONDITION'
 ]);
 
-/** User Product: siempre excluir (guía, logística, impuestos; ML los resuelve o rechaza en POST). */
+/** User Product: no enviar talle/color por variación ni fila de guía (una MLA por talle). */
 const ML_USER_PRODUCT_ATTR_NEVER_SEND = new Set([
-  'SIZE_GRID_ID',
   'SIZE_GRID_ROW_ID',
   'SIZE',
   'COLOR',
-  'IMPORT_DUTY',
-  'VALUE_ADDED_TAX',
-  'SELLER_PACKAGE_HEIGHT',
-  'SELLER_PACKAGE_LENGTH',
-  'SELLER_PACKAGE_WEIGHT',
-  'SELLER_PACKAGE_WIDTH',
   ...ML_ITEM_CREATE_ATTR_BLOCKLIST
 ]);
+
+/** Atributos obligatorios de categoría (ej. MLA429740); no filtrar en sanitize. */
+const ML_MANDATORY_CATEGORY_ATTRIBUTE_IDS = new Set([
+  'VALUE_ADDED_TAX',
+  'IMPORT_DUTY',
+  'SELLER_PACKAGE_HEIGHT',
+  'SELLER_PACKAGE_WIDTH',
+  'SELLER_PACKAGE_LENGTH',
+  'SELLER_PACKAGE_WEIGHT',
+  'SIZE_GRID_ID'
+]);
+
+const ML_MANDATORY_CATEGORY_ATTRIBUTE_DEFAULTS: Record<string, MlItemCreateAttribute> = {
+  VALUE_ADDED_TAX: { id: 'VALUE_ADDED_TAX', value_name: '21 %' },
+  IMPORT_DUTY: { id: 'IMPORT_DUTY', value_name: '0 %' },
+  SELLER_PACKAGE_HEIGHT: { id: 'SELLER_PACKAGE_HEIGHT', value_name: '25 cm' },
+  SELLER_PACKAGE_WIDTH: { id: 'SELLER_PACKAGE_WIDTH', value_name: '18 cm' },
+  SELLER_PACKAGE_LENGTH: { id: 'SELLER_PACKAGE_LENGTH', value_name: '5 cm' },
+  SELLER_PACKAGE_WEIGHT: { id: 'SELLER_PACKAGE_WEIGHT', value_name: '59 g' },
+  SIZE_GRID_ID: { id: 'SIZE_GRID_ID', value_id: '2484883' }
+};
 
 /** Categorías que publican solo como User Product (family_name, sin variations). */
 const ML_USER_PRODUCT_CATEGORY_IDS = new Set(['MLA429740']);
@@ -400,6 +414,13 @@ function filterMlItemAttributesForCreatePost(
   const out: MlItemCreateAttribute[] = [];
   for (const a of attrs) {
     const upper = mlAttrIdUpper(a.id);
+    if (ML_MANDATORY_CATEGORY_ATTRIBUTE_IDS.has(upper)) {
+      if (!a.value_name && a.value_id == null) continue;
+      if (seen.has(upper)) continue;
+      seen.add(upper);
+      out.push({ id: upper, value_name: a.value_name, value_id: a.value_id });
+      continue;
+    }
     if (opts?.userProduct) {
       if (ML_USER_PRODUCT_ATTR_NEVER_SEND.has(upper)) continue;
       if (!allowlist.has(upper)) continue;
@@ -413,6 +434,34 @@ function filterMlItemAttributesForCreatePost(
     out.push({ id: upper, value_name: a.value_name, value_id: a.value_id });
   }
   return out;
+}
+
+/** Preserva atributos obligatorios de categoría desde el ítem origen o defaults. */
+function mlMergeMandatoryCategoryAttributes(
+  attrs: MlItemCreateAttribute[],
+  sourceRaw: unknown,
+  categoryId: string
+): MlItemCreateAttribute[] {
+  const cat = String(categoryId || '').trim();
+  if (!cat || !ML_USER_PRODUCT_CATEGORY_IDS.has(cat)) return attrs;
+
+  const sourceAttrs = sanitizeMlCreateAttributes(sourceRaw);
+  let out = [...attrs];
+  for (const attrId of ML_MANDATORY_CATEGORY_ATTRIBUTE_IDS) {
+    const fromSource = sourceAttrs.find((a) => mlAttrIdUpper(a.id) === attrId);
+    const hasSourceValue =
+      fromSource && (fromSource.value_name || fromSource.value_id != null);
+    const pick = hasSourceValue ? fromSource! : ML_MANDATORY_CATEGORY_ATTRIBUTE_DEFAULTS[attrId];
+    if (pick) out = upsertMlCreateAttribute(out, pick);
+  }
+  return out;
+}
+
+function logMlPayloadAttributeIds(payload: Record<string, unknown>, debugContext?: string): void {
+  const attrs = Array.isArray(payload.attributes) ? payload.attributes : [];
+  const ids = attrs.map((a) => String((a as Record<string, unknown>)?.id ?? '')).filter(Boolean);
+  const ctx = debugContext ? ` ${debugContext}` : '';
+  console.log(`[ML] attribute ids before POST${ctx}`, ids);
 }
 
 function mlPickCreateAttributeFromList(attrs: unknown, attrId: string): MlItemCreateAttribute | null {
@@ -447,13 +496,15 @@ export type MlItemPayloadInput = {
   listing_type_id?: string;
   condition?: string;
   pictures?: Array<{ id?: string; source?: string }>;
-  attributes?: Array<{ id?: string; value_name?: string; value_id?: string | number }>;
+  attributes?: unknown;
   seller_custom_field?: string;
   sale_terms?: unknown;
   shipping?: unknown;
   status?: string;
   video_id?: string;
   userProduct?: boolean;
+  /** Atributos crudos del ítem origen (para preservar obligatorios de categoría). */
+  sourceAttributes?: unknown;
 };
 
 function mlPictureIdForPayload(id: unknown): string | null {
@@ -466,23 +517,25 @@ function mlPictureIdForPayload(id: unknown): string | null {
 
 function mlAttributesForPayloadInput(
   raw: unknown,
-  opts?: { userProduct?: boolean }
-): Array<{ id: string; value_name: string }> {
-  if (!Array.isArray(raw)) return [];
+  opts?: { userProduct?: boolean; categoryId?: string; sourceAttributes?: unknown }
+): MlItemCreateAttribute[] {
   const normalized: MlItemCreateAttribute[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue;
-    const e = entry as Record<string, unknown>;
-    const id = String(e.id ?? '').trim();
-    if (!id || looksLikeMlPictureId(id) || id.includes('MLA')) continue;
-    const value_name = mlExtractAttributeValueName(e);
-    if (!value_name || value_name === 'null') continue;
-    normalized.push({ id, value_name });
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const attr = mlRawEntryToCreateAttribute(entry);
+      if (attr) normalized.push(attr);
+    }
   }
-  return filterMlItemAttributesForCreatePost(normalized, { userProduct: opts?.userProduct }).map((a) => ({
-    id: a.id,
-    value_name: String(a.value_name ?? '')
-  }));
+  let filtered = filterMlItemAttributesForCreatePost(normalized, { userProduct: opts?.userProduct });
+  const categoryId = String(opts?.categoryId ?? '').trim();
+  if (categoryId) {
+    filtered = mlMergeMandatoryCategoryAttributes(
+      filtered,
+      opts?.sourceAttributes ?? raw,
+      categoryId
+    );
+  }
+  return filtered;
 }
 
 /** Arma payload POST /items sin mutar ni mezclar objetos de ML. */
@@ -494,7 +547,13 @@ export function buildMercadoLibreItemPayload(input: MlItemPayloadInput): Record<
     .filter((id): id is string => Boolean(id))
     .map((id) => ({ id }));
 
-  const attributes = mlAttributesForPayloadInput(input.attributes, { userProduct });
+  const categoryId = String(input.category_id || '').trim();
+  const attrModels = mlAttributesForPayloadInput(input.attributes, {
+    userProduct,
+    categoryId,
+    sourceAttributes: input.sourceAttributes
+  });
+  const attributes = mlAttributesForPostPayload(attrModels);
 
   const payload: Record<string, unknown> = {
     category_id: String(input.category_id || '').trim(),
@@ -568,19 +627,36 @@ export function validateMlPayload(
     }
   }
 
-  for (const a of Array.isArray(payload.attributes) ? payload.attributes : []) {
+  const attrs = Array.isArray(payload.attributes) ? payload.attributes : [];
+  for (const a of attrs) {
     const attr = a as Record<string, unknown>;
     const id = String(attr.id ?? '').trim();
     if (!id || id.includes('MLA')) {
       throw new Error(`Invalid attribute object: ${JSON.stringify(a)}`);
     }
     const keys = Object.keys(attr);
+    if (id === 'SIZE_GRID_ID') {
+      if (!keys.includes('id') || attr.value_id == null) {
+        throw new Error(`SIZE_GRID_ID requires value_id: ${JSON.stringify(a)}`);
+      }
+      if (keys.some((k) => !['id', 'value_id'].includes(k))) {
+        throw new Error(`Invalid SIZE_GRID_ID shape: ${JSON.stringify(a)}`);
+      }
+      continue;
+    }
     if (keys.length !== 2 || !keys.includes('id') || !keys.includes('value_name')) {
       throw new Error(`Attribute must only have id and value_name: ${JSON.stringify(a)}`);
     }
     const vn = attr.value_name;
     if (vn === null || vn === undefined || String(vn).trim() === '') {
       throw new Error(`Invalid attribute value: ${JSON.stringify(a)}`);
+    }
+  }
+
+  if (opts?.userProduct && ML_USER_PRODUCT_CATEGORY_IDS.has(categoryId)) {
+    for (const mandatoryId of ML_MANDATORY_CATEGORY_ATTRIBUTE_IDS) {
+      const found = attrs.some((a) => mlAttrIdUpper(String((a as any)?.id ?? '')) === mandatoryId);
+      if (!found) throw new Error(`Missing mandatory attribute: ${mandatoryId}`);
     }
   }
 
@@ -608,17 +684,6 @@ function mlDraftToPayloadInput(
     }
   }
 
-  const attributes: Array<{ id: string; value_name: string }> = [];
-  if (Array.isArray(draft.attributes)) {
-    for (const a of draft.attributes) {
-      if (!a || typeof a !== 'object') continue;
-      const row = a as Record<string, unknown>;
-      const id = String(row.id ?? '').trim();
-      const value_name = String(row.value_name ?? row.value ?? '').trim();
-      if (id && value_name) attributes.push({ id, value_name });
-    }
-  }
-
   return {
     title: opts.userProduct ? undefined : String(draft.title ?? '').trim() || undefined,
     family_name: String(draft.family_name ?? '').trim() || undefined,
@@ -630,13 +695,14 @@ function mlDraftToPayloadInput(
     listing_type_id: String(draft.listing_type_id ?? 'gold_special'),
     condition: String(draft.condition ?? 'new'),
     pictures,
-    attributes,
+    attributes: draft.attributes,
     seller_custom_field: String(draft.seller_custom_field ?? '').trim() || undefined,
     sale_terms: draft.sale_terms,
     shipping: draft.shipping,
     status: draft.status != null ? String(draft.status) : undefined,
     video_id: draft.video_id != null ? String(draft.video_id) : undefined,
-    userProduct: opts.userProduct
+    userProduct: opts.userProduct,
+    sourceAttributes: draft.sourceAttributes
   };
 }
 
@@ -732,12 +798,14 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
       delete classic.family_name;
       classic.variations = variations;
       validateMlPayload(classic, { userProduct: false });
+      logMlPayloadAttributeIds(classic);
       console.log('[ML PAYLOAD CLEAN]', JSON.stringify(classic, null, 2));
       return classic;
     }
   }
 
   validateMlPayload(payload, { userProduct });
+  logMlPayloadAttributeIds(payload);
   console.log('[ML PAYLOAD CLEAN]', JSON.stringify(payload, null, 2));
   return payload;
 }
@@ -1085,7 +1153,7 @@ function mlAttributesForPackCreate(
   const filtered = opts?.omitFamilyName
     ? raw.filter((a) => mlAttrIdUpper(a.id) !== 'FAMILY_NAME')
     : raw;
-  return sanitizeMlAttributesForApi(filtered);
+  return sanitizeMlCreateAttributes(filtered);
 }
 
 function upsertMlCreateAttribute(
@@ -1395,7 +1463,8 @@ async function buildMercadoLibrePackListingBodyClassic(
     price,
     available_quantity: itemQty,
     pictures: pictureRows,
-    attributes: attrs.map((a) => ({ id: a.id, value_name: a.value_name ?? '' })),
+    attributes: attrs,
+    sourceAttributes: sourceItem?.attributes,
     variations
   };
   if (listing.video_id) draft.video_id = listing.video_id;
@@ -1459,7 +1528,8 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     price,
     available_quantity: itemQty,
     pictures: pictureRows,
-    attributes: attrs.map((a) => ({ id: a.id, value_name: a.value_name ?? '' })),
+    attributes: attrs,
+    sourceAttributes: sourceItem?.attributes,
     seller_custom_field: sellerField,
     userProduct: true
   };
