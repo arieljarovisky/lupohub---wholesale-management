@@ -275,6 +275,26 @@ export function sanitizeMercadoLibreItemCreateBody(
   return stripMlInternalBodyKeys(out);
 }
 
+function mlIsUserProductPostPayload(body: Record<string, unknown>): boolean {
+  const hasFamilyName = Boolean(String(body.family_name ?? '').trim());
+  const variations = Array.isArray(body.variations) ? body.variations : [];
+  return hasFamilyName && variations.length === 0;
+}
+
+/** SIZE/COLOR/guía: solo en variations; en User Product van en title/family_name, no en attributes. */
+function isMlVariationOnlyItemAttributeId(attrId: string): boolean {
+  const upper = mlAttrIdUpper(attrId);
+  if (upper === 'SIZE_GRID_ID') return true;
+  return ML_COLOR_ATTR_IDS.has(upper) || ML_SIZE_ATTR_IDS.has(upper);
+}
+
+function filterMlVariationAttrsFromItemAttributesForUserProduct(
+  attrs: unknown
+): Array<{ id: string; value_name: string }> {
+  if (!Array.isArray(attrs)) return [];
+  return sanitizeMlAttributesForApi(attrs).filter((a) => !isMlVariationOnlyItemAttributeId(a.id));
+}
+
 /** Payload final exclusivo para POST /items (sin _flags ni claves internas). */
 export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): Record<string, unknown> {
   let safe = sanitizeMercadoLibreItemCreateBody(body);
@@ -282,6 +302,9 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
     delete safe.family_name;
   } else {
     delete safe.variations;
+    if (mlIsUserProductPostPayload(safe)) {
+      safe.attributes = filterMlVariationAttrsFromItemAttributesForUserProduct(safe.attributes);
+    }
   }
   return stripMlInternalBodyKeys(safe);
 }
