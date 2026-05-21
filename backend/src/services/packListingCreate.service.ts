@@ -489,8 +489,10 @@ export function summarizeMlItemCreateBody(body: Record<string, unknown>): Record
   const variations = Array.isArray(safe.variations) ? safe.variations : [];
   return Object.assign({}, safe, {
     _flags: {
+      user_product_mode: Boolean(String(safe.family_name ?? '').trim()) && variations.length === 0,
       uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
       removed_family_name_because_variations: variations.length > 0,
+      removed_variations_for_user_product: variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
       has_item_price: safe.price != null,
       has_item_stock: safe.available_quantity != null,
       variation_count: variations.length,
@@ -498,6 +500,17 @@ export function summarizeMlItemCreateBody(body: Record<string, unknown>): Record
       attribute_count: Array.isArray(safe.attributes) ? safe.attributes.length : 0
     }
   });
+}
+
+/** Error ML que exige User Product (family_name sin variations en el mismo body). */
+export function mlCreateErrorRequiresUserProduct(message: string): boolean {
+  const m = String(message || '').toLowerCase();
+  return (
+    m.includes('variations is invalid with family name') ||
+    m.includes('invalid with family name') ||
+    (m.includes('family_name') && m.includes('required_fields')) ||
+    (m.includes('family_name') && m.includes('does not contains'))
+  );
 }
 
 function logMlItemCreateBeforePost(
@@ -508,9 +521,12 @@ function logMlItemCreateBeforePost(
 ): void {
   const ctx = debugContext ? ` ${debugContext}` : '';
   const hadFamilyName = Boolean(String(draftBody.family_name ?? '').trim());
-  const variations = Array.isArray(safeBody.variations) ? safeBody.variations : [];
-  const removedFamilyName = hadFamilyName && variations.length > 0;
-  const combinations = variations.map((v: any) => ({
+  const draftVariations = Array.isArray(draftBody.variations) ? draftBody.variations : [];
+  const safeVariations = Array.isArray(safeBody.variations) ? safeBody.variations : [];
+  const removedFamilyName = hadFamilyName && safeVariations.length > 0;
+  const removedVariations =
+    draftVariations.length > 0 && safeVariations.length === 0 && Boolean(safeBody.family_name);
+  const combinations = safeVariations.map((v: any) => ({
     price: v?.price,
     available_quantity: v?.available_quantity,
     seller_custom_field: v?.seller_custom_field,
@@ -521,9 +537,12 @@ function logMlItemCreateBeforePost(
     `[ML POST /items]${ctx}`,
     JSON.stringify(
       {
+        user_product_mode: extra?.user_product_mode ?? Boolean(safeBody.family_name && !safeVariations.length),
+        publishing_size: extra?.publishing_size,
+        removed_variations: removedVariations || extra?.removed_variations === true,
         removed_family_name: removedFamilyName,
         had_family_name_in_draft: hadFamilyName,
-        variation_count: variations.length,
+        variation_count: safeVariations.length,
         combinations,
         ...extra,
         body: summarizeMlItemCreateBody(safeBody)
@@ -610,13 +629,69 @@ function mlAttributesForDuplicate(item: any, skuSuffix: string): Array<{ id: str
     .filter(Boolean) as Array<{ id: string; value_name: string }>;
 }
 
-/** Publicaciones catalogadas / User Products: family_name + price + available_quantity; no admite array `variations`. */
+/** User Product: exige family_name; no admite `variations` en el mismo POST. */
 export function mlItemUsesFamilyNameModel(item: any): boolean {
   if (mlFamilyNameFromItem(item)) return true;
   const up = item?.user_product_id;
   if (up != null && String(up).trim() !== '') return true;
   if (item?.catalog_listing === true) return true;
   return false;
+}
+
+function mlFamilyNameForPackListing(sourceItem: any, baseTitle?: string): string {
+  const fn = mlFamilyNameFromItem(sourceItem);
+  if (fn) return fn;
+  const title = String(baseTitle || sourceItem?.title || '')
+    .trim()
+    .replace(/\s*Talle\s+[\w\d]+.*$/i, '')
+    .replace(/\s*\(Pack\).*$/i, '')
+    .trim();
+  if (title) return title;
+  throw new Error(
+    'No se pudo obtener family_name de la publicación origen. Usá una publicación individual del mismo producto.'
+  );
+}
+
+function packListingBaseTitle(
+  sourceItem: any,
+  opts: { titleSuffix: string; content?: PackListingPublicationContent }
+): string {
+  const raw =
+    opts.content?.title?.trim() ||
+    appendTitleSuffix(String(sourceItem.title || 'Pack'), opts.titleSuffix);
+  return raw
+    .replace(/\s*Talle\s+[\w\d]+.*$/i, '')
+    .replace(/\s*\(Pack\)\s*$/i, '')
+    .trim();
+}
+
+function packListingTitleForSize(baseTitle: string, size: string): string {
+  const base = String(baseTitle || '').trim() || 'Pack';
+  const sz = String(size || '').trim() || 'U';
+  if (base.toLowerCase().includes(`talle ${sz.toLowerCase()}`)) return base;
+  return `${base} Talle ${sz}`;
+}
+
+function buildPackListingSellerCustomField(
+  sourceItem: any,
+  _skuSuffix: string,
+  size: string
+): string {
+  let core = mlSkuFromItem(sourceItem);
+  if (!core && Array.isArray(sourceItem?.attributes)) {
+    const modelAttr = sourceItem.attributes.find(
+      (a: any) => mlAttrIdUpper(a?.id) === 'MODEL'
+    );
+    core = String(modelAttr?.value_name ?? modelAttr?.value ?? '').trim();
+  }
+  core = (core || 'item')
+    .replace(/[^a-zA-Z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const sizeCode = String(size || 'U')
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, '');
+  return `PACK-${core}-${sizeCode}`;
 }
 
 function mlFamilyNameFromItem(item: any): string {
@@ -655,11 +730,14 @@ function mlCommonListingFields(sourceItem: any): Record<string, unknown> {
 async function postMercadoLibreNewItem(
   accessToken: string,
   body: Record<string, unknown>,
-  debugContext?: string
+  debugContext?: string,
+  logExtra?: Record<string, unknown>
 ): Promise<any> {
   const safeBody = sanitizeMercadoLibreItemCreateBody(body);
   if (Array.isArray(safeBody.variations) && safeBody.variations.length > 0) {
     delete safeBody.family_name;
+  } else {
+    delete safeBody.variations;
   }
   const pics = safeBody.pictures;
   if (!Array.isArray(pics) || !pics.length) {
@@ -667,7 +745,7 @@ async function postMercadoLibreNewItem(
       'No hay fotos válidas para Mercado Libre (revisá que pictureId sea de imagen ML, no un atributo)'
     );
   }
-  logMlItemCreateBeforePost(body, safeBody, debugContext);
+  logMlItemCreateBeforePost(body, safeBody, debugContext, logExtra);
   const payloadPreview = summarizeMlItemCreateBody(safeBody);
 
   const postRes = await axios.post('https://api.mercadolibre.com/items', safeBody, {
@@ -808,6 +886,119 @@ async function buildMercadoLibrePackListingBodyClassic(
   if (opts.status === 'paused') body.status = 'paused';
 
   return body;
+}
+
+/** User Product: una publicación por talle, con family_name y sin variations. */
+async function buildMercadoLibrePackListingBodyUserProductSingle(
+  sourceItem: any,
+  packVariant: { label: string; items: PublicationBundleItem[] },
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    status?: 'active' | 'paused';
+    content?: PackListingPublicationContent;
+    baseTitle: string;
+    baseFamilyName: string;
+  }
+): Promise<Record<string, unknown>> {
+  const pictures = mlPicturesPayload(opts.content, sourceItem);
+  if (!pictures.length) throw new Error('Seleccioná al menos una foto para la publicación');
+
+  const price =
+    opts.content?.price != null && Number.isFinite(Number(opts.content.price))
+      ? Number(opts.content.price)
+      : Number(sourceItem.price) || 0;
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error('Indicá un precio válido para la publicación pack');
+  }
+
+  const comboLabel = (packVariant.label || '').trim();
+  const { color, size } = await resolvePackVariantColorSize(
+    packVariant.items,
+    sourceItem,
+    comboLabel
+  );
+  const itemQty = Math.max(0, Math.floor(computeAvailableStockFromItems(packVariant.items)));
+  const title = packListingTitleForSize(opts.baseTitle, size);
+  const sellerField = buildPackListingSellerCustomField(sourceItem, opts.skuSuffix, size);
+
+  let attrs = mlItemAttributesForPackListing(
+    sourceItem,
+    opts.skuSuffix,
+    opts.baseTitle,
+    packVariant.items,
+    { withVariations: false }
+  );
+  attrs = upsertMlItemAttribute(attrs, 'SIZE', size);
+  attrs = upsertMlItemAttribute(attrs, 'COLOR', packColorNameForMlVariation(color));
+
+  const body: Record<string, unknown> = {
+    ...mlCommonListingFields(sourceItem),
+    title,
+    family_name: opts.baseFamilyName,
+    price,
+    available_quantity: itemQty,
+    pictures: sanitizeMlPicturesForApi(pictures),
+    attributes: attrs,
+    seller_custom_field: sellerField
+  };
+
+  if (opts.status === 'paused') body.status = 'paused';
+  return body;
+}
+
+async function createMercadoLibrePackListingUserProduct(
+  sourceItem: any,
+  packVariants: Array<{ label: string; items: PublicationBundleItem[] }>,
+  opts: {
+    titleSuffix: string;
+    skuSuffix: string;
+    status?: 'active' | 'paused';
+    content?: PackListingPublicationContent;
+  }
+): Promise<{ itemId: string; item: any; variationIds: string[] }> {
+  const mlToken = await getValidMLToken();
+  if (!mlToken) throw new Error('No hay integración con Mercado Libre');
+  if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
+
+  const baseTitle = packListingBaseTitle(sourceItem, opts);
+  const baseFamilyName = mlFamilyNameForPackListing(sourceItem, baseTitle);
+  const listingIds: string[] = [];
+  let lastItem: any = null;
+
+  console.log(
+    `[ML pack User Product] Creando ${packVariants.length} publicación(es) separada(s) (sin variations). family_name="${baseFamilyName}"`
+  );
+
+  for (let idx = 0; idx < packVariants.length; idx++) {
+    const pv = packVariants[idx];
+    const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
+    const { size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
+
+    const body = await buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, pv, {
+      ...opts,
+      baseTitle,
+      baseFamilyName
+    });
+
+    const newItem = await postMercadoLibreNewItem(
+      mlToken.access_token,
+      body,
+      `user_product pack ${idx + 1}/${packVariants.length}`,
+      {
+        user_product_mode: true,
+        removed_variations: true,
+        publishing_size: size,
+        pack_combo_label: comboLabel
+      }
+    );
+    const itemId = String(newItem.id);
+    listingIds.push(itemId);
+    lastItem = newItem;
+    await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
+  }
+
+  return { itemId: listingIds[0], item: lastItem, variationIds: listingIds };
 }
 
 export type PublicationSourcePreview = {
@@ -964,22 +1155,32 @@ export async function createMercadoLibrePackListingWithVariants(
   if (!mlToken) throw new Error('No hay integración con Mercado Libre');
   if (!packVariants.length) throw new Error('Agregá al menos una combinación de colores');
 
-  const body = await buildMercadoLibrePackListingBodyClassic(sourceItem, packVariants, opts);
+  if (mlItemUsesFamilyNameModel(sourceItem)) {
+    return createMercadoLibrePackListingUserProduct(sourceItem, packVariants, opts);
+  }
 
-  const newItem = await postMercadoLibreNewItem(
-    mlToken.access_token,
-    body,
-    `pack variations=${packVariants.length} (sin family_name)`
-  );
-  const itemId = String(newItem.id);
-
-  const variationIds = (Array.isArray(newItem.variations) ? newItem.variations : []).map((v: any) =>
-    String(v?.id || '')
-  );
-
-  await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
-
-  return { itemId, item: newItem, variationIds };
+  try {
+    const body = await buildMercadoLibrePackListingBodyClassic(sourceItem, packVariants, opts);
+    const newItem = await postMercadoLibreNewItem(
+      mlToken.access_token,
+      body,
+      `pack classic variations=${packVariants.length}`,
+      { user_product_mode: false, removed_variations: false }
+    );
+    const itemId = String(newItem.id);
+    const variationIds = (Array.isArray(newItem.variations) ? newItem.variations : []).map((v: any) =>
+      String(v?.id || '')
+    );
+    await applyDescriptionFromSource(itemId, sourceItem, mlToken.access_token, opts.content?.description);
+    return { itemId, item: newItem, variationIds };
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (!mlCreateErrorRequiresUserProduct(msg)) throw err;
+    console.warn(
+      '[ML pack] ML exigió User Product (family_name sin variations). Reintentando una publicación por talle.'
+    );
+    return createMercadoLibrePackListingUserProduct(sourceItem, packVariants, opts);
+  }
 }
 
 function tnImagesFromContent(
@@ -1347,6 +1548,39 @@ export async function createPackListingAndBundle(input: {
         status: input.published === false ? 'paused' : 'active',
         content: input.publicationContent
       });
+
+      const userProductMulti =
+        mlItemUsesFamilyNameModel(resolved.item) && created.variationIds.length > 1;
+
+      if (userProductMulti) {
+        for (let idx = 0; idx < packVariants.length; idx++) {
+          const mlaId = created.variationIds[idx];
+          if (!mlaId) continue;
+          await createPublicationBundle({
+            platform: 'mercadolibre',
+            externalProductId: mlaId,
+            externalVariantId: '',
+            label: packVariants[idx].label,
+            items: packVariants[idx].rawItems
+          });
+        }
+        const allBundles = [];
+        for (const mlaId of created.variationIds) {
+          allBundles.push(...(await findBundlesByProduct('mercadolibre', mlaId)));
+        }
+        return {
+          group: {
+            platform: 'mercadolibre',
+            externalProductId: created.itemId,
+            listingLabel: input.label?.trim() || null,
+            variants: allBundles
+          },
+          newExternalProductId: created.itemId,
+          sourceExternalProductId: normalizeMercadoLibreItemId(sourceId) || sourceId,
+          message: `Se crearon ${packVariants.length} publicaciones ML (User Product, un talle por MLA): ${created.variationIds.join(', ')}`
+        };
+      }
+
       newProductId = created.itemId;
       packVariants.forEach((pv, idx) => {
         bundleVariants.push({
