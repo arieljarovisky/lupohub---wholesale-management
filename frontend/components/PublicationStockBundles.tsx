@@ -336,16 +336,45 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     );
   };
 
-  const addTopX3CombosForActiveSize = () => {
-    if (!activeSizeGroup) return;
+  const addAllX3CombosForSize = (size: string, combos: PackComboSuggestion[]) => {
     let added = 0;
-    for (const combo of activeSizeGroup.suggestedCombosX3.slice(0, 6)) {
-      const items = draftItemsFromPickedColors(activeSizeGroup.size, combo.variantIds);
+    for (const combo of combos) {
+      const items = draftItemsFromPickedColors(size, combo.variantIds);
       if (items.length < DEFAULT_PACK_COLOR_COUNT) continue;
-      if (appendPackCombination(comboLabelWithSize(combo, activeSizeGroup.size), items)) added += 1;
+      if (appendPackCombination(comboLabelWithSize(combo, size), items)) added += 1;
     }
-    if (added === 0) showToast('error', 'No hay combos x3 con stock en este talle');
-    else showToast('success', `${added} combinación(es) x3 agregada(s) para talle ${activeSizeGroup.size}`);
+    return added;
+  };
+
+  const addAllX3CombosForActiveSize = () => {
+    if (!activeSizeGroup) return;
+    const added = addAllX3CombosForSize(activeSizeGroup.size, activeSizeGroup.suggestedCombosX3);
+    if (added === 0) showToast('error', 'No hay packs x3 con stock en este talle');
+    else
+      showToast(
+        'success',
+        `${added} pack(s) x3 agregado(s) en talle ${activeSizeGroup.size} (${activeSizeGroup.viableX3Count} combos posibles)`
+      );
+  };
+
+  const addAllX3CombosForAllSizes = () => {
+    if (!articlePackMatrix) return;
+    let added = 0;
+    let sizes = 0;
+    for (const group of articlePackMatrix.sizeGroups) {
+      if (!group.suggestedCombosX3.length) continue;
+      const n = addAllX3CombosForSize(group.size, group.suggestedCombosX3);
+      if (n > 0) {
+        added += n;
+        sizes += 1;
+      }
+    }
+    if (added === 0) showToast('error', 'No hay talles con packs x3 surtidos posibles');
+    else
+      showToast(
+        'success',
+        `${added} pack(s) x3 en ${sizes} talle(s) (todos los combos viables según stock)`
+      );
   };
 
   const addBestX3ForAllSizes = () => {
@@ -359,10 +388,6 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     }
     if (added === 0) showToast('error', 'No hay talles con un pack x3 surtido posible');
     else showToast('success', `${added} mejor pack x3 por talle agregado(s)`);
-  };
-
-  const addAllSizesAsPackCombinations = () => {
-    addBestX3ForAllSizes();
   };
 
   const prunePackItemsToArticle = (articleKey: string) => {
@@ -1166,9 +1191,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                 {showSuggestions && selectedArticleKey && (
                   <div className="rounded-xl border border-amber-800/50 bg-amber-950/25 p-3 space-y-3">
                     <p className="text-xs text-amber-200/90">
-                      Packs <strong>x{DEFAULT_PACK_COLOR_COUNT} surtidos</strong>: el sistema calcula las mejores
-                      combinaciones de 3 colores según el <strong>stock mínimo</strong> (cuántos packs podés vender).
-                      También podés elegir colores a mano.
+                      Por cada <strong>talle</strong> se listan <strong>varios packs x{DEFAULT_PACK_COLOR_COUNT}</strong>{' '}
+                      con distintos colores si el stock alcanza (ej. 4 colores → hasta 4 combos distintos). Ordenados
+                      por cuántos packs podés vender (stock del color que más limita).
                     </p>
                     <div className="relative">
                       <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -1202,12 +1227,13 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                                 }`}
                               >
                                 {g.size}
-                                {g.bestComboX3 && g.bestComboX3.availablePacks > 0 ? (
-                                  <span className="ml-1 text-[10px] text-emerald-400/90" title="Mejor pack x3 surtido">
-                                    (x3: {g.bestComboX3.availablePacks})
+                                {g.viableX3Count > 0 ? (
+                                  <span
+                                    className="ml-1 text-[10px] text-emerald-400/90"
+                                    title={`${g.viableX3Count} packs x3 distintos · mejor: ${g.bestComboX3?.availablePacks ?? 0} u.`}
+                                  >
+                                    ({g.viableX3Count} packs x3)
                                   </span>
-                                ) : g.suggestedCombosX3.length > 0 ? (
-                                  <span className="ml-1 text-[10px] text-slate-500">(sin x3)</span>
                                 ) : null}
                               </button>
                             ))}
@@ -1278,7 +1304,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                         {activeSizeGroup && activeSizeGroup.suggestedCombosX3.length > 0 && (
                           <div>
                             <label className="text-[10px] font-bold text-emerald-400/90 uppercase tracking-wide block mb-1.5">
-                              3 · Mejores packs x{DEFAULT_PACK_COLOR_COUNT} surtidos (talle {activeSizeGroup.size})
+                              3 · Packs x{DEFAULT_PACK_COLOR_COUNT} surtidos en talle {activeSizeGroup.size} (
+                              {activeSizeGroup.viableX3Count} combo{activeSizeGroup.viableX3Count === 1 ? '' : 's'})
                             </label>
                             <ul className="space-y-1.5 max-h-52 overflow-y-auto">
                               {activeSizeGroup.suggestedCombosX3.map((combo, ci) => (
@@ -1316,10 +1343,10 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                           <button
                             type="button"
                             disabled={!activeSizeGroup?.suggestedCombosX3.length}
-                            onClick={addTopX3CombosForActiveSize}
+                            onClick={addAllX3CombosForActiveSize}
                             className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40"
                           >
-                            Agregar mejores x3 (este talle)
+                            Agregar todos los x3 (talle {activeSizeGroup?.size || '—'})
                           </button>
                           <button
                             type="button"
@@ -1330,7 +1357,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                             }
                             className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-40"
                           >
-                            Mejor pack x3 ({activeSizeGroup?.bestComboX3?.label || '—'})
+                            Solo el mejor ({activeSizeGroup?.bestComboX3?.label || '—'})
                           </button>
                           <button
                             type="button"
@@ -1352,10 +1379,17 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                           )}
                           <button
                             type="button"
-                            onClick={addBestX3ForAllSizes}
-                            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 text-xs hover:bg-slate-800"
+                            onClick={addAllX3CombosForAllSizes}
+                            className="px-3 py-1.5 rounded-lg border border-emerald-800/60 text-emerald-200 text-xs hover:bg-emerald-950/40 font-semibold"
                           >
-                            Mejor x3 por cada talle
+                            Todos los x3 en todos los talles
+                          </button>
+                          <button
+                            type="button"
+                            onClick={addBestX3ForAllSizes}
+                            className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-400 text-xs hover:bg-slate-800"
+                          >
+                            Solo el mejor x3 por talle
                           </button>
                         </div>
                       </>

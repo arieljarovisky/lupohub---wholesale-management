@@ -150,7 +150,7 @@ export function suggestPublicationPacks(
       stock: r.stock
     }));
 
-    const combosX3 = suggestPackCombosOfSize(colorOpts, { packSize, maxCombos: 6 });
+    const combosX3 = suggestPackCombosOfSize(colorOpts, { packSize, minAvailablePacks: 1 });
     const packVariants: SuggestedPackVariant[] = combosX3.map((combo) => ({
       label: combo.label,
       items: packItemsFromColorOptions(colorOpts, combo.variantIds),
@@ -219,10 +219,12 @@ export type ArticlePackSizeGroup = {
   packLabel: string;
   /** Pack con todos los colores con stock (referencia). */
   availablePacks: number;
-  /** Mejores combinaciones de exactamente 3 colores surtidos. */
+  /** Combinaciones x3 surtidas viables (varias por talle si el stock alcanza). */
   suggestedCombosX3: PackComboSuggestion[];
   /** Mejor combo x3 del talle (máximo stock disponible). */
   bestComboX3: PackComboSuggestion | null;
+  /** Cuántos packs x3 distintos hay para este talle. */
+  viableX3Count: number;
 };
 
 function combinationsOfSize<T>(items: T[], k: number): T[][] {
@@ -247,22 +249,49 @@ function combinationsOfSize<T>(items: T[], k: number): T[][] {
 /**
  * Mejores packs de N colores surtidos según stock: prioriza más packs vendibles (min stock del trio).
  */
+function comboVariantKey(variantIds: string[]): string {
+  return [...variantIds].sort().join('|');
+}
+
+function maxCombinationsForColors(n: number, k: number): number {
+  if (n < k) return 0;
+  let num = 1;
+  let den = 1;
+  for (let i = 0; i < k; i++) {
+    num *= n - i;
+    den *= i + 1;
+  }
+  return Math.floor(num / den);
+}
+
+/**
+ * Mejores packs de N colores surtidos según stock.
+ * Devuelve varios tríos distintos por talle (no solo uno), ordenados por packs vendibles.
+ */
 export function suggestPackCombosOfSize(
   colors: ArticlePackColorOption[],
-  opts?: { packSize?: number; maxCombos?: number; minStockPerColor?: number }
+  opts?: {
+    packSize?: number;
+    maxCombos?: number;
+    minStockPerColor?: number;
+    minAvailablePacks?: number;
+  }
 ): PackComboSuggestion[] {
   const packSize = Math.max(2, opts?.packSize ?? DEFAULT_PACK_COLOR_COUNT);
-  const maxCombos = opts?.maxCombos ?? 8;
   const minStock = Math.max(0, opts?.minStockPerColor ?? 1);
+  const minAvailablePacks = Math.max(1, opts?.minAvailablePacks ?? 1);
 
   const eligible = colors.filter((c) => c.stock >= minStock);
   if (eligible.length < packSize) return [];
+
+  const maxPossible = maxCombinationsForColors(eligible.length, packSize);
+  const maxCombos = opts?.maxCombos ?? Math.min(24, Math.max(12, maxPossible));
 
   const combos: PackComboSuggestion[] = [];
   for (const trio of combinationsOfSize(eligible, packSize)) {
     const stocks = trio.map((c) => c.stock);
     const minS = Math.min(...stocks);
-    if (minS < 1) continue;
+    if (minS < minAvailablePacks) continue;
     const colorNames = trio.map((c) => c.color);
     const totalStock = stocks.reduce((a, b) => a + b, 0);
     combos.push({
@@ -277,14 +306,14 @@ export function suggestPackCombosOfSize(
 
   combos.sort((a, b) => b.score - a.score);
 
+  const seen = new Set<string>();
   const picked: PackComboSuggestion[] = [];
   for (const c of combos) {
     if (picked.length >= maxCombos) break;
-    const tooSimilar = picked.some((p) => {
-      const shared = p.variantIds.filter((id) => c.variantIds.includes(id)).length;
-      return shared >= packSize - 1;
-    });
-    if (!tooSimilar) picked.push(c);
+    const key = comboVariantKey(c.variantIds);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(c);
   }
   return picked;
 }
@@ -376,8 +405,8 @@ export function buildArticlePackMatrix(
     }));
     const suggestedCombosX3 = suggestPackCombosOfSize(withStock, {
       packSize: DEFAULT_PACK_COLOR_COUNT,
-      maxCombos: 8,
-      minStockPerColor: minStock
+      minStockPerColor: minStock,
+      minAvailablePacks: 1
     });
 
     sizeGroups.push({
@@ -386,7 +415,8 @@ export function buildArticlePackMatrix(
       packLabel: colorAbbrevLabel(withStock.map((c) => c.color)),
       availablePacks: computeAvailablePacks(items),
       suggestedCombosX3,
-      bestComboX3: suggestedCombosX3[0] ?? null
+      bestComboX3: suggestedCombosX3[0] ?? null,
+      viableX3Count: suggestedCombosX3.length
     });
   }
 
