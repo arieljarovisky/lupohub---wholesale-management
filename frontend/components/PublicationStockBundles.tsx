@@ -6,8 +6,8 @@ import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } fr
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 import {
   buildArticlePackMatrix,
-  colorAbbrevLabel,
   DEFAULT_PACK_COLOR_COUNT,
+  packComboColorLabel,
   packItemsFromColorOptions,
   productGroupKey,
   type PackComboSuggestion
@@ -303,9 +303,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     const items = draftItemsFromPickedColors(size, ids);
     const colorNames =
       activeSizeGroup?.colors.filter((c) => ids.includes(c.variantId)).map((c) => c.color) || [];
-    const label = colorAbbrevLabel(colorNames);
+    const label = `${packComboColorLabel(colorNames)} (${size})`;
     if (!appendPackCombination(label, items)) return;
-    showToast('success', `Combinación agregada (${items.length} colores, talle ${size})`);
+    showToast('success', `Combinación agregada (${label})`);
   };
 
   const addFullSizePack = (size: string) => {
@@ -319,12 +319,13 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       size,
       withStock.map((c) => c.variantId)
     );
-    if (!appendPackCombination(group.packLabel, items)) return;
-    showToast('success', `Pack ${group.packLabel} (talle ${size}) agregado`);
+    const label = `${packComboColorLabel(withStock.map((c) => c.color))} (${size})`;
+    if (!appendPackCombination(label, items)) return;
+    showToast('success', `Pack agregado: ${label}`);
   };
 
   const comboLabelWithSize = (combo: PackComboSuggestion, size: string) =>
-    `Pack x${DEFAULT_PACK_COLOR_COUNT} ${combo.label} (${size})`;
+    `${packComboColorLabel(combo.colorNames)} (${size})`;
 
   const addSuggestedX3Combo = (combo: PackComboSuggestion, size: string) => {
     const items = draftItemsFromPickedColors(size, combo.variantIds);
@@ -1314,9 +1315,11 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                                   className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-900/50 bg-slate-900/60 px-2.5 py-2"
                                 >
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-white">{combo.label}</p>
-                                    <p className="text-[10px] text-slate-400 truncate">
-                                      {combo.colorNames.join(' + ')}
+                                    <p className="text-sm font-semibold text-white leading-snug">
+                                      {packComboColorLabel(combo.colorNames)}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 mt-0.5">
+                                      Talle {activeSizeGroup.size}
                                     </p>
                                     <p className="text-[10px] text-emerald-400/90 mt-0.5">
                                       Hasta <strong>{combo.availablePacks}</strong> pack(s) · stock mín.{' '}

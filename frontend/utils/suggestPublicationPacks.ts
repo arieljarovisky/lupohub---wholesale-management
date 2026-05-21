@@ -71,6 +71,13 @@ export function colorAbbrevLabel(colors: string[]): string {
   return names.join(' / ');
 }
 
+/** Nombre legible del pack: colores completos (ej. "Negro + Gris + Blanco"). */
+export function packComboColorLabel(colors: string[], separator = ' + '): string {
+  const names = colors.map((c) => c.trim()).filter(Boolean);
+  if (!names.length) return 'Pack surtido';
+  return names.join(separator);
+}
+
 function computeAvailablePacks(items: SuggestedPackItem[]): number {
   if (!items.length) return 0;
   let min = Infinity;
@@ -295,7 +302,7 @@ export function suggestPackCombosOfSize(
     const colorNames = trio.map((c) => c.color);
     const totalStock = stocks.reduce((a, b) => a + b, 0);
     combos.push({
-      label: colorAbbrevLabel(colorNames),
+      label: packComboColorLabel(colorNames),
       colorNames,
       variantIds: trio.map((c) => c.variantId),
       availablePacks: minS,
@@ -412,7 +419,7 @@ export function buildArticlePackMatrix(
     sizeGroups.push({
       size,
       colors,
-      packLabel: colorAbbrevLabel(withStock.map((c) => c.color)),
+      packLabel: packComboColorLabel(withStock.map((c) => c.color)),
       availablePacks: computeAvailablePacks(items),
       suggestedCombosX3,
       bestComboX3: suggestedCombosX3[0] ?? null,
