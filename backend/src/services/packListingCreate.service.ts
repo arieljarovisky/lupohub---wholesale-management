@@ -2306,6 +2306,81 @@ async function createMercadoLibrePackListingUserProduct(
   return { itemId: listingIds[0], item: lastItem, variationIds: listingIds };
 }
 
+export type MlFashionGridPreviewRow = {
+  variationId?: string;
+  sizeDisplay: string;
+  sizeGridRowId: string;
+  sizeAttribute: string;
+};
+
+export type MlFashionGridPreview = {
+  sizeGridId: string;
+  familyName?: string;
+  sourceSellerId?: string;
+  integrationSellerId?: string;
+  sellerMatchesIntegration: boolean;
+  sellerWarning?: string;
+  rows: MlFashionGridPreviewRow[];
+};
+
+/** Vista previa de guía de talles que se copiará al crear el pack (misma MLA origen). */
+export function buildMlFashionGridPreview(
+  sourceItem: any,
+  integrationSellerId?: string
+): MlFashionGridPreview | null {
+  const sizeGridId = mlSourceSizeGridId(sourceItem);
+  if (!sizeGridId) return null;
+
+  const sourceSellerId = String(sourceItem?.seller_id ?? '').trim();
+  const tokenSeller = String(integrationSellerId ?? '').trim();
+  const sellerMatchesIntegration =
+    !sourceSellerId || !tokenSeller || sourceSellerId === tokenSeller;
+
+  const rows: MlFashionGridPreviewRow[] = [];
+  const variations = Array.isArray(sourceItem?.variations) ? sourceItem.variations : [];
+
+  for (const v of variations) {
+    const rowAttr = mlPickCreateAttributeFromList(v?.attributes, 'SIZE_GRID_ROW_ID');
+    const rowId = String(rowAttr?.value_name ?? rowAttr?.value_id ?? '').trim();
+    if (!rowId) continue;
+    const sizeAttr = mlPickCreateAttributeFromList(v?.attributes, 'SIZE');
+    const ac = Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : [];
+    const sizeAc = ac.find((a: any) => ML_SIZE_ATTR_IDS.has(mlAttrIdUpper(a?.id)));
+    const sizeDisplay = String(sizeAc?.value_name ?? sizeAttr?.value_name ?? '').trim() || '—';
+    rows.push({
+      variationId: v?.id != null ? String(v.id) : undefined,
+      sizeDisplay,
+      sizeGridRowId: rowId,
+      sizeAttribute: String(sizeAttr?.value_name ?? sizeDisplay)
+    });
+  }
+
+  if (!rows.length) {
+    const rowAttr = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ROW_ID');
+    const sizeAttr = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE');
+    const rowId = String(rowAttr?.value_name ?? rowAttr?.value_id ?? '').trim();
+    if (rowId) {
+      rows.push({
+        sizeDisplay: String(sizeAttr?.value_name ?? '—'),
+        sizeGridRowId: rowId,
+        sizeAttribute: String(sizeAttr?.value_name ?? '—')
+      });
+    }
+  }
+
+  return {
+    sizeGridId,
+    familyName: mlFamilyNameFromItem(sourceItem) || undefined,
+    sourceSellerId: sourceSellerId || undefined,
+    integrationSellerId: tokenSeller || undefined,
+    sellerMatchesIntegration,
+    sellerWarning: sellerMatchesIntegration
+      ? undefined
+      : `La publicación origen es del vendedor ${sourceSellerId} y la cuenta conectada es ${tokenSeller}. La guía puede fallar al publicar.`,
+    rows
+  };
+}
+
 export type PublicationSourcePreview = {
   platform: PublicationBundlePlatform;
   resolvedId: string;
@@ -2313,6 +2388,7 @@ export type PublicationSourcePreview = {
   description: string;
   images: PreviewImageDto[];
   price?: number;
+  fashionGrid?: MlFashionGridPreview;
 };
 
 function localizedTnText(field: unknown): string {
@@ -2358,13 +2434,15 @@ export async function fetchPublicationSourcePreview(
     }
     if (!description && item.subtitle) description = String(item.subtitle).trim();
     const images = collectMlPicturesFromItem(item);
+    const fashionGrid = buildMlFashionGridPreview(item, mlToken?.user_id);
     return {
       platform: 'mercadolibre',
       resolvedId: itemId,
       title: String(item.title || '').trim(),
       description,
       images,
-      price: Number(item.price) || undefined
+      price: Number(item.price) || undefined,
+      fashionGrid: fashionGrid ?? undefined
     };
   }
 

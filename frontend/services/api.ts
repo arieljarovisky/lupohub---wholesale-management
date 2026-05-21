@@ -704,6 +704,20 @@ export const api = {
     description: string;
     images: Array<{ url: string; pictureId?: string } | string>;
     price?: number;
+    fashionGrid?: {
+      sizeGridId: string;
+      familyName?: string;
+      sourceSellerId?: string;
+      integrationSellerId?: string;
+      sellerMatchesIntegration: boolean;
+      sellerWarning?: string;
+      rows: Array<{
+        variationId?: string;
+        sizeDisplay: string;
+        sizeGridRowId: string;
+        sizeAttribute: string;
+      }>;
+    };
   }> => {
     const q = new URLSearchParams({ platform, sourceId });
     const res = await request<any>(`/publication-bundles/source-preview?${q.toString()}`, 'GET');

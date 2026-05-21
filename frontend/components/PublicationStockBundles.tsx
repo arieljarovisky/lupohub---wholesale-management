@@ -20,13 +20,68 @@ type DraftPublicationImage = {
   selected: boolean;
 };
 
+type FashionGridPreviewRow = {
+  variationId?: string;
+  sizeDisplay: string;
+  sizeGridRowId: string;
+  sizeAttribute: string;
+};
+
+type FashionGridPreview = {
+  sizeGridId: string;
+  familyName?: string;
+  sellerMatchesIntegration: boolean;
+  sellerWarning?: string;
+  rows: FashionGridPreviewRow[];
+};
+
 type PublicationDraft = {
   resolvedId: string;
   title: string;
   description: string;
   price: string;
   images: DraftPublicationImage[];
+  fashionGrid?: FashionGridPreview | null;
 };
+
+function packVariantSizeFromItems(
+  items: DraftItem[],
+  variantById: Map<string, Product>
+): { sizeCode: string; sizeLabel: string } {
+  const codes = new Set<string>();
+  const labels = new Set<string>();
+  for (const it of items) {
+    const p = variantById.get(it.variantId);
+    if (!p) continue;
+    const code = String(p.size || '').trim();
+    if (code) codes.add(code);
+    const label = String(p.size || '').trim();
+    if (label) labels.add(label);
+  }
+  const sizeCode = codes.size === 1 ? [...codes][0] : [...codes][0] || '';
+  const sizeLabel = labels.size === 1 ? [...labels][0] : [...labels][0] || sizeCode;
+  return { sizeCode, sizeLabel };
+}
+
+function matchFashionGridRow(
+  grid: FashionGridPreview,
+  sizeCode: string,
+  sizeLabel: string
+): FashionGridPreviewRow | undefined {
+  const tokens = new Set(
+    [sizeCode, sizeLabel]
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  return grid.rows.find((r) => {
+    const d = r.sizeDisplay.toLowerCase();
+    const a = r.sizeAttribute.toLowerCase();
+    for (const t of tokens) {
+      if (d === t || a === t || d.startsWith(`${t} `) || a.startsWith(`${t} `)) return true;
+    }
+    return false;
+  });
+}
 
 const PreviewThumb: React.FC<{
   url: string;
@@ -369,7 +424,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
               title: fullTitle,
               description: p.description || '',
               price: p.price != null ? String(p.price) : '',
-              images
+              images,
+              fashionGrid: p.fashionGrid ?? null
             });
             if (!listingLabelTouched.current) setListingLabel(fullTitle);
           }
@@ -781,6 +837,95 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                         Base {publicationDraft.resolvedId} · {publicationDraft.images.filter((i) => i.selected).length}/
                         {publicationDraft.images.length} fotos seleccionadas
                       </p>
+                      {platform === 'mercadolibre' && (
+                        <div className="rounded-lg border border-sky-800/50 bg-sky-950/30 p-3 space-y-2">
+                          <p className="text-[11px] font-bold text-sky-300 uppercase tracking-wide">
+                            Guía de talles (desde publicación origen)
+                          </p>
+                          {!publicationDraft.fashionGrid?.sizeGridId ? (
+                            <p className="text-xs text-amber-400">
+                              La publicación origen no tiene SIZE_GRID_ID. Elegí otra MLA con guía de talles configurada.
+                            </p>
+                          ) : (
+                            <>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono text-slate-300">
+                                <p>
+                                  <span className="text-slate-500">SIZE_GRID_ID:</span>{' '}
+                                  {publicationDraft.fashionGrid.sizeGridId}
+                                </p>
+                                {publicationDraft.fashionGrid.familyName && (
+                                  <p className="sm:col-span-2">
+                                    <span className="text-slate-500">family_name:</span>{' '}
+                                    {publicationDraft.fashionGrid.familyName}
+                                  </p>
+                                )}
+                              </div>
+                              {!publicationDraft.fashionGrid.sellerMatchesIntegration &&
+                                publicationDraft.fashionGrid.sellerWarning && (
+                                  <p className="text-xs text-amber-400">{publicationDraft.fashionGrid.sellerWarning}</p>
+                                )}
+                              {publicationDraft.fashionGrid.rows.length > 0 && (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-left text-[11px] text-slate-300 border-collapse">
+                                    <thead>
+                                      <tr className="text-slate-500 border-b border-slate-700">
+                                        <th className="py-1 pr-2 font-normal">Talle MLA</th>
+                                        <th className="py-1 pr-2 font-normal">SIZE_GRID_ROW_ID</th>
+                                        <th className="py-1 font-normal">SIZE</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {publicationDraft.fashionGrid.rows.map((row) => (
+                                        <tr key={row.sizeGridRowId} className="border-b border-slate-800/80">
+                                          <td className="py-1 pr-2">{row.sizeDisplay}</td>
+                                          <td className="py-1 pr-2 font-mono">{row.sizeGridRowId}</td>
+                                          <td className="py-1">{row.sizeAttribute}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {packColorVariants.some((pv) => pv.items.length > 0) && (
+                                <div className="pt-1 border-t border-slate-700/80 space-y-1">
+                                  <p className="text-[10px] text-slate-500 uppercase">Por combinación del pack</p>
+                                  {packColorVariants
+                                    .filter((pv) => pv.items.length > 0)
+                                    .map((pv) => {
+                                      const { sizeCode, sizeLabel } = packVariantSizeFromItems(pv.items, variantById);
+                                      const row = publicationDraft.fashionGrid
+                                        ? matchFashionGridRow(publicationDraft.fashionGrid, sizeCode, sizeLabel)
+                                        : undefined;
+                                      const combo = pv.label.trim() || 'Combo';
+                                      return (
+                                        <p key={pv.key} className="text-xs font-mono">
+                                          <span className="text-violet-300">{combo}</span>
+                                          {sizeCode ? (
+                                            <span className="text-slate-500"> · talle {sizeCode}</span>
+                                          ) : null}
+                                          {row ? (
+                                            <span className="text-emerald-400">
+                                              {' '}
+                                              → fila {row.sizeGridRowId} (SIZE: {row.sizeAttribute})
+                                            </span>
+                                          ) : (
+                                            <span className="text-amber-400">
+                                              {' '}
+                                              → sin fila en la guía origen para este talle
+                                            </span>
+                                          )}
+                                        </p>
+                                      );
+                                    })}
+                                </div>
+                              )}
+                              <p className="text-[10px] text-slate-500">
+                                Al publicar se envía la misma guía y fila que la MLA origen (no otra de charts/search).
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      )}
                       <div>
                         <label className="text-[11px] text-slate-500 block mb-1">Título</label>
                         <input
