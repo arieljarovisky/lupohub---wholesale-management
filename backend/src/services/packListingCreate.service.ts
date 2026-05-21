@@ -112,7 +112,9 @@ function sanitizeMlAttributesForApi(raw: unknown): Array<{ id: string; value_nam
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as Record<string, unknown>;
     const id = String(e.id ?? '').trim();
-    const value_name = String(e.value_name ?? e.value ?? '').trim();
+    const rawVal = e.value_name ?? e.value;
+    if (rawVal == null || rawVal === 'null') continue;
+    const value_name = String(rawVal).trim();
     if (!id || !value_name) continue;
     if (looksLikeMlPictureId(id)) continue;
     const key = mlAttrIdUpper(id);
@@ -123,18 +125,59 @@ function sanitizeMlAttributesForApi(raw: unknown): Array<{ id: string; value_nam
   return out;
 }
 
+function normalizeMlVariationAttributeCombinations(
+  raw: unknown
+): Array<{ id: string; value_name: string }> {
+  if (!Array.isArray(raw)) return [];
+  return (raw as any[])
+    .map((a) => ({
+      id: String(a?.id ?? '').trim(),
+      value_name: String(a?.value_name ?? '').trim()
+    }))
+    .filter((a) => a.id && a.value_name);
+}
+
+/** Clave única COLOR + SIZE para deduplicar variaciones. */
+function mlVariationCombinationKey(
+  attributeCombinations: Array<{ id: string; value_name: string }>
+): string {
+  let color = '';
+  let size = '';
+  for (const a of attributeCombinations) {
+    const id = mlAttrIdUpper(a.id);
+    if (ML_COLOR_ATTR_IDS.has(id)) color = a.value_name;
+    if (ML_SIZE_ATTR_IDS.has(id)) size = a.value_name;
+  }
+  return `${color}||${size}`;
+}
+
+function dedupeMlPackVariations(
+  variations: Array<Record<string, unknown>>
+): { variations: Array<Record<string, unknown>>; skippedKeys: string[] } {
+  const byKey = new Map<string, Record<string, unknown>>();
+  const skippedKeys: string[] = [];
+  for (const row of variations) {
+    const ac = normalizeMlVariationAttributeCombinations(row.attribute_combinations);
+    const key = mlVariationCombinationKey(ac);
+    const existing = byKey.get(key);
+    if (existing) {
+      skippedKeys.push(key);
+      const mergedQty =
+        Math.max(0, Number(existing.available_quantity) || 0) +
+        Math.max(0, Number(row.available_quantity) || 0);
+      existing.available_quantity = mergedQty;
+      continue;
+    }
+    byKey.set(key, { ...row, attribute_combinations: ac });
+  }
+  return { variations: [...byKey.values()], skippedKeys };
+}
+
 function sanitizeMlVariationsForApi(raw: unknown): Array<Record<string, unknown>> | undefined {
   if (!Array.isArray(raw) || !raw.length) return undefined;
-  return raw.map((entry) => {
+  const mapped = raw.map((entry) => {
     const row = entry as Record<string, unknown>;
-    const ac = Array.isArray(row.attribute_combinations)
-      ? (row.attribute_combinations as any[])
-          .map((a) => ({
-            id: String(a?.id ?? '').trim(),
-            value_name: String(a?.value_name ?? '').trim()
-          }))
-          .filter((a) => a.id && a.value_name)
-      : [];
+    const ac = normalizeMlVariationAttributeCombinations(row.attribute_combinations);
     const out: Record<string, unknown> = {
       price: Number(row.price),
       available_quantity: Math.max(0, Math.floor(Number(row.available_quantity) || 0)),
@@ -144,6 +187,7 @@ function sanitizeMlVariationsForApi(raw: unknown): Array<Record<string, unknown>
     if (sku) out.seller_custom_field = sku;
     return out;
   });
+  return dedupeMlPackVariations(mapped).variations;
 }
 
 /** Body limpio para POST /items: pictures y attributes separados y sin campos extra de la API origen. */
@@ -168,10 +212,12 @@ export function sanitizeMercadoLibreItemCreateBody(
 
   const title = String(body.title ?? '').trim();
   if (title) out.title = title;
+
   const familyName = String(body.family_name ?? '').trim();
   if (variations?.length) {
     out.variations = variations;
-    // ML no admite family_name junto con variations en la misma publicación.
+    // ML rechaza family_name + variations en el mismo POST.
+    delete out.family_name;
   } else if (familyName) {
     out.family_name = familyName;
   }
@@ -307,12 +353,23 @@ function buildMlVariationAttributeCombinations(
   }));
 }
 
-/** Variación pack: solo talle (colores del combo van en el título, no como COLOR inventado en ML). */
+function packColorNameForMlVariation(color: string): string {
+  const c = String(color || '').trim();
+  if (!c) return 'Surtido';
+  if (c.includes(' - ')) return 'Surtido';
+  return c;
+}
+
 function buildMlPackVariationAttributeCombinations(opts: {
+  color: string;
   size: string;
 }): Array<{ id: string; value_name: string }> {
+  const colorName = packColorNameForMlVariation(opts.color);
   const sizeName = String(opts.size || '').trim() || 'U';
-  return [{ id: 'SIZE', value_name: sizeName }];
+  return [
+    { id: 'COLOR', value_name: colorName },
+    { id: 'SIZE', value_name: sizeName }
+  ];
 }
 
 function inferPackUnitsPerSale(
@@ -372,8 +429,9 @@ function assertValidMlPackVariations(
   packLabels: string[]
 ): void {
   if (!variations.length) {
-    throw new Error('El pack debe generar al menos una variación de Mercado Libre (por talle)');
+    throw new Error('El pack debe generar al menos una variación de Mercado Libre');
   }
+  const comboKeys = new Set<string>();
   for (let i = 0; i < variations.length; i++) {
     const label = packLabels[i] || `Combo ${i + 1}`;
     const v = variations[i];
@@ -385,22 +443,25 @@ function assertValidMlPackVariations(
     if (!Number.isFinite(qty) || qty < 0) {
       throw new Error(`La variante "${label}" necesita available_quantity válido`);
     }
-    const ac = v.attribute_combinations;
-    if (!Array.isArray(ac) || !ac.length) {
-      throw new Error(`La variante "${label}" debe incluir attribute_combinations con SIZE (talle)`);
+    const ac = normalizeMlVariationAttributeCombinations(v.attribute_combinations);
+    if (!ac.length) {
+      throw new Error(`La variante "${label}" debe incluir attribute_combinations (COLOR y SIZE)`);
     }
+    let hasColor = false;
     let hasSize = false;
     for (const a of ac) {
-      const id = mlAttrIdUpper((a as any)?.id);
-      const vn = String((a as any)?.value_name ?? '').trim();
-      if (ML_SIZE_ATTR_IDS.has(id)) {
-        hasSize = true;
-        if (!vn) throw new Error(`La variante "${label}" necesita value_name en SIZE/Talle`);
-      }
+      const id = mlAttrIdUpper(a.id);
+      if (ML_COLOR_ATTR_IDS.has(id)) hasColor = true;
+      if (ML_SIZE_ATTR_IDS.has(id)) hasSize = true;
     }
-    if (!hasSize) {
-      throw new Error(`La variante "${label}" debe incluir SIZE en attribute_combinations`);
+    if (!hasColor || !hasSize) {
+      throw new Error(`La variante "${label}" debe incluir COLOR y SIZE en attribute_combinations`);
     }
+    const key = mlVariationCombinationKey(ac);
+    if (comboKeys.has(key)) {
+      throw new Error(`Hay variaciones duplicadas con la misma combinación COLOR/SIZE (${key})`);
+    }
+    comboKeys.add(key);
     if (!String(v.seller_custom_field ?? '').trim()) {
       throw new Error(`La variante "${label}" necesita seller_custom_field (SKU del pack)`);
     }
@@ -427,6 +488,7 @@ export function summarizeMlItemCreateBody(body: Record<string, unknown>): Record
   return Object.assign({}, safe, {
     _flags: {
       uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
+      removed_family_name_because_variations: variations.length > 0,
       has_item_price: safe.price != null,
       has_item_stock: safe.available_quantity != null,
       variation_count: variations.length,
@@ -434,6 +496,40 @@ export function summarizeMlItemCreateBody(body: Record<string, unknown>): Record
       attribute_count: Array.isArray(safe.attributes) ? safe.attributes.length : 0
     }
   });
+}
+
+function logMlItemCreateBeforePost(
+  draftBody: Record<string, unknown>,
+  safeBody: Record<string, unknown>,
+  debugContext?: string,
+  extra?: Record<string, unknown>
+): void {
+  const ctx = debugContext ? ` ${debugContext}` : '';
+  const hadFamilyName = Boolean(String(draftBody.family_name ?? '').trim());
+  const variations = Array.isArray(safeBody.variations) ? safeBody.variations : [];
+  const removedFamilyName = hadFamilyName && variations.length > 0;
+  const combinations = variations.map((v: any) => ({
+    price: v?.price,
+    available_quantity: v?.available_quantity,
+    seller_custom_field: v?.seller_custom_field,
+    attribute_combinations: v?.attribute_combinations
+  }));
+
+  console.log(
+    `[ML POST /items]${ctx}`,
+    JSON.stringify(
+      {
+        removed_family_name: removedFamilyName,
+        had_family_name_in_draft: hadFamilyName,
+        variation_count: variations.length,
+        combinations,
+        ...extra,
+        body: summarizeMlItemCreateBody(safeBody)
+      },
+      null,
+      2
+    )
+  );
 }
 
 function mlAttributesForPackCreate(
@@ -560,15 +656,17 @@ async function postMercadoLibreNewItem(
   debugContext?: string
 ): Promise<any> {
   const safeBody = sanitizeMercadoLibreItemCreateBody(body);
+  if (Array.isArray(safeBody.variations) && safeBody.variations.length > 0) {
+    delete safeBody.family_name;
+  }
   const pics = safeBody.pictures;
   if (!Array.isArray(pics) || !pics.length) {
     throw new Error(
       'No hay fotos válidas para Mercado Libre (revisá que pictureId sea de imagen ML, no un atributo)'
     );
   }
+  logMlItemCreateBeforePost(body, safeBody, debugContext);
   const payloadPreview = summarizeMlItemCreateBody(safeBody);
-  const ctx = debugContext ? ` (${debugContext})` : '';
-  console.log(`[ML POST /items]${ctx}`, JSON.stringify(payloadPreview, null, 2));
 
   const postRes = await axios.post('https://api.mercadolibre.com/items', safeBody, {
     headers: {
@@ -625,7 +723,7 @@ async function buildMlPackVariations(
     packVariants.map(async (pv, idx) => {
       const stock = computeAvailableStockFromItems(pv.items);
       const comboLabel = (pv.label || `Combo ${idx + 1}`).trim();
-      const { size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
+      const { color, size } = await resolvePackVariantColorSize(pv.items, sourceItem, comboLabel);
       const varSku =
         baseSku && packVariants.length > 1
           ? `${baseSku}${opts.skuSuffix}-${idx + 1}`
@@ -635,17 +733,24 @@ async function buildMlPackVariations(
       return {
         price: opts.price,
         available_quantity: Math.max(0, Math.floor(stock)),
-        attribute_combinations: buildMlPackVariationAttributeCombinations({ size }),
+        attribute_combinations: buildMlPackVariationAttributeCombinations({ color, size }),
         seller_custom_field: varSku
       };
     })
   );
 
+  const { variations: deduped, skippedKeys } = dedupeMlPackVariations(rows);
+  if (skippedKeys.length) {
+    console.warn(
+      `[ML pack] Variaciones duplicadas COLOR/SIZE omitidas o fusionadas: ${skippedKeys.join(', ')}`
+    );
+  }
+
   assertValidMlPackVariations(
-    rows,
+    deduped,
     packVariants.map((pv, i) => (pv.label || `Combo ${i + 1}`).trim())
   );
-  return rows;
+  return deduped;
 }
 
 async function buildMercadoLibrePackListingBodyClassic(
@@ -695,6 +800,8 @@ async function buildMercadoLibrePackListingBodyClassic(
     attributes: attrs,
     variations
   };
+  // Nunca mezclar family_name con variations (lo quita sanitize + POST).
+  delete body.family_name;
 
   if (opts.status === 'paused') body.status = 'paused';
 
