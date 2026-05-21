@@ -566,18 +566,40 @@ function mlFindSourceVariationBySize(sourceItem: any, size: string): any | null 
   return null;
 }
 
+function mlSourceSizeGridId(sourceItem: any): string {
+  const fromItem = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID');
+  const id = String(fromItem?.value_id ?? fromItem?.value_name ?? '').trim();
+  if (id && /^\d+$/.test(id)) return id;
+  for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
+    const fromVar = mlPickCreateAttributeFromList(v?.attributes, 'SIZE_GRID_ID');
+    const vid = String(fromVar?.value_id ?? fromVar?.value_name ?? '').trim();
+    if (vid && /^\d+$/.test(vid)) return vid;
+  }
+  return '';
+}
+
 function mlSizeGridRowFromSourceItem(sourceItem: any, size: string): MlItemCreateAttribute | null {
   const variation = mlFindSourceVariationBySize(sourceItem, size);
   if (variation) {
     const fromVar = mlPickCreateAttributeFromList(variation.attributes, 'SIZE_GRID_ROW_ID');
     if (fromVar) return mlNormalizeSizeGridRowAttr(fromVar);
   }
-  for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
-    const fromVar = mlPickCreateAttributeFromList(v?.attributes, 'SIZE_GRID_ROW_ID');
-    if (fromVar) return mlNormalizeSizeGridRowAttr(fromVar);
-  }
   const fromItem = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ROW_ID');
   if (fromItem) return mlNormalizeSizeGridRowAttr(fromItem);
+  return null;
+}
+
+function mlSizeAttrFromSourceVariation(sourceItem: any, sizeLabel: string): MlItemCreateAttribute | null {
+  const variation = mlFindSourceVariationBySize(sourceItem, sizeLabel);
+  if (!variation) return null;
+  const fromVar = mlPickCreateAttributeFromList(variation.attributes, 'SIZE');
+  if (fromVar?.value_name) return { id: 'SIZE', value_name: String(fromVar.value_name) };
+  const ac = Array.isArray(variation.attribute_combinations) ? variation.attribute_combinations : [];
+  for (const a of ac) {
+    if (!ML_SIZE_ATTR_IDS.has(mlAttrIdUpper(a?.id))) continue;
+    const vn = String(a?.value_name ?? '').trim();
+    if (vn) return { id: 'SIZE', value_name: vn };
+  }
   return null;
 }
 
@@ -1030,88 +1052,80 @@ function mlFashionSizeAttrForPack(
 }
 
 /**
- * SIZE_GRID_ID para POST /items: solo guías devueltas por POST /catalog/charts/search (seller_id).
- * El SIZE_GRID_ID del GET /items/{id} origen es referencia; ML lo rechaza si no está en esa búsqueda.
+ * Guía de talles idéntica a la publicación MLA origen (SIZE_GRID_ID + fila + SIZE del talle).
+ * No sustituye por charts/search: el pack debe compartir la misma guía que el ítem modelo.
  */
+async function mlFashionAttrsFromSourcePublication(
+  sourceItem: any,
+  sizeLabel: string,
+  accessToken: string
+): Promise<MlItemCreateAttribute[]> {
+  const chartId = mlSourceSizeGridId(sourceItem);
+  if (!chartId) {
+    throw new Error(
+      'La publicación origen no tiene SIZE_GRID_ID (guía de talles). ' +
+        'Usá como modelo una publicación MLA individual con guía configurada en Mercado Libre.'
+    );
+  }
+
+  let row: MlItemCreateAttribute | undefined;
+  const fromSource = mlSizeGridRowFromSourceItem(sourceItem, sizeLabel);
+  if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
+    row = mlNormalizeSizeGridRowAttr(fromSource);
+  }
+  if (!row?.value_name && sizeLabel) {
+    const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
+    if (rowMatch?.rowId) {
+      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
+    }
+  }
+  if (!row?.value_name) {
+    const letter = mlSizeValueNameForMercadoLibre(sizeLabel);
+    throw new Error(
+      `La publicación origen (guía ${chartId}) no tiene fila para el talle ${sizeLabel} (${letter}). ` +
+        'Verificá que la MLA modelo tenga variación con ese talle y SIZE_GRID_ROW_ID, o elegí otra publicación origen.'
+    );
+  }
+
+  const sizeAttr =
+    mlSizeAttrFromSourceVariation(sourceItem, sizeLabel) ??
+    mlFashionSizeAttrForPack(sourceItem, sizeLabel, null);
+
+  console.log('[ML pack] fashion grid = publicación origen', {
+    sourceItemId: String(sourceItem?.id ?? ''),
+    chartId,
+    sizeCode: sizeLabel,
+    row: row.value_name,
+    sizeName: sizeAttr.value_name
+  });
+
+  return [{ id: 'SIZE_GRID_ID', value_id: chartId }, row, sizeAttr];
+}
+
+async function mlAssertSourceItemSameSeller(
+  sourceItem: any,
+  integrationSellerId: string
+): Promise<void> {
+  const sourceSeller = String(sourceItem?.seller_id ?? '').trim();
+  const tokenSeller = String(integrationSellerId ?? '').trim();
+  if (!sourceSeller || !tokenSeller || sourceSeller === tokenSeller) return;
+  throw new Error(
+    `La publicación origen (MLA ${sourceItem?.id}) pertenece al vendedor ${sourceSeller}, ` +
+      `pero la cuenta conectada en LupoHub es ${tokenSeller}. ` +
+      'La guía de talles solo es válida si el pack se crea con la misma cuenta ML que la publicación modelo.'
+  );
+}
+
 async function mlUserProductFashionAttrsFromSource(
   sourceItem: any,
   size: string,
   accessToken: string,
   sellerId: string,
-  familyName?: string
+  _familyName?: string
 ): Promise<MlItemCreateAttribute[]> {
   const sizeLabel = String(size || '').trim();
-  const sourceGridId = String(
-    mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID')?.value_id ?? ''
-  ).trim();
-
-  const fromApi = await mlResolveFashionGridViaMercadoLibreApi(
-    sourceItem,
-    sizeLabel,
-    accessToken,
-    sellerId,
-    familyName
-  );
-
-  const chartId = String(fromApi?.chartId ?? '').trim();
-  if (!chartId) {
-    throw new Error(
-      `No se encontró guía de talles (charts/search) para el dominio ${fromApi?.domainId || '?'}. ` +
-        `Verificá BRAND y GENDER en la publicación origen y que exista guía BRAND/SPECIFIC en ML para ${familyName || 'este producto'}.`
-    );
-  }
-  if (sourceGridId && sourceGridId !== chartId) {
-    console.warn('[ML pack] SIZE_GRID_ID origen no usable en POST; usando charts/search', {
-      sourceGridId,
-      chartId,
-      domainId: fromApi?.domainId
-    });
-  }
-
-  const grid: MlItemCreateAttribute = { id: 'SIZE_GRID_ID', value_id: chartId };
-  let row: MlItemCreateAttribute | undefined = fromApi?.row
-    ? mlNormalizeSizeGridRowAttr(fromApi.row)
-    : undefined;
-
-  let chartRow: any = null;
-  if (!mlSizeGridRowMatchesChart(row, chartId) && sizeLabel) {
-    const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
-    if (rowMatch?.rowId) {
-      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
-      chartRow = rowMatch.row;
-    }
-  }
-
-  if (!row?.value_name) {
-    const fromSource = mlSizeGridRowFromSourceItem(sourceItem, sizeLabel);
-    if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
-      row = mlNormalizeSizeGridRowAttr(fromSource);
-      console.log('[ML pack] SIZE_GRID_ROW_ID desde variación origen', row.value_name);
-    }
-  }
-
-  if (!row?.value_name) {
-    const letter = mlSizeValueNameForMercadoLibre(sizeLabel);
-    const range = TALLE_CODIGO_A_RANGO_ML[sizeLabel] || TALLE_CODIGO_A_RANGO_ML[Object.keys(TALLE_CODIGO_A_NOMBRE).find((k) => TALLE_CODIGO_A_NOMBRE[k] === letter) || ''];
-    throw new Error(
-      `No hay fila en la guía ${chartId} para el talle ${sizeLabel} (${letter}${range ? ` / ${range}` : ''}). ` +
-        'En ML la guía muestra talles como "P 38-40", "M 42-44", etc. Revisá GET /catalog/charts/{id}.'
-    );
-  }
-
-  const sizeAttr = mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow);
-
-  console.log('[ML pack] fashion grid resolved', {
-    chartId,
-    source: 'catalog/charts/search',
-    domainId: fromApi?.domainId,
-    size: sizeLabel,
-    sizeName: sizeAttr.value_name,
-    row: row.value_name,
-    sourceListingGridId: sourceGridId || undefined
-  });
-
-  return [grid, row, sizeAttr];
+  await mlAssertSourceItemSameSeller(sourceItem, sellerId);
+  return mlFashionAttrsFromSourcePublication(sourceItem, sizeLabel, accessToken);
 }
 
 function sanitizeMlShippingForApi(raw: unknown): Record<string, unknown> | undefined {
