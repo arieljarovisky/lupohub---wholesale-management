@@ -191,14 +191,15 @@ function mlRawEntryToCreateAttribute(entry: unknown): MlItemCreateAttribute | nu
   const rawVid = e.value_id;
   if (rawVid != null && String(rawVid).trim() !== '') {
     const s = String(rawVid).trim();
-    value_id = /^\d+$/.test(s) ? Number(s) : s;
+    // ML exige value_id como string en POST /items (ej. SIZE_GRID_ID "2484883").
+    value_id = s;
   }
   if (!value_name && value_id == null) return null;
   const out: MlItemCreateAttribute = { id: upper };
   if (value_name) out.value_name = value_name;
   if (value_id != null) out.value_id = value_id;
   if (upper === 'SIZE_GRID_ID' && out.value_id == null && value_name && /^\d+$/.test(value_name)) {
-    out.value_id = Number(value_name);
+    out.value_id = value_name;
   }
   return out;
 }
@@ -231,7 +232,7 @@ function mlAttributesForPostPayload(attrs: MlItemCreateAttribute[]): Array<Recor
       const id = mlAttrIdUpper(a.id);
       const row: Record<string, unknown> = { id };
       if (id === 'SIZE_GRID_ID' && a.value_id != null) {
-        row.value_id = a.value_id;
+        row.value_id = String(a.value_id);
         return row;
       }
       if (id === 'SIZE_GRID_ROW_ID') {
