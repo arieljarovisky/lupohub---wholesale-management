@@ -7,8 +7,10 @@ import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '.
 import {
   buildArticlePackMatrix,
   colorAbbrevLabel,
+  DEFAULT_PACK_COLOR_COUNT,
   packItemsFromColorOptions,
-  productGroupKey
+  productGroupKey,
+  type PackComboSuggestion
 } from '../utils/suggestPublicationPacks';
 
 type DraftItem = { variantId: string; unitsPerSale: number; label: string };
@@ -321,21 +323,46 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     showToast('success', `Pack ${group.packLabel} (talle ${size}) agregado`);
   };
 
-  const addAllSizesAsPackCombinations = () => {
+  const comboLabelWithSize = (combo: PackComboSuggestion, size: string) =>
+    `Pack x${DEFAULT_PACK_COLOR_COUNT} ${combo.label} (${size})`;
+
+  const addSuggestedX3Combo = (combo: PackComboSuggestion, size: string) => {
+    const items = draftItemsFromPickedColors(size, combo.variantIds);
+    const label = comboLabelWithSize(combo, size);
+    if (!appendPackCombination(label, items)) return;
+    showToast(
+      'success',
+      `${combo.label} · talle ${size}: hasta ${combo.availablePacks} pack(s) (mín. stock ${combo.minStock})`
+    );
+  };
+
+  const addTopX3CombosForActiveSize = () => {
+    if (!activeSizeGroup) return;
+    let added = 0;
+    for (const combo of activeSizeGroup.suggestedCombosX3.slice(0, 6)) {
+      const items = draftItemsFromPickedColors(activeSizeGroup.size, combo.variantIds);
+      if (items.length < DEFAULT_PACK_COLOR_COUNT) continue;
+      if (appendPackCombination(comboLabelWithSize(combo, activeSizeGroup.size), items)) added += 1;
+    }
+    if (added === 0) showToast('error', 'No hay combos x3 con stock en este talle');
+    else showToast('success', `${added} combinación(es) x3 agregada(s) para talle ${activeSizeGroup.size}`);
+  };
+
+  const addBestX3ForAllSizes = () => {
     if (!articlePackMatrix) return;
     let added = 0;
     for (const group of articlePackMatrix.sizeGroups) {
-      if (group.availablePacks < 1) continue;
-      const withStock = group.colors.filter((c) => c.stock > 0);
-      if (withStock.length < 2) continue;
-      const items = draftItemsFromPickedColors(
-        group.size,
-        withStock.map((c) => c.variantId)
-      );
-      if (appendPackCombination(group.packLabel, items)) added += 1;
+      const best = group.bestComboX3;
+      if (!best || best.availablePacks < 1) continue;
+      const items = draftItemsFromPickedColors(group.size, best.variantIds);
+      if (appendPackCombination(comboLabelWithSize(best, group.size), items)) added += 1;
     }
-    if (added === 0) showToast('error', 'No hay talles con al menos 2 colores y stock');
-    else showToast('success', `${added} combinación(es) agregada(s) (una por talle)`);
+    if (added === 0) showToast('error', 'No hay talles con un pack x3 surtido posible');
+    else showToast('success', `${added} mejor pack x3 por talle agregado(s)`);
+  };
+
+  const addAllSizesAsPackCombinations = () => {
+    addBestX3ForAllSizes();
   };
 
   const prunePackItemsToArticle = (articleKey: string) => {
@@ -1139,8 +1166,9 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                 {showSuggestions && selectedArticleKey && (
                   <div className="rounded-xl border border-amber-800/50 bg-amber-950/25 p-3 space-y-3">
                     <p className="text-xs text-amber-200/90">
-                      Elegí el <strong>talle</strong>, marcá los <strong>colores</strong> del pack (1 unidad c/u) y
-                      agregá la combinación. En Mercado Libre la publicación usa variante Color + Talle.
+                      Packs <strong>x{DEFAULT_PACK_COLOR_COUNT} surtidos</strong>: el sistema calcula las mejores
+                      combinaciones de 3 colores según el <strong>stock mínimo</strong> (cuántos packs podés vender).
+                      También podés elegir colores a mano.
                     </p>
                     <div className="relative">
                       <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -1174,8 +1202,12 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                                 }`}
                               >
                                 {g.size}
-                                {g.availablePacks > 0 ? (
-                                  <span className="ml-1 text-[10px] text-emerald-400/90">({g.availablePacks})</span>
+                                {g.bestComboX3 && g.bestComboX3.availablePacks > 0 ? (
+                                  <span className="ml-1 text-[10px] text-emerald-400/90" title="Mejor pack x3 surtido">
+                                    (x3: {g.bestComboX3.availablePacks})
+                                  </span>
+                                ) : g.suggestedCombosX3.length > 0 ? (
+                                  <span className="ml-1 text-[10px] text-slate-500">(sin x3)</span>
                                 ) : null}
                               </button>
                             ))}
@@ -1234,38 +1266,96 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                                 );
                               })}
                             </ul>
-                            {activeSizeGroup.colors.length < 2 && (
+                            {activeSizeGroup.colors.length < DEFAULT_PACK_COLOR_COUNT && (
                               <p className="text-[10px] text-amber-400/90 mt-1">
-                                Este talle tiene menos de 2 colores en inventario.
+                                Este talle necesita al menos {DEFAULT_PACK_COLOR_COUNT} colores con stock para pack
+                                surtido.
                               </p>
                             )}
+                          </div>
+                        )}
+
+                        {activeSizeGroup && activeSizeGroup.suggestedCombosX3.length > 0 && (
+                          <div>
+                            <label className="text-[10px] font-bold text-emerald-400/90 uppercase tracking-wide block mb-1.5">
+                              3 · Mejores packs x{DEFAULT_PACK_COLOR_COUNT} surtidos (talle {activeSizeGroup.size})
+                            </label>
+                            <ul className="space-y-1.5 max-h-52 overflow-y-auto">
+                              {activeSizeGroup.suggestedCombosX3.map((combo, ci) => (
+                                <li
+                                  key={`${combo.label}-${ci}`}
+                                  className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-900/50 bg-slate-900/60 px-2.5 py-2"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-white">{combo.label}</p>
+                                    <p className="text-[10px] text-slate-400 truncate">
+                                      {combo.colorNames.join(' + ')}
+                                    </p>
+                                    <p className="text-[10px] text-emerald-400/90 mt-0.5">
+                                      Hasta <strong>{combo.availablePacks}</strong> pack(s) · stock mín.{' '}
+                                      {combo.minStock} u.
+                                      {ci === 0 ? (
+                                        <span className="ml-1 text-amber-300">· mejor opción</span>
+                                      ) : null}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => addSuggestedX3Combo(combo, activeSizeGroup.size)}
+                                    className="shrink-0 px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-semibold"
+                                  >
+                                    Agregar
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
 
                         <div className="flex flex-wrap gap-2 pt-1">
                           <button
                             type="button"
-                            disabled={selectedColorIdsForActiveSize.size < 2}
-                            onClick={addSelectedColorsAsPackCombination}
+                            disabled={!activeSizeGroup?.suggestedCombosX3.length}
+                            onClick={addTopX3CombosForActiveSize}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40"
+                          >
+                            Agregar mejores x3 (este talle)
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!activeSizeGroup?.bestComboX3}
+                            onClick={() =>
+                              activeSizeGroup?.bestComboX3 &&
+                              addSuggestedX3Combo(activeSizeGroup.bestComboX3, activeSizeGroup.size)
+                            }
                             className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-40"
                           >
-                            Agregar colores seleccionados
+                            Mejor pack x3 ({activeSizeGroup?.bestComboX3?.label || '—'})
                           </button>
-                          {activeSizeGroup && activeSizeGroup.availablePacks > 0 && (
+                          <button
+                            type="button"
+                            disabled={selectedColorIdsForActiveSize.size < 2}
+                            onClick={addSelectedColorsAsPackCombination}
+                            className="px-3 py-1.5 rounded-lg border border-amber-700/60 text-amber-200 text-xs hover:bg-amber-950/50 disabled:opacity-40"
+                          >
+                            Manual (colores elegidos)
+                          </button>
+                          {activeSizeGroup && activeSizeGroup.colors.filter((c) => c.stock > 0).length >= DEFAULT_PACK_COLOR_COUNT && (
                             <button
                               type="button"
                               onClick={() => addFullSizePack(activeSizeGroup.size)}
-                              className="px-3 py-1.5 rounded-lg border border-amber-700/60 text-amber-200 text-xs hover:bg-amber-950/50"
+                              className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-400 text-xs hover:bg-slate-800"
+                              title="Todos los colores con stock, no solo 3"
                             >
-                              Pack completo {activeSizeGroup.packLabel} ({activeSizeGroup.size})
+                              Todos los colores ({activeSizeGroup.size})
                             </button>
                           )}
                           <button
                             type="button"
-                            onClick={addAllSizesAsPackCombinations}
+                            onClick={addBestX3ForAllSizes}
                             className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 text-xs hover:bg-slate-800"
                           >
-                            Un pack por cada talle
+                            Mejor x3 por cada talle
                           </button>
                         </div>
                       </>

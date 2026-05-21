@@ -1,6 +1,9 @@
 import { Product } from '../types';
 import { SIZE_ORDER } from './inventoryUtils';
 
+/** Cantidad de colores distintos por pack surtido (ej. pack x3). */
+export const DEFAULT_PACK_COLOR_COUNT = 3;
+
 export type SuggestedPackItem = {
   variantId: string;
   unitsPerSale: number;
@@ -80,7 +83,7 @@ function computeAvailablePacks(items: SuggestedPackItem[]): number {
 }
 
 /**
- * Sugiere packs multicolor por artículo y talle: 1 unidad de cada color con stock.
+ * Sugiere packs multicolor x3 surtidos por artículo y talle (mejores tríos según stock).
  */
 export function suggestPublicationPacks(
   products: Product[],
@@ -90,9 +93,11 @@ export function suggestPublicationPacks(
     maxSuggestions?: number;
     query?: string;
     baseSku?: string;
+    packSize?: number;
   }
 ): SuggestedPublicationPack[] {
-  const minColors = Math.max(2, opts?.minColors ?? 2);
+  const packSize = Math.max(2, opts?.packSize ?? DEFAULT_PACK_COLOR_COUNT);
+  const minColors = Math.max(packSize, opts?.minColors ?? packSize);
   const minStock = Math.max(0, opts?.minStockPerColor ?? 1);
   const maxSuggestions = opts?.maxSuggestions ?? 24;
   const q = (opts?.query || '').trim().toLowerCase();
@@ -138,36 +143,41 @@ export function suggestPublicationPacks(
     const colors = [...byColor.values()];
     if (colors.length < minColors) continue;
 
-    const items: SuggestedPackItem[] = colors.map((r) => ({
+    const colorOpts: ArticlePackColorOption[] = colors.map((r) => ({
       variantId: r.variantId,
-      unitsPerSale: 1,
-      label: r.label,
       color: r.color,
       size: r.size,
       stock: r.stock
     }));
-    const label = colorAbbrevLabel(colors.map((c) => c.color));
-    const availablePacks = computeAvailablePacks(items);
-    if (availablePacks < 1) continue;
+
+    const combosX3 = suggestPackCombosOfSize(colorOpts, { packSize, maxCombos: 6 });
+    const packVariants: SuggestedPackVariant[] = combosX3.map((combo) => ({
+      label: combo.label,
+      items: packItemsFromColorOptions(colorOpts, combo.variantIds),
+      availablePacks: combo.availablePacks
+    }));
+
+    if (!packVariants.length) continue;
 
     const productName = colors[0]?.productName || baseSku;
+    const best = packVariants[0];
     const title = `${productName} · Talle ${size}`;
-    const subtitle = `${colors.length} colores · hasta ${availablePacks} pack(s)`;
+    const subtitle = `Pack x${packSize} surtido · ${packVariants.length} combo(s) · mejor: ${best.availablePacks} pack(s)`;
 
     if (q) {
-      const hay = `${title} ${subtitle} ${baseSku} ${label} ${colors.map((c) => c.color).join(' ')}`.toLowerCase();
+      const hay = `${title} ${subtitle} ${baseSku} ${packVariants.map((v) => v.label).join(' ')} ${colors.map((c) => c.color).join(' ')}`.toLowerCase();
       if (!hay.includes(q)) continue;
     }
 
     out.push({
-      id: `${baseSku}|${size}|${label}`,
+      id: `${baseSku}|${size}|x${packSize}`,
       title,
       subtitle,
       baseSku,
       size,
-      colorCount: colors.length,
-      packVariants: [{ label, items, availablePacks }],
-      score: availablePacks * colors.length
+      colorCount: packSize,
+      packVariants,
+      score: best.availablePacks * 100 + packVariants.length
     });
   }
 
@@ -175,66 +185,15 @@ export function suggestPublicationPacks(
   return out.slice(0, maxSuggestions);
 }
 
-/** Variantes de pack con distintas combinaciones de colores (subconjuntos de 3). */
-export function suggestMultiComboPublicationPacks(
-  products: Product[],
-  opts?: { minColors?: number; maxCombos?: number; query?: string; baseSku?: string }
-): SuggestedPublicationPack[] {
-  const base = suggestPublicationPacks(products, {
-    minColors: Math.max(3, opts?.minColors ?? 3),
-    maxSuggestions: 12,
-    query: opts?.query,
-    baseSku: opts?.baseSku
-  });
-  const maxCombos = opts?.maxCombos ?? 3;
-  const multi: SuggestedPublicationPack[] = [];
-
-  for (const pack of base) {
-    const pv = pack.packVariants[0];
-    if (!pv || pv.items.length < 3) continue;
-    const sorted = [...pv.items].sort((a, b) => b.stock - a.stock);
-    const combos: SuggestedPackItem[][] = [];
-    if (sorted.length >= 3) combos.push(sorted.slice(0, 3));
-    if (sorted.length >= 4) combos.push([sorted[0], sorted[1], sorted[3]]);
-    if (sorted.length >= 5) combos.push([sorted[0], sorted[2], sorted[4]]);
-
-    const packVariants: SuggestedPackVariant[] = combos.slice(0, maxCombos).map((items) => {
-      const label = colorAbbrevLabel(items.map((i) => i.color));
-      return { label, items, availablePacks: computeAvailablePacks(items) };
-    }).filter((v) => v.availablePacks > 0);
-
-    if (packVariants.length >= 2) {
-      multi.push({
-        ...pack,
-        id: `${pack.id}|multi`,
-        title: `${pack.title} (varias combinaciones)`,
-        subtitle: `${packVariants.length} combos de colores`,
-        packVariants,
-        score: pack.score + packVariants.length * 10
-      });
-    }
-  }
-
-  return multi;
-}
-
 export function suggestAllPublicationPacks(
   products: Product[],
-  opts?: { query?: string; includeMultiCombo?: boolean; baseSku?: string }
+  opts?: { query?: string; baseSku?: string; packSize?: number }
 ): SuggestedPublicationPack[] {
-  const simple = suggestPublicationPacks(products, { query: opts?.query, baseSku: opts?.baseSku });
-  if (opts?.includeMultiCombo === false) return simple;
-  const multi = suggestMultiComboPublicationPacks(products, {
+  return suggestPublicationPacks(products, {
     query: opts?.query,
-    baseSku: opts?.baseSku
+    baseSku: opts?.baseSku,
+    packSize: opts?.packSize ?? DEFAULT_PACK_COLOR_COUNT
   });
-  const seen = new Set(simple.map((s) => s.id));
-  const merged = [...simple];
-  for (const m of multi) {
-    if (!seen.has(m.id)) merged.push(m);
-  }
-  merged.sort((a, b) => b.score - a.score);
-  return merged.slice(0, 30);
 }
 
 export type ArticlePackColorOption = {
@@ -244,12 +203,91 @@ export type ArticlePackColorOption = {
   stock: number;
 };
 
+export type PackComboSuggestion = {
+  label: string;
+  colorNames: string[];
+  variantIds: string[];
+  /** Cuántos packs x3 se pueden vender (mínimo de stock entre los 3 colores). */
+  availablePacks: number;
+  minStock: number;
+  score: number;
+};
+
 export type ArticlePackSizeGroup = {
   size: string;
   colors: ArticlePackColorOption[];
   packLabel: string;
+  /** Pack con todos los colores con stock (referencia). */
   availablePacks: number;
+  /** Mejores combinaciones de exactamente 3 colores surtidos. */
+  suggestedCombosX3: PackComboSuggestion[];
+  /** Mejor combo x3 del talle (máximo stock disponible). */
+  bestComboX3: PackComboSuggestion | null;
 };
+
+function combinationsOfSize<T>(items: T[], k: number): T[][] {
+  if (k <= 0 || items.length < k) return [];
+  if (k === 1) return items.map((x) => [x]);
+  const out: T[][] = [];
+  const walk = (start: number, acc: T[]) => {
+    if (acc.length === k) {
+      out.push([...acc]);
+      return;
+    }
+    for (let i = start; i <= items.length - (k - acc.length); i++) {
+      acc.push(items[i]);
+      walk(i + 1, acc);
+      acc.pop();
+    }
+  };
+  walk(0, []);
+  return out;
+}
+
+/**
+ * Mejores packs de N colores surtidos según stock: prioriza más packs vendibles (min stock del trio).
+ */
+export function suggestPackCombosOfSize(
+  colors: ArticlePackColorOption[],
+  opts?: { packSize?: number; maxCombos?: number; minStockPerColor?: number }
+): PackComboSuggestion[] {
+  const packSize = Math.max(2, opts?.packSize ?? DEFAULT_PACK_COLOR_COUNT);
+  const maxCombos = opts?.maxCombos ?? 8;
+  const minStock = Math.max(0, opts?.minStockPerColor ?? 1);
+
+  const eligible = colors.filter((c) => c.stock >= minStock);
+  if (eligible.length < packSize) return [];
+
+  const combos: PackComboSuggestion[] = [];
+  for (const trio of combinationsOfSize(eligible, packSize)) {
+    const stocks = trio.map((c) => c.stock);
+    const minS = Math.min(...stocks);
+    if (minS < 1) continue;
+    const colorNames = trio.map((c) => c.color);
+    const totalStock = stocks.reduce((a, b) => a + b, 0);
+    combos.push({
+      label: colorAbbrevLabel(colorNames),
+      colorNames,
+      variantIds: trio.map((c) => c.variantId),
+      availablePacks: minS,
+      minStock: minS,
+      score: minS * 10_000 + totalStock
+    });
+  }
+
+  combos.sort((a, b) => b.score - a.score);
+
+  const picked: PackComboSuggestion[] = [];
+  for (const c of combos) {
+    if (picked.length >= maxCombos) break;
+    const tooSimilar = picked.some((p) => {
+      const shared = p.variantIds.filter((id) => c.variantIds.includes(id)).length;
+      return shared >= packSize - 1;
+    });
+    if (!tooSimilar) picked.push(c);
+  }
+  return picked;
+}
 
 export type ArticlePackMatrix = {
   baseSku: string;
@@ -336,11 +374,19 @@ export function buildArticlePackMatrix(
       size: c.size,
       stock: c.stock
     }));
+    const suggestedCombosX3 = suggestPackCombosOfSize(withStock, {
+      packSize: DEFAULT_PACK_COLOR_COUNT,
+      maxCombos: 8,
+      minStockPerColor: minStock
+    });
+
     sizeGroups.push({
       size,
       colors,
       packLabel: colorAbbrevLabel(withStock.map((c) => c.color)),
-      availablePacks: computeAvailablePacks(items)
+      availablePacks: computeAvailablePacks(items),
+      suggestedCombosX3,
+      bestComboX3: suggestedCombosX3[0] ?? null
     });
   }
 
