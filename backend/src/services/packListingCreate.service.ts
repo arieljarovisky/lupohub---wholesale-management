@@ -190,6 +190,19 @@ function sanitizeMlVariationsForApi(raw: unknown): Array<Record<string, unknown>
   return dedupeMlPackVariations(mapped).variations;
 }
 
+/** Atributos comerciales permitidos en POST /items al crear publicación. */
+const ML_ITEM_CREATE_ATTR_ALLOWLIST = new Set([
+  'BRAND',
+  'AGE_GROUP',
+  'GENDER',
+  'COMPOSITION',
+  'MAIN_MATERIAL',
+  'MALE_UNDERWEAR_TYPE',
+  'MODEL',
+  'SALE_FORMAT',
+  'UNITS_PER_PACK'
+]);
+
 /** Claves solo para logs/debug; nunca deben ir al POST de ML. */
 const ML_ITEM_BODY_INTERNAL_KEYS = new Set(['_flags', '_meta', '__debug']);
 
@@ -207,17 +220,33 @@ function sanitizeMlSaleTermsForApi(raw: unknown): Array<Record<string, unknown>>
   const out = raw
     .map((st) => {
       if (!st || typeof st !== 'object') return null;
-      const row: Record<string, unknown> = {};
       const id = String((st as any).id ?? '').trim();
-      if (id) row.id = id;
-      const valueName = String((st as any).value_name ?? '').trim();
-      if (valueName) row.value_name = valueName;
+      if (!id) return null;
+      const row: Record<string, unknown> = { id };
       const valueId = (st as any).value_id;
       if (valueId != null && String(valueId).trim() !== '') row.value_id = valueId;
-      return Object.keys(row).length ? row : null;
+      const valueName = String((st as any).value_name ?? '').trim();
+      if (valueName) row.value_name = valueName;
+      return row;
     })
     .filter(Boolean) as Array<Record<string, unknown>>;
   return out.length ? out : undefined;
+}
+
+/** Solo atributos comerciales válidos; sin duplicados ni ids de sistema/logística. */
+function filterMlItemAttributesForCreatePost(
+  attrs: Array<{ id: string; value_name: string }>
+): Array<{ id: string; value_name: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ id: string; value_name: string }> = [];
+  for (const a of attrs) {
+    const upper = mlAttrIdUpper(a.id);
+    if (!ML_ITEM_CREATE_ATTR_ALLOWLIST.has(upper)) continue;
+    if (seen.has(upper)) continue;
+    seen.add(upper);
+    out.push({ id: upper, value_name: a.value_name });
+  }
+  return out;
 }
 
 function sanitizeMlShippingForApi(raw: unknown): Record<string, unknown> | undefined {
@@ -281,20 +310,6 @@ function mlIsUserProductPostPayload(body: Record<string, unknown>): boolean {
   return hasFamilyName && variations.length === 0;
 }
 
-/** SIZE/COLOR/guía: solo en variations; en User Product van en title/family_name, no en attributes. */
-function isMlVariationOnlyItemAttributeId(attrId: string): boolean {
-  const upper = mlAttrIdUpper(attrId);
-  if (upper === 'SIZE_GRID_ID') return true;
-  return ML_COLOR_ATTR_IDS.has(upper) || ML_SIZE_ATTR_IDS.has(upper);
-}
-
-function filterMlVariationAttrsFromItemAttributesForUserProduct(
-  attrs: unknown
-): Array<{ id: string; value_name: string }> {
-  if (!Array.isArray(attrs)) return [];
-  return sanitizeMlAttributesForApi(attrs).filter((a) => !isMlVariationOnlyItemAttributeId(a.id));
-}
-
 /** Payload final exclusivo para POST /items (sin _flags ni claves internas). */
 export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): Record<string, unknown> {
   let safe = sanitizeMercadoLibreItemCreateBody(body);
@@ -302,10 +317,10 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
     delete safe.family_name;
   } else {
     delete safe.variations;
-    if (mlIsUserProductPostPayload(safe)) {
-      safe.attributes = filterMlVariationAttrsFromItemAttributesForUserProduct(safe.attributes);
-    }
   }
+  safe.attributes = filterMlItemAttributesForCreatePost(
+    sanitizeMlAttributesForApi(safe.attributes)
+  );
   return stripMlInternalBodyKeys(safe);
 }
 
@@ -838,6 +853,14 @@ async function postMercadoLibreNewItem(
     validateStatus: () => true
   });
   if (postRes.status !== 201 && postRes.status !== 200) {
+    console.error('[ML] POST /items rechazado', {
+      status: postRes.status,
+      debugContext,
+      message: postRes.data?.message,
+      error: postRes.data?.error,
+      cause: postRes.data?.cause,
+      data: postRes.data
+    });
     const preview = JSON.stringify(payloadToSend);
     throw new Error(
       `Mercado Libre rechazó la creación: ${formatMlCreateError(postRes)}. Payload enviado a ML: ${preview}`
