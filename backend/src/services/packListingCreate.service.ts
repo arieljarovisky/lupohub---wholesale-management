@@ -1252,7 +1252,7 @@ export function buildMercadoLibreItemPayload(input: MlItemPayloadInput): Record<
   if (familyName) payload.family_name = familyName;
 
   const title = String(input.title ?? '').trim();
-  if (title) payload.title = title;
+  if (title && !userProduct) payload.title = title;
 
   const sku = String(input.seller_custom_field ?? '').trim();
   if (sku) payload.seller_custom_field = sku;
@@ -1285,6 +1285,9 @@ export function validateMlPayload(
 
   if (opts?.userProduct) {
     if (!String(payload.family_name ?? '').trim()) throw new Error('Missing family_name');
+    if (payload.title != null && String(payload.title).trim() !== '') {
+      throw new Error('User Product payload must not include title');
+    }
     if (Array.isArray(payload.variations) && payload.variations.length > 0) {
       throw new Error('User Product payload must not include variations');
     }
@@ -1453,9 +1456,8 @@ export function sanitizeMercadoLibreItemCreateBody(
     const title = String(body.title ?? '').trim();
     if (title) out.title = title;
   } else if (familyName) {
+    // User Product: solo family_name (sin title).
     out.family_name = familyName;
-    const title = String(body.title ?? '').trim();
-    if (title) out.title = title;
   } else {
     const title = String(body.title ?? '').trim();
     if (title) out.title = title;
@@ -1502,6 +1504,22 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
     }
   }
 
+  if (userProduct) {
+    delete payload.title;
+    const attrs = Array.isArray(payload.attributes) ? payload.attributes : [];
+    const findAttr = (attrId: string) =>
+      attrs.find(
+        (a) => mlAttrIdUpper(String((a as Record<string, unknown>).id ?? '')) === attrId
+      );
+    console.log('[ML USER PRODUCT FINAL]', {
+      hasTitle: payload.title != null && String(payload.title).trim() !== '',
+      family_name: payload.family_name,
+      user_product_mode: userProduct,
+      sizeGridId: findAttr('SIZE_GRID_ID'),
+      sizeGridRowId: findAttr('SIZE_GRID_ROW_ID')
+    });
+  }
+
   validateMlPayload(payload, { userProduct });
   logMlPayloadAttributeIds(payload);
   console.log('[ML PAYLOAD CLEAN]', JSON.stringify(payload, null, 2));
@@ -1518,7 +1536,7 @@ function buildMlItemCreateDebugFlags(safe: Record<string, unknown>): Record<stri
     uses_family_name_field: hasFamilyName,
     removed_family_name_because_variations: variations.length > 0,
     removed_variations_for_user_product: userProductMode,
-    removed_title_for_user_product: userProductMode && !hasTitle,
+    removed_title_for_user_product: userProductMode,
     has_item_price: safe.price != null,
     has_item_stock: safe.available_quantity != null,
     variation_count: variations.length,
@@ -1992,24 +2010,6 @@ function mlPackFamilyNameForListing(
   return `${clean || 'Pack'} Pack X${units}`;
 }
 
-/** Título por talle en User Product pack: "Base Pack X3 Talle P 38-40". */
-function mlPackTitleForUserProductListing(
-  baseTitle: string,
-  sizeName: string,
-  packItems?: PublicationBundleItem[],
-  titleForInfer?: string
-): string {
-  const clean = String(baseTitle || '')
-    .trim()
-    .replace(/\s*Talle\s+.+$/i, '')
-    .replace(/\s*\(Pack\)\s*$/i, '')
-    .replace(/\s*Pack\s*X\d+\s*$/i, '')
-    .trim();
-  const units = inferPackUnitsPerSale(titleForInfer || clean, packItems);
-  const size = String(sizeName || '').trim() || 'U';
-  return `${clean || 'Pack'} Pack X${units} Talle ${size}`;
-}
-
 function buildPackListingSellerCustomField(
   sourceItem: any,
   _skuSuffix: string,
@@ -2287,15 +2287,6 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     attrs = upsertMlCreateAttribute(attrs, fa);
   }
 
-  const sizeAttr = fashionAttrs.find((a) => mlAttrIdUpper(a.id) === 'SIZE');
-  const sizeName = String(sizeAttr?.value_name ?? '').trim() || mlSizeValueNameForMercadoLibre(size);
-  const listingTitle = mlPackTitleForUserProductListing(
-    opts.baseTitle,
-    sizeName,
-    packVariant.items,
-    opts.baseTitle
-  );
-
   const listing = mlListingFieldsFromSourceItem(sourceItem);
   const pictureRows = sanitizeMlPicturesForApi(pictures);
 
@@ -2305,7 +2296,6 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     buying_mode: listing.buying_mode,
     listing_type_id: listing.listing_type_id,
     condition: listing.condition,
-    title: listingTitle,
     family_name: opts.packFamilyName,
     price,
     available_quantity: itemQty,
@@ -2368,7 +2358,7 @@ async function createMercadoLibrePackListingUserProduct(
       {
         user_product_mode: true,
         removed_variations: true,
-        removed_title_for_user_product: false,
+        removed_title_for_user_product: true,
         publishing_size: size,
         pack_combo_label: comboLabel
       }
