@@ -10,6 +10,7 @@ export const TALLE_CODIGO_A_NOMBRE: Record<string, string> = {
   '170': 'U',
   '180': 'XG',
   '200': 'XXG',
+  '220': 'XXXG',
   '240': 'XXG',
   '250': 'XXXG',
 };
@@ -28,7 +29,11 @@ const TALLE_NOMBRE_A_CODIGO: Record<string, string> = {
   U: '170',
   XG: '180',
   XXG: '200',
-  XXXG: '250',
+  XXXG: '220',
+  S: '130',
+  EG: '160',
+  UNICO: '170',
+  ÚNICO: '170',
   '130': '130',
   '140': '140',
   '150': '150',
@@ -36,8 +41,22 @@ const TALLE_NOMBRE_A_CODIGO: Record<string, string> = {
   '170': '170',
   '180': '180',
   '200': '200',
+  '220': '220',
   '240': '240',
   '250': '250',
+};
+
+/** Sinónimos de letra para matchear guías ML (ej. 130 → P o S). */
+export const TALLE_LETRAS_EQUIVALENTES: Record<string, string[]> = {
+  '130': ['P', 'S'],
+  '140': ['M'],
+  '150': ['G'],
+  '160': ['GG', 'EG'],
+  '170': ['U', 'UNICO', 'ÚNICO'],
+  '180': ['XG'],
+  '200': ['XXG'],
+  '220': ['XXXG'],
+  '250': ['XXXG'],
 };
 
 export function codigoTalleParaSku(nameOrCode: string | undefined | null): string {

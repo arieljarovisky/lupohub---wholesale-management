@@ -8,6 +8,10 @@ import {
 } from '../controllers/integrations.controller';
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 import {
+  nombreTalleDesdeCodigo,
+  TALLE_LETRAS_EQUIVALENTES
+} from '../talles-tango';
+import {
   computeAvailableStockFromItems,
   createPublicationBundle,
   findBundlesByProduct,
@@ -111,6 +115,42 @@ export type MlItemCreateAttribute = {
   value_id?: string | number;
 };
 
+function mlNormalizeSizeLabel(size: string): string {
+  return String(size || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^talle\s+/i, '')
+    .replace(/único/g, 'unico');
+}
+
+/** Código numérico (130) + letra Tango (P) + alias ML (S, EG…) para buscar variación / guía. */
+function mlSizeLabelsForMatch(size: string): string[] {
+  const raw = String(size || '').trim();
+  const out = new Set<string>();
+  const push = (s: string) => {
+    const t = mlNormalizeSizeLabel(s);
+    if (t) out.add(t);
+  };
+  push(raw);
+  if (/^\d{2,3}$/.test(raw)) {
+    const letter = nombreTalleDesdeCodigo(raw);
+    push(letter);
+    for (const alias of TALLE_LETRAS_EQUIVALENTES[raw] || []) push(alias);
+  } else {
+    push(nombreTalleDesdeCodigo(raw));
+  }
+  return [...out];
+}
+
+/** Valor SIZE para POST ML: letra de catálogo (M), no código Tango (140). */
+function mlSizeValueNameForMercadoLibre(sizeCode: string): string {
+  const raw = String(sizeCode || '').trim();
+  if (!raw) return 'U';
+  const letter = nombreTalleDesdeCodigo(raw);
+  if (/^\d{2,3}$/.test(raw) && letter && letter !== raw) return letter;
+  return raw;
+}
+
 function mlExtractAttributeValueName(entry: Record<string, unknown>): string {
   let value_name = String(entry.value_name ?? '').trim();
   if (!value_name || value_name === 'null') {
@@ -126,7 +166,18 @@ function mlExtractAttributeValueName(entry: Record<string, unknown>): string {
       ).trim();
     }
   }
+  const struct = entry.value_struct as Record<string, unknown> | undefined;
+  if (!value_name && struct && struct.number != null) {
+    value_name = String(struct.number).trim();
+  }
   return value_name;
+}
+
+function mlNormalizeSizeGridRowAttr(row: MlItemCreateAttribute): MlItemCreateAttribute {
+  if (row.value_name) return row;
+  const vid = row.value_id != null ? String(row.value_id).trim() : '';
+  if (vid.includes(':')) return { ...row, value_name: vid };
+  return row;
 }
 
 function mlRawEntryToCreateAttribute(entry: unknown): MlItemCreateAttribute | null {
@@ -181,6 +232,11 @@ function mlAttributesForPostPayload(attrs: MlItemCreateAttribute[]): Array<Recor
       const row: Record<string, unknown> = { id };
       if (id === 'SIZE_GRID_ID' && a.value_id != null) {
         row.value_id = a.value_id;
+        return row;
+      }
+      if (id === 'SIZE_GRID_ROW_ID') {
+        if (a.value_name) row.value_name = a.value_name;
+        else if (a.value_id != null) row.value_name = String(a.value_id);
         return row;
       }
       if (a.value_name) row.value_name = a.value_name;
@@ -363,14 +419,36 @@ function filterMlItemAttributesForCreatePost(
   return out;
 }
 
+function mlVariationSizeMatchesLabels(varSizeName: string, labels: string[]): boolean {
+  const norm = mlNormalizeSizeLabel(varSizeName);
+  if (!norm) return false;
+  return labels.some((l) => l === norm);
+}
+
 function mlFindSourceVariationBySize(sourceItem: any, size: string): any | null {
-  const targetSize = String(size || '').trim();
-  if (!targetSize) return null;
+  const labels = mlSizeLabelsForMatch(size);
+  if (!labels.length) return null;
   for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
     const ac = Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : [];
     const varSize = ac.find((a: any) => ML_SIZE_ATTR_IDS.has(mlAttrIdUpper(a?.id)));
-    if (String(varSize?.value_name ?? '').trim() === targetSize) return v;
+    if (mlVariationSizeMatchesLabels(String(varSize?.value_name ?? ''), labels)) return v;
   }
+  return null;
+}
+
+/** SIZE_GRID_ROW_ID suele venir en attributes de la variación del GET (no siempre en el ítem). */
+function mlSizeGridRowFromSourceItem(sourceItem: any, size: string): MlItemCreateAttribute | null {
+  const variation = mlFindSourceVariationBySize(sourceItem, size);
+  if (variation) {
+    const fromVar = mlPickCreateAttributeFromList(variation.attributes, 'SIZE_GRID_ROW_ID');
+    if (fromVar) return mlNormalizeSizeGridRowAttr(fromVar);
+  }
+  for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
+    const fromVar = mlPickCreateAttributeFromList(v?.attributes, 'SIZE_GRID_ROW_ID');
+    if (fromVar) return mlNormalizeSizeGridRowAttr(fromVar);
+  }
+  const fromItem = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ROW_ID');
+  if (fromItem) return mlNormalizeSizeGridRowAttr(fromItem);
   return null;
 }
 
@@ -389,38 +467,56 @@ function mlFashionSizeAttrsFromSource(sourceItem: any, size: string): MlItemCrea
   const attrSources: unknown[] = [variation?.attributes, sourceItem?.attributes];
 
   const out: MlItemCreateAttribute[] = [];
-  for (const attrId of ['SIZE_GRID_ID', 'SIZE_GRID_ROW_ID'] as const) {
-    for (const src of attrSources) {
-      const picked = mlPickCreateAttributeFromList(src, attrId);
-      if (picked) {
-        out.push(picked);
-        break;
-      }
+  for (const src of attrSources) {
+    const grid = mlPickCreateAttributeFromList(src, 'SIZE_GRID_ID');
+    if (grid) {
+      out.push(grid);
+      break;
     }
   }
+  const rowFromSource = mlSizeGridRowFromSourceItem(sourceItem, targetSize);
+  if (rowFromSource) out.push(rowFromSource);
 
   let sizeAttr: MlItemCreateAttribute | null = null;
   for (const src of attrSources) {
     sizeAttr = mlPickCreateAttributeFromList(src, 'SIZE');
     if (sizeAttr) break;
   }
-  if (!sizeAttr && targetSize) sizeAttr = { id: 'SIZE', value_name: targetSize };
+  if (!sizeAttr && targetSize) {
+    sizeAttr = { id: 'SIZE', value_name: mlSizeValueNameForMercadoLibre(targetSize) };
+  } else if (sizeAttr?.value_name) {
+    sizeAttr = { ...sizeAttr, value_name: mlSizeValueNameForMercadoLibre(sizeAttr.value_name) };
+  }
   if (sizeAttr) out.push(sizeAttr);
 
   return out;
 }
 
+function mlChartSizeCandidates(v: any): string[] {
+  const out: string[] = [];
+  const push = (s: unknown) => {
+    const t = String(s ?? '').trim();
+    if (t) out.push(mlNormalizeSizeLabel(t));
+  };
+  push(v?.name);
+  push(v?.value_name);
+  if (v?.struct && typeof v.struct === 'object') push((v.struct as any).number);
+  push(v?.id);
+  return out;
+}
+
 function mlChartRowMatchesSizeLabel(row: any, sizeLabel: string): boolean {
-  const target = String(sizeLabel || '').trim().toLowerCase();
-  if (!target) return false;
+  const labels = mlSizeLabelsForMatch(sizeLabel);
+  if (!labels.length) return false;
   const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
   for (const att of attrs) {
     const attId = mlAttrIdUpper(att?.id ?? att?.name);
     if (attId !== 'SIZE' && !ML_SIZE_ATTR_IDS.has(attId)) continue;
     const vals = Array.isArray(att?.values) ? att.values : [];
     for (const v of vals) {
-      const n = String(v?.name ?? v?.value_name ?? '').trim().toLowerCase();
-      if (n === target) return true;
+      for (const candidate of mlChartSizeCandidates(v)) {
+        if (labels.includes(candidate)) return true;
+      }
     }
   }
   return false;
@@ -441,13 +537,22 @@ async function mlFetchSizeGridRowIdForSize(
         validateStatus: () => true
       }
     );
-    if (res.status !== 200 || !res.data) return '';
+    if (res.status !== 200 || !res.data) {
+      console.warn('[ML pack] Guía de talles HTTP', chartKey, res.status, res.data?.message || res.data?.error);
+      return '';
+    }
     const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
     for (const row of rows) {
       if (!mlChartRowMatchesSizeLabel(row, sizeLabel)) continue;
       const rowId = String(row.id ?? '').trim();
       if (rowId) return rowId;
     }
+    console.warn(
+      '[ML pack] Guía sin fila para talle',
+      chartKey,
+      sizeLabel,
+      `(${rows.length} filas)`
+    );
   } catch (err: any) {
     console.warn('[ML pack] No se pudo leer guía de talles', chartKey, err?.message || err);
   }
@@ -467,17 +572,21 @@ async function mlUserProductAttrsFromSource(
   let row = byId.get('SIZE_GRID_ROW_ID');
   const sizeLabel = String(size || '').trim();
 
-  if (grid && !row?.value_name && sizeLabel) {
+  const rowNeedsChart =
+    !row || (!row.value_name && !(row.value_id != null && String(row.value_id).includes(':')));
+  if (grid && rowNeedsChart && sizeLabel) {
     const chartId = grid.value_id ?? grid.value_name;
     const rowId = await mlFetchSizeGridRowIdForSize(accessToken, chartId as string | number, sizeLabel);
     if (rowId) {
       row = { id: 'SIZE_GRID_ROW_ID', value_name: rowId };
       byId.set('SIZE_GRID_ROW_ID', row);
     }
+  } else if (row) {
+    byId.set('SIZE_GRID_ROW_ID', mlNormalizeSizeGridRowAttr(row));
   }
 
   if (!byId.has('SIZE') && sizeLabel) {
-    byId.set('SIZE', { id: 'SIZE', value_name: sizeLabel });
+    byId.set('SIZE', { id: 'SIZE', value_name: mlSizeValueNameForMercadoLibre(sizeLabel) });
   }
 
   const needed = new Set<string>(ML_USER_PRODUCT_REQUIRED_FROM_SOURCE);
@@ -741,7 +850,7 @@ function buildMlPackVariationAttributeCombinations(opts: {
   size: string;
 }): Array<{ id: string; value_name: string }> {
   const colorName = packColorNameForMlVariation(opts.color);
-  const sizeName = String(opts.size || '').trim() || 'U';
+  const sizeName = mlSizeValueNameForMercadoLibre(String(opts.size || '').trim() || 'U');
   return [
     { id: 'COLOR', value_name: colorName },
     { id: 'SIZE', value_name: sizeName }
@@ -1308,8 +1417,19 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     (id) => !mlHasCreateAttribute(attrs, id)
   );
   if (missingRequired.length) {
+    const fashionDebug = attrs
+      .filter((a) => ['SIZE_GRID_ID', 'SIZE_GRID_ROW_ID', 'SIZE'].includes(mlAttrIdUpper(a.id)))
+      .map((a) => ({
+        id: a.id,
+        value_name: a.value_name,
+        value_id: a.value_id
+      }));
+    const varCount = Array.isArray(sourceItem?.variations) ? sourceItem.variations.length : 0;
     throw new Error(
-      `La publicación origen no tiene los atributos que Mercado Libre exige para crear el pack: ${missingRequired.join(', ')}. Completalos en la publicación MLA origen e intentá de nuevo.`
+      `No se pudieron resolver atributos de guía de talles para el talle ${size}: ${missingRequired.join(', ')}. ` +
+        `La MLA origen (${sourceItem?.id || '?'}) trae ${varCount} variación(es) en el GET; ` +
+        `SIZE_GRID_ROW_ID suele estar en cada variación, no en el ítem. ` +
+        `Debug: ${JSON.stringify(fashionDebug)}`
     );
   }
 
@@ -1475,6 +1595,46 @@ export async function fetchPublicationSourcePreview(
   };
 }
 
+/** Completa attributes de cada variación (el GET del ítem a veces no los trae). */
+async function enrichMercadoLibreItemVariations(item: any, accessToken: string): Promise<any> {
+  const itemId = String(item?.id || '').trim();
+  const variations = Array.isArray(item?.variations) ? item.variations : [];
+  if (!itemId || variations.length < 1) return item;
+
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  let changed = false;
+  const enriched = await Promise.all(
+    variations.map(async (v: any) => {
+      const hasRow = mlPickCreateAttributeFromList(v?.attributes, 'SIZE_GRID_ROW_ID');
+      const rowOk =
+        Boolean(hasRow?.value_name) ||
+        (hasRow?.value_id != null && String(hasRow.value_id).includes(':'));
+      if (rowOk) return v;
+
+      const vid = v?.id;
+      if (vid == null) return v;
+      try {
+        const r = await axios.get(`https://api.mercadolibre.com/items/${itemId}/variations/${vid}`, {
+          headers,
+          validateStatus: () => true
+        });
+        if (r.status === 200 && r.data) {
+          changed = true;
+          return {
+            ...v,
+            attribute_combinations: v.attribute_combinations ?? r.data.attribute_combinations,
+            attributes: r.data.attributes ?? v.attributes
+          };
+        }
+      } catch {
+        /* opcional */
+      }
+      return v;
+    })
+  );
+  return changed ? { ...item, variations: enriched } : item;
+}
+
 export async function fetchMercadoLibreItemResolved(rawItemId: string): Promise<{ item: any; itemId: string } | null> {
   const mlToken = await getValidMLToken();
   if (!mlToken) return null;
@@ -1488,7 +1648,8 @@ export async function fetchMercadoLibreItemResolved(rawItemId: string): Promise<
         validateStatus: () => true
       });
       if (r.status === 200 && r.data && !r.data.error) {
-        return { item: r.data, itemId: String(r.data.id || candidate) };
+        const item = await enrichMercadoLibreItemVariations(r.data, mlToken.access_token);
+        return { item, itemId: String(item.id || candidate) };
       }
     } catch {
       /* siguiente candidato */
