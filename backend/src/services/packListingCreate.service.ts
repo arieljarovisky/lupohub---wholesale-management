@@ -581,7 +581,7 @@ function mlSizeGridRowFromSourceItem(sourceItem: any, size: string): MlItemCreat
   return null;
 }
 
-/** Solo SIZE (letra); nunca copiar SIZE_GRID_ID/ROW del origen (causa 2613 si la guía no aplica). */
+/** Solo SIZE (letra); SIZE_GRID_ID/ROW se resuelven en mlUserProductFashionAttrsFromSource. */
 function mlSizeAttrForUserProduct(size: string): MlItemCreateAttribute | null {
   const targetSize = String(size || '').trim();
   if (!targetSize) return null;
@@ -826,8 +826,14 @@ async function mlDomainSupportsSizeGrid(accessToken: string, domainId: string): 
   }
 }
 
-function mlPickChartIdFromSearchResponse(data: any): string {
+function mlPickChartIdFromSearchResponse(data: any, preferredChartId?: string): string {
   const charts = Array.isArray(data?.charts) ? data.charts : [];
+  const preferred = String(preferredChartId ?? '').trim();
+  if (preferred && /^\d+$/.test(preferred)) {
+    for (const c of charts) {
+      if (String(c?.id ?? '').trim() === preferred) return preferred;
+    }
+  }
   const pick = (pred: (c: any) => boolean) => {
     for (const c of charts) {
       if (!pred(c)) continue;
@@ -850,6 +856,7 @@ async function mlSearchCatalogChartId(
     siteId: string;
     sellerId: string;
     searchAttributes: Array<{ id: string; values: Array<{ name: string }> }>;
+    preferredChartId?: string;
   }
 ): Promise<string> {
   const sellerNum = Number(opts.sellerId);
@@ -902,13 +909,14 @@ async function mlSearchCatalogChartId(
             );
             continue;
           }
-          const chartId = mlPickChartIdFromSearchResponse(res.data);
+          const chartId = mlPickChartIdFromSearchResponse(res.data, opts.preferredChartId);
           if (chartId) {
             console.log('[ML pack] charts/search OK', {
               chartId,
               domain_id,
               type: type || 'all',
-              attrCount: attributes.length
+              attrCount: attributes.length,
+              preferred: opts.preferredChartId || undefined
             });
             return chartId;
           }
@@ -954,11 +962,15 @@ async function mlResolveFashionGridViaMercadoLibreApi(
   }
 
   const searchAttributes = await mlChartSearchAttributesForDomain(accessToken, domainId, sourceItem);
+  const sourceChartId = String(
+    mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID')?.value_id ?? ''
+  ).trim();
   const chartId = await mlSearchCatalogChartId(accessToken, {
     domainId,
     siteId,
     sellerId,
-    searchAttributes
+    searchAttributes,
+    preferredChartId: sourceChartId || undefined
   });
   if (!chartId) {
     console.warn('[ML pack] charts/search sin chart_id', { domainId, searchAttributes });
@@ -987,7 +999,69 @@ function mlSizeGridRowMatchesChart(row: MlItemCreateAttribute | undefined, chart
   return rowName.startsWith(`${chartId}:`);
 }
 
-/** SIZE_GRID_ID + SIZE_GRID_ROW_ID + SIZE solo desde guía del dominio (nunca del MLA origen). */
+function mlFashionSizeAttrForPack(
+  sourceItem: any,
+  sizeLabel: string,
+  chartRow: any | null
+): MlItemCreateAttribute {
+  if (chartRow) {
+    return { id: 'SIZE', value_name: mlSizeValueFromChartRow(chartRow, sizeLabel) };
+  }
+  const variation = mlFindSourceVariationBySize(sourceItem, sizeLabel);
+  const fromVar = mlPickCreateAttributeFromList(variation?.attributes, 'SIZE');
+  if (fromVar?.value_name) {
+    return { id: 'SIZE', value_name: String(fromVar.value_name) };
+  }
+  return (
+    mlSizeAttrForUserProduct(sizeLabel) ?? {
+      id: 'SIZE',
+      value_name: mlSizeValueNameForMercadoLibre(sizeLabel)
+    }
+  );
+}
+
+/** Reutiliza SIZE_GRID_ID del ítem MLA origen si hay fila válida (evita charts/search genérico inválido). */
+async function mlTryFashionGridFromSourceListing(
+  sourceItem: any,
+  sizeLabel: string,
+  accessToken: string
+): Promise<MlItemCreateAttribute[] | null> {
+  const sourceGrid = mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID');
+  const chartId = String(sourceGrid?.value_id ?? '').trim();
+  if (!chartId || !/^\d+$/.test(chartId)) return null;
+
+  let row: MlItemCreateAttribute | undefined;
+  let chartRow: any = null;
+  const fromSource = mlSizeGridRowFromSourceItem(sourceItem, sizeLabel);
+  if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
+    row = mlNormalizeSizeGridRowAttr(fromSource);
+  }
+  if (!row?.value_name && sizeLabel) {
+    const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
+    if (rowMatch?.rowId) {
+      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
+      chartRow = rowMatch.row;
+    }
+  }
+  if (!row?.value_name) {
+    console.warn('[ML pack] Guía origen sin fila para talle; fallback charts/search', {
+      chartId,
+      size: sizeLabel
+    });
+    return null;
+  }
+
+  const sizeAttr = mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow);
+  console.log('[ML pack] fashion grid from source listing', {
+    chartId,
+    size: sizeLabel,
+    sizeName: sizeAttr.value_name,
+    row: row.value_name
+  });
+  return [{ id: 'SIZE_GRID_ID', value_id: chartId }, row, sizeAttr];
+}
+
+/** SIZE_GRID_ID + SIZE_GRID_ROW_ID + SIZE: primero guía del MLA origen; si no, charts/search del dominio. */
 async function mlUserProductFashionAttrsFromSource(
   sourceItem: any,
   size: string,
@@ -996,6 +1070,13 @@ async function mlUserProductFashionAttrsFromSource(
   familyName?: string
 ): Promise<MlItemCreateAttribute[]> {
   const sizeLabel = String(size || '').trim();
+  const fromSourceListing = await mlTryFashionGridFromSourceListing(
+    sourceItem,
+    sizeLabel,
+    accessToken
+  );
+  if (fromSourceListing) return fromSourceListing;
+
   const fromApi = await mlResolveFashionGridViaMercadoLibreApi(
     sourceItem,
     sizeLabel,
@@ -1043,30 +1124,15 @@ async function mlUserProductFashionAttrsFromSource(
     );
   }
 
-  let sizeAttr: MlItemCreateAttribute;
-  if (chartRow) {
-    sizeAttr = { id: 'SIZE', value_name: mlSizeValueFromChartRow(chartRow, sizeLabel) };
-  } else {
-    const variation = mlFindSourceVariationBySize(sourceItem, sizeLabel);
-    const fromVar = mlPickCreateAttributeFromList(variation?.attributes, 'SIZE');
-    if (fromVar?.value_name) {
-      sizeAttr = { id: 'SIZE', value_name: String(fromVar.value_name) };
-    } else {
-      sizeAttr =
-        mlSizeAttrForUserProduct(sizeLabel) ?? {
-          id: 'SIZE',
-          value_name: mlSizeValueNameForMercadoLibre(sizeLabel)
-        };
-    }
-  }
+  const sizeAttr = mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow);
 
-  console.log('[ML pack] fashion grid resolved', {
+  console.log('[ML pack] fashion grid resolved via charts/search', {
     chartId,
     domainId: fromApi?.domainId,
     size: sizeLabel,
     sizeName: sizeAttr.value_name,
     row: row.value_name,
-    sourceGridIgnored: String(
+    sourceGridId: String(
       mlPickCreateAttributeFromList(sourceItem?.attributes, 'SIZE_GRID_ID')?.value_id ?? ''
     )
   });
