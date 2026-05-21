@@ -260,6 +260,18 @@ function mlRawEntryToCreateAttribute(entry: unknown): MlItemCreateAttribute | nu
   if (upper === 'SIZE_GRID_ID' && out.value_id == null && value_name && /^\d+$/.test(value_name)) {
     out.value_id = value_name;
   }
+  if (upper === 'SIZE_GRID_ROW_ID') {
+    const rid =
+      out.value_id != null && String(out.value_id).includes(':')
+        ? String(out.value_id).trim()
+        : value_name.includes(':')
+          ? value_name
+          : '';
+    if (rid) {
+      out.value_id = rid;
+      delete out.value_name;
+    }
+  }
   return out;
 }
 
@@ -284,7 +296,7 @@ function sanitizeMlAttributesForApi(raw: unknown): Array<{ id: string; value_nam
     .map((a) => ({ id: a.id, value_name: a.value_name! }));
 }
 
-/** Formato que exige ML en POST /items (SIZE_GRID_ID con value_id, resto con value_name). */
+/** Formato que exige ML en POST /items (SIZE_GRID_ID y SIZE_GRID_ROW_ID con value_id). */
 function mlAttributesForPostPayload(attrs: MlItemCreateAttribute[]): Array<Record<string, unknown>> {
   return attrs
     .map((a) => {
@@ -295,8 +307,8 @@ function mlAttributesForPostPayload(attrs: MlItemCreateAttribute[]): Array<Recor
         return row;
       }
       if (id === 'SIZE_GRID_ROW_ID') {
-        if (a.value_name) row.value_name = a.value_name;
-        else if (a.value_id != null) row.value_name = String(a.value_id);
+        const rowId = mlSizeGridRowIdValue(a);
+        if (rowId) row.value_id = rowId;
         return row;
       }
       if (a.value_name) row.value_name = a.value_name;
@@ -542,11 +554,23 @@ function mlPickCreateAttributeFromList(attrs: unknown, attrId: string): MlItemCr
   return null;
 }
 
-function mlNormalizeSizeGridRowAttr(row: MlItemCreateAttribute): MlItemCreateAttribute {
-  if (row.value_name) return row;
+function mlSizeGridRowIdValue(row: MlItemCreateAttribute | undefined): string {
+  if (!row) return '';
   const vid = row.value_id != null ? String(row.value_id).trim() : '';
-  if (vid.includes(':')) return { ...row, value_name: vid };
-  return row;
+  if (vid.includes(':')) return vid;
+  const vn = String(row.value_name ?? '').trim();
+  if (vn.includes(':')) return vn;
+  return '';
+}
+
+function mlNormalizeSizeGridRowAttr(row: MlItemCreateAttribute): MlItemCreateAttribute {
+  const rowId = mlSizeGridRowIdValue(row);
+  if (!rowId) return row;
+  return { id: 'SIZE_GRID_ROW_ID', value_id: rowId };
+}
+
+function mlMakeSizeGridRowAttr(rowId: string): MlItemCreateAttribute {
+  return { id: 'SIZE_GRID_ROW_ID', value_id: String(rowId).trim() };
 }
 
 function mlVariationSizeMatchesLabels(varSizeName: string, labels: string[]): boolean {
@@ -1019,7 +1043,7 @@ async function mlResolveFashionGridViaMercadoLibreApi(
     domainId,
     chartId,
     grid: { id: 'SIZE_GRID_ID', value_id: String(chartId) },
-    row: rowId ? { id: 'SIZE_GRID_ROW_ID', value_name: rowId } : undefined,
+    row: rowId ? mlMakeSizeGridRowAttr(rowId) : undefined,
     size: sizeLabel ? { id: 'SIZE', value_name: sizeName } : undefined
   };
 }
@@ -1073,13 +1097,13 @@ async function mlFashionAttrsFromSourcePublication(
   if (fromSource && mlSizeGridRowMatchesChart(fromSource, chartId)) {
     row = mlNormalizeSizeGridRowAttr(fromSource);
   }
-  if (!row?.value_name && sizeLabel) {
+  if (!mlSizeGridRowIdValue(row) && sizeLabel) {
     const rowMatch = await mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
     if (rowMatch?.rowId) {
-      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowMatch.rowId };
+      row = mlMakeSizeGridRowAttr(rowMatch.rowId);
     }
   }
-  if (!row?.value_name) {
+  if (!mlSizeGridRowIdValue(row)) {
     const letter = mlSizeValueNameForMercadoLibre(sizeLabel);
     throw new Error(
       `La publicación origen (guía ${chartId}) no tiene fila para el talle ${sizeLabel} (${letter}). ` +
@@ -1095,7 +1119,7 @@ async function mlFashionAttrsFromSourcePublication(
     sourceItemId: String(sourceItem?.id ?? ''),
     chartId,
     sizeCode: sizeLabel,
-    row: row.value_name,
+    row: mlSizeGridRowIdValue(row),
     sizeName: sizeAttr.value_name
   });
 
@@ -1300,19 +1324,19 @@ export function validateMlPayload(
       continue;
     }
     if (id === 'SIZE_GRID_ROW_ID') {
-      const vn = String(attr.value_name ?? '').trim();
-      if (!vn || !vn.includes(':')) {
-        throw new Error(`SIZE_GRID_ROW_ID requires value_name grid:row: ${JSON.stringify(a)}`);
+      const rid = String(attr.value_id ?? attr.value_name ?? '').trim();
+      if (!rid || !rid.includes(':')) {
+        throw new Error(`SIZE_GRID_ROW_ID requires value_id grid:row: ${JSON.stringify(a)}`);
       }
-      if (keys.some((k) => !['id', 'value_name'].includes(k))) {
+      if (keys.some((k) => !['id', 'value_id'].includes(k))) {
         throw new Error(`Invalid SIZE_GRID_ROW_ID shape: ${JSON.stringify(a)}`);
       }
       const gridAttr = attrs.find(
         (x) => mlAttrIdUpper(String((x as Record<string, unknown>).id ?? '')) === 'SIZE_GRID_ID'
       ) as Record<string, unknown> | undefined;
       const gridId = String(gridAttr?.value_id ?? '').trim();
-      if (gridId && !vn.startsWith(`${gridId}:`)) {
-        throw new Error(`SIZE_GRID_ROW_ID ${vn} no coincide con SIZE_GRID_ID ${gridId}`);
+      if (gridId && !rid.startsWith(`${gridId}:`)) {
+        throw new Error(`SIZE_GRID_ROW_ID ${rid} no coincide con SIZE_GRID_ID ${gridId}`);
       }
       continue;
     }

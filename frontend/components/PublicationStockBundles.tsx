@@ -870,7 +870,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                                     <thead>
                                       <tr className="text-slate-500 border-b border-slate-700">
                                         <th className="py-1 pr-2 font-normal">Talle MLA</th>
-                                        <th className="py-1 pr-2 font-normal">SIZE_GRID_ROW_ID</th>
+                                        <th className="py-1 pr-2 font-normal">SIZE_GRID_ROW_ID (value_id)</th>
                                         <th className="py-1 font-normal">SIZE</th>
                                       </tr>
                                     </thead>
