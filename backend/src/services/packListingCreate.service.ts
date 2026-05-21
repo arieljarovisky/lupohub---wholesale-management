@@ -254,13 +254,15 @@ function mlPicturesPayload(
 }
 
 function mlPicturesFromItem(item: any): Array<{ id?: string; source?: string }> {
-  return collectMlPicturesFromItem(item)
-    .map((p) => {
-      if (p.pictureId && looksLikeMlPictureId(p.pictureId)) return { id: p.pictureId };
-      if (p.url?.startsWith('http')) return { source: p.url };
-      return null;
-    })
-    .filter((x): x is { id?: string; source?: string } => Boolean(x));
+  const out: Array<{ id?: string; source?: string }> = [];
+  for (const p of collectMlPicturesFromItem(item)) {
+    if (p.pictureId && looksLikeMlPictureId(p.pictureId)) {
+      out.push({ id: p.pictureId });
+    } else if (p.url?.startsWith('http')) {
+      out.push({ source: p.url });
+    }
+  }
+  return out;
 }
 
 async function applyMlItemDescription(
