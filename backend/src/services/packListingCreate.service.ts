@@ -104,6 +104,13 @@ function sanitizeMlPicturesForApi(
   return out;
 }
 
+/** Atributo para POST /items (value_id y/o value_name según el id). */
+export type MlItemCreateAttribute = {
+  id: string;
+  value_name?: string;
+  value_id?: string | number;
+};
+
 function mlExtractAttributeValueName(entry: Record<string, unknown>): string {
   let value_name = String(entry.value_name ?? '').trim();
   if (!value_name || value_name === 'null') {
@@ -122,23 +129,65 @@ function mlExtractAttributeValueName(entry: Record<string, unknown>): string {
   return value_name;
 }
 
-function sanitizeMlAttributesForApi(raw: unknown): Array<{ id: string; value_name: string }> {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: Array<{ id: string; value_name: string }> = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue;
-    const e = entry as Record<string, unknown>;
-    const id = String(e.id ?? '').trim();
-    const value_name = mlExtractAttributeValueName(e);
-    if (!id || !value_name) continue;
-    if (looksLikeMlPictureId(id)) continue;
-    const key = mlAttrIdUpper(id);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ id, value_name });
+function mlRawEntryToCreateAttribute(entry: unknown): MlItemCreateAttribute | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const e = entry as Record<string, unknown>;
+  const id = String(e.id ?? '').trim();
+  if (!id || looksLikeMlPictureId(id)) return null;
+  const upper = mlAttrIdUpper(id);
+  const value_name = mlExtractAttributeValueName(e);
+  let value_id: string | number | undefined;
+  const rawVid = e.value_id;
+  if (rawVid != null && String(rawVid).trim() !== '') {
+    const s = String(rawVid).trim();
+    value_id = /^\d+$/.test(s) ? Number(s) : s;
+  }
+  if (!value_name && value_id == null) return null;
+  const out: MlItemCreateAttribute = { id: upper };
+  if (value_name) out.value_name = value_name;
+  if (value_id != null) out.value_id = value_id;
+  if (upper === 'SIZE_GRID_ID' && out.value_id == null && value_name && /^\d+$/.test(value_name)) {
+    out.value_id = Number(value_name);
   }
   return out;
+}
+
+function sanitizeMlCreateAttributes(raw: unknown): MlItemCreateAttribute[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: MlItemCreateAttribute[] = [];
+  for (const entry of raw) {
+    const attr = mlRawEntryToCreateAttribute(entry);
+    if (!attr) continue;
+    const key = mlAttrIdUpper(attr.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(attr);
+  }
+  return out;
+}
+
+function sanitizeMlAttributesForApi(raw: unknown): Array<{ id: string; value_name: string }> {
+  return sanitizeMlCreateAttributes(raw)
+    .filter((a) => Boolean(a.value_name))
+    .map((a) => ({ id: a.id, value_name: a.value_name! }));
+}
+
+/** Formato que exige ML en POST /items (SIZE_GRID_ID con value_id, resto con value_name). */
+function mlAttributesForPostPayload(attrs: MlItemCreateAttribute[]): Array<Record<string, unknown>> {
+  return attrs
+    .map((a) => {
+      const id = mlAttrIdUpper(a.id);
+      const row: Record<string, unknown> = { id };
+      if (id === 'SIZE_GRID_ID' && a.value_id != null) {
+        row.value_id = a.value_id;
+        return row;
+      }
+      if (a.value_name) row.value_name = a.value_name;
+      else if (a.value_id != null) row.value_id = a.value_id;
+      return row;
+    })
+    .filter((row) => row.value_name != null || row.value_id != null);
 }
 
 function normalizeMlVariationAttributeCombinations(
@@ -223,6 +272,8 @@ const ML_ITEM_CREATE_ATTR_ALLOWLIST_CLASSIC = new Set([
 const ML_ITEM_CREATE_ATTR_ALLOWLIST_USER_PRODUCT = new Set([
   ...ML_ITEM_CREATE_ATTR_ALLOWLIST_CLASSIC,
   'SIZE_GRID_ID',
+  'SIZE_GRID_ROW_ID',
+  'SIZE',
   'VALUE_ADDED_TAX',
   'IMPORT_DUTY',
   'SELLER_PACKAGE_HEIGHT',
@@ -246,6 +297,8 @@ const ML_ITEM_CREATE_ATTR_OMIT_USER_PRODUCT = new Set(['AGE_GROUP']);
 
 const ML_USER_PRODUCT_REQUIRED_FROM_SOURCE = [
   'SIZE_GRID_ID',
+  'SIZE_GRID_ROW_ID',
+  'SIZE',
   'VALUE_ADDED_TAX',
   'IMPORT_DUTY',
   'SELLER_PACKAGE_HEIGHT',
@@ -289,57 +342,167 @@ function sanitizeMlSaleTermsForApi(raw: unknown): Array<Record<string, unknown>>
 
 /** Solo atributos permitidos para el tipo de publicación; sin duplicados. */
 function filterMlItemAttributesForCreatePost(
-  attrs: Array<{ id: string; value_name: string }>,
+  attrs: MlItemCreateAttribute[],
   opts?: { userProduct?: boolean }
-): Array<{ id: string; value_name: string }> {
+): MlItemCreateAttribute[] {
   const allowlist = opts?.userProduct
     ? ML_ITEM_CREATE_ATTR_ALLOWLIST_USER_PRODUCT
     : ML_ITEM_CREATE_ATTR_ALLOWLIST_CLASSIC;
   const seen = new Set<string>();
-  const out: Array<{ id: string; value_name: string }> = [];
+  const out: MlItemCreateAttribute[] = [];
   for (const a of attrs) {
     const upper = mlAttrIdUpper(a.id);
     if (ML_ITEM_CREATE_ATTR_BLOCKLIST.has(upper)) continue;
     if (opts?.userProduct && ML_ITEM_CREATE_ATTR_OMIT_USER_PRODUCT.has(upper)) continue;
     if (!allowlist.has(upper)) continue;
+    if (!a.value_name && a.value_id == null) continue;
     if (seen.has(upper)) continue;
     seen.add(upper);
-    out.push({ id: upper, value_name: a.value_name });
+    out.push({ id: upper, value_name: a.value_name, value_id: a.value_id });
   }
   return out;
 }
 
-function mlSizeGridIdFromSourceForSize(sourceItem: any, size: string): string {
-  const itemAttrs = sanitizeMlAttributesForApi(sourceItem?.attributes);
-  const onItem = itemAttrs.find((a) => mlAttrIdUpper(a.id) === 'SIZE_GRID_ID');
-  if (onItem?.value_name) return onItem.value_name;
-
+function mlFindSourceVariationBySize(sourceItem: any, size: string): any | null {
   const targetSize = String(size || '').trim();
-  const variations = Array.isArray(sourceItem?.variations) ? sourceItem.variations : [];
-  for (const v of variations) {
+  if (!targetSize) return null;
+  for (const v of Array.isArray(sourceItem?.variations) ? sourceItem.variations : []) {
     const ac = Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : [];
     const varSize = ac.find((a: any) => ML_SIZE_ATTR_IDS.has(mlAttrIdUpper(a?.id)));
-    const varSizeName = String(varSize?.value_name ?? '').trim();
-    if (targetSize && varSizeName && varSizeName !== targetSize) continue;
-    const vAttrs = sanitizeMlAttributesForApi(v?.attributes);
-    const grid = vAttrs.find((a) => mlAttrIdUpper(a.id) === 'SIZE_GRID_ID');
-    if (grid?.value_name) return grid.value_name;
+    if (String(varSize?.value_name ?? '').trim() === targetSize) return v;
+  }
+  return null;
+}
+
+function mlPickCreateAttributeFromList(attrs: unknown, attrId: string): MlItemCreateAttribute | null {
+  if (!Array.isArray(attrs)) return null;
+  for (const entry of attrs) {
+    const attr = mlRawEntryToCreateAttribute(entry);
+    if (attr && mlAttrIdUpper(attr.id) === mlAttrIdUpper(attrId)) return attr;
+  }
+  return null;
+}
+
+function mlFashionSizeAttrsFromSource(sourceItem: any, size: string): MlItemCreateAttribute[] {
+  const targetSize = String(size || '').trim();
+  const variation = mlFindSourceVariationBySize(sourceItem, targetSize);
+  const attrSources: unknown[] = [variation?.attributes, sourceItem?.attributes];
+
+  const out: MlItemCreateAttribute[] = [];
+  for (const attrId of ['SIZE_GRID_ID', 'SIZE_GRID_ROW_ID'] as const) {
+    for (const src of attrSources) {
+      const picked = mlPickCreateAttributeFromList(src, attrId);
+      if (picked) {
+        out.push(picked);
+        break;
+      }
+    }
+  }
+
+  let sizeAttr: MlItemCreateAttribute | null = null;
+  for (const src of attrSources) {
+    sizeAttr = mlPickCreateAttributeFromList(src, 'SIZE');
+    if (sizeAttr) break;
+  }
+  if (!sizeAttr && targetSize) sizeAttr = { id: 'SIZE', value_name: targetSize };
+  if (sizeAttr) out.push(sizeAttr);
+
+  return out;
+}
+
+function mlChartRowMatchesSizeLabel(row: any, sizeLabel: string): boolean {
+  const target = String(sizeLabel || '').trim().toLowerCase();
+  if (!target) return false;
+  const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
+  for (const att of attrs) {
+    const attId = mlAttrIdUpper(att?.id ?? att?.name);
+    if (attId !== 'SIZE' && !ML_SIZE_ATTR_IDS.has(attId)) continue;
+    const vals = Array.isArray(att?.values) ? att.values : [];
+    for (const v of vals) {
+      const n = String(v?.name ?? v?.value_name ?? '').trim().toLowerCase();
+      if (n === target) return true;
+    }
+  }
+  return false;
+}
+
+async function mlFetchSizeGridRowIdForSize(
+  accessToken: string,
+  chartId: string | number,
+  sizeLabel: string
+): Promise<string> {
+  const chartKey = String(chartId ?? '').trim();
+  if (!chartKey) return '';
+  try {
+    const res = await axios.get(
+      `https://api.mercadolibre.com/catalog/charts/${encodeURIComponent(chartKey)}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      }
+    );
+    if (res.status !== 200 || !res.data) return '';
+    const rows = Array.isArray(res.data.rows) ? res.data.rows : [];
+    for (const row of rows) {
+      if (!mlChartRowMatchesSizeLabel(row, sizeLabel)) continue;
+      const rowId = String(row.id ?? '').trim();
+      if (rowId) return rowId;
+    }
+  } catch (err: any) {
+    console.warn('[ML pack] No se pudo leer guía de talles', chartKey, err?.message || err);
   }
   return '';
 }
 
-function mlUserProductRequiredAttrsFromSource(
+async function mlUserProductAttrsFromSource(
   sourceItem: any,
-  size?: string
-): Array<{ id: string; value_name: string }> {
-  const fromSource = sanitizeMlAttributesForApi(sourceItem?.attributes);
-  const needed = new Set<string>(ML_USER_PRODUCT_REQUIRED_FROM_SOURCE);
-  const out = fromSource.filter((a) => needed.has(mlAttrIdUpper(a.id)));
-  if (!out.some((a) => mlAttrIdUpper(a.id) === 'SIZE_GRID_ID')) {
-    const grid = mlSizeGridIdFromSourceForSize(sourceItem, String(size || ''));
-    if (grid) out.push({ id: 'SIZE_GRID_ID', value_name: grid });
+  size: string,
+  accessToken: string
+): Promise<MlItemCreateAttribute[]> {
+  const fashion = mlFashionSizeAttrsFromSource(sourceItem, size);
+  const byId = new Map<string, MlItemCreateAttribute>();
+  for (const a of fashion) byId.set(mlAttrIdUpper(a.id), a);
+
+  let grid = byId.get('SIZE_GRID_ID');
+  let row = byId.get('SIZE_GRID_ROW_ID');
+  const sizeLabel = String(size || '').trim();
+
+  if (grid && !row?.value_name && sizeLabel) {
+    const chartId = grid.value_id ?? grid.value_name;
+    const rowId = await mlFetchSizeGridRowIdForSize(accessToken, chartId as string | number, sizeLabel);
+    if (rowId) {
+      row = { id: 'SIZE_GRID_ROW_ID', value_name: rowId };
+      byId.set('SIZE_GRID_ROW_ID', row);
+    }
   }
-  return out;
+
+  if (!byId.has('SIZE') && sizeLabel) {
+    byId.set('SIZE', { id: 'SIZE', value_name: sizeLabel });
+  }
+
+  const needed = new Set<string>(ML_USER_PRODUCT_REQUIRED_FROM_SOURCE);
+  const fromItem = sanitizeMlCreateAttributes(sourceItem?.attributes);
+  for (const a of fromItem) {
+    const upper = mlAttrIdUpper(a.id);
+    if (!needed.has(upper) || byId.has(upper)) continue;
+    byId.set(upper, a);
+  }
+
+  const variation = mlFindSourceVariationBySize(sourceItem, sizeLabel);
+  const fromVar = sanitizeMlCreateAttributes(variation?.attributes);
+  for (const a of fromVar) {
+    const upper = mlAttrIdUpper(a.id);
+    if (!needed.has(upper) || byId.has(upper)) continue;
+    byId.set(upper, a);
+  }
+
+  return [...byId.values()];
+}
+
+function mlHasCreateAttribute(attrs: MlItemCreateAttribute[], attrId: string): boolean {
+  const a = attrs.find((x) => mlAttrIdUpper(x.id) === mlAttrIdUpper(attrId));
+  if (!a) return false;
+  return Boolean(a.value_name) || a.value_id != null;
 }
 
 function sanitizeMlShippingForApi(raw: unknown): Record<string, unknown> | undefined {
@@ -418,9 +581,10 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
     }
   }
   const userProduct = mlIsUserProductPostPayload(safe);
-  safe.attributes = filterMlItemAttributesForCreatePost(sanitizeMlAttributesForApi(safe.attributes), {
+  const filtered = filterMlItemAttributesForCreatePost(sanitizeMlCreateAttributes(safe.attributes), {
     userProduct
   });
+  safe.attributes = mlAttributesForPostPayload(filtered);
   return stripMlInternalBodyKeys(safe);
 }
 
@@ -608,10 +772,10 @@ function inferPackUnitsPerSale(
 }
 
 function applyPackProductAttributeOverrides(
-  attrs: Array<{ id: string; value_name: string }>,
+  attrs: MlItemCreateAttribute[],
   title: string,
   packItems?: PublicationBundleItem[]
-): Array<{ id: string; value_name: string }> {
+): MlItemCreateAttribute[] {
   const skip = new Set(['UNDERPANTS_RISE', 'FAMILY_NAME']);
   let out = attrs.filter((a) => !skip.has(mlAttrIdUpper(a.id)));
   out = upsertMlItemAttribute(out, 'SALE_FORMAT', 'Pack');
@@ -625,7 +789,7 @@ function mlItemAttributesForPackListing(
   title: string,
   packItems: PublicationBundleItem[],
   opts?: { withVariations?: boolean }
-): Array<{ id: string; value_name: string }> {
+): MlItemCreateAttribute[] {
   let attrs = mlAttributesForPackCreate(sourceItem, skuSuffix, { omitFamilyName: true });
   if (opts?.withVariations) {
     attrs = attrs.filter(
@@ -762,7 +926,7 @@ function mlAttributesForPackCreate(
   item: any,
   skuSuffix: string,
   opts?: { omitFamilyName?: boolean }
-): Array<{ id: string; value_name: string }> {
+): MlItemCreateAttribute[] {
   const raw = mlAttributesForDuplicate(item, skuSuffix);
   const filtered = opts?.omitFamilyName
     ? raw.filter((a) => mlAttrIdUpper(a.id) !== 'FAMILY_NAME')
@@ -770,17 +934,24 @@ function mlAttributesForPackCreate(
   return sanitizeMlAttributesForApi(filtered);
 }
 
+function upsertMlCreateAttribute(
+  attrs: MlItemCreateAttribute[],
+  entry: MlItemCreateAttribute
+): MlItemCreateAttribute[] {
+  const upper = mlAttrIdUpper(entry.id);
+  if (!upper) return attrs;
+  const rest = attrs.filter((a) => mlAttrIdUpper(a.id) !== upper);
+  return [...rest, { id: upper, value_name: entry.value_name, value_id: entry.value_id }];
+}
+
 function upsertMlItemAttribute(
-  attrs: Array<{ id: string; value_name: string }>,
+  attrs: MlItemCreateAttribute[],
   attrId: string,
   valueName: string
-): Array<{ id: string; value_name: string }> {
-  const id = String(attrId || '').trim();
+): MlItemCreateAttribute[] {
   const value = String(valueName || '').trim();
-  if (!id || !value) return attrs;
-  const upper = mlAttrIdUpper(id);
-  const rest = attrs.filter((a) => mlAttrIdUpper(a.id) !== upper);
-  return sanitizeMlAttributesForApi([...rest, { id, value_name: value }]);
+  if (!value) return attrs;
+  return upsertMlCreateAttribute(attrs, { id: attrId, value_name: value });
 }
 
 async function resolvePackVariantColorSize(
@@ -818,20 +989,18 @@ async function resolvePackVariantColorSize(
   return { color: color || 'Único', size: size || 'U' };
 }
 
-function mlAttributesForDuplicate(item: any, skuSuffix: string): Array<{ id: string; value_name: string }> {
+function mlAttributesForDuplicate(item: any, skuSuffix: string): MlItemCreateAttribute[] {
   if (!Array.isArray(item?.attributes)) return [];
   const baseSku = mlSkuFromItem(item);
   const newSku = baseSku ? `${baseSku}${skuSuffix}` : '';
-  return item.attributes
-    .map((a: any) => {
-      const id = String(a?.id ?? '').trim();
-      if (!id || looksLikeMlPictureId(id)) return null;
-      let value_name = mlExtractAttributeValueName(a as Record<string, unknown>);
-      if (mlAttrIdUpper(id) === 'SELLER_SKU' && newSku) value_name = newSku;
-      if (!value_name) return null;
-      return { id, value_name };
-    })
-    .filter(Boolean) as Array<{ id: string; value_name: string }>;
+  const out: MlItemCreateAttribute[] = [];
+  for (const a of item.attributes) {
+    const attr = mlRawEntryToCreateAttribute(a);
+    if (!attr) continue;
+    if (mlAttrIdUpper(attr.id) === 'SELLER_SKU' && newSku) attr.value_name = newSku;
+    out.push(attr);
+  }
+  return out;
 }
 
 /** User Product: exige family_name; no admite `variations` en el mismo POST. */
@@ -1102,6 +1271,7 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     content?: PackListingPublicationContent;
     baseTitle: string;
     baseFamilyName: string;
+    accessToken: string;
   }
 ): Promise<Record<string, unknown>> {
   const pictures = mlPicturesPayload(opts.content, sourceItem);
@@ -1131,11 +1301,11 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     packVariant.items,
     { withVariations: false }
   );
-  for (const required of mlUserProductRequiredAttrsFromSource(sourceItem, size)) {
-    attrs = upsertMlItemAttribute(attrs, required.id, required.value_name);
+  for (const required of await mlUserProductAttrsFromSource(sourceItem, size, opts.accessToken)) {
+    attrs = upsertMlCreateAttribute(attrs, required);
   }
   const missingRequired = ML_USER_PRODUCT_REQUIRED_FROM_SOURCE.filter(
-    (id) => !attrs.some((a) => mlAttrIdUpper(a.id) === id)
+    (id) => !mlHasCreateAttribute(attrs, id)
   );
   if (missingRequired.length) {
     throw new Error(
@@ -1188,7 +1358,8 @@ async function createMercadoLibrePackListingUserProduct(
     const body = await buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, pv, {
       ...opts,
       baseTitle,
-      baseFamilyName
+      baseFamilyName,
+      accessToken: mlToken.access_token
     });
 
     const newItem = await postMercadoLibreNewItem(
