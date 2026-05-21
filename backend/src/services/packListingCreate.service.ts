@@ -1103,13 +1103,15 @@ async function mlFashionAttrsFromSourcePublication(
       row = mlMakeSizeGridRowAttr(rowMatch.rowId);
     }
   }
-  if (!mlSizeGridRowIdValue(row)) {
+  const rowIdFinal = mlSizeGridRowIdValue(row);
+  if (!rowIdFinal) {
     const letter = mlSizeValueNameForMercadoLibre(sizeLabel);
     throw new Error(
       `La publicación origen (guía ${chartId}) no tiene fila para el talle ${sizeLabel} (${letter}). ` +
         'Verificá que la MLA modelo tenga variación con ese talle y SIZE_GRID_ROW_ID, o elegí otra publicación origen.'
     );
   }
+  const rowAttr = mlMakeSizeGridRowAttr(rowIdFinal);
 
   const sizeAttr =
     mlSizeAttrFromSourceVariation(sourceItem, sizeLabel) ??
@@ -1119,11 +1121,11 @@ async function mlFashionAttrsFromSourcePublication(
     sourceItemId: String(sourceItem?.id ?? ''),
     chartId,
     sizeCode: sizeLabel,
-    row: mlSizeGridRowIdValue(row),
+    row: rowIdFinal,
     sizeName: sizeAttr.value_name
   });
 
-  return [{ id: 'SIZE_GRID_ID', value_id: chartId }, row, sizeAttr];
+  return [{ id: 'SIZE_GRID_ID', value_id: chartId }, rowAttr, sizeAttr];
 }
 
 async function mlAssertSourceItemSameSeller(
