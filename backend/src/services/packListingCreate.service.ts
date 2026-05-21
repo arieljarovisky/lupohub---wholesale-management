@@ -280,16 +280,19 @@ export function sanitizeMercadoLibreItemCreateBody(
     attributes
   };
 
-  const title = String(body.title ?? '').trim();
-  if (title) out.title = title;
-
   const familyName = String(body.family_name ?? '').trim();
   if (variations?.length) {
     out.variations = variations;
     // ML rechaza family_name + variations en el mismo POST.
     delete out.family_name;
+    const title = String(body.title ?? '').trim();
+    if (title) out.title = title;
   } else if (familyName) {
+    // User Product: solo family_name; title invalida el POST.
     out.family_name = familyName;
+  } else {
+    const title = String(body.title ?? '').trim();
+    if (title) out.title = title;
   }
 
   const sku = String(body.seller_custom_field ?? '').trim();
@@ -317,6 +320,9 @@ export function mlPayloadForMercadoLibreApiPost(body: Record<string, unknown>): 
     delete safe.family_name;
   } else {
     delete safe.variations;
+    if (mlIsUserProductPostPayload(safe)) {
+      delete safe.title;
+    }
   }
   safe.attributes = filterMlItemAttributesForCreatePost(
     sanitizeMlAttributesForApi(safe.attributes)
@@ -331,6 +337,8 @@ function buildMlItemCreateDebugFlags(safe: Record<string, unknown>): Record<stri
     uses_family_name_field: Boolean(String(safe.family_name ?? '').trim()),
     removed_family_name_because_variations: variations.length > 0,
     removed_variations_for_user_product:
+      variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
+    removed_title_for_user_product:
       variations.length === 0 && Boolean(String(safe.family_name ?? '').trim()),
     has_item_price: safe.price != null,
     has_item_stock: safe.available_quantity != null,
@@ -1018,28 +1026,24 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
   }
 
   const comboLabel = (packVariant.label || '').trim();
-  const { color, size } = await resolvePackVariantColorSize(
+  const { size } = await resolvePackVariantColorSize(
     packVariant.items,
     sourceItem,
     comboLabel
   );
   const itemQty = Math.max(0, Math.floor(computeAvailableStockFromItems(packVariant.items)));
-  const title = packListingTitleForSize(opts.baseTitle, size);
   const sellerField = buildPackListingSellerCustomField(sourceItem, opts.skuSuffix, size);
 
-  let attrs = mlItemAttributesForPackListing(
+  const attrs = mlItemAttributesForPackListing(
     sourceItem,
     opts.skuSuffix,
     opts.baseTitle,
     packVariant.items,
     { withVariations: false }
   );
-  attrs = upsertMlItemAttribute(attrs, 'SIZE', size);
-  attrs = upsertMlItemAttribute(attrs, 'COLOR', packColorNameForMlVariation(color));
 
   const body: Record<string, unknown> = {
     ...mlCommonListingFields(sourceItem),
-    title,
     family_name: opts.baseFamilyName,
     price,
     available_quantity: itemQty,
