@@ -560,18 +560,237 @@ async function mlFetchSizeGridRowIdForSize(
   return '';
 }
 
+function mlSiteIdFromItem(sourceItem: any): string {
+  const cat = String(sourceItem?.category_id || 'MLA');
+  const m = cat.match(/^([A-Z]{3})/);
+  return m ? m[1] : 'MLA';
+}
+
+/** domain_id corto para POST /catalog/charts/search (ej. MLA-UNDERWEAR → UNDERWEAR). */
+function mlDomainIdForChartSearch(domainId: string): string {
+  const d = String(domainId || '').trim();
+  const m = d.match(/^[A-Z]{3}-(.+)$/);
+  return m ? m[1] : d;
+}
+
+async function mlDiscoverDomainId(
+  accessToken: string,
+  siteId: string,
+  query: string,
+  categoryId?: string
+): Promise<string> {
+  const q = String(query || '').trim();
+  if (q) {
+    try {
+      const res = await axios.get(
+        `https://api.mercadolibre.com/sites/${siteId}/domain_discovery/search`,
+        {
+          params: { q, limit: 1 },
+          headers: { Authorization: `Bearer ${accessToken}` },
+          validateStatus: () => true
+        }
+      );
+      if (res.status === 200 && Array.isArray(res.data) && res.data[0]?.domain_id) {
+        const domainId = String(res.data[0].domain_id).trim();
+        console.log('[ML pack] domain_discovery', { q, domain_id: domainId, category_id: res.data[0]?.category_id });
+        return domainId;
+      }
+    } catch (err: any) {
+      console.warn('[ML pack] domain_discovery error', err?.message || err);
+    }
+  }
+
+  const cat = String(categoryId || '').trim();
+  if (cat) {
+    try {
+      const res = await axios.get(`https://api.mercadolibre.com/categories/${cat}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      });
+      const settings = res.data?.settings;
+      const fromSettings = String(settings?.catalog_domain || settings?.domain || '').trim();
+      if (fromSettings) return fromSettings.includes('-') ? fromSettings : `${siteId}-${fromSettings}`;
+    } catch {
+      /* opcional */
+    }
+  }
+  return '';
+}
+
+async function mlDomainSupportsSizeGrid(
+  accessToken: string,
+  domainId: string
+): Promise<boolean> {
+  const id = String(domainId || '').trim();
+  if (!id) return false;
+  try {
+    const res = await axios.get(`https://api.mercadolibre.com/domains/${encodeURIComponent(id)}/technical_specs`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true
+    });
+    if (res.status !== 200) return true;
+    const blob = JSON.stringify(res.data || {});
+    return /grid_id|SIZE_GRID_ID|grid_row_id|SIZE_GRID_ROW_ID/i.test(blob);
+  } catch {
+    return true;
+  }
+}
+
+function mlChartSearchAttributesFromSource(
+  sourceItem: any
+): Array<{ id: string; values: Array<{ name: string }> }> {
+  const filterIds = ['GENDER', 'BRAND', 'MALE_UNDERWEAR_TYPE', 'AGE_GROUP'];
+  const fromItem = sanitizeMlCreateAttributes(sourceItem?.attributes);
+  const out: Array<{ id: string; values: Array<{ name: string }> }> = [];
+  for (const fid of filterIds) {
+    const a = fromItem.find((x) => mlAttrIdUpper(x.id) === fid);
+    if (!a?.value_name) continue;
+    out.push({ id: fid, values: [{ name: a.value_name }] });
+  }
+  return out;
+}
+
+async function mlSearchCatalogChartId(
+  accessToken: string,
+  opts: {
+    domainId: string;
+    siteId: string;
+    sellerId: string;
+    searchAttributes: Array<{ id: string; values: Array<{ name: string }> }>;
+  }
+): Promise<string> {
+  const sellerNum = Number(opts.sellerId);
+  if (!Number.isFinite(sellerNum) || sellerNum <= 0) return '';
+
+  const body: Record<string, unknown> = {
+    domain_id: mlDomainIdForChartSearch(opts.domainId),
+    site_id: opts.siteId,
+    seller_id: sellerNum,
+    attributes: opts.searchAttributes
+  };
+
+  try {
+    const res = await axios.post('https://api.mercadolibre.com/catalog/charts/search', body, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      validateStatus: () => true
+    });
+    if (res.status !== 200 || !res.data) {
+      console.warn('[ML pack] charts/search HTTP', res.status, res.data?.message || res.data?.error);
+      return '';
+    }
+    const charts = Array.isArray(res.data.charts) ? res.data.charts : [];
+    const pick = (pred: (c: any) => boolean) => {
+      for (const c of charts) {
+        if (!pred(c)) continue;
+        const id = String(c?.id ?? '').trim();
+        if (id) return id;
+      }
+      return '';
+    };
+    const specific = pick((c) => String(c?.type || '').toUpperCase() === 'SPECIFIC');
+    if (specific) {
+      console.log('[ML pack] charts/search → SPECIFIC', specific);
+      return specific;
+    }
+    const any = pick(() => true);
+    if (any) console.log('[ML pack] charts/search → chart', any);
+    return any;
+  } catch (err: any) {
+    console.warn('[ML pack] charts/search error', err?.message || err);
+    return '';
+  }
+}
+
+/** Guía válida para dominio/categoría vía API ML (evita SIZE_GRID_ID de otra categoría → cause 2613). */
+async function mlResolveFashionGridViaMercadoLibreApi(
+  sourceItem: any,
+  size: string,
+  accessToken: string,
+  sellerId: string
+): Promise<{
+  grid?: MlItemCreateAttribute;
+  row?: MlItemCreateAttribute;
+  size?: MlItemCreateAttribute;
+  domainId?: string;
+  chartId?: string;
+} | null> {
+  const siteId = mlSiteIdFromItem(sourceItem);
+  const query = String(
+    sourceItem?.family_name || sourceItem?.title || sourceItem?.category_id || ''
+  ).trim();
+  const domainId = await mlDiscoverDomainId(
+    accessToken,
+    siteId,
+    query,
+    String(sourceItem?.category_id || '')
+  );
+  if (!domainId) {
+    console.warn('[ML pack] Sin domain_id (domain_discovery)');
+    return null;
+  }
+
+  const supportsGrid = await mlDomainSupportsSizeGrid(accessToken, domainId);
+  if (!supportsGrid) {
+    console.warn('[ML pack] Dominio sin guía de talles en technical_specs', domainId);
+    return null;
+  }
+
+  const searchAttributes = mlChartSearchAttributesFromSource(sourceItem);
+  const chartId = await mlSearchCatalogChartId(accessToken, {
+    domainId,
+    siteId,
+    sellerId,
+    searchAttributes
+  });
+  if (!chartId) return { domainId };
+
+  const sizeLabel = String(size || '').trim();
+  const rowId = sizeLabel ? await mlFetchSizeGridRowIdForSize(accessToken, chartId, sizeLabel) : '';
+
+  return {
+    domainId,
+    chartId,
+    grid: { id: 'SIZE_GRID_ID', value_id: String(chartId) },
+    row: rowId ? { id: 'SIZE_GRID_ROW_ID', value_name: rowId } : undefined,
+    size: sizeLabel
+      ? { id: 'SIZE', value_name: mlSizeValueNameForMercadoLibre(sizeLabel) }
+      : undefined
+  };
+}
+
 async function mlUserProductAttrsFromSource(
   sourceItem: any,
   size: string,
-  accessToken: string
+  accessToken: string,
+  sellerId: string
 ): Promise<MlItemCreateAttribute[]> {
-  const fashion = mlFashionSizeAttrsFromSource(sourceItem, size);
   const byId = new Map<string, MlItemCreateAttribute>();
-  for (const a of fashion) byId.set(mlAttrIdUpper(a.id), a);
+  const sizeLabel = String(size || '').trim();
+
+  const fromApi = await mlResolveFashionGridViaMercadoLibreApi(
+    sourceItem,
+    sizeLabel,
+    accessToken,
+    sellerId
+  );
+  if (fromApi?.grid) byId.set('SIZE_GRID_ID', fromApi.grid);
+  if (fromApi?.row) byId.set('SIZE_GRID_ROW_ID', mlNormalizeSizeGridRowAttr(fromApi.row));
+  if (fromApi?.size) byId.set('SIZE', fromApi.size);
+
+  const fashion = mlFashionSizeAttrsFromSource(sourceItem, sizeLabel);
+  for (const a of fashion) {
+    const upper = mlAttrIdUpper(a.id);
+    if (upper === 'SIZE_GRID_ID' || upper === 'SIZE_GRID_ROW_ID' || upper === 'SIZE') {
+      if (!byId.has(upper)) byId.set(upper, a);
+      continue;
+    }
+  }
 
   let grid = byId.get('SIZE_GRID_ID');
   let row = byId.get('SIZE_GRID_ROW_ID');
-  const sizeLabel = String(size || '').trim();
 
   const rowNeedsChart =
     !row || (!row.value_name && !(row.value_id != null && String(row.value_id).includes(':')));
@@ -1382,6 +1601,7 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     baseTitle: string;
     baseFamilyName: string;
     accessToken: string;
+    sellerId: string;
   }
 ): Promise<Record<string, unknown>> {
   const pictures = mlPicturesPayload(opts.content, sourceItem);
@@ -1411,7 +1631,12 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     packVariant.items,
     { withVariations: false }
   );
-  for (const required of await mlUserProductAttrsFromSource(sourceItem, size, opts.accessToken)) {
+  for (const required of await mlUserProductAttrsFromSource(
+    sourceItem,
+    size,
+    opts.accessToken,
+    opts.sellerId
+  )) {
     attrs = upsertMlCreateAttribute(attrs, required);
   }
   const missingRequired = ML_USER_PRODUCT_REQUIRED_FROM_SOURCE.filter(
@@ -1428,8 +1653,8 @@ async function buildMercadoLibrePackListingBodyUserProductSingle(
     const varCount = Array.isArray(sourceItem?.variations) ? sourceItem.variations.length : 0;
     throw new Error(
       `No se pudieron resolver atributos de guía de talles para el talle ${size}: ${missingRequired.join(', ')}. ` +
-        `La MLA origen (${sourceItem?.id || '?'}) trae ${varCount} variación(es) en el GET; ` +
-        `SIZE_GRID_ROW_ID suele estar en cada variación, no en el ítem. ` +
+        `Se usó domain_discovery + charts/search para el dominio correcto (no copiar SIZE_GRID_ID de otra categoría). ` +
+        `MLA origen: ${sourceItem?.id || '?'}, variaciones en GET: ${varCount}. ` +
         `Debug: ${JSON.stringify(fashionDebug)}`
     );
   }
@@ -1480,7 +1705,8 @@ async function createMercadoLibrePackListingUserProduct(
       ...opts,
       baseTitle,
       baseFamilyName,
-      accessToken: mlToken.access_token
+      accessToken: mlToken.access_token,
+      sellerId: mlToken.user_id
     });
 
     const newItem = await postMercadoLibreNewItem(
