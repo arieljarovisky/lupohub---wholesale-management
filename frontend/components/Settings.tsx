@@ -246,9 +246,21 @@ const Settings: React.FC<SettingsProps> = ({
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
   const [loadingNormalizeColors, setLoadingNormalizeColors] = useState(false);
   const [showNormalizeColorsModal, setShowNormalizeColorsModal] = useState(false);
-  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{ updatedVariants: number; skippedProducts: number; skippedDuplicates?: number; logs: string[] } | null>(null);
+  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{
+    updatedVariants: number;
+    skippedProducts: number;
+    skippedDuplicates?: number;
+    mergedVariants?: number;
+    logs: string[];
+  } | null>(null);
   const [loadingUnifySizes, setLoadingUnifySizes] = useState(false);
-  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; skippedDuplicates?: number; logs: string[] } | null>(null);
+  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{
+    updatedVariants: number;
+    skippedProducts: number;
+    skippedDuplicates?: number;
+    mergedVariants?: number;
+    logs: string[];
+  } | null>(null);
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
     let current: { product: string; variants: string[]; errors: string[] } | null = null;
@@ -712,6 +724,7 @@ const Settings: React.FC<SettingsProps> = ({
         updatedVariants: res.updatedVariants,
         skippedProducts: res.skippedProducts,
         skippedDuplicates: res.skippedDuplicates,
+        mergedVariants: res.mergedVariants,
         logs: res.logs || [],
       });
     } catch (e: unknown) {
@@ -721,6 +734,7 @@ const Settings: React.FC<SettingsProps> = ({
         updatedVariants: prev?.updatedVariants ?? 0,
         skippedProducts: prev?.skippedProducts ?? 0,
         skippedDuplicates: prev?.skippedDuplicates,
+        mergedVariants: prev?.mergedVariants,
         logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
       }));
     } finally {
@@ -744,6 +758,7 @@ const Settings: React.FC<SettingsProps> = ({
         updatedVariants: res.updatedVariants,
         skippedProducts: res.skippedProducts,
         skippedDuplicates: res.skippedDuplicates,
+        mergedVariants: res.mergedVariants,
         logs: res.logs || [],
       });
     } catch (e: unknown) {
@@ -753,6 +768,7 @@ const Settings: React.FC<SettingsProps> = ({
         updatedVariants: prev?.updatedVariants ?? 0,
         skippedProducts: prev?.skippedProducts ?? 0,
         skippedDuplicates: prev?.skippedDuplicates,
+        mergedVariants: prev?.mergedVariants,
         logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
       }));
     } finally {
@@ -3157,7 +3173,11 @@ const Settings: React.FC<SettingsProps> = ({
                   <p className="text-xl font-black text-green-400">{normalizeColorsResult.updatedVariants}</p>
                 </div>
                 <div className="flex-1 min-w-[120px]">
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Omitidas (duplicado)</p>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Fusionadas</p>
+                  <p className="text-xl font-black text-cyan-400">{normalizeColorsResult.mergedVariants ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores / omitidas</p>
                   <p className="text-xl font-black text-amber-400">{normalizeColorsResult.skippedDuplicates ?? 0}</p>
                 </div>
                 <div className="flex-1 min-w-[120px]">
@@ -3166,7 +3186,7 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
               <p className="text-xs text-slate-400">
-                Los colores se unifican a nombres cortos (Negro, Azul, Bordó, Gris, etc.). Las omitidas por duplicado requieren revisión manual en Tienda Nube.
+                Los colores se unifican a nombres cortos; duplicados se fusionan con suma de stock ([MERGE] en el log).
               </p>
               {normalizeColorsResult.logs.length > 0 && (
                 <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
@@ -3178,7 +3198,9 @@ const Settings: React.FC<SettingsProps> = ({
                           ? 'text-red-400'
                           : line.includes('[SKIP]')
                             ? 'text-amber-300'
-                            : 'text-green-300'
+                            : line.includes('[MERGE]')
+                              ? 'text-cyan-300'
+                              : 'text-green-300'
                       }
                     >
                       {line}
@@ -3217,7 +3239,11 @@ const Settings: React.FC<SettingsProps> = ({
                   <p className="text-xl font-black text-green-400">{normalizeSizesResult.updatedVariants}</p>
                 </div>
                 <div className="flex-1 min-w-[120px]">
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Omitidas (duplicado)</p>
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Fusionadas</p>
+                  <p className="text-xl font-black text-cyan-400">{normalizeSizesResult.mergedVariants ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores / omitidas</p>
                   <p className="text-xl font-black text-amber-400">{normalizeSizesResult.skippedDuplicates ?? 0}</p>
                 </div>
                 <div className="flex-1 min-w-[120px]">
@@ -3226,7 +3252,7 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
               <p className="text-xs text-slate-400">
-                Si aparecen omitidas por duplicado, en ese producto ya hay dos variantes con el mismo color+talle al unificar (ej. &quot;M&quot; y &quot;M 37-40&quot;). Revisalas manualmente en Tienda Nube.
+                Si hay duplicados (ej. &quot;G&quot; y &quot;G/44-46&quot;), se suma el stock en una variante y se elimina la otra automáticamente. Las líneas [MERGE] en el log muestran cada fusión.
               </p>
               {normalizeSizesResult.logs.length > 0 && (
                 <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
@@ -3238,7 +3264,9 @@ const Settings: React.FC<SettingsProps> = ({
                           ? 'text-red-400'
                           : line.includes('[SKIP]')
                             ? 'text-amber-300'
-                            : 'text-green-300'
+                            : line.includes('[MERGE]')
+                              ? 'text-cyan-300'
+                              : 'text-green-300'
                       }
                     >
                       {line}

@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
+import { mergeTiendaNubeDuplicateVariants } from '../services/tiendanubeVariantMerge.service';
 import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
 
@@ -713,7 +714,12 @@ function tnVariantComboKey(values: unknown[], attrIndex: number, replaceAtAttr?:
 }
 
 type TnVariantNormalizePlan = {
-  variant: { id: number | string; values?: unknown[] };
+  variant: {
+    id: number | string;
+    values?: unknown[];
+    stock?: number | string | null;
+    stock_management?: boolean;
+  };
   vi: number;
   current: string;
   normalized: string;
@@ -736,6 +742,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   updatedVariants: number;
   skippedProducts: number;
   skippedDuplicates: number;
+  mergedVariants: number;
   logs: string[];
   hasMore: boolean;
   nextPage?: number;
@@ -753,6 +760,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   let updatedVariants = 0;
   let skippedProducts = 0;
   let skippedDuplicates = 0;
+  let mergedVariants = 0;
   let updatesThisBatch = 0;
   let page = options.resume?.page ?? options.startPage ?? 1;
   let productStart = options.resume?.productIndex ?? 0;
@@ -787,7 +795,12 @@ async function normalizeTiendaNubeVariantAttribute(options: {
       const tnProduct = products[pi] as {
         id: number | string;
         attributes?: unknown[];
-        variants?: Array<{ id: number | string; values?: unknown[] }>;
+        variants?: Array<{
+          id: number | string;
+          values?: unknown[];
+          stock?: number | string | null;
+          stock_management?: boolean;
+        }>;
       };
       const productAttributes = tnProduct.attributes || [];
       let attrIndex = -1;
@@ -830,16 +843,15 @@ async function normalizeTiendaNubeVariantAttribute(options: {
         });
       }
 
-      const effectiveKeyOwners = new Map<string, string[]>();
+      const groupsByEffectiveKey = new Map<string, TnVariantNormalizePlan[]>();
       for (const p of plans) {
         const values = p.variant.values || [];
-        const key = p.willUpdate
-          ? p.newKey
-          : tnVariantComboKey(values, attrIndex);
-        const id = String(p.variant.id);
-        if (!effectiveKeyOwners.has(key)) effectiveKeyOwners.set(key, []);
-        effectiveKeyOwners.get(key)!.push(id);
+        const key = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+        if (!groupsByEffectiveKey.has(key)) groupsByEffectiveKey.set(key, []);
+        groupsByEffectiveKey.get(key)!.push(p);
       }
+
+      const mergedKeys = new Set<string>();
 
       for (let pi2 = 0; pi2 < plans.length; pi2++) {
         const p = plans[pi2];
@@ -850,24 +862,47 @@ async function normalizeTiendaNubeVariantAttribute(options: {
             updatedVariants,
             skippedProducts,
             skippedDuplicates,
+            mergedVariants,
             logs,
             hasMore: true,
             resume: { page, productIndex: pi, variantIndex: p.vi },
           };
         }
-        if (!p.willUpdate) continue;
 
-        const owners = effectiveKeyOwners.get(p.newKey) || [];
-        if (owners.length > 1) {
-          skippedDuplicates++;
-          const otros = owners.filter((id) => id !== String(p.variant.id)).join(', ');
-          log(
-            `  [SKIP] Producto ${tnProduct.id} variante ${p.variant.id}: "${p.current}"→"${p.normalized}" duplicaría combinación (otras: ${otros})`
-          );
+        const values = p.variant.values || [];
+        const effKey = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+        const group = groupsByEffectiveKey.get(effKey) || [];
+
+        if (group.length > 1) {
+          if (mergedKeys.has(effKey)) continue;
+          mergedKeys.add(effKey);
+          try {
+            const { mergedCount } = await mergeTiendaNubeDuplicateVariants({
+              storeId: store_id,
+              productId: tnProduct.id,
+              attrIndex,
+              group: group.map((g) => ({
+                variant: g.variant,
+                current: g.current,
+                normalized: g.normalized,
+                willUpdate: g.willUpdate,
+              })),
+              headers: tnHeaders,
+              log,
+            });
+            mergedVariants += mergedCount;
+            updatedVariants += 1;
+            updatesThisBatch++;
+          } catch (err: unknown) {
+            skippedDuplicates++;
+            const m = err instanceof Error ? err.message : String(err);
+            log(`  [ERROR] Producto ${tnProduct.id} fusión (${effKey}): ${m}`);
+          }
           continue;
         }
 
-        const values = p.variant.values || [];
+        if (!p.willUpdate) continue;
+
         const newValues = values.map((obj: unknown, i: number) => {
           if (i !== attrIndex) return obj;
           const langKeys = obj && typeof obj === 'object' ? Object.keys(obj as object) : ['es'];
@@ -891,7 +926,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
           const desc = ax.response?.data?.description || ax.message || '';
           if (/cannot be repeated|no pueden repetirse|variantes.*repetid/i.test(desc)) {
             skippedDuplicates++;
-            log(`  [SKIP] Variante ${p.variant.id}: combinación ya existe en el producto (${desc})`);
+            log(`  [SKIP] Variante ${p.variant.id}: combinación ya existe (${desc})`);
           } else {
             log(`  [ERROR] Variante ${p.variant.id}: ${desc}`);
           }
@@ -914,6 +949,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
     updatedVariants,
     skippedProducts,
     skippedDuplicates,
+    mergedVariants,
     logs,
     hasMore,
     nextPage: hasMore && !stoppedByCap ? page : undefined,
