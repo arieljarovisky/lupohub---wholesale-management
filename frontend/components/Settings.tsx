@@ -246,9 +246,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
   const [loadingNormalizeColors, setLoadingNormalizeColors] = useState(false);
   const [showNormalizeColorsModal, setShowNormalizeColorsModal] = useState(false);
-  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
+  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{ updatedVariants: number; skippedProducts: number; skippedDuplicates?: number; logs: string[] } | null>(null);
   const [loadingUnifySizes, setLoadingUnifySizes] = useState(false);
-  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
+  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; skippedDuplicates?: number; logs: string[] } | null>(null);
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
     let current: { product: string; variants: string[]; errors: string[] } | null = null;
@@ -708,13 +708,19 @@ const Settings: React.FC<SettingsProps> = ({
           logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
         });
       });
-      setNormalizeSizesResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
+      setNormalizeSizesResult({
+        updatedVariants: res.updatedVariants,
+        skippedProducts: res.skippedProducts,
+        skippedDuplicates: res.skippedDuplicates,
+        logs: res.logs || [],
+      });
     } catch (e: unknown) {
       console.error(e);
       const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
       setNormalizeSizesResult((prev) => ({
         updatedVariants: prev?.updatedVariants ?? 0,
         skippedProducts: prev?.skippedProducts ?? 0,
+        skippedDuplicates: prev?.skippedDuplicates,
         logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
       }));
     } finally {
@@ -734,13 +740,19 @@ const Settings: React.FC<SettingsProps> = ({
           logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
         });
       });
-      setNormalizeColorsResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
+      setNormalizeColorsResult({
+        updatedVariants: res.updatedVariants,
+        skippedProducts: res.skippedProducts,
+        skippedDuplicates: res.skippedDuplicates,
+        logs: res.logs || [],
+      });
     } catch (e: unknown) {
       console.error(e);
       const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
       setNormalizeColorsResult((prev) => ({
         updatedVariants: prev?.updatedVariants ?? 0,
         skippedProducts: prev?.skippedProducts ?? 0,
+        skippedDuplicates: prev?.skippedDuplicates,
         logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
       }));
     } finally {
@@ -3139,23 +3151,38 @@ const Settings: React.FC<SettingsProps> = ({
         <div className="space-y-4">
           {normalizeColorsResult && (
             <>
-              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-4">
-                <div className="flex-1">
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[120px]">
                   <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
                   <p className="text-xl font-black text-green-400">{normalizeColorsResult.updatedVariants}</p>
                 </div>
-                <div className="flex-1">
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos sin atributo Color</p>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Omitidas (duplicado)</p>
+                  <p className="text-xl font-black text-amber-400">{normalizeColorsResult.skippedDuplicates ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Sin atributo Color</p>
                   <p className="text-xl font-black text-slate-400">{normalizeColorsResult.skippedProducts}</p>
                 </div>
               </div>
               <p className="text-xs text-slate-400">
-                Los colores se unifican a nombres cortos (Negro, Azul, Bordó, Gris, etc.) y se quitan sufijos como &quot; - 999&quot;. Volvé a consultar productos para ver los cambios en LupoHub.
+                Los colores se unifican a nombres cortos (Negro, Azul, Bordó, Gris, etc.). Las omitidas por duplicado requieren revisión manual en Tienda Nube.
               </p>
               {normalizeColorsResult.logs.length > 0 && (
                 <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
                   {normalizeColorsResult.logs.slice(-50).map((line, i) => (
-                    <div key={i} className={line.includes('[ERROR]') ? 'text-red-400' : 'text-green-300'}>{line}</div>
+                    <div
+                      key={i}
+                      className={
+                        line.includes('[ERROR]')
+                          ? 'text-red-400'
+                          : line.includes('[SKIP]')
+                            ? 'text-amber-300'
+                            : 'text-green-300'
+                      }
+                    >
+                      {line}
+                    </div>
                   ))}
                 </div>
               )}
@@ -3184,23 +3211,38 @@ const Settings: React.FC<SettingsProps> = ({
         <div className="space-y-4">
           {normalizeSizesResult && (
             <>
-              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-4">
-                <div className="flex-1">
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[120px]">
                   <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
                   <p className="text-xl font-black text-green-400">{normalizeSizesResult.updatedVariants}</p>
                 </div>
-                <div className="flex-1">
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos sin atributo Talle</p>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Omitidas (duplicado)</p>
+                  <p className="text-xl font-black text-amber-400">{normalizeSizesResult.skippedDuplicates ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Sin atributo Talle</p>
                   <p className="text-xl font-black text-slate-400">{normalizeSizesResult.skippedProducts}</p>
                 </div>
               </div>
               <p className="text-xs text-slate-400">
-                Los talles en Tienda Nube se convirtieron a: P, M, G, GG, XG, XXG, XXXG (y U para único). Volvé a &quot;Importar productos&quot; para reflejar los cambios en LupoHub.
+                Si aparecen omitidas por duplicado, en ese producto ya hay dos variantes con el mismo color+talle al unificar (ej. &quot;M&quot; y &quot;M 37-40&quot;). Revisalas manualmente en Tienda Nube.
               </p>
               {normalizeSizesResult.logs.length > 0 && (
                 <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
                   {normalizeSizesResult.logs.slice(-50).map((line, i) => (
-                    <div key={i} className={line.includes('[ERROR]') ? 'text-red-400' : 'text-green-300'}>{line}</div>
+                    <div
+                      key={i}
+                      className={
+                        line.includes('[ERROR]')
+                          ? 'text-red-400'
+                          : line.includes('[SKIP]')
+                            ? 'text-amber-300'
+                            : 'text-green-300'
+                      }
+                    >
+                      {line}
+                    </div>
                   ))}
                 </div>
               )}

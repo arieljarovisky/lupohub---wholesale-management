@@ -21,6 +21,7 @@ type TnNormalizeBatchResponse = {
   message: string;
   updatedVariants: number;
   skippedProducts: number;
+  skippedDuplicates?: number;
   logs: string[];
   hasMore?: boolean;
   nextPage?: number;
@@ -32,10 +33,11 @@ const TN_NORMALIZE_BATCH_TIMEOUT_MS = 300000;
 async function runTiendaNubeNormalizeBatches(
   path: string,
   onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
-): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> {
+): Promise<{ message: string; updatedVariants: number; skippedProducts: number; skippedDuplicates: number; logs: string[] }> {
   let batch = 0;
   let totalUpdated = 0;
   let totalSkipped = 0;
+  let totalDuplicates = 0;
   const allLogs: string[] = [];
   let hasMore = true;
   let resume: TnNormalizeBatchResponse['resume'];
@@ -56,6 +58,7 @@ async function runTiendaNubeNormalizeBatches(
 
     totalUpdated += res.updatedVariants ?? 0;
     totalSkipped += res.skippedProducts ?? 0;
+    totalDuplicates += res.skippedDuplicates ?? 0;
     if (res.logs?.length) allLogs.push(...res.logs);
     onProgress?.({ batch, updatedVariants: totalUpdated, logs: allLogs });
 
@@ -78,6 +81,7 @@ async function runTiendaNubeNormalizeBatches(
     message: hasMore ? 'Proceso interrumpido (demasiados lotes)' : 'Normalización completada',
     updatedVariants: totalUpdated,
     skippedProducts: totalSkipped,
+    skippedDuplicates: totalDuplicates,
     logs: allLogs,
   };
 }
@@ -1975,19 +1979,19 @@ export const api = {
   /** Normaliza talles en Tienda Nube (lotes; evita timeout en catálogos grandes). */
   normalizeSizesInTiendaNube: async (
     onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
-  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
+  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; skippedDuplicates: number; logs: string[] }> => {
     return handleRequest(async () => {
       return runTiendaNubeNormalizeBatches('/integrations/tiendanube/normalize-sizes', onProgress);
-    }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, logs: [] }, 'normalizeSizesInTiendaNube');
+    }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, skippedDuplicates: 0, logs: [] }, 'normalizeSizesInTiendaNube');
   },
 
   /** Normaliza nombres de color en Tienda Nube (lotes). */
   normalizeColorsInTiendaNube: async (
     onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
-  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
+  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; skippedDuplicates: number; logs: string[] }> => {
     return handleRequest(async () => {
       return runTiendaNubeNormalizeBatches('/integrations/tiendanube/normalize-colors', onProgress);
-    }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, logs: [] }, 'normalizeColorsInTiendaNube');
+    }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, skippedDuplicates: 0, logs: [] }, 'normalizeColorsInTiendaNube');
   },
   
   syncProductsFromMercadoLibre: async (): Promise<{ message: string; linkedVariants: number; logs: string[] }> => {

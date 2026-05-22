@@ -695,6 +695,32 @@ function tnVariantValueText(val: unknown): string {
   )?.toString().trim() || '';
 }
 
+/** Clave única Color+Talle+… para detectar variantes repetidas en Tienda Nube. */
+function tnVariantComboKey(values: unknown[], attrIndex: number, replaceAtAttr?: string): string {
+  const parts: string[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const text =
+      i === attrIndex && replaceAtAttr !== undefined ? replaceAtAttr : tnVariantValueText(values[i]);
+    parts.push(
+      text
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+    );
+  }
+  return parts.join('||');
+}
+
+type TnVariantNormalizePlan = {
+  variant: { id: number | string; values?: unknown[] };
+  vi: number;
+  current: string;
+  normalized: string;
+  willUpdate: boolean;
+  newKey: string;
+};
+
 async function normalizeTiendaNubeVariantAttribute(options: {
   access_token: string;
   store_id: string;
@@ -709,6 +735,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
 }): Promise<{
   updatedVariants: number;
   skippedProducts: number;
+  skippedDuplicates: number;
   logs: string[];
   hasMore: boolean;
   nextPage?: number;
@@ -725,6 +752,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   };
   let updatedVariants = 0;
   let skippedProducts = 0;
+  let skippedDuplicates = 0;
   let updatesThisBatch = 0;
   let page = options.resume?.page ?? options.startPage ?? 1;
   let productStart = options.resume?.productIndex ?? 0;
@@ -776,22 +804,11 @@ async function normalizeTiendaNubeVariantAttribute(options: {
       }
 
       const variants = tnProduct.variants || [];
-      for (let vi = pi === productStart ? variantStart : 0; vi < variants.length; vi++) {
-        if (updatesThisBatch >= maxUpdates) {
-          stoppedByCap = true;
-          return {
-            updatedVariants,
-            skippedProducts,
-            logs,
-            hasMore: true,
-            resume: { page, productIndex: pi, variantIndex: vi },
-          };
-        }
-
+      const plans: TnVariantNormalizePlan[] = [];
+      for (let vi = 0; vi < variants.length; vi++) {
         const variant = variants[vi];
         const values = variant.values || [];
         if (attrIndex >= values.length) continue;
-
         let current = '';
         let normalized = '';
         try {
@@ -802,30 +819,82 @@ async function normalizeTiendaNubeVariantAttribute(options: {
           log(`  [ERROR] Variante ${variant.id}: normalización falló (${m})`);
           continue;
         }
+        const willUpdate = shouldUpdate(current, normalized);
+        plans.push({
+          variant,
+          vi,
+          current,
+          normalized,
+          willUpdate,
+          newKey: tnVariantComboKey(values, attrIndex, normalized),
+        });
+      }
 
-        if (!shouldUpdate(current, normalized)) continue;
+      const effectiveKeyOwners = new Map<string, string[]>();
+      for (const p of plans) {
+        const values = p.variant.values || [];
+        const key = p.willUpdate
+          ? p.newKey
+          : tnVariantComboKey(values, attrIndex);
+        const id = String(p.variant.id);
+        if (!effectiveKeyOwners.has(key)) effectiveKeyOwners.set(key, []);
+        effectiveKeyOwners.get(key)!.push(id);
+      }
 
+      for (let pi2 = 0; pi2 < plans.length; pi2++) {
+        const p = plans[pi2];
+        if (pi === productStart && p.vi < variantStart) continue;
+        if (updatesThisBatch >= maxUpdates) {
+          stoppedByCap = true;
+          return {
+            updatedVariants,
+            skippedProducts,
+            skippedDuplicates,
+            logs,
+            hasMore: true,
+            resume: { page, productIndex: pi, variantIndex: p.vi },
+          };
+        }
+        if (!p.willUpdate) continue;
+
+        const owners = effectiveKeyOwners.get(p.newKey) || [];
+        if (owners.length > 1) {
+          skippedDuplicates++;
+          const otros = owners.filter((id) => id !== String(p.variant.id)).join(', ');
+          log(
+            `  [SKIP] Producto ${tnProduct.id} variante ${p.variant.id}: "${p.current}"→"${p.normalized}" duplicaría combinación (otras: ${otros})`
+          );
+          continue;
+        }
+
+        const values = p.variant.values || [];
         const newValues = values.map((obj: unknown, i: number) => {
           if (i !== attrIndex) return obj;
           const langKeys = obj && typeof obj === 'object' ? Object.keys(obj as object) : ['es'];
           const next: Record<string, string> = {};
-          for (const lang of langKeys) next[lang] = normalized;
+          for (const lang of langKeys) next[lang] = p.normalized;
           return next;
         });
 
         try {
           await tnPutWithRetry(
             axios,
-            `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
+            `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${p.variant.id}`,
             { values: newValues },
             { headers: tnHeaders }
           );
           updatedVariants++;
           updatesThisBatch++;
-          log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
+          log(`  [TN] Producto ${tnProduct.id} variante ${p.variant.id}: "${p.current}" → "${p.normalized}"`);
         } catch (err: unknown) {
           const ax = err as { response?: { data?: { description?: string } }; message?: string };
-          log(`  [ERROR] Variante ${variant.id}: ${ax.response?.data?.description || ax.message}`);
+          const desc = ax.response?.data?.description || ax.message || '';
+          if (/cannot be repeated|no pueden repetirse|variantes.*repetid/i.test(desc)) {
+            skippedDuplicates++;
+            log(`  [SKIP] Variante ${p.variant.id}: combinación ya existe en el producto (${desc})`);
+          } else {
+            log(`  [ERROR] Variante ${p.variant.id}: ${desc}`);
+          }
         }
       }
       variantStart = 0;
@@ -844,6 +913,7 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   return {
     updatedVariants,
     skippedProducts,
+    skippedDuplicates,
     logs,
     hasMore,
     nextPage: hasMore && !stoppedByCap ? page : undefined,

@@ -22,6 +22,8 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG**, 
    - Rangos y textos viejos (ej. `M 37-40`, `Gg 45 Al 48`, `P - 85`, `Xxg`, `Eg`, `Plus`…) → letra estándar correspondiente
 5. Al terminar, ejecutá de nuevo **CONSULTAR PRODUCTOS** para refrescar datos en LupoHub.
 
+**Duplicados:** Si un producto tiene, por ejemplo, talle `M` y `M 37-40` (mismo color), al unificar ambos pasan a `M` y Tienda Nube no lo permite. Esas variantes aparecen como `[SKIP]` en el log; hay que fusionar stock y borrar la variante sobrante en el admin de TN.
+
 ---
 
 ## Opción 2: Desde Tienda Nube (CSV)
