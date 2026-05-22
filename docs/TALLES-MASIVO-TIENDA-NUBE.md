@@ -40,6 +40,12 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG**, 
 
 ---
 
+## Colores
+
+Para unificar nombres de color en Tienda Nube (filtros sin duplicados), usá **NORMALIZAR COLORES** en la misma pantalla de integraciones. Detalle: [COLORES-MASIVO-TIENDA-NUBE.md](./COLORES-MASIVO-TIENDA-NUBE.md).
+
+---
+
 ## Si TALLE y COLOR aparecen invertidos
 
 Si en LupoHub ves, por ejemplo, "TALLE: AZUL" y "COLOR: GG", en Tienda Nube ese producto tiene el orden de atributos al revés. Conviene:

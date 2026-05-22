@@ -244,6 +244,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0, productCount: 0, variantCount: 0 });
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
+  const [loadingNormalizeColors, setLoadingNormalizeColors] = useState(false);
+  const [showNormalizeColorsModal, setShowNormalizeColorsModal] = useState(false);
+  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
   const [loadingUnifySizes, setLoadingUnifySizes] = useState(false);
   const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
   const groupedLogs = React.useMemo(() => {
@@ -705,6 +708,21 @@ const Settings: React.FC<SettingsProps> = ({
       setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
     } finally {
       setLoadingNormalizeSizes(false);
+    }
+  };
+
+  const handleNormalizeColorsTiendaNube = async () => {
+    setShowNormalizeColorsModal(true);
+    setLoadingNormalizeColors(true);
+    setNormalizeColorsResult(null);
+    try {
+      const res = await api.normalizeColorsInTiendaNube();
+      setNormalizeColorsResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
+    } catch (e) {
+      console.error(e);
+      setNormalizeColorsResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
+    } finally {
+      setLoadingNormalizeColors(false);
     }
   };
 
@@ -2110,10 +2128,19 @@ const Settings: React.FC<SettingsProps> = ({
                           onClick={handleNormalizeSizesTiendaNube}
                           disabled={loadingNormalizeSizes}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                          title="Convertir todos los talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG"
+                          title="Convertir todos los talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG, U y 4–14"
                         >
                           {loadingNormalizeSizes ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
                           NORMALIZAR TALLES
+                        </button>
+                        <button 
+                          onClick={handleNormalizeColorsTiendaNube}
+                          disabled={loadingNormalizeColors}
+                          className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Unificar nombres de color en Tienda Nube (Negro, Azul, Bordó, etc.)"
+                        >
+                          {loadingNormalizeColors ? <Loader2 size={14} className="animate-spin" /> : <Palette size={14} />}
+                          NORMALIZAR COLORES
                         </button>
                       </div>
                     </div>
@@ -2166,7 +2193,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG, U y 4–14.
+                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles/colores: unifica filtros de la tienda (talles P–XXXG, U, 4–14; colores Negro, Azul, Bordó, etc.).
                     </p>
                   </div>
                 )}
@@ -3071,6 +3098,51 @@ const Settings: React.FC<SettingsProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Normalize colors modal */}
+      <Modal
+        isOpen={showNormalizeColorsModal}
+        onClose={() => setShowNormalizeColorsModal(false)}
+        title="Normalizar colores en Tienda Nube"
+        footer={
+          <button onClick={() => setShowNormalizeColorsModal(false)} className="bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg font-bold text-sm">
+            Cerrar
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {normalizeColorsResult && (
+            <>
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-4">
+                <div className="flex-1">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
+                  <p className="text-xl font-black text-green-400">{normalizeColorsResult.updatedVariants}</p>
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos sin atributo Color</p>
+                  <p className="text-xl font-black text-slate-400">{normalizeColorsResult.skippedProducts}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">
+                Los colores se unifican a nombres cortos (Negro, Azul, Bordó, Gris, etc.) y se quitan sufijos como &quot; - 999&quot;. Volvé a consultar productos para ver los cambios en LupoHub.
+              </p>
+              {normalizeColorsResult.logs.length > 0 && (
+                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
+                  {normalizeColorsResult.logs.slice(-50).map((line, i) => (
+                    <div key={i} className={line.includes('[ERROR]') ? 'text-red-400' : 'text-green-300'}>{line}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {loadingNormalizeColors && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-violet-500" size={32} />
+              <p className="text-sm text-violet-400 font-bold">Actualizando colores en Tienda Nube...</p>
             </div>
           )}
         </div>

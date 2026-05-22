@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
+import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
@@ -646,6 +647,102 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+function tnAttributeLabel(attr: unknown): string {
+  return (attr as { es?: string; en?: string; pt?: string })?.es
+    ?? (attr as { es?: string; en?: string; pt?: string })?.en
+    ?? (attr as { es?: string; en?: string; pt?: string })?.pt
+    ?? (typeof attr === 'string' ? attr : '')
+    ).toString();
+}
+
+function tnVariantValueText(val: unknown): string {
+  return (
+    (val as { es?: string; en?: string; pt?: string })?.es
+    ?? (val as { es?: string; en?: string; pt?: string })?.pt
+    ?? (val as { es?: string; en?: string; pt?: string })?.en
+    ?? val
+  )?.toString().trim() || '';
+}
+
+async function normalizeTiendaNubeVariantAttribute(options: {
+  access_token: string;
+  store_id: string;
+  isTargetAttribute: (attrName: string) => boolean;
+  normalizeValue: (raw: string) => string;
+  shouldUpdate?: (current: string, normalized: string) => boolean;
+  completedMessage: string;
+}): Promise<{ updatedVariants: number; skippedProducts: number; logs: string[] }> {
+  const { access_token, store_id, isTargetAttribute, normalizeValue, completedMessage } = options;
+  const shouldUpdate = options.shouldUpdate ?? ((c, n) => c !== n);
+  const logs: string[] = [];
+  const log = (msg: string) => {
+    console.log(msg);
+    logs.push(msg);
+  };
+  let updatedVariants = 0;
+  let skippedProducts = 0;
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
+      headers: { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
+      params: { page, per_page: 50 },
+    });
+    const products = response.data;
+    if (!products?.length) {
+      hasMore = false;
+      break;
+    }
+    for (const tnProduct of products) {
+      const productAttributes = tnProduct.attributes || [];
+      let attrIndex = -1;
+      for (let i = 0; i < productAttributes.length; i++) {
+        if (isTargetAttribute(tnAttributeLabel(productAttributes[i]))) {
+          attrIndex = i;
+          break;
+        }
+      }
+      if (attrIndex === -1) {
+        skippedProducts++;
+        continue;
+      }
+      for (const variant of tnProduct.variants || []) {
+        const values = variant.values || [];
+        if (attrIndex >= values.length) continue;
+        const current = tnVariantValueText(values[attrIndex]);
+        const normalized = normalizeValue(current);
+        if (!shouldUpdate(current, normalized)) continue;
+        const newValues = values.map((obj: unknown, i: number) => {
+          if (i !== attrIndex) return obj;
+          const langKeys = obj && typeof obj === 'object' ? Object.keys(obj as object) : ['es'];
+          const next: Record<string, string> = {};
+          for (const lang of langKeys) next[lang] = normalized;
+          return next;
+        });
+        try {
+          await axios.put(
+            `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
+            { values: newValues },
+            { headers: { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
+          );
+          updatedVariants++;
+          log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
+          await delay(250);
+        } catch (err: unknown) {
+          const ax = err as { response?: { data?: { description?: string } }; message?: string };
+          log(`  [ERROR] Variante ${variant.id}: ${ax.response?.data?.description || ax.message}`);
+        }
+      }
+    }
+    page++;
+    if (page > 300) hasMore = false;
+  }
+
+  log(completedMessage);
+  return { updatedVariants, skippedProducts, logs };
+}
+
 export const normalizeSizesInTiendaNube = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
@@ -653,83 +750,47 @@ export const normalizeSizesInTiendaNube = async (req: Request, res: Response) =>
       return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
     }
     const { access_token, user_id: store_id } = integration;
-    const logs: string[] = [];
-    const log = (msg: string) => {
-      console.log(msg);
-      logs.push(msg);
-    };
-    let updatedVariants = 0;
-    let skippedProducts = 0;
-    let page = 1;
-    let hasMore = true;
-    const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
-
-    while (hasMore) {
-      const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
-        headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
-        params: { page, per_page: 50 }
-      });
-      const products = response.data;
-      if (!products?.length) {
-        hasMore = false;
-        break;
-      }
-      for (const tnProduct of products) {
-        const productAttributes = tnProduct.attributes || [];
-        let sizeAttrIndex = -1;
-        for (let i = 0; i < productAttributes.length; i++) {
-          const attr = productAttributes[i];
-          const name = (attr?.es ?? attr?.en ?? attr?.pt ?? (typeof attr === 'string' ? attr : '')).toString();
-          if (isSizeAttr(name)) {
-            sizeAttrIndex = i;
-            break;
-          }
-        }
-        if (sizeAttrIndex === -1) {
-          skippedProducts++;
-          continue;
-        }
-        for (const variant of tnProduct.variants || []) {
-          const values = variant.values || [];
-          if (sizeAttrIndex >= values.length) continue;
-          const sizeVal = values[sizeAttrIndex];
-          const current = (sizeVal?.es ?? sizeVal?.pt ?? sizeVal?.en ?? sizeVal)?.toString().trim() || '';
-          const normalized = normalizeSizeToStandard(current);
-          if (normalized === current) continue;
-          const newValues = values.map((obj: any, i: number) => {
-            if (i !== sizeAttrIndex) return obj;
-            const langKeys = obj && typeof obj === 'object' ? Object.keys(obj) : ['es'];
-            const next: Record<string, string> = {};
-            for (const lang of langKeys) next[lang] = normalized;
-            return next;
-          });
-          try {
-            await axios.put(
-              `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
-              { values: newValues },
-              { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
-            );
-            updatedVariants++;
-            log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
-            await delay(250);
-          } catch (err: any) {
-            log(`  [ERROR] Variante ${variant.id}: ${err.response?.data?.description || err.message}`);
-          }
-        }
-      }
-      page++;
-      if (page > 300) hasMore = false; // hasta 300 páginas × 50 = 15.000 productos
-    }
-
+    const result = await normalizeTiendaNubeVariantAttribute({
+      access_token,
+      store_id,
+      isTargetAttribute: (name) => /talle|talla|size|tamano|tamaño/i.test(name),
+      normalizeValue: normalizeSizeToStandard,
+      completedMessage: 'Normalización de talles en Tienda Nube completada',
+    });
     res.json({
       message: 'Normalización de talles en Tienda Nube completada',
-      updatedVariants,
-      skippedProducts,
-      logs
+      ...result,
     });
-  } catch (error: any) {
-    console.error('Error normalizing sizes:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: error.message });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error normalizing sizes:', ax.response?.data || ax.message);
+    res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: ax.message });
+  }
+};
+
+export const normalizeColorsInTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration || !integration.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const { access_token, user_id: store_id } = integration;
+    const result = await normalizeTiendaNubeVariantAttribute({
+      access_token,
+      store_id,
+      isTargetAttribute: (name) => /color|colour|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name),
+      normalizeValue: normalizeColorNameToStandard,
+      shouldUpdate: shouldUpdateColorValue,
+      completedMessage: 'Normalización de colores en Tienda Nube completada',
+    });
+    res.json({
+      message: 'Normalización de colores en Tienda Nube completada',
+      ...result,
+    });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error normalizing colors:', ax.response?.data || ax.message);
+    res.status(500).json({ message: 'Error normalizando colores en Tienda Nube', error: ax.message });
   }
 };
 
