@@ -14,8 +14,13 @@ export function normalizeMercadoLibreItemId(raw: unknown): string {
   s = s.replace(/\s+/g, '');
 
   if (/^https?:\/\//i.test(s)) {
-    const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
-    if (m?.[1]) s = m[1];
+    const catalog = s.match(/\/p\/(ML[A-Z]{0,5}-?\d+)/i);
+    if (catalog?.[1]) {
+      s = catalog[1];
+    } else {
+      const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+      if (m?.[1]) s = m[1];
+    }
   }
 
   s = s.toUpperCase();
