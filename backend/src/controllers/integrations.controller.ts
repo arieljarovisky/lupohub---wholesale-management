@@ -1123,7 +1123,7 @@ export const syncSkusToTiendaNube = async (req: Request, res: Response) => {
 export const disconnectIntegration = async (req: Request, res: Response) => {
   const { platform } = req.params as { platform: 'mercadolibre' | 'tiendanube' };
   if (!platform || !['mercadolibre', 'tiendanube'].includes(platform)) {
-    return res.status(400).json({ message: 'Plataforma inválida' };
+    return res.status(400).json({ message: 'Plataforma inválida' });
   }
   try {
     await execute(`DELETE FROM integrations WHERE platform = ?`, [platform]);
