@@ -678,11 +678,12 @@ function parseTnNormalizeBatchBody(req: Request): {
 }
 
 function tnAttributeLabel(attr: unknown): string {
-  return (attr as { es?: string; en?: string; pt?: string })?.es
+  return (
+    (attr as { es?: string; en?: string; pt?: string })?.es
     ?? (attr as { es?: string; en?: string; pt?: string })?.en
     ?? (attr as { es?: string; en?: string; pt?: string })?.pt
     ?? (typeof attr === 'string' ? attr : '')
-    ).toString();
+  ).toString();
 }
 
 function tnVariantValueText(val: unknown): string {
