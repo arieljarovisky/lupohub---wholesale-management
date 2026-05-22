@@ -1,6 +1,6 @@
 # Cómo cambiar los talles masivamente en Tienda Nube
 
-Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG** (y **U** para único), podés hacerlo de dos formas.
+Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG**, **U** (único) y los numéricos infantiles **4, 6, 8, 10, 12, 14**, podés hacerlo de dos formas.
 
 ---
 
@@ -17,6 +17,8 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG** (
    - **XXG** (ej. XXL, 50…)
    - **XXXG** (ej. XXXL, 52…)
    - **U** (ej. Único, Unico, Liso…)
+   - **4, 6, 8, 10, 12, 14** (talles infantiles; no se convierten a letras)
+   - Rangos y textos viejos (ej. `M 37-40`, `Gg 45 Al 48`, `P - 85`, `Xxg`, `Eg`, `Plus`…) → letra estándar correspondiente
 4. Al terminar, ejecutá de nuevo **IMPORTAR PRODUCTOS** para que LupoHub refleje los cambios.
 
 ---
@@ -28,7 +30,7 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG** (
 3. **Descargar** la lista de productos (archivo CSV).  
    Ayuda: [Cómo descargar la lista de productos](https://ayuda.tiendanube.com/122710-importar-y-exportar-productos/como-descargar-la-lista-de-productos-de-mi-tiendanube).
 4. Abrí el CSV en Excel o Google Sheets. Buscá la columna que corresponde a **variante / talle** (según el nombre que use tu exportación).
-5. Reemplazá todos los valores por solo: **P**, **M**, **G**, **GG**, **XG**, **XXG**, **XXXG** o **U**, según corresponda (ej. "XL" → "XG", "Único" → "U").
+5. Reemplazá todos los valores por solo: **P**, **M**, **G**, **GG**, **XG**, **XXG**, **XXXG**, **U** o **4/6/8/10/12/14**, según corresponda (ej. "XL" → "XG", "Único" → "U", "M 37-40" → "M").
 6. Guardá el archivo como **CSV** (delimitado por comas). No uses .XLS o .XLSX para importar.
 7. En Tienda Nube: **Importar y exportar > Cargar archivo .csv**.
 8. Subí el archivo y elegí **"Modificar productos ya existentes"** para no duplicar productos.

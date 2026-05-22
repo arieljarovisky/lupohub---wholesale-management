@@ -2166,7 +2166,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG.
+                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG, U y 4–14.
                     </p>
                   </div>
                 )}

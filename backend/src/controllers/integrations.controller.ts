@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
+import { normalizeSizeToStandard } from '../utils/talleStandard';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -642,38 +643,6 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
     res.status(500).json({ message: 'Error sincronizando productos', error: error.message });
   }
 };
-
-/** Talles estándar para el público: P, M, G, GG, XG, XXG, XXXG (+ U para único) */
-const STANDARD_SIZES = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG', 'U'] as const;
-
-/** Mapeo de nombres comunes a talle estándar (clave en mayúsculas/normalizada) */
-function normalizeSizeToStandard(raw: string): string {
-  const v = raw.trim().toUpperCase().replace(/\s+/g, ' ');
-  if (!v) return 'U';
-  // Ya estándar
-  if (STANDARD_SIZES.includes(v as any)) return v;
-  // Único / sin talla
-  if (/^U$|UNICO|ÚNICO|LISO|UNICA|ÚNICA/i.test(v)) return 'U';
-  // Pequeño
-  if (/^P$|^S$|^PP$|^XS$|^1$|^2$|^34$|^36$|^35$|^XXS$/i.test(v)) return 'P';
-  // Mediano
-  if (/^M$|^3$|^4$|^38$|^40$/i.test(v)) return 'M';
-  // Grande
-  if (/^G$|^L$|^5$|^6$|^42$|^44$/i.test(v)) return 'G';
-  if (/^GG$|^7$|^8$|^46$/i.test(v)) return 'GG';
-  // Extra grande
-  if (/^XG$|^XL$|^9$|^10$|^48$/i.test(v)) return 'XG';
-  if (/^XXG$|^XXL$|^11$|^12$|^50$/i.test(v)) return 'XXG';
-  if (/^XXXG$|^XXXL$|^13$|^52$/i.test(v)) return 'XXXG';
-  // Por texto
-  if (/EXTRA\s*GRANDE|XXL|XX\s*L/i.test(v) && !/XXX/i.test(v)) return 'XXG';
-  if (/XXX|TRIPLE/i.test(v)) return 'XXXG';
-  if (/XL|EXTRA\s*LARGE/i.test(v)) return 'XG';
-  if (/GRANDE|LARGE|^L$/i.test(v)) return 'G';
-  if (/MEDIANO|MEDIUM|^M$/i.test(v)) return 'M';
-  if (/PEQUEÑO|SMALL|^S$|^P$/i.test(v)) return 'P';
-  return v; // dejar como está si no hay match
-}
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
