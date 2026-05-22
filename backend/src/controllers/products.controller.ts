@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
+import { skuToCanonicalString } from '../utils/skuString';
 import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper, mergeManualVariantPair } from '../services/mergeDuplicateProductsBySku';
 import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 
@@ -924,7 +925,7 @@ export const updateVariant = async (req: Request, res: Response) => {
     );
     if (!updated) return res.status(404).json({ message: 'Variante no encontrada' });
 
-    const skuToSend = (updated.external_sku || updated.sku || '').toString().trim();
+    const skuToSend = skuToCanonicalString(updated.sku || updated.external_sku || '');
     if (skuToSend) {
       if (updated.mercado_libre_item_id && updated.mercado_libre_variant_id) {
         updateMercadoLibreSku(updated.mercado_libre_item_id, updated.mercado_libre_variant_id, skuToSend).catch(err =>

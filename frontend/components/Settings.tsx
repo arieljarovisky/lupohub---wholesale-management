@@ -245,6 +245,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
   const [loadingNormalizeColors, setLoadingNormalizeColors] = useState(false);
+  const [loadingSyncTnSkus, setLoadingSyncTnSkus] = useState(false);
   const [showNormalizeColorsModal, setShowNormalizeColorsModal] = useState(false);
   const [normalizeColorsResult, setNormalizeColorsResult] = useState<{
     updatedVariants: number;
@@ -739,6 +740,29 @@ const Settings: React.FC<SettingsProps> = ({
       }));
     } finally {
       setLoadingNormalizeSizes(false);
+    }
+  };
+
+  const handleSyncSkusTiendaNube = async () => {
+    const ok = await showConfirm({
+      title: 'Sincronizar SKU a Tienda Nube',
+      message:
+        'Se enviará el SKU de cada variante de LupoHub (formato artículo-talle-color) a Tienda Nube, reemplazando valores corruptos como 4,16E+12. ¿Continuar?',
+      confirmLabel: 'Sincronizar',
+    });
+    if (!ok) return;
+    setLoadingSyncTnSkus(true);
+    try {
+      const res = await api.syncSkusToTiendaNube();
+      if (res.errors > 0) {
+        showToast('error', `SKU TN: ${res.updated} ok, ${res.errors} errores (de ${res.total}).`);
+      } else {
+        showToast('success', `SKU TN: ${res.updated} variantes actualizadas.`);
+      }
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'Error sincronizando SKU');
+    } finally {
+      setLoadingSyncTnSkus(false);
     }
   };
 
@@ -2192,6 +2216,15 @@ const Settings: React.FC<SettingsProps> = ({
                           {loadingNormalizeColors ? <Loader2 size={14} className="animate-spin" /> : <Palette size={14} />}
                           NORMALIZAR COLORES
                         </button>
+                        <button
+                          onClick={handleSyncSkusTiendaNube}
+                          disabled={loadingSyncTnSkus}
+                          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Copiar SKU de LupoHub a cada variante en Tienda Nube"
+                        >
+                          {loadingSyncTnSkus ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+                          SINCRONIZAR SKU
+                        </button>
                       </div>
                     </div>
                     <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
@@ -2243,7 +2276,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles/colores: unifica filtros de la tienda (talles P–XXXG, U, 4–14; colores Negro, Azul, Bordó, etc.).
+                      Sincronizar stock / SKU / normalizar talles y colores. SKU: usa el código de LupoHub (ej. 0051003-130-280), no notación científica.
                     </p>
                   </div>
                 )}

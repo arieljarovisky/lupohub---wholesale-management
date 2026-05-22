@@ -2004,6 +2004,26 @@ export const api = {
   },
 
   /** Normaliza nombres de color en Tienda Nube (lotes). */
+  syncSkusToTiendaNube: async (): Promise<{
+    message: string;
+    total: number;
+    updated: number;
+    errors: number;
+    skipped: number;
+    logs: string[];
+  }> => {
+    return handleRequest(async () => {
+      return await request<{
+        message: string;
+        total: number;
+        updated: number;
+        errors: number;
+        skipped: number;
+        logs: string[];
+      }>('/integrations/tiendanube/sync-skus', 'POST', undefined, undefined, 600000);
+    }, { message: 'Offline', total: 0, updated: 0, errors: 0, skipped: 0, logs: [] }, 'syncSkusToTiendaNube');
+  },
+
   normalizeColorsInTiendaNube: async (
     onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
   ): Promise<{

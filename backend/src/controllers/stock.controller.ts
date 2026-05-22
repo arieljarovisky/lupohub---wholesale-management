@@ -5,6 +5,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { skuToCanonicalString } from '../utils/skuString';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
@@ -838,11 +839,16 @@ export const updateTiendaNubeSku = async (
     console.log('[TN SKU] No hay integración configurada');
     return false;
   }
+  const sku = skuToCanonicalString(newSku);
+  if (!sku) {
+    console.log('[TN SKU] SKU vacío, omitido');
+    return false;
+  }
   try {
     await tnPutWithRetry(
       axios,
       `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-      { sku: newSku },
+      { sku },
       {
         headers: {
           'Authentication': `bearer ${integration.access_token}`,
@@ -852,7 +858,7 @@ export const updateTiendaNubeSku = async (
       },
       { maxRetries: 4 }
     );
-    console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
+    console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${sku}"`);
     return true;
   } catch (e: any) {
     console.error('[TN SKU] Error:', e.response?.data || e.message);

@@ -10,6 +10,7 @@ import {
   mergeTiendaNubeDuplicateVariants,
 } from '../services/tiendanubeVariantMerge.service';
 import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
+import { skuToCanonicalString } from '../utils/skuString';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
@@ -1041,10 +1042,88 @@ export const normalizeColorsInTiendaNube = async (req: Request, res: Response) =
   }
 };
 
+/** Envía a Tienda Nube el SKU de LupoHub (base-talle-color) en todas las variantes vinculadas. */
+export const syncSkusToTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+
+    const rows = await query(
+      `SELECT pv.id AS variant_id, pv.sku, pv.tienda_nube_variant_id, p.tienda_nube_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.tienda_nube_variant_id IS NOT NULL
+         AND p.tienda_nube_id IS NOT NULL
+         AND pv.sku IS NOT NULL
+         AND TRIM(pv.sku) <> ''`
+    );
+
+    const headers = {
+      Authentication: `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT,
+      'Content-Type': 'application/json',
+    };
+    const logs: string[] = [];
+    let updated = 0;
+    let errors = 0;
+    let skipped = 0;
+
+    for (const r of rows as Array<{
+      variant_id: string;
+      sku: string;
+      tienda_nube_variant_id: string;
+      tienda_nube_id: string;
+    }>) {
+      const lupoSku = skuToCanonicalString(r.sku);
+      if (!lupoSku) {
+        skipped++;
+        continue;
+      }
+      try {
+        await tnPutWithRetry(
+          axios,
+          `https://api.tiendanube.com/v1/${store_id}/products/${r.tienda_nube_id}/variants/${r.tienda_nube_variant_id}`,
+          { sku: lupoSku },
+          { headers }
+        );
+        updated++;
+        if (logs.length < 200) logs.push(`[OK] ${lupoSku} (variante ${r.tienda_nube_variant_id})`);
+      } catch (err: unknown) {
+        errors++;
+        const ax = err as { response?: { data?: { description?: string } }; message?: string };
+        if (logs.length < 200) {
+          logs.push(`[ERROR] ${lupoSku}: ${ax.response?.data?.description || ax.message}`);
+        }
+      }
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+    }
+
+    res.json({
+      message: 'Sincronización de SKU a Tienda Nube completada',
+      total: rows.length,
+      updated,
+      errors,
+      skipped,
+      logs,
+    });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error syncing SKUs to TN:', ax.response?.data || ax.message);
+    res.status(500).json({ message: 'Error sincronizando SKU a Tienda Nube', error: ax.message });
+  }
+};
+
 export const disconnectIntegration = async (req: Request, res: Response) => {
   const { platform } = req.params as { platform: 'mercadolibre' | 'tiendanube' };
   if (!platform || !['mercadolibre', 'tiendanube'].includes(platform)) {
-    return res.status(400).json({ message: 'Plataforma inválida' });
+    return res.status(400).json({ message: 'Plataforma inválida' };
   }
   try {
     await execute(`DELETE FROM integrations WHERE platform = ?`, [platform]);
@@ -5173,12 +5252,14 @@ function tiendaNubeCategoryIdsOnly(raw: any): number[] {
 
 function stripVariantForTiendaNubeCreate(v: any, skuSuffix: string, idx: number): any {
   const baseSku =
-    v?.sku != null && String(v.sku).trim() !== '' ? String(v.sku).trim() : `VAR-${idx + 1}`;
+    v?.sku != null && String(v.sku).trim() !== ''
+      ? skuToCanonicalString(v.sku)
+      : `VAR-${idx + 1}`;
   const out: any = {
     price: v.price != null ? String(v.price) : '0',
     stock_management: v.stock_management !== false,
     stock: Number(v.stock) || 0,
-    sku: `${baseSku}${skuSuffix}`,
+    sku: skuToCanonicalString(`${baseSku}${skuSuffix}`),
     values: Array.isArray(v.values) ? v.values : []
   };
   if (v.promotional_price != null && String(v.promotional_price).trim() !== '') {
