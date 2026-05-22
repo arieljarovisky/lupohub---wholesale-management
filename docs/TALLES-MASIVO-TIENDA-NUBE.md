@@ -8,7 +8,8 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG**, 
 
 1. Entrá a **Configuración** (engranaje) y abrí la pestaña **Integraciones**.
 2. Con Tienda Nube **conectado**, en la tarjeta de Tienda Nube hacé clic en **NORMALIZAR TALLES**.
-3. La app actualizará en Tienda Nube todas las variantes que tengan un atributo tipo "Talle"/"Size"/"Talla", convirtiendo los valores a:
+3. La app procesa el catálogo **por lotes** (varios minutos en tiendas grandes); dejá el modal abierto hasta que termine.
+4. Actualizará en Tienda Nube las variantes con atributo "Talle"/"Size"/"Talla", convirtiendo los valores a:
    - **P** (ej. S, PP, XS, 34, 36…)
    - **M** (ej. 38, 40…)
    - **G** (ej. L, 42, 44…)
@@ -19,7 +20,7 @@ Para que el público vea **solo** estos talles: **P, M, G, GG, XG, XXG, XXXG**, 
    - **U** (ej. Único, Unico, Liso…)
    - **4, 6, 8, 10, 12, 14** (talles infantiles; no se convierten a letras)
    - Rangos y textos viejos (ej. `M 37-40`, `Gg 45 Al 48`, `P - 85`, `Xxg`, `Eg`, `Plus`…) → letra estándar correspondiente
-4. Al terminar, ejecutá de nuevo **IMPORTAR PRODUCTOS** para que LupoHub refleje los cambios.
+5. Al terminar, ejecutá de nuevo **CONSULTAR PRODUCTOS** para refrescar datos en LupoHub.
 
 ---
 

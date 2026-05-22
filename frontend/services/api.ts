@@ -17,6 +17,71 @@ const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorM
   }
 };
 
+type TnNormalizeBatchResponse = {
+  message: string;
+  updatedVariants: number;
+  skippedProducts: number;
+  logs: string[];
+  hasMore?: boolean;
+  nextPage?: number;
+  resume?: { page: number; productIndex: number; variantIndex: number };
+};
+
+const TN_NORMALIZE_BATCH_TIMEOUT_MS = 300000;
+
+async function runTiendaNubeNormalizeBatches(
+  path: string,
+  onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
+): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> {
+  let batch = 0;
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+  const allLogs: string[] = [];
+  let hasMore = true;
+  let resume: TnNormalizeBatchResponse['resume'];
+  let startPage = 1;
+
+  while (hasMore) {
+    batch++;
+    const body: Record<string, unknown> = { startPage, maxPages: 2, maxUpdates: 25 };
+    if (resume) body.resume = resume;
+
+    const res = await request<TnNormalizeBatchResponse>(
+      path,
+      'POST',
+      body,
+      undefined,
+      TN_NORMALIZE_BATCH_TIMEOUT_MS
+    );
+
+    totalUpdated += res.updatedVariants ?? 0;
+    totalSkipped += res.skippedProducts ?? 0;
+    if (res.logs?.length) allLogs.push(...res.logs);
+    onProgress?.({ batch, updatedVariants: totalUpdated, logs: allLogs });
+
+    hasMore = !!res.hasMore;
+    resume = res.resume;
+    if (hasMore) {
+      if (resume) {
+        startPage = resume.page;
+      } else if (res.nextPage) {
+        startPage = res.nextPage;
+        resume = undefined;
+      } else {
+        hasMore = false;
+      }
+    }
+    if (batch > 500) break;
+  }
+
+  return {
+    message: hasMore ? 'Proceso interrumpido (demasiados lotes)' : 'Normalización completada',
+    updatedVariants: totalUpdated,
+    skippedProducts: totalSkipped,
+    logs: allLogs,
+  };
+}
+
 const getFilenameFromContentDisposition = (headerValue?: string): string => {
   const raw = String(headerValue || '').trim();
   if (!raw) return '';
@@ -1907,17 +1972,21 @@ export const api = {
     }, { message: 'Offline', imported: 0, updated: 0, logs: [] }, 'syncProductsFromTiendaNube');
   },
 
-  /** Normaliza talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG (masivo vía API) */
-  normalizeSizesInTiendaNube: async (): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
+  /** Normaliza talles en Tienda Nube (lotes; evita timeout en catálogos grandes). */
+  normalizeSizesInTiendaNube: async (
+    onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
+  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }>('/integrations/tiendanube/normalize-sizes', 'POST');
+      return runTiendaNubeNormalizeBatches('/integrations/tiendanube/normalize-sizes', onProgress);
     }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, logs: [] }, 'normalizeSizesInTiendaNube');
   },
 
-  /** Normaliza nombres de color en Tienda Nube (masivo vía API) */
-  normalizeColorsInTiendaNube: async (): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
+  /** Normaliza nombres de color en Tienda Nube (lotes). */
+  normalizeColorsInTiendaNube: async (
+    onProgress?: (state: { batch: number; updatedVariants: number; logs: string[] }) => void
+  ): Promise<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; updatedVariants: number; skippedProducts: number; logs: string[] }>('/integrations/tiendanube/normalize-colors', 'POST');
+      return runTiendaNubeNormalizeBatches('/integrations/tiendanube/normalize-colors', onProgress);
     }, { message: 'Offline', updatedVariants: 0, skippedProducts: 0, logs: [] }, 'normalizeColorsInTiendaNube');
   },
   

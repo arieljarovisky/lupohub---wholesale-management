@@ -699,13 +699,24 @@ const Settings: React.FC<SettingsProps> = ({
   const handleNormalizeSizesTiendaNube = async () => {
     setShowNormalizeSizesModal(true);
     setLoadingNormalizeSizes(true);
-    setNormalizeSizesResult(null);
+    setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Iniciando normalización por lotes…'] });
     try {
-      const res = await api.normalizeSizesInTiendaNube();
+      const res = await api.normalizeSizesInTiendaNube((p) => {
+        setNormalizeSizesResult({
+          updatedVariants: p.updatedVariants,
+          skippedProducts: 0,
+          logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
+        });
+      });
       setNormalizeSizesResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
-      setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
+      const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
+      setNormalizeSizesResult((prev) => ({
+        updatedVariants: prev?.updatedVariants ?? 0,
+        skippedProducts: prev?.skippedProducts ?? 0,
+        logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
+      }));
     } finally {
       setLoadingNormalizeSizes(false);
     }
@@ -714,13 +725,24 @@ const Settings: React.FC<SettingsProps> = ({
   const handleNormalizeColorsTiendaNube = async () => {
     setShowNormalizeColorsModal(true);
     setLoadingNormalizeColors(true);
-    setNormalizeColorsResult(null);
+    setNormalizeColorsResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Iniciando normalización por lotes…'] });
     try {
-      const res = await api.normalizeColorsInTiendaNube();
+      const res = await api.normalizeColorsInTiendaNube((p) => {
+        setNormalizeColorsResult({
+          updatedVariants: p.updatedVariants,
+          skippedProducts: 0,
+          logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
+        });
+      });
       setNormalizeColorsResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(e);
-      setNormalizeColorsResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
+      const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
+      setNormalizeColorsResult((prev) => ({
+        updatedVariants: prev?.updatedVariants ?? 0,
+        skippedProducts: prev?.skippedProducts ?? 0,
+        logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
+      }));
     } finally {
       setLoadingNormalizeColors(false);
     }
@@ -3142,7 +3164,7 @@ const Settings: React.FC<SettingsProps> = ({
           {loadingNormalizeColors && (
             <div className="py-6 flex flex-col items-center gap-3">
               <Loader2 className="animate-spin text-violet-500" size={32} />
-              <p className="text-sm text-violet-400 font-bold">Actualizando colores en Tienda Nube...</p>
+              <p className="text-sm text-violet-400 font-bold">Actualizando colores en Tienda Nube (por lotes, puede tardar varios minutos)...</p>
             </div>
           )}
         </div>
@@ -3187,7 +3209,7 @@ const Settings: React.FC<SettingsProps> = ({
           {loadingNormalizeSizes && (
             <div className="py-6 flex flex-col items-center gap-3">
               <Loader2 className="animate-spin text-blue-500" size={32} />
-              <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube...</p>
+              <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube (por lotes, puede tardar varios minutos)...</p>
             </div>
           )}
         </div>

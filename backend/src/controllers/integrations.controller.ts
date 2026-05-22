@@ -647,6 +647,36 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+type TnNormalizeResume = { page: number; productIndex: number; variantIndex: number };
+
+function getTiendaNubeStoreId(integration: { store_id?: string | null; user_id?: string | null }): string | null {
+  const id = String(integration.store_id ?? integration.user_id ?? '').trim();
+  return id || null;
+}
+
+function parseTnNormalizeBatchBody(req: Request): {
+  startPage: number;
+  maxPages: number;
+  maxUpdates: number;
+  resume?: TnNormalizeResume;
+} {
+  const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const startPage = Math.max(1, parseInt(String(body.startPage ?? 1), 10) || 1);
+  const maxPages = Math.min(10, Math.max(1, parseInt(String(body.maxPages ?? 2), 10) || 2));
+  const maxUpdates = Math.min(200, Math.max(1, parseInt(String(body.maxUpdates ?? 25), 10) || 25));
+  const raw = body.resume;
+  let resume: TnNormalizeResume | undefined;
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>;
+    resume = {
+      page: Math.max(1, parseInt(String(r.page ?? startPage), 10) || startPage),
+      productIndex: Math.max(0, parseInt(String(r.productIndex ?? 0), 10) || 0),
+      variantIndex: Math.max(0, parseInt(String(r.variantIndex ?? 0), 10) || 0),
+    };
+  }
+  return { startPage, maxPages, maxUpdates, resume };
+}
+
 function tnAttributeLabel(attr: unknown): string {
   return (attr as { es?: string; en?: string; pt?: string })?.es
     ?? (attr as { es?: string; en?: string; pt?: string })?.en
@@ -671,9 +701,22 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   normalizeValue: (raw: string) => string;
   shouldUpdate?: (current: string, normalized: string) => boolean;
   completedMessage: string;
-}): Promise<{ updatedVariants: number; skippedProducts: number; logs: string[] }> {
+  startPage?: number;
+  maxPages?: number;
+  maxUpdates?: number;
+  resume?: TnNormalizeResume;
+}): Promise<{
+  updatedVariants: number;
+  skippedProducts: number;
+  logs: string[];
+  hasMore: boolean;
+  nextPage?: number;
+  resume?: TnNormalizeResume;
+}> {
   const { access_token, store_id, isTargetAttribute, normalizeValue, completedMessage } = options;
   const shouldUpdate = options.shouldUpdate ?? ((c, n) => c !== n);
+  const maxPages = options.maxPages ?? 2;
+  const maxUpdates = options.maxUpdates ?? 40;
   const logs: string[] = [];
   const log = (msg: string) => {
     console.log(msg);
@@ -681,20 +724,42 @@ async function normalizeTiendaNubeVariantAttribute(options: {
   };
   let updatedVariants = 0;
   let skippedProducts = 0;
-  let page = 1;
-  let hasMore = true;
+  let updatesThisBatch = 0;
+  let page = options.resume?.page ?? options.startPage ?? 1;
+  let productStart = options.resume?.productIndex ?? 0;
+  let variantStart = options.resume?.variantIndex ?? 0;
+  let pagesProcessed = 0;
+  let stoppedByCap = false;
+  let lastPageFull = false;
+  const perPage = 50;
+  const tnHeaders = { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT };
 
-  while (hasMore) {
-    const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
-      headers: { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
-      params: { page, per_page: 50 },
-    });
-    const products = response.data;
-    if (!products?.length) {
-      hasMore = false;
-      break;
+  while (pagesProcessed < maxPages && updatesThisBatch < maxUpdates) {
+    let products: unknown[] = [];
+    try {
+      const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
+        headers: tnHeaders,
+        params: { page, per_page: perPage },
+      });
+      products = Array.isArray(response.data) ? response.data : [];
+    } catch (err: unknown) {
+      const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+      if (ax.response?.status === 404) {
+        break;
+      }
+      throw err;
     }
-    for (const tnProduct of products) {
+
+    if (!products.length) break;
+    lastPageFull = products.length >= perPage;
+    log(`[TN] Página ${page}: ${products.length} productos`);
+
+    for (let pi = productStart; pi < products.length; pi++) {
+      const tnProduct = products[pi] as {
+        id: number | string;
+        attributes?: unknown[];
+        variants?: Array<{ id: number | string; values?: unknown[] }>;
+      };
       const productAttributes = tnProduct.attributes || [];
       let attrIndex = -1;
       for (let i = 0; i < productAttributes.length; i++) {
@@ -705,14 +770,40 @@ async function normalizeTiendaNubeVariantAttribute(options: {
       }
       if (attrIndex === -1) {
         skippedProducts++;
+        variantStart = 0;
         continue;
       }
-      for (const variant of tnProduct.variants || []) {
+
+      const variants = tnProduct.variants || [];
+      for (let vi = pi === productStart ? variantStart : 0; vi < variants.length; vi++) {
+        if (updatesThisBatch >= maxUpdates) {
+          stoppedByCap = true;
+          return {
+            updatedVariants,
+            skippedProducts,
+            logs,
+            hasMore: true,
+            resume: { page, productIndex: pi, variantIndex: vi },
+          };
+        }
+
+        const variant = variants[vi];
         const values = variant.values || [];
         if (attrIndex >= values.length) continue;
-        const current = tnVariantValueText(values[attrIndex]);
-        const normalized = normalizeValue(current);
+
+        let current = '';
+        let normalized = '';
+        try {
+          current = tnVariantValueText(values[attrIndex]);
+          normalized = normalizeValue(current);
+        } catch (normErr: unknown) {
+          const m = normErr instanceof Error ? normErr.message : String(normErr);
+          log(`  [ERROR] Variante ${variant.id}: normalización falló (${m})`);
+          continue;
+        }
+
         if (!shouldUpdate(current, normalized)) continue;
+
         const newValues = values.map((obj: unknown, i: number) => {
           if (i !== attrIndex) return obj;
           const langKeys = obj && typeof obj === 'object' ? Object.keys(obj as object) : ['es'];
@@ -720,77 +811,114 @@ async function normalizeTiendaNubeVariantAttribute(options: {
           for (const lang of langKeys) next[lang] = normalized;
           return next;
         });
+
         try {
-          await axios.put(
+          await tnPutWithRetry(
+            axios,
             `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
             { values: newValues },
-            { headers: { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
+            { headers: tnHeaders }
           );
           updatedVariants++;
+          updatesThisBatch++;
           log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
-          await delay(250);
         } catch (err: unknown) {
           const ax = err as { response?: { data?: { description?: string } }; message?: string };
           log(`  [ERROR] Variante ${variant.id}: ${ax.response?.data?.description || ax.message}`);
         }
       }
+      variantStart = 0;
     }
+
+    productStart = 0;
     page++;
-    if (page > 300) hasMore = false;
+    pagesProcessed++;
+    if (!lastPageFull) break;
+    if (page > 300) break;
   }
 
-  log(completedMessage);
-  return { updatedVariants, skippedProducts, logs };
+  const hasMore = stoppedByCap || (lastPageFull && pagesProcessed >= maxPages);
+  if (!hasMore) log(completedMessage);
+
+  return {
+    updatedVariants,
+    skippedProducts,
+    logs,
+    hasMore,
+    nextPage: hasMore && !stoppedByCap ? page : undefined,
+  };
 }
 
 export const normalizeSizesInTiendaNube = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration || !integration.access_token) {
+    if (!integration?.access_token) {
       return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
     }
-    const { access_token, user_id: store_id } = integration;
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+    const batch = parseTnNormalizeBatchBody(req);
     const result = await normalizeTiendaNubeVariantAttribute({
-      access_token,
+      access_token: integration.access_token,
       store_id,
       isTargetAttribute: (name) => /talle|talla|size|tamano|tamaño/i.test(name),
       normalizeValue: normalizeSizeToStandard,
       completedMessage: 'Normalización de talles en Tienda Nube completada',
+      ...batch,
     });
     res.json({
-      message: 'Normalización de talles en Tienda Nube completada',
+      message: result.hasMore
+        ? 'Lote de talles procesado; hay más productos pendientes'
+        : 'Normalización de talles en Tienda Nube completada',
       ...result,
     });
   } catch (error: unknown) {
     const ax = error as { response?: { data?: unknown }; message?: string };
     console.error('Error normalizing sizes:', ax.response?.data || ax.message);
-    res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: ax.message });
+    res.status(500).json({
+      message: 'Error normalizando talles en Tienda Nube',
+      error: ax.message,
+      detail: ax.response?.data,
+    });
   }
 };
 
 export const normalizeColorsInTiendaNube = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration || !integration.access_token) {
+    if (!integration?.access_token) {
       return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
     }
-    const { access_token, user_id: store_id } = integration;
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+    const batch = parseTnNormalizeBatchBody(req);
     const result = await normalizeTiendaNubeVariantAttribute({
-      access_token,
+      access_token: integration.access_token,
       store_id,
       isTargetAttribute: (name) => /color|colour|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name),
       normalizeValue: normalizeColorNameToStandard,
       shouldUpdate: shouldUpdateColorValue,
       completedMessage: 'Normalización de colores en Tienda Nube completada',
+      ...batch,
     });
     res.json({
-      message: 'Normalización de colores en Tienda Nube completada',
+      message: result.hasMore
+        ? 'Lote de colores procesado; hay más productos pendientes'
+        : 'Normalización de colores en Tienda Nube completada',
       ...result,
     });
   } catch (error: unknown) {
     const ax = error as { response?: { data?: unknown }; message?: string };
     console.error('Error normalizing colors:', ax.response?.data || ax.message);
-    res.status(500).json({ message: 'Error normalizando colores en Tienda Nube', error: ax.message });
+    res.status(500).json({
+      message: 'Error normalizando colores en Tienda Nube',
+      error: ax.message,
+      detail: ax.response?.data,
+    });
   }
 };
 
