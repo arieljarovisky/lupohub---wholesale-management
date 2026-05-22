@@ -21,7 +21,13 @@ import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
-import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
+import {
+  normalizeMercadoLibreItemId,
+  extractMercadoLibreVariationIdFromUrl,
+  isVariantLinkedToMercadoLibre,
+  isVariantLinkedToTiendaNube,
+  getChannelStockDisplay
+} from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
 /** Referencia estable: cuando no hay filtro ML≠TN, el agrupado no debe recalcularse por cada actualización de stocks externos. */
@@ -774,8 +780,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: { 
             local: true, 
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre 
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -1442,8 +1448,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: { 
             local: true, 
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre 
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -1747,7 +1753,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               integrations: {
                 local: true,
                 tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-                mercadoLibre: !!v.externalIds?.mercadoLibre,
+                mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds),
               },
               externalIds: v.externalIds,
             }));
@@ -2084,7 +2090,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           integrations: {
             local: true,
             tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -2229,12 +2235,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               ...p.externalIds,
               tiendaNube: tnResolved || linkTnId,
               tiendaNubeVariant: linkTnVariantId,
-              mercadoLibre: mlResolved || linkMlId
+              mercadoLibre: mlResolved || linkMlId,
+              mercadoLibreVariant: linkMlVariantId || undefined,
+              mercadoLibreItemId: mlResolved || undefined
             },
             integrations: {
                 ...p.integrations,
-                tiendaNube: !!((tnResolved || linkTnId) && linkTnVariantId),
-                mercadoLibre: !!(mlResolved || linkMlId)
+                tiendaNube: isVariantLinkedToTiendaNube({
+                  tiendaNubeVariant: linkTnVariantId
+                }),
+                mercadoLibre: isVariantLinkedToMercadoLibre({
+                  mercadoLibreVariant: linkMlVariantId,
+                  mercadoLibreItemId: mlResolved
+                })
             }
           } : p)
         };
@@ -2255,8 +2268,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -2307,8 +2320,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -2529,8 +2542,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             stock: v.stock,
             integrations: {
               local: true,
-              tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-              mercadoLibre: !!v.externalIds?.mercadoLibre
+              tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+              mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
             },
             externalIds: v.externalIds
           }));
@@ -2612,8 +2625,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -3508,8 +3521,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                    {product.sku}
                                 </span>
                                 <div className="flex gap-1 shrink-0">
-                                  {product.integrations?.tiendaNube && <Cloud size={12} className="text-blue-400" />}
-                                  {product.integrations?.mercadoLibre && <Zap size={12} className="text-yellow-500" />}
+                                  {isVariantLinkedToTiendaNube(product.externalIds) && <Cloud size={12} className="text-blue-400" />}
+                                  {isVariantLinkedToMercadoLibre(product.externalIds) && <Zap size={12} className="text-yellow-500" />}
                                 </div>
                              </div>
                              <div className="flex items-center gap-3 flex-wrap">
@@ -3574,28 +3587,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
                                        </div>
                                        <div className="flex flex-col gap-0.5 text-xs">
+                                         {(() => {
+                                           const mlLinked = isVariantLinkedToMercadoLibre(product.externalIds);
+                                           const tnLinked = isVariantLinkedToTiendaNube(product.externalIds);
+                                           const mlDisp = getChannelStockDisplay(mlLinked, variantExternalStocks[product.id]?.stockML);
+                                           const tnDisp = getChannelStockDisplay(tnLinked, variantExternalStocks[product.id]?.stockTN);
+                                           return (
+                                             <>
                                          <div className="flex items-center gap-1.5">
-                                           <Zap size={10} className="text-amber-500 shrink-0" />
+                                           <Zap size={10} className={mlLinked ? 'text-amber-500 shrink-0' : 'text-slate-600 shrink-0'} />
                                            <span className="text-slate-400">ML:</span>
-                                           <span className={product.integrations?.mercadoLibre ? 'text-white font-medium' : 'text-amber-500/90'}>
-                                             {product.integrations?.mercadoLibre
-                                               ? (variantExternalStocks[product.id]?.stockML !== undefined
-                                                 ? String(variantExternalStocks[product.id].stockML)
-                                                 : '—')
-                                               : 'Falta sincronizar'}
-                                           </span>
+                                           <span className={mlDisp.className}>{mlDisp.text}</span>
                                          </div>
                                          <div className="flex items-center gap-1.5">
-                                           <Cloud size={10} className="text-blue-400 shrink-0" />
+                                           <Cloud size={10} className={tnLinked ? 'text-blue-400 shrink-0' : 'text-slate-600 shrink-0'} />
                                            <span className="text-slate-400">TN:</span>
-                                           <span className={product.integrations?.tiendaNube ? 'text-white font-medium' : 'text-amber-500/90'}>
-                                             {product.integrations?.tiendaNube
-                                               ? (variantExternalStocks[product.id]?.stockTN !== undefined
-                                                 ? String(variantExternalStocks[product.id].stockTN)
-                                                 : '—')
-                                               : 'Falta sincronizar'}
-                                           </span>
+                                           <span className={tnDisp.className}>{tnDisp.text}</span>
                                          </div>
+                                             </>
+                                           );
+                                         })()}
                                          <div className="flex items-center gap-1.5" title="Último stock enviado con éxito al webhook de tu tienda online">
                                            <Store size={10} className="text-violet-400 shrink-0" />
                                            <span className="text-slate-400">Tienda:</span>

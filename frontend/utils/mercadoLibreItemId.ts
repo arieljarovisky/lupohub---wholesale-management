@@ -71,6 +71,40 @@ export function extractMercadoLibreVariationIdFromUrl(raw: unknown): string | un
   return undefined;
 }
 
+export type VariantExternalIds = {
+  tiendaNube?: string | number | null;
+  tiendaNubeVariant?: string | number | null;
+  mercadoLibre?: string | number | null;
+  mercadoLibreVariant?: string | number | null;
+  mercadoLibreItemId?: string | number | null;
+};
+
+/** Vinculación real de la variante (no solo el ID padre del producto en ML). */
+export function isVariantLinkedToMercadoLibre(externalIds?: VariantExternalIds | null): boolean {
+  if (!externalIds) return false;
+  const vVar = externalIds.mercadoLibreVariant != null && String(externalIds.mercadoLibreVariant).trim() !== '';
+  const vItem = externalIds.mercadoLibreItemId != null && String(externalIds.mercadoLibreItemId).trim() !== '';
+  return vVar || vItem;
+}
+
+export function isVariantLinkedToTiendaNube(externalIds?: VariantExternalIds | null): boolean {
+  if (!externalIds) return false;
+  return externalIds.tiendaNubeVariant != null && String(externalIds.tiendaNubeVariant).trim() !== '';
+}
+
+export type ChannelStockDisplay = { text: string; className: string };
+
+/** Texto para columna ML/TN en inventario (evita mostrar solo "—"). */
+export function getChannelStockDisplay(linked: boolean, stock: number | undefined): ChannelStockDisplay {
+  if (!linked || stock === undefined) {
+    return { text: 'Sin sincronizar', className: 'text-amber-500/90' };
+  }
+  if (stock <= 0) {
+    return { text: 'Sin stock', className: 'text-red-400/90 font-medium' };
+  }
+  return { text: String(stock), className: 'text-white font-medium' };
+}
+
 /** True si el texto buscado y el id de ítem se refieren al mismo listing (MLAU vs MLA, etc.). */
 export function mercadoLibreItemIdsMatch(searchRaw: string, itemId: string): boolean {
   const a = normalizeMercadoLibreItemId(searchRaw);
