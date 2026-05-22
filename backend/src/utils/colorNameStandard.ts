@@ -129,9 +129,23 @@ const PHRASE_MATCHES: Array<{ needle: string; canon: string }> = [
 function cleanRaw(raw: string): string {
   let v = String(raw ?? '').trim();
   if (!v) return v;
-  v = v.replace(/\s*-\s*\d+\s*$/i, '').trim();
+  // Sufijos de código: "Gris - 823", "Verde - 402", "Negro - 999"
+  v = v.replace(/\s*[-–—]\s*\d+\s*$/i, '').trim();
+  v = v.replace(/\s*[-–—]\s*\d{2,4}\s*$/i, '').trim();
+  v = v.replace(/\s+\d{3,4}\s*$/i, '').trim();
   v = v.replace(/\s+/g, ' ');
   return v;
+}
+
+/** Si el texto empieza por un color de catálogo, devuelve el nombre canónico. */
+function canonicalFromLeadingColorWord(cleaned: string): string | null {
+  const first = normKey(cleaned.split(/\s+/)[0] ?? '');
+  if (!first) return null;
+  if (ALIASES[first]) return ALIASES[first];
+  for (const name of STANDARD_COLOR_NAMES) {
+    if (normKey(name) === first) return name;
+  }
+  return null;
 }
 
 /**
@@ -148,6 +162,9 @@ export function normalizeColorNameToStandard(raw: string): string {
     if (normKey(name) === key) return name;
   }
 
+  const fromFirst = canonicalFromLeadingColorWord(cleaned);
+  if (fromFirst) return fromFirst;
+
   for (const { needle, canon } of PHRASE_MATCHES) {
     if (key.includes(needle)) return canon;
   }
@@ -158,12 +175,19 @@ export function normalizeColorNameToStandard(raw: string): string {
     .join(' ');
 }
 
+/** true si el valor en TN aún no está en catálogo (código, sin acento, etc.). */
+export function colorValueNeedsNormalization(raw: string): boolean {
+  const current = String(raw ?? '').trim();
+  if (!current) return false;
+  const normalized = normalizeColorNameToStandard(current);
+  return normKey(current) !== normKey(normalized) || current !== normalized;
+}
+
 export function shouldUpdateColorValue(current: string, normalized: string): boolean {
   if (!normalized) return false;
+  if (colorValueNeedsNormalization(current)) return true;
   if (current === normalized) return false;
-  if (normKey(current) === normKey(normalized)) {
-    return current !== normalized;
-  }
+  if (normKey(current) === normKey(normalized)) return current !== normalized;
   return true;
 }
 

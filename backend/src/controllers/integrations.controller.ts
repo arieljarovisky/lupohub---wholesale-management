@@ -5,7 +5,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
-import { mergeTiendaNubeDuplicateVariants } from '../services/tiendanubeVariantMerge.service';
+import {
+  fetchAllTiendaNubeProductVariants,
+  mergeTiendaNubeDuplicateVariants,
+} from '../services/tiendanubeVariantMerge.service';
 import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
 
@@ -816,7 +819,15 @@ async function normalizeTiendaNubeVariantAttribute(options: {
         continue;
       }
 
-      const variants = tnProduct.variants || [];
+      let variants = tnProduct.variants || [];
+      try {
+        const allVariants = await fetchAllTiendaNubeProductVariants(store_id, tnProduct.id, tnHeaders);
+        if (allVariants.length > 0) variants = allVariants;
+      } catch (fetchErr: unknown) {
+        const m = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        log(`  [WARN] Producto ${tnProduct.id}: no se pudieron listar todas las variantes (${m})`);
+      }
+
       const plans: TnVariantNormalizePlan[] = [];
       for (let vi = 0; vi < variants.length; vi++) {
         const variant = variants[vi];
@@ -1006,7 +1017,8 @@ export const normalizeColorsInTiendaNube = async (req: Request, res: Response) =
     const result = await normalizeTiendaNubeVariantAttribute({
       access_token: integration.access_token,
       store_id,
-      isTargetAttribute: (name) => /color|colour|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name),
+      isTargetAttribute: (name) =>
+        /color|colour|colore|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name),
       normalizeValue: normalizeColorNameToStandard,
       shouldUpdate: shouldUpdateColorValue,
       completedMessage: 'Normalización de colores en Tienda Nube completada',

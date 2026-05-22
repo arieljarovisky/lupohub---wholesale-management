@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { tnDeleteWithRetry, tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
+import { tnDeleteWithRetry, tnGetWithRetry, tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 
 export type TnVariantRow = {
   id: number | string;
@@ -37,7 +37,8 @@ async function fetchVariantStockFromApi(
   variantId: number | string,
   headers: Record<string, string>
 ): Promise<number> {
-  const res = await axios.get(
+  const res = await tnGetWithRetry<TnVariantRow>(
+    axios,
     `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants/${variantId}`,
     { headers }
   );
@@ -46,10 +47,36 @@ async function fetchVariantStockFromApi(
 }
 
 function pickKeeperPlan(group: TnVariantMergePlan[]): TnVariantMergePlan {
+  const exactLabel = group.filter((p) => p.current === p.normalized);
+  if (exactLabel.length) return exactLabel[0];
   const alreadyTarget = group.filter((p) => !p.willUpdate);
-  if (alreadyTarget.length) return alreadyTarget[0];
+  if (alreadyTarget.length) {
+    const withAccent = alreadyTarget.find((p) => /[áéíóúñ]/i.test(p.current));
+    return withAccent ?? alreadyTarget[0];
+  }
   const sorted = group.slice().sort((a, b) => String(a.variant.id).localeCompare(String(b.variant.id)));
   return sorted[0];
+}
+
+/** Todas las variantes de un producto (el listado paginado de productos suele traer solo un subconjunto). */
+export async function fetchAllTiendaNubeProductVariants(
+  storeId: string,
+  productId: number | string,
+  headers: Record<string, string>
+): Promise<TnVariantRow[]> {
+  const out: TnVariantRow[] = [];
+  const perPage = 200;
+  for (let vPage = 1; vPage <= 50; vPage++) {
+    const res = await tnGetWithRetry<TnVariantRow[]>(
+      axios,
+      `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`,
+      { headers, params: { page: vPage, per_page: perPage }, validateStatus: () => true }
+    );
+    const chunk = res.status === 200 && Array.isArray(res.data) ? res.data : [];
+    out.push(...chunk);
+    if (chunk.length < perPage) break;
+  }
+  return out;
 }
 
 function buildValuesWithAttr(
