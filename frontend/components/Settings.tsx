@@ -743,27 +743,28 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleSyncSkusTiendaNube = async () => {
-    const ok = await showConfirm({
+  const handleSyncSkusTiendaNube = () => {
+    showConfirm({
       title: 'Sincronizar SKU a Tienda Nube',
       message:
         'Se enviará el SKU de cada variante de LupoHub (formato artículo-talle-color) a Tienda Nube, reemplazando valores corruptos como 4,16E+12. ¿Continuar?',
       confirmLabel: 'Sincronizar',
+      onConfirm: async () => {
+        setLoadingSyncTnSkus(true);
+        try {
+          const res = await api.syncSkusToTiendaNube();
+          if (res.errors > 0) {
+            showToast('error', `SKU TN: ${res.updated} ok, ${res.errors} errores (de ${res.total}).`);
+          } else {
+            showToast('success', `SKU TN: ${res.updated} variantes actualizadas.`);
+          }
+        } catch (e: unknown) {
+          showToast('error', e instanceof Error ? e.message : 'Error sincronizando SKU');
+        } finally {
+          setLoadingSyncTnSkus(false);
+        }
+      },
     });
-    if (!ok) return;
-    setLoadingSyncTnSkus(true);
-    try {
-      const res = await api.syncSkusToTiendaNube();
-      if (res.errors > 0) {
-        showToast('error', `SKU TN: ${res.updated} ok, ${res.errors} errores (de ${res.total}).`);
-      } else {
-        showToast('success', `SKU TN: ${res.updated} variantes actualizadas.`);
-      }
-    } catch (e: unknown) {
-      showToast('error', e instanceof Error ? e.message : 'Error sincronizando SKU');
-    } finally {
-      setLoadingSyncTnSkus(false);
-    }
   };
 
   const handleNormalizeColorsTiendaNube = async () => {
