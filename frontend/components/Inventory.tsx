@@ -2064,9 +2064,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setBulkLinkSaving(false);
         return;
       }
+      const allMlOwnPublications =
+        links.every((l) => {
+          const ml = bulkLinkAssignments[l.variantId]?.ml?.trim() || '';
+          return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
+        }) && links.some((l) => {
+          const ml = bulkLinkAssignments[l.variantId]?.ml?.trim() || '';
+          return /^ML[A-Z]{1,5}\d+$/i.test(ml);
+        });
       const res = await api.bulkLinkVariants({
         productId: bulkLinkProductId,
-        mercadoLibreItemId: normalizeMercadoLibreItemId(bulkLinkMlId) || undefined,
+        mercadoLibreItemId: allMlOwnPublications ? undefined : (normalizeMercadoLibreItemId(bulkLinkMlId) || undefined),
         tiendaNubeProductId: (() => {
           const n = normalizeTiendaNubeProductId(bulkLinkTnId);
           return /^\d+$/.test(n) ? n : bulkLinkTnId.trim() || undefined;
@@ -2075,6 +2083,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
       const updated = (res as any)?.updated ?? links.length;
       const synced = (res as any)?.synced ?? 0;
+      const linkedVariantIds = links.map((l) => l.variantId);
       await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
         const mapped: Product[] = variants.map((v) => ({
           id: v.variantId,
@@ -2096,14 +2105,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         }));
         setLoadedVariants(prev => ({ ...prev, [bulkLinkGroupKey]: mapped }));
       });
+      if (linkedVariantIds.length > 0) {
+        api.getVariantExternalStocks(linkedVariantIds).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }
       setShowBulkLinkModal(false);
       setBulkLinkGroupKey(null);
       if (updated > 0) {
         setServerListRefreshKey(k => k + 1);
         onImportComplete?.();
         const msg = synced > 0
-          ? `Se guardaron ${updated} vinculación(es) y se trajo el stock de Mercado Libre a tu inventario (${synced} variante(s) actualizadas).`
-          : `Se guardaron ${updated} vinculación(es).`;
+          ? `Se guardaron ${updated} vinculación(es) y se envió el stock local a ML/TN (${synced} variante(s)).`
+          : `Se guardaron ${updated} vinculación(es). Revisá que los IDs MLA sean correctos.`;
         showToast('success', msg);
       }
     } catch (e: any) {

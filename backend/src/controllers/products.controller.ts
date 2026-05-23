@@ -720,7 +720,14 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
 
   try {
     const withMlItem = links.filter((l: any) => l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== '').length;
+    const withMlVar = links.filter(
+      (l: any) =>
+        l.mercadoLibreVariantId != null &&
+        String(l.mercadoLibreVariantId).trim() !== '' &&
+        !(l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== '')
+    ).length;
     const withTn = links.filter((l: any) => l.tiendaNubeVariantId != null && String(l.tiendaNubeVariantId) !== '').length;
+    const allMlOwnPublications = withMlItem > 0 && withMlVar === 0;
     console.log('[bulkLinkVariants] Actualizando', links.length, 'variantes, productId:', productId, 'ML padre:', mercadoLibreItemId, 'TN producto:', tiendaNubeProductId, '| links con ML publicación propia:', withMlItem, 'con TN:', withTn);
     let resolvedProductId = productId;
     if ((mercadoLibreItemId || tiendaNubeProductId) && !resolvedProductId && links.length > 0) {
@@ -740,33 +747,94 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
           [String(tiendaNubeProductId), resolvedProductId]
         );
       }
-      if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
+      if (allMlOwnPublications) {
+        // Cada variante tiene su MLA: el ID padre no debe usarse para sync (evita pisar stock).
+        await execute(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [resolvedProductId]);
+      } else if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
         await execute(
           `UPDATE products SET mercado_libre_id = ? WHERE id = ?`,
           [String(mercadoLibreItemId), resolvedProductId]
         );
       }
     }
+
+    const productRow = resolvedProductId
+      ? await get(
+          `SELECT tienda_nube_id, mercado_libre_id,
+                  COALESCE(NULLIF(tienda_nube_pack_size, 0), 1) AS tn_pack,
+                  COALESCE(NULLIF(mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM products WHERE id = ? LIMIT 1`,
+          [resolvedProductId]
+        )
+      : null;
+    const tnProductIdForPub =
+      (tiendaNubeProductId && String(tiendaNubeProductId).trim()) ||
+      (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim()) ||
+      null;
+    const mlParentIdForPub =
+      allMlOwnPublications
+        ? null
+        : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
+          (productRow?.mercado_libre_id && String(productRow.mercado_libre_id).trim()) ||
+          null;
+    const tnPack = Number(productRow?.tn_pack ?? 1) || 1;
+    const mlPack = Number(productRow?.ml_pack ?? 1) || 1;
+
     for (const link of links) {
       const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
       if (!variantId) continue;
-      const mlVarId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId) : null;
       const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
-      await execute(
-        `UPDATE product_variants SET
-           tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
-           mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
-           mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
-           external_sku = COALESCE(?, external_sku)
-         WHERE id = ?`,
-        [
-          tiendaNubeVariantId != null && tiendaNubeVariantId !== '' ? String(tiendaNubeVariantId) : null,
-          mlVarId,
-          mlItemId,
-          externalSku !== undefined && externalSku !== null ? String(externalSku) : null,
-          variantId
-        ]
-      );
+      const mlVarId =
+        !mlItemId && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+          ? String(mercadoLibreVariantId).trim()
+          : null;
+      const tnVarId =
+        tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
+
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      if (tnVarId != null) {
+        sets.push('tienda_nube_variant_id = ?');
+        params.push(tnVarId);
+      }
+      if (mlItemId != null) {
+        sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
+        params.push(mlItemId);
+      } else if (mlVarId != null) {
+        sets.push('mercado_libre_variant_id = ?', 'mercado_libre_item_id = NULL');
+        params.push(mlVarId);
+      }
+      if (externalSku !== undefined && externalSku !== null) {
+        sets.push('external_sku = ?');
+        params.push(String(externalSku).trim() || null);
+      }
+      if (sets.length > 0) {
+        params.push(variantId);
+        await execute(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
+      }
+
+      if (tnVarId && tnProductIdForPub) {
+        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
+        await execute(
+          `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+           VALUES (?, ?, 'tiendanube', ?, ?, ?)
+           ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
+          [uuidv4(), variantId, tnProductIdForPub, tnVarId, tnPack]
+        );
+      }
+
+      if (mlItemId || mlVarId) {
+        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
+        const pubItemId = mlItemId || mlParentIdForPub;
+        if (pubItemId) {
+          await execute(
+            `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+             VALUES (?, ?, 'mercadolibre', ?, ?, ?)
+             ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`,
+            [uuidv4(), variantId, pubItemId, mlVarId || '', mlPack]
+          );
+        }
+      }
     }
 
     // Enviar stock local a plataformas externas (ML/TN). Por lotes para no disparar el timeout del cliente.
