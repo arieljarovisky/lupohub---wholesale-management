@@ -1960,6 +1960,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const mlList = res.variations || [];
       setBulkLinkMlVariations(mlList);
       runBulkAutoMatch(bulkLinkVariants, mlList, bulkLinkTnVariants);
+      if (mlList.length > 0 && bulkLinkVariants.length > mlList.length) {
+        showToast(
+          'info',
+          `ML devolvió ${mlList.length} opción(es) para ${bulkLinkVariants.length} variantes locales. Si faltan colores, pegá el link de la página de catálogo (/p/MLA…) o el MLAU en el campo ML.`
+        );
+      }
     } catch (e) {
       console.error(e);
       showToast('error', 'No se pudieron cargar las variaciones de ML.');

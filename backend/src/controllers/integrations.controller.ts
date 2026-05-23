@@ -374,6 +374,22 @@ async function gatherMercadoLibreItemIdsForAllVariations(opts: {
   if (opts.item) {
     const siblingIds = await findMercadoLibreSiblingListingIds(opts.item, opts.sellerId, opts.accessToken);
     for (const id of siblingIds) add(id);
+
+    const familyName = mlFamilyNameFromItem(opts.item);
+    if (familyName) {
+      const familyIds = await resolveMercadoLibreItemsByFamilyName(familyName, opts.sellerId, opts.accessToken);
+      for (const id of familyIds) add(id);
+    }
+
+    const skuPrefixes = new Set<string>();
+    for (const sku of collectMercadoLibreItemSkus(opts.item)) {
+      const prefix = extractArticlePrefixFromMlSku(sku);
+      if (prefix) skuPrefixes.add(prefix);
+    }
+    for (const prefix of skuPrefixes) {
+      const skuIds = await resolveMercadoLibreItemsByArticlePrefix(prefix, opts.sellerId, opts.accessToken);
+      for (const id of skuIds) add(id);
+    }
   }
 
   return Array.from(seen).slice(0, 120);
@@ -409,23 +425,169 @@ async function findMercadoLibreSiblingListingIds(
   const baseTitle = mlBaseTitle((item?.title || '').toString().trim());
   const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
   if (!baseTitle) return [];
-  const searchRes = await axios.get(
-    `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
-      validateStatus: () => true
+  const siblingIds: string[] = [];
+  const seen = new Set<string>();
+  const pageLimit = 50;
+  for (const status of ['active', 'paused'] as const) {
+    let offset = 0;
+    while (offset < 500) {
+      const searchRes = await axios.get(
+        `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: { q: baseTitleLoose || baseTitle, limit: pageLimit, offset, status },
+          validateStatus: () => true
+        }
+      );
+      const rows: string[] =
+        searchRes.status === 200 && Array.isArray(searchRes.data?.results)
+          ? searchRes.data.results.map((x: any) => String(x || '').trim()).filter(Boolean)
+          : [];
+      for (const id of rows) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          siblingIds.push(id);
+        }
+      }
+      if (rows.length < pageLimit) break;
+      offset += pageLimit;
     }
-  );
-  const siblingIds: string[] =
-    searchRes.status === 200 && Array.isArray(searchRes.data?.results)
-      ? searchRes.data.results.map((x: any) => String(x || '').trim()).filter(Boolean)
-      : [];
+  }
   const unique = Array.from(new Set(siblingIds));
   return unique.filter((sid) => {
     // Se valida título al extraer variaciones; aquí solo limitamos cantidad.
     return sid && sid !== String(item?.id || '');
-  }).slice(0, 50);
+  }).slice(0, 120);
+}
+
+function mlFamilyNameFromItem(item: any): string {
+  return String(item?.family_name ?? '').trim();
+}
+
+/** Prefijo de artículo Lupo/Tango desde SKU (ej. 24650150542 → 24650, 24650-130-280 → 24650). */
+function extractArticlePrefixFromMlSku(sku: string): string | null {
+  const s = String(sku || '').trim();
+  if (!s) return null;
+  const dashHead = s.split('-')[0];
+  if (/^\d{4,7}$/.test(dashHead)) return dashHead;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 11) return digits.slice(0, 5);
+  if (digits.length >= 8) return digits.slice(0, 5);
+  if (/^\d{4,7}$/.test(digits)) return digits;
+  return null;
+}
+
+function collectMercadoLibreItemSkus(it: any): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    const t = String(v ?? '').trim();
+    if (t) out.add(t);
+  };
+  add(it?.seller_sku);
+  add(it?.seller_custom_field);
+  const attrs = Array.isArray(it?.attributes) ? it.attributes : [];
+  const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+  if (skuAttr) add(skuAttr.value_name ?? skuAttr.value);
+  if (Array.isArray(it?.variations)) {
+    for (const v of it.variations) {
+      add(v?.seller_sku);
+      add(v?.seller_custom_field);
+      const vAttr = Array.isArray(v?.attributes) && v.attributes.find((a: any) => (a.id || '').toUpperCase() === 'SELLER_SKU');
+      if (vAttr) add(vAttr.value_name ?? vAttr.value);
+    }
+  }
+  return [...out];
+}
+
+/** Busca publicaciones del vendedor paginando /items/search. */
+async function searchMercadoLibreSellerItems(
+  sellerId: string | number,
+  accessToken: string,
+  params: Record<string, string | number>,
+  maxResults = 200
+): Promise<string[]> {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const pageLimit = 50;
+  let offset = 0;
+  while (out.length < maxResults && offset < 5000) {
+    const res = await axios.get(
+      `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { ...params, limit: pageLimit, offset },
+        validateStatus: () => true
+      }
+    );
+    if (res.status >= 400 || !res.data) break;
+    const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+    for (const x of rows) {
+      const id = String(x || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    if (rows.length < pageLimit) break;
+    offset += pageLimit;
+  }
+  return out;
+}
+
+/** Publicaciones hermanas por family_name (User Product / catálogo ML). */
+async function resolveMercadoLibreItemsByFamilyName(
+  familyName: string,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const fn = String(familyName || '').trim();
+  if (!fn) return [];
+  const statuses = ['active', 'paused'] as const;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const st of statuses) {
+    const ids = await searchMercadoLibreSellerItems(sellerId, accessToken, { q: fn, status: st }, 120);
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out.slice(0, 120);
+}
+
+/** Publicaciones del mismo artículo por prefijo de SKU (24650 → 24650130542, 24650140542…). */
+async function resolveMercadoLibreItemsByArticlePrefix(
+  prefix: string,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const p = String(prefix || '').trim().replace(/\D/g, '');
+  if (!p || p.length < 4) return [];
+  const searchIds = await searchMercadoLibreSellerItems(sellerId, accessToken, { q: p, status: 'active' }, 200);
+  const prefixLoose = p.replace(/^0+/, '') || p;
+  const matched: string[] = [];
+  const seen = new Set<string>();
+  for (const id of searchIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const r = await axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      });
+      const it = r.data;
+      if (!it?.id) continue;
+      const skus = collectMercadoLibreItemSkus(it);
+      const hit = skus.some((s) => {
+        const d = s.replace(/\D/g, '');
+        return d.startsWith(p) || d.startsWith(prefixLoose) || s.startsWith(p) || s.startsWith(prefixLoose);
+      });
+      if (hit) matched.push(String(it.id));
+    } catch {
+      // ignorar ítem inválido
+    }
+  }
+  return matched.slice(0, 120);
 }
 
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
@@ -5098,37 +5260,77 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       preloadedUserProductIds: userProductItemCandidates
     });
     const distinctItemIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+    const familyNameOnItem = mlFamilyNameFromItem(item);
     const shouldAggregateMulti =
       shouldResolveAsUserProduct ||
       Boolean(catalogFromPermalink) ||
       /^MLAU\d+$/i.test(itemUserProductId) ||
+      Boolean(familyNameOnItem) ||
+      item?.catalog_listing === true ||
       distinctItemIds.size > 1 ||
       catalogItemCandidates.length > 1 ||
       userProductItemCandidates.length > 1;
 
+    const buildAggregatedResponse = (aggregated: MlVariationRow[], extraDebug: Record<string, unknown> = {}) => {
+      const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+      return res.json({
+        variations: aggregated,
+        singleProduct: false,
+        itemId: item.id,
+        requestedItemId: String(req.params.itemId || ''),
+        resolvedItemId,
+        resolvedFromMultiListing: true,
+        debug: {
+          userProduct: userProductResolveDebug,
+          itemIdsCount: distinctItemIds.size,
+          variationCount: aggregated.length,
+          colorCount: distinctColors.size,
+          familyName: familyNameOnItem || undefined,
+          ...extraDebug
+        }
+      });
+    };
+
     if (shouldAggregateMulti && allItemIds.length > 0) {
-      const aggregated = await aggregateMercadoLibreVariationsFromItemIds(allItemIds, mlToken.access_token);
+      let aggregated = await aggregateMercadoLibreVariationsFromItemIds(allItemIds, mlToken.access_token);
       const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
       const distinctSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
+
+      // Si solo aparece un color, ampliar por family_name o prefijo SKU del artículo.
+      if (distinctColors.size <= 1) {
+        const extraIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+        if (familyNameOnItem) {
+          for (const id of await resolveMercadoLibreItemsByFamilyName(familyNameOnItem, mlToken.user_id, mlToken.access_token)) {
+            extraIds.add(normalizeMercadoLibreItemId(id));
+          }
+        }
+        const skuPrefixes = new Set<string>();
+        for (const sku of collectMercadoLibreItemSkus(item)) {
+          const prefix = extractArticlePrefixFromMlSku(sku);
+          if (prefix) skuPrefixes.add(prefix);
+        }
+        for (const row of aggregated) {
+          const prefix = extractArticlePrefixFromMlSku(row.sku);
+          if (prefix) skuPrefixes.add(prefix);
+        }
+        for (const prefix of skuPrefixes) {
+          for (const id of await resolveMercadoLibreItemsByArticlePrefix(prefix, mlToken.user_id, mlToken.access_token)) {
+            extraIds.add(normalizeMercadoLibreItemId(id));
+          }
+        }
+        if (extraIds.size > distinctItemIds.size) {
+          aggregated = await aggregateMercadoLibreVariationsFromItemIds(Array.from(extraIds), mlToken.access_token);
+        }
+      }
+
+      const finalColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+      const finalSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
       const moreThanSingleItem =
         aggregated.length > singleItemVariations.length ||
-        distinctColors.size > 1 ||
-        distinctSizes.size > 1;
-      if (aggregated.length > 0 && (moreThanSingleItem || distinctItemIds.size > 1)) {
-        return res.json({
-          variations: aggregated,
-          singleProduct: false,
-          itemId: item.id,
-          requestedItemId: String(req.params.itemId || ''),
-          resolvedItemId,
-          resolvedFromMultiListing: true,
-          debug: {
-            userProduct: userProductResolveDebug,
-            itemIdsCount: distinctItemIds.size,
-            variationCount: aggregated.length,
-            colorCount: distinctColors.size
-          }
-        });
+        finalColors.size > 1 ||
+        finalSizes.size > 1;
+      if (aggregated.length > 0 && (moreThanSingleItem || distinctItemIds.size > 1 || finalColors.size > 1)) {
+        return buildAggregatedResponse(aggregated);
       }
     }
 
@@ -5137,7 +5339,9 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       distinctItemIds.size <= 1 &&
       catalogItemCandidates.length <= 1 &&
       !catalogFromPermalink &&
-      !/^MLAU\d+$/i.test(itemUserProductId)
+      !/^MLAU\d+$/i.test(itemUserProductId) &&
+      !familyNameOnItem &&
+      item?.catalog_listing !== true
     ) {
       return res.json({
         variations: singleItemVariations,
