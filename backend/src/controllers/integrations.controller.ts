@@ -3028,8 +3028,17 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
       for (const r of rows || []) {
         const variantId = (r as any).variant_id;
-        const mlItemId = (r as any).mercado_libre_item_id || (r as any).mercado_libre_id;
-        const variationId = (r as any).mercado_libre_variant_id ? String((r as any).mercado_libre_variant_id) : null;
+        const ownItemId =
+          (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
+            ? String((r as any).mercado_libre_item_id).trim()
+            : null;
+        const mlItemId = ownItemId || (r as any).mercado_libre_id;
+        const variationId =
+          ownItemId
+            ? null
+            : (r as any).mercado_libre_variant_id
+              ? String((r as any).mercado_libre_variant_id)
+              : null;
         if (!mlItemId) continue;
         if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
         mlItemIds.get(mlItemId)!.push({ variantId, variationId });
@@ -3045,8 +3054,8 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
             } else if (variationId) {
               const v = variations.find((x: any) => String(x.id) === String(variationId));
               stocks[variantId].stockML = v ? (v.available_quantity ?? 0) : undefined;
-            } else if (variations.length === 1) {
-              stocks[variantId].stockML = variations[0].available_quantity ?? 0;
+            } else {
+              stocks[variantId].stockML = item.available_quantity ?? 0;
             }
           }
         } catch {

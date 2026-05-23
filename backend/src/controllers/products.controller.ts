@@ -522,12 +522,36 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
 
   try {
+    const mlItemOnVariant =
+      hasMlItem && mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== ''
+        ? String(mercadoLibreItemId).trim()
+        : null;
+    const mlVarOnVariant =
+      !mlItemOnVariant && hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+        ? String(mercadoLibreVariantId).trim()
+        : null;
+
     const sets: string[] = [];
     const params: any[] = [];
-    if (hasTnVar) { sets.push('tienda_nube_variant_id = ?'); params.push(tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null); }
-    if (hasMlVar) { sets.push('mercado_libre_variant_id = ?'); params.push(mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '' ? String(mercadoLibreVariantId).trim() : null); }
-    if (hasMlItem) { sets.push('mercado_libre_item_id = ?'); params.push(mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '' ? String(mercadoLibreItemId).trim() : null); }
-    if (hasExternalSku) { sets.push('external_sku = ?'); params.push(externalSku != null && String(externalSku).trim() !== '' ? String(externalSku).trim() : null); }
+    if (hasTnVar) {
+      sets.push('tienda_nube_variant_id = ?');
+      params.push(
+        tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null
+      );
+    }
+    if (mlItemOnVariant) {
+      sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
+      params.push(mlItemOnVariant);
+    } else if (mlVarOnVariant) {
+      sets.push('mercado_libre_variant_id = ?', 'mercado_libre_item_id = NULL');
+      params.push(mlVarOnVariant);
+    } else if (hasMlVar || hasMlItem) {
+      sets.push('mercado_libre_variant_id = NULL', 'mercado_libre_item_id = NULL');
+    }
+    if (hasExternalSku) {
+      sets.push('external_sku = ?');
+      params.push(externalSku != null && String(externalSku).trim() !== '' ? String(externalSku).trim() : null);
+    }
     if (sets.length > 0) {
       params.push(variantId);
       await execute(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
@@ -544,38 +568,37 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       [variantId]
     );
 
-    // Actualizar IDs del producto padre solo si el request lo incluye explícitamente.
+    // Publicación propia (MLA por variante): no pisar mercado_libre_id del producto padre.
     if (productRow?.product_id) {
-      if (hasMlItem) {
-        const mlItemToSet = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
-        await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [mlItemToSet, productRow.product_id]);
-        productRow = { ...productRow, mercado_libre_id: mlItemToSet };
-      }
       if (hasTnProd) {
-        const tnProdToSet = (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '') ? String(tiendaNubeProductId).trim() : null;
+        const tnProdToSet =
+          tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '' ? String(tiendaNubeProductId).trim() : null;
         await execute(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [tnProdToSet, productRow.product_id]);
         productRow = { ...productRow, tienda_nube_id: tnProdToSet };
       }
     }
 
-    // Registrar en variant_publications para que la sincronización de stock use esta publicación
-    const tnVariantId = (tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '') ? String(tiendaNubeVariantId).trim() : null;
-    const mlVariantId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId).trim() : '';
-    const tnProductId = (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : null;
+    const tnVariantId =
+      tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
+    const tnProductId =
+      (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : null;
     const tnPack = productRow?.tn_pack ?? 1;
     const mlPack = productRow?.ml_pack ?? 1;
-    // Si se borró la publicación, también la borramos de variant_publications.
+    const mlPubItemId = mlItemOnVariant
+      || (mlVarOnVariant && productRow?.mercado_libre_id ? String(productRow.mercado_libre_id).trim() : null);
+
     if (hasTnVar && (!tnProductId || !tnVariantId)) {
       await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
     }
     if (hasMlVar || hasMlItem) {
-      const hasAnyMl = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') || (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '');
+      const hasAnyMl = !!mlPubItemId || !!mlVarOnVariant;
       if (!hasAnyMl) {
         await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
       }
     }
 
     if (tnProductId && tnVariantId) {
+      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'tiendanube', ?, ?, ?)
@@ -583,13 +606,13 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
         [uuidv4(), variantId, tnProductId, tnVariantId, tnPack]
       );
     }
-    const mlItemId = (productRow?.mercado_libre_id && String(productRow.mercado_libre_id).trim() !== '') ? String(productRow.mercado_libre_id).trim() : null;
-    if (mlItemId) {
+    if (mlPubItemId) {
+      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'mercadolibre', ?, ?, ?)
-         ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
-        [uuidv4(), variantId, mlItemId, mlVariantId, mlPack]
+         ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`,
+        [uuidv4(), variantId, mlPubItemId, mlVarOnVariant || '', mlPack]
       );
     }
 

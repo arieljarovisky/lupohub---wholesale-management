@@ -2173,12 +2173,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         return /^\d+$/.test(n) ? n : '';
       })();
       const mlResolved = linkMlId.trim() ? normalizeMercadoLibreItemId(linkMlId) || linkMlId.trim() : '';
-      // 1. Update Variant External IDs (si hay Item ML, el backend trae el stock de ML y lo guarda en inventario)
+      const isMlItemId = /^ML[A-Z]{1,5}\d+$/i.test(mlResolved);
       const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
         tiendaNubeProductId: tnResolved || undefined,
-        mercadoLibreVariantId: linkMlVariantId || mlResolved || undefined,
-        mercadoLibreItemId: mlResolved || undefined,
+        mercadoLibreVariantId: isMlItemId ? undefined : (linkMlVariantId || mlResolved || undefined),
+        mercadoLibreItemId: isMlItemId ? mlResolved : undefined,
         externalSku: linkExternalSku.trim() || undefined
       } as { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string });
       const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
@@ -2219,7 +2219,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         await api.updateProductExternalIds(parentProductId, {
           tiendaNubeId: tnResolved
         });
-        if (mlResolved) {
+        if (mlResolved && !isMlItemId) {
              await api.updateProductExternalIds(parentProductId, {
                 mercadoLibreId: mlResolved
              });
