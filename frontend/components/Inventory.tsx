@@ -2084,28 +2084,57 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const updated = (res as any)?.updated ?? links.length;
       const synced = (res as any)?.synced ?? 0;
       const linkedVariantIds = links.map((l) => l.variantId);
-      await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: (v as any).sku || `${bulkLinkGroupKey}-${v.sizeCode}-${v.colorCode}`,
-          name: groupedProducts[bulkLinkGroupKey]?.[0]?.name || '',
-          category: groupedProducts[bulkLinkGroupKey]?.[0]?.category || 'General',
-          price: groupedProducts[bulkLinkGroupKey]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: {
-            local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+      const p = await api.getProductBySku(bulkLinkGroupKey);
+      if (p?.variants?.length) {
+        const parentExternalIds = p.externalIds || {};
+        const mapped: Product[] = p.variants.map((v: any) => {
+          const variantId = v.variant_id;
+          const rawSku = (v.variant_sku ?? '').toString().trim();
+          const extSku = (v.external_sku ?? '').toString().trim();
+          const fallbackSku = `${bulkLinkGroupKey}-${v.size_code}-${v.color_code}`;
+          const sku =
+            rawSku && rawSku !== String(variantId)
+              ? rawSku
+              : extSku
+                ? extSku
+                : fallbackSku;
+          return {
+            id: variantId,
+            sku,
+            name: groupedProducts[bulkLinkGroupKey]?.[0]?.name || p.name || '',
+            category: groupedProducts[bulkLinkGroupKey]?.[0]?.category || 'General',
+            price: groupedProducts[bulkLinkGroupKey]?.[0]?.price || 0,
+            description: '',
+            size: v.size_code,
+            color: v.color_name,
+            colorCode: v.color_code,
+            stock: Number(v.stock ?? 0),
+            integrations: {
+              local: true,
+              tiendaNube: !!(parentExternalIds.tiendaNube && (v.externalIds?.tiendaNubeVariant ?? v.tienda_nube_variant_id)),
+              mercadoLibre: isVariantLinkedToMercadoLibre({
+                mercadoLibreItemId: v.externalIds?.mercadoLibreItemId ?? v.mercado_libre_item_id,
+                mercadoLibreVariant: v.externalIds?.mercadoLibreVariant ?? v.mercado_libre_variant_id
+              })
+            },
+            externalIds: {
+              tiendaNube: parentExternalIds.tiendaNube,
+              mercadoLibre: parentExternalIds.mercadoLibre,
+              tiendaNubeVariant: v.externalIds?.tiendaNubeVariant ?? v.tienda_nube_variant_id ?? null,
+              mercadoLibreVariant: v.externalIds?.mercadoLibreVariant ?? v.mercado_libre_variant_id ?? null,
+              mercadoLibreItemId: v.externalIds?.mercadoLibreItemId ?? v.mercado_libre_item_id ?? null
+            }
+          };
+        });
         setLoadedVariants(prev => ({ ...prev, [bulkLinkGroupKey]: mapped }));
-      });
-      if (linkedVariantIds.length > 0) {
+        const allIds = mapped.map((m) => m.id);
+        if (allIds.length > 0) {
+          api.getVariantExternalStocks(allIds).then((ext) => {
+            if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+          }).catch(() => {});
+        }
+      }
+      if (linkedVariantIds.length > 0 && !p?.variants?.length) {
         api.getVariantExternalStocks(linkedVariantIds).then((ext) => {
           if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
         }).catch(() => {});

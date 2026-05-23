@@ -732,8 +732,9 @@ export const api = {
         externalIds: {
           tiendaNube: parentExternalIds.tiendaNube,
           mercadoLibre: parentExternalIds.mercadoLibre,
-          tiendaNubeVariant: v.tienda_nube_variant_id,
-          mercadoLibreVariant: v.mercado_libre_variant_id
+          tiendaNubeVariant: v.externalIds?.tiendaNubeVariant ?? v.tienda_nube_variant_id ?? null,
+          mercadoLibreVariant: v.externalIds?.mercadoLibreVariant ?? v.mercado_libre_variant_id ?? null,
+          mercadoLibreItemId: v.externalIds?.mercadoLibreItemId ?? v.mercado_libre_item_id ?? null
         }
       }));
       return variants;
