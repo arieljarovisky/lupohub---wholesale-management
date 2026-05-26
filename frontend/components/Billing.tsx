@@ -8,9 +8,10 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
 
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 const BILLING_PAGE_SIZE = 25;
@@ -21,9 +22,11 @@ interface BillingProps {
   customers: Customer[];
   users?: User[];
   products?: Product[];
+  /** Permite navegar a otras vistas del app (ej. ir a Pedidos filtrado por el order_id de la factura). */
+  onNavigate?: (view: string) => void;
 }
 
-const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [] }) => {
+const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [], onNavigate }) => {
   const { showToast, showConfirm } = useNotification();
   const canAfipInvoiceActions = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   const defaultRetPerMonth = (() => {
@@ -87,6 +90,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [billingExportCuitsText, setBillingExportCuitsText] = useState('');
   const [billingRecalcOrderId, setBillingRecalcOrderId] = useState<string | null>(null);
   const [billingReemitOrderId, setBillingReemitOrderId] = useState<string | null>(null);
+  /** Pedido para el que se está emitiendo una NC por el total desde la pantalla de facturación. */
+  const [billingEmitNCOrderId, setBillingEmitNCOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
@@ -904,6 +909,78 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         >
                           <Eye size={14} /> Ver
                         </button>
+                        {item.tipo === 'FACTURA' &&
+                          item.orderId &&
+                          !String(item.id || '').startsWith('mm-fac-') &&
+                          onNavigate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                /* Pre-cargamos el filtro de Pedidos con el id del pedido para que la lista se filtre directamente.
+                                   El campo de búsqueda en Orders.tsx ya matchea contra `o.id`, así que esto funciona sin
+                                   inventar una vista nueva ni endpoint adicional. */
+                                const prev = getStoredOrdersListFilters();
+                                setStoredOrdersListFilters({
+                                  ...prev,
+                                  customerSearchQuery: String(item.orderId),
+                                  filterStatus: 'ALL',
+                                  invoiceFilter: 'all',
+                                });
+                                onNavigate('orders');
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
+                              title="Ir al pedido (para emitir NC parcial por ítems, ver historial, etc.)"
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          )}
+                        {canAfipInvoiceActions &&
+                          item.tipo === 'FACTURA' &&
+                          item.orderId &&
+                          !String(item.id || '').startsWith('mm-fac-') &&
+                          Number(item.creditNotesCount || 0) === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                showConfirm({
+                                  title: 'Emitir nota de crédito por el total',
+                                  message:
+                                    'Se emitirá en AFIP una nota de crédito por el TOTAL de esta factura. Se restituye el stock al inventario. Esta acción no se puede deshacer en AFIP. ¿Continuar?',
+                                  confirmLabel: 'Emitir NC total',
+                                  onConfirm: () => {
+                                    setBillingEmitNCOrderId(item.orderId);
+                                    api
+                                      .emitirNotaCredito(item.orderId, { tipo: 'total' })
+                                      .then((r) => {
+                                        showToast(
+                                          'success',
+                                          `NC total emitida (CAE ${r?.cae ?? '—'}). Se restituyó el stock.`
+                                        );
+                                        void load();
+                                      })
+                                      .catch((err: any) =>
+                                        showToast(
+                                          'error',
+                                          err?.response?.data?.message ||
+                                            err?.message ||
+                                            'No se pudo emitir la nota de crédito'
+                                        )
+                                      )
+                                      .finally(() => setBillingEmitNCOrderId(null));
+                                  }
+                                });
+                              }}
+                              disabled={billingEmitNCOrderId === item.orderId}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-orange-200/95 text-xs hover:bg-slate-700 border border-orange-900/40 disabled:opacity-50"
+                              title="Emitir NC por el total de la factura (restituye stock). Para NC parcial por ítems, ir al pedido."
+                            >
+                              {billingEmitNCOrderId === item.orderId ? (
+                                <Loader2 size={14} className="animate-spin text-orange-300" />
+                              ) : (
+                                <FileMinus size={14} />
+                              )}
+                            </button>
+                          )}
                         {canAfipInvoiceActions &&
                           item.tipo === 'FACTURA' &&
                           item.orderId &&
