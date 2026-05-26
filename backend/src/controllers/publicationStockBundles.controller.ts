@@ -15,6 +15,7 @@ import {
 import { normalizeMercadoLibreItemId } from './integrations.controller';
 import {
   createPackListingAndBundle,
+  fetchListingPackVariations,
   fetchPublicationSourcePreview
 } from '../services/packListingCreate.service';
 
@@ -60,6 +61,33 @@ export const getSourcePreview = async (req: Request, res: Response) => {
   } catch (e: any) {
     console.error('getSourcePreview:', e);
     res.status(500).json({ message: e?.message || 'Error cargando vista previa' });
+  }
+};
+
+export const getListingVariations = async (req: Request, res: Response) => {
+  try {
+    const platform = req.query.platform as PublicationBundlePlatform;
+    const listingId = String(req.query.listingId || req.query.listing_id || '').trim();
+    if (!platform || (platform !== 'mercadolibre' && platform !== 'tiendanube')) {
+      return res.status(400).json({ message: 'platform inválida' });
+    }
+    if (!listingId) {
+      return res.status(400).json({ message: 'listingId es requerido' });
+    }
+    const result = await fetchListingPackVariations(platform, listingId);
+    if (!result) {
+      const mlauHint =
+        platform === 'mercadolibre' && /^MLAU\d+$/i.test(normalizeMercadoLibreItemId(listingId))
+          ? ' Verificá que el MLAU sea de tu cuenta ML.'
+          : '';
+      return res.status(404).json({
+        message: `Publicación no encontrada en la plataforma.${mlauHint}`
+      });
+    }
+    res.json(result);
+  } catch (e: any) {
+    console.error('getListingVariations:', e);
+    res.status(500).json({ message: e?.message || 'Error obteniendo variaciones' });
   }
 };
 

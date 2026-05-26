@@ -268,6 +268,10 @@ export const api = {
     profitOrLoss: 'profit' | 'loss';
     expenseCount: number;
     incomeCount: number;
+    invoicedTotal: number;
+    invoicedNet: number;
+    invoicedIva: number;
+    invoicedCount: number;
     pendingInvoicesTotal: number;
     pendingInvoicesCount: number;
     pendingInvoices: Array<{
@@ -692,6 +696,50 @@ export const api = {
   getPublicationBundles: async (): Promise<PublicationBundleDto[]> => {
     const res = await request<any[]>('/publication-bundles', 'GET');
     return Array.isArray(res) ? res.map(mapPublicationBundle) : [];
+  },
+
+  getPublicationBundleListingVariations: async (
+    platform: 'mercadolibre' | 'tiendanube',
+    listingId: string
+  ): Promise<{
+    platform: 'mercadolibre' | 'tiendanube';
+    resolvedId: string;
+    title: string;
+    variations: Array<{
+      variationId: string;
+      colorValueName: string;
+      sizeValueName: string;
+      parsedColors: string[];
+      isAssorted: boolean;
+      sku?: string;
+      availableQuantity?: number;
+      pictureIds?: string[];
+    }>;
+  }> => {
+    const q = new URLSearchParams({ platform, listingId });
+    const res = await request<any>(`/publication-bundles/listing-variations?${q.toString()}`, 'GET');
+    return {
+      platform: res?.platform,
+      resolvedId: String(res?.resolvedId ?? ''),
+      title: String(res?.title ?? ''),
+      variations: Array.isArray(res?.variations)
+        ? res.variations.map((v: any) => ({
+            variationId: String(v?.variationId ?? ''),
+            colorValueName: String(v?.colorValueName ?? ''),
+            sizeValueName: String(v?.sizeValueName ?? ''),
+            parsedColors: Array.isArray(v?.parsedColors)
+              ? v.parsedColors.map((s: any) => String(s))
+              : [],
+            isAssorted: Boolean(v?.isAssorted),
+            sku: v?.sku ? String(v.sku) : undefined,
+            availableQuantity:
+              v?.availableQuantity != null ? Number(v.availableQuantity) : undefined,
+            pictureIds: Array.isArray(v?.pictureIds)
+              ? v.pictureIds.map((p: any) => String(p))
+              : undefined
+          }))
+        : []
+    };
   },
 
   getPublicationBundleSourcePreview: async (

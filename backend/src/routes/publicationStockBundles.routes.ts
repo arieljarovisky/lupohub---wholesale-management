@@ -4,6 +4,7 @@ import {
   createListingFromSource,
   getBundle,
   getBundlesByProduct,
+  getListingVariations,
   getSourcePreview,
   listBundles,
   removeBundle,
@@ -18,6 +19,7 @@ const router = Router();
 
 router.get('/', authMiddleware, listBundles);
 router.get('/source-preview', authMiddleware, getSourcePreview);
+router.get('/listing-variations', authMiddleware, getListingVariations);
 router.get('/by-product', authMiddleware, getBundlesByProduct);
 router.post(
   '/create-listing-from-source',
