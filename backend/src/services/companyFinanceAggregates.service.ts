@@ -41,40 +41,21 @@ function isTnOrderPaid(order: Record<string, unknown>): boolean {
   );
 }
 
-export type InvoicedBucket = { total: number; net: number; iva: number; count: number };
-
-function buildInvoicedBucket(netRaw: unknown, cntRaw: unknown): InvoicedBucket {
-  const net = round2(Number(netRaw ?? 0));
-  const total = round2(net * 1.21);
-  const iva = round2(total - net);
-  return { total, net, iva, count: Number(cntRaw ?? 0) };
-}
-
 /**
  * Suma facturas AFIP emitidas en el rango (por `invoices.created_at`).
  * - `net`: suma de `orders.total - notas_credito` (neto sin IVA).
  * - `iva`: 21% sobre el neto.
  * - `total`: net + iva (importe del comprobante con IVA).
- * Devuelve además el desglose entre cobrado (`paid`) y sin cobrar (`unpaid`)
- * según `orders.payment_status` (`'pendiente'` = sin cobrar).
  * Misma fórmula que `listPendingInvoices` para consistencia.
  */
 export async function sumInvoicedInRange(
   from: string,
   to: string
-): Promise<InvoicedBucket & { paid: InvoicedBucket; unpaid: InvoicedBucket }> {
+): Promise<{ total: number; net: number; iva: number; count: number }> {
   const row = (await get(
     `SELECT
        COALESCE(SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))), 0) AS net,
-       COUNT(*) AS cnt,
-       COALESCE(SUM(CASE WHEN o.payment_status = 'pendiente'
-                         THEN GREATEST(0, o.total - COALESCE(cn.cn_total, 0))
-                         ELSE 0 END), 0) AS netUnpaid,
-       COALESCE(SUM(CASE WHEN o.payment_status = 'pendiente' THEN 1 ELSE 0 END), 0) AS cntUnpaid,
-       COALESCE(SUM(CASE WHEN o.payment_status <> 'pendiente'
-                         THEN GREATEST(0, o.total - COALESCE(cn.cn_total, 0))
-                         ELSE 0 END), 0) AS netPaid,
-       COALESCE(SUM(CASE WHEN o.payment_status <> 'pendiente' THEN 1 ELSE 0 END), 0) AS cntPaid
+       COUNT(*) AS cnt
      FROM invoices i
      INNER JOIN orders o ON o.id = i.order_id
      LEFT JOIN (
@@ -84,20 +65,11 @@ export async function sumInvoicedInRange(
      ) cn ON cn.order_id = o.id
      WHERE DATE(i.created_at) >= ? AND DATE(i.created_at) <= ?`,
     [from, to]
-  )) as
-    | {
-        net: string | number;
-        cnt: number;
-        netUnpaid: string | number;
-        cntUnpaid: number;
-        netPaid: string | number;
-        cntPaid: number;
-      }
-    | undefined;
-  const total = buildInvoicedBucket(row?.net, row?.cnt);
-  const paid = buildInvoicedBucket(row?.netPaid, row?.cntPaid);
-  const unpaid = buildInvoicedBucket(row?.netUnpaid, row?.cntUnpaid);
-  return { ...total, paid, unpaid };
+  )) as { net: string | number; cnt: number } | undefined;
+  const net = round2(Number(row?.net ?? 0));
+  const total = round2(net * 1.21);
+  const iva = round2(total - net);
+  return { total, net, iva, count: Number(row?.cnt ?? 0) };
 }
 
 export async function sumReceiptsInRange(from: string, to: string): Promise<{ total: number; count: number }> {
