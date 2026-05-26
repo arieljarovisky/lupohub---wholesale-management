@@ -8,7 +8,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
@@ -170,6 +170,20 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       showToast('success', 'Descarga iniciada');
     } catch (err: any) {
       showToast('error', err?.message || 'Error exportando facturación');
+    }
+  };
+
+  const handleOpenPrint = async () => {
+    try {
+      await api.openBillingPrint({
+        desde: desde || undefined,
+        hasta: hasta || undefined,
+        customerId: customerId !== 'ALL' ? customerId : undefined,
+        province: province !== 'ALL' ? province : undefined,
+        tipo: tipo === 'ALL' ? undefined : tipo
+      });
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error abriendo listado para imprimir');
     }
   };
 
@@ -665,6 +679,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleOpenPrint()}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-700 text-white text-sm font-bold shadow-lg shadow-sky-900/40 hover:bg-sky-600"
+            title="Abre una vista imprimible del rango seleccionado con fechas en español"
+          >
+            <Printer size={16} /> Imprimir listado
           </button>
           <button
             type="button"

@@ -41,6 +41,37 @@ function isTnOrderPaid(order: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * Suma facturas AFIP emitidas en el rango (por `invoices.created_at`).
+ * - `net`: suma de `orders.total - notas_credito` (neto sin IVA).
+ * - `iva`: 21% sobre el neto.
+ * - `total`: net + iva (importe del comprobante con IVA).
+ * Misma fórmula que `listPendingInvoices` para consistencia.
+ */
+export async function sumInvoicedInRange(
+  from: string,
+  to: string
+): Promise<{ total: number; net: number; iva: number; count: number }> {
+  const row = (await get(
+    `SELECT
+       COALESCE(SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))), 0) AS net,
+       COUNT(*) AS cnt
+     FROM invoices i
+     INNER JOIN orders o ON o.id = i.order_id
+     LEFT JOIN (
+       SELECT order_id, SUM(amount_credited) AS cn_total
+       FROM credit_notes
+       GROUP BY order_id
+     ) cn ON cn.order_id = o.id
+     WHERE DATE(i.created_at) >= ? AND DATE(i.created_at) <= ?`,
+    [from, to]
+  )) as { net: string | number; cnt: number } | undefined;
+  const net = round2(Number(row?.net ?? 0));
+  const total = round2(net * 1.21);
+  const iva = round2(total - net);
+  return { total, net, iva, count: Number(row?.cnt ?? 0) };
+}
+
 export async function sumReceiptsInRange(from: string, to: string): Promise<{ total: number; count: number }> {
   const row = (await get(
     `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt

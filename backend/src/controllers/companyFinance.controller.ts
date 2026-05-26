@@ -7,6 +7,7 @@ import {
   aggregateTiendaNubeInRange,
   listPendingInvoices,
   sumDespachosCostInRange,
+  sumInvoicedInRange,
   sumReceiptsInRange,
 } from '../services/companyFinanceAggregates.service';
 import { fetchMercadoPagoMovements } from '../services/mercadopagoFinance.service';
@@ -555,7 +556,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       [from, to]
     )) as Array<{ month: string; entryType: string; total: number }>;
 
-    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg] = await Promise.all([
+    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced] = await Promise.all([
       sumReceiptsInRange(from, to),
       sumDespachosCostInRange(from, to),
       listPendingInvoices(200),
@@ -569,6 +570,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
             { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
             { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
           ]),
+      sumInvoicedInRange(from, to),
     ]);
 
     const [mlAgg, tnAgg] = channelAgg;
@@ -630,6 +632,10 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       profitOrLoss: netResult >= 0 ? 'profit' : 'loss',
       expenseCount: Number(totals?.expenseCount ?? 0),
       incomeCount: Number(totals?.incomeCount ?? 0),
+      invoicedTotal: invoiced.total,
+      invoicedNet: invoiced.net,
+      invoicedIva: invoiced.iva,
+      invoicedCount: invoiced.count,
       pendingInvoicesTotal: pendingInvoices.totalPending,
       pendingInvoicesCount: pendingInvoices.items.length,
       pendingInvoices: pendingInvoices.items,

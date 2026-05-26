@@ -2545,6 +2545,124 @@ export async function fetchPublicationSourcePreview(
   };
 }
 
+const COLOR_COMBO_SEPARATORS = /\s*(?:[-/·,+|\\]| y | e | x |\s\+\s)\s*/gi;
+const ASSORTED_COLOR_PATTERN = /^(?:surtido|surtidos|variado|variados|varios|mix|combo|multicolor|assorted|aleatorio)$/i;
+
+/** Parte un nombre de variación como "Negro-Gris-Blanco" en colores individuales. */
+export function splitColorComboLabel(raw: string): string[] {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return [];
+  if (ASSORTED_COLOR_PATTERN.test(trimmed)) return [];
+  const parts = trimmed
+    .split(COLOR_COMBO_SEPARATORS)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return [trimmed];
+  return parts;
+}
+
+export type ListingPackVariation = {
+  variationId: string;
+  colorValueName: string;
+  sizeValueName: string;
+  parsedColors: string[];
+  isAssorted: boolean;
+  sku?: string;
+  availableQuantity?: number;
+  pictureIds?: string[];
+};
+
+export type ListingPackVariationsResponse = {
+  platform: PublicationBundlePlatform;
+  resolvedId: string;
+  title: string;
+  variations: ListingPackVariation[];
+};
+
+function tnVariantColorSize(variant: any): { color: string; size: string } {
+  const values = Array.isArray(variant?.values) ? variant.values : [];
+  if (values.length === 0) return { color: '', size: '' };
+  const labels = values.map((v: any) => localizedTnText(v));
+  const color = labels[0] || '';
+  const size = labels[1] || '';
+  return { color, size };
+}
+
+export async function fetchListingPackVariations(
+  platform: PublicationBundlePlatform,
+  rawId: string
+): Promise<ListingPackVariationsResponse | null> {
+  const id = String(rawId || '').trim();
+  if (!id) return null;
+
+  if (platform === 'mercadolibre') {
+    const resolved = await fetchMercadoLibreItemResolved(id);
+    if (!resolved) return null;
+    const { item, itemId } = resolved;
+    const variations = Array.isArray(item?.variations) ? item.variations : [];
+    const out: ListingPackVariation[] = variations.map((v: any) => {
+      const { color, size } = mlColorSizeFromVariation(v, String(item?.title || ''));
+      const rawColor = String(color || '').trim();
+      const parsed = splitColorComboLabel(rawColor);
+      const isAssorted = parsed.length === 0 && rawColor.length > 0;
+      return {
+        variationId: v?.id != null ? String(v.id) : '',
+        colorValueName: rawColor,
+        sizeValueName: String(size || '').trim(),
+        parsedColors: parsed,
+        isAssorted,
+        sku: v?.seller_custom_field ? String(v.seller_custom_field).trim() : undefined,
+        availableQuantity:
+          v?.available_quantity != null ? Number(v.available_quantity) : undefined,
+        pictureIds: Array.isArray(v?.picture_ids)
+          ? v.picture_ids.map((p: any) => String(p)).filter(Boolean)
+          : undefined
+      };
+    });
+    return {
+      platform: 'mercadolibre',
+      resolvedId: itemId,
+      title: String(item?.title || '').trim(),
+      variations: out.filter((v) => v.variationId)
+    };
+  }
+
+  const integration = await get(
+    `SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`
+  );
+  if (!integration?.access_token) return null;
+  const storeId = integration.store_id || integration.user_id;
+  if (!storeId) return null;
+  const tnId = id.replace(/\D/g, '') || id;
+  const headers = { Authentication: `bearer ${integration.access_token}`, 'User-Agent': TN_USER_AGENT };
+  const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${tnId}`, {
+    headers,
+    validateStatus: () => true
+  });
+  if (productRes.status !== 200 || !productRes.data) return null;
+  const tnVariants = await fetchAllTnVariants(storeId, integration.access_token, String(tnId));
+  const out: ListingPackVariation[] = tnVariants.map((v: any) => {
+    const { color, size } = tnVariantColorSize(v);
+    const parsed = splitColorComboLabel(color);
+    const isAssorted = parsed.length === 0 && color.length > 0;
+    return {
+      variationId: v?.id != null ? String(v.id) : '',
+      colorValueName: color,
+      sizeValueName: size,
+      parsedColors: parsed,
+      isAssorted,
+      sku: v?.sku ? String(v.sku).trim() : undefined,
+      availableQuantity: v?.stock != null ? Number(v.stock) : undefined
+    };
+  });
+  return {
+    platform: 'tiendanube',
+    resolvedId: String(productRes.data?.id ?? tnId),
+    title: localizedTnText(productRes.data?.name),
+    variations: out.filter((v) => v.variationId)
+  };
+}
+
 /** Completa attributes de cada variación (el GET del ítem a veces no los trae). */
 async function enrichMercadoLibreItemVariations(item: any, accessToken: string): Promise<any> {
   const itemId = String(item?.id || '').trim();

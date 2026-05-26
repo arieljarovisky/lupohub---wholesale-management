@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search, Sparkles, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
+import { X, Plus, Trash2, Layers, RefreshCw, Loader2, Search, Sparkles, ChevronDown, ChevronUp, Wand2, DownloadCloud, AlertTriangle } from 'lucide-react';
 import { Product, Role } from '../types';
 import { api, PublicationBundleDto, PublicationBundleGroupDto } from '../services/api';
 import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
@@ -14,6 +14,21 @@ import {
 } from '../utils/suggestPublicationPacks';
 
 type DraftItem = { variantId: string; unitsPerSale: number; label: string };
+
+function stripDiacritics(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeColorKey(s: string): string {
+  return stripDiacritics(String(s || '').toLowerCase()).replace(/\s+/g, ' ').trim();
+}
+
+function normalizeSizeKey(s: string): string {
+  return stripDiacritics(String(s || '').toLowerCase())
+    .replace(/^talle\s+/, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
 
 type DraftPublicationImage = {
   key: string;
@@ -180,6 +195,13 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const [selectedArticleKey, setSelectedArticleKey] = useState('');
   const [suggestionSize, setSuggestionSize] = useState('');
   const [suggestionPicksBySize, setSuggestionPicksBySize] = useState<Record<string, string[]>>({});
+  const [importingVariations, setImportingVariations] = useState(false);
+  const [variationImportReport, setVariationImportReport] = useState<{
+    total: number;
+    fullyMatched: number;
+    partial: number;
+    unmatched: string[];
+  } | null>(null);
 
   const variantById = useMemo(() => {
     const m = new Map<string, Product>();
@@ -407,7 +429,146 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
   const onArticleSelect = (key: string) => {
     setSelectedArticleKey(key);
     resetSuggestionPicks();
+    setVariationImportReport(null);
     if (key) prunePackItemsToArticle(key);
+  };
+
+  const findArticleVariantMatch = useCallback(
+    (colorRaw: string, sizeRaw: string): (typeof articleVariants)[number] | null => {
+      const colorKey = normalizeColorKey(colorRaw);
+      if (!colorKey) return null;
+      const sizeKey = normalizeSizeKey(sizeRaw);
+      const candidates = sizeKey
+        ? articleVariants.filter((v) => normalizeSizeKey(v.size) === sizeKey)
+        : articleVariants;
+      const pool = candidates.length > 0 ? candidates : articleVariants;
+
+      const exact = pool.find((v) => normalizeColorKey(v.color) === colorKey);
+      if (exact) return exact;
+
+      const startsOrIncludes = pool.find((v) => {
+        const vc = normalizeColorKey(v.color);
+        if (!vc) return false;
+        return (
+          vc.startsWith(colorKey) ||
+          colorKey.startsWith(vc) ||
+          vc.includes(colorKey) ||
+          colorKey.includes(vc)
+        );
+      });
+      return startsOrIncludes ?? null;
+    },
+    [articleVariants]
+  );
+
+  const importListingVariations = async () => {
+    if (linkMode !== 'existing') {
+      showToast('error', 'La importación está disponible en "Vincular publicación existente"');
+      return;
+    }
+    const productId = parseListingProductId();
+    if (!productId) {
+      showToast('error', 'Pegá primero el MLA / link de la publicación pack');
+      return;
+    }
+    if (!selectedArticleKey) {
+      showToast('error', 'Seleccioná el artículo del pack antes de importar');
+      return;
+    }
+    setImportingVariations(true);
+    setVariationImportReport(null);
+    try {
+      const res = await api.getPublicationBundleListingVariations(platform, productId);
+      if (!res.variations.length) {
+        showToast('error', 'La publicación no tiene variaciones para importar');
+        return;
+      }
+
+      const existingByVar = new Map<string, PackColorVariant>();
+      for (const pv of packColorVariants) {
+        const ext = parseExternalVariantId(pv.externalVariantId);
+        if (ext && pv.bundleId) existingByVar.set(ext, pv);
+      }
+
+      const unmatchedDetails: string[] = [];
+      let fullyMatched = 0;
+      let partial = 0;
+
+      const next: PackColorVariant[] = res.variations.map((v) => {
+        const sizeSuffix = v.sizeValueName ? ` (${v.sizeValueName})` : '';
+        const label = `${v.colorValueName || 'Combo'}${sizeSuffix}`.trim();
+
+        const existing = existingByVar.get(v.variationId);
+        if (existing) {
+          existingByVar.delete(v.variationId);
+          return {
+            ...existing,
+            label: existing.label || label,
+            externalVariantId: v.variationId,
+            expanded: existing.items.length === 0
+          };
+        }
+
+        const colorsToMatch = v.parsedColors.length > 0 ? v.parsedColors : [];
+        const items: DraftItem[] = [];
+        const colorMisses: string[] = [];
+
+        for (const colorRaw of colorsToMatch) {
+          const match = findArticleVariantMatch(colorRaw, v.sizeValueName);
+          if (!match) {
+            colorMisses.push(colorRaw);
+            continue;
+          }
+          if (items.some((it) => it.variantId === match.variantId)) continue;
+          items.push({
+            variantId: match.variantId,
+            unitsPerSale: 1,
+            label: match.shortLabel
+          });
+        }
+
+        const isAssorted = v.isAssorted || colorsToMatch.length === 0;
+        if (isAssorted) {
+          unmatchedDetails.push(`${label} → variación surtida sin colores parseables`);
+        } else if (colorMisses.length > 0) {
+          unmatchedDetails.push(
+            `${label} → sin coincidencia para: ${colorMisses.join(', ')}`
+          );
+        }
+
+        if (items.length === colorsToMatch.length && colorsToMatch.length > 0) {
+          fullyMatched++;
+        } else if (items.length > 0) {
+          partial++;
+        }
+
+        return newPackColorVariant({
+          label,
+          externalVariantId: v.variationId,
+          items,
+          expanded: items.length === 0 || colorMisses.length > 0
+        });
+      });
+
+      const orphanedKeptCombos = [...existingByVar.values()];
+      const finalList = [...next, ...orphanedKeptCombos];
+      setPackColorVariants(finalList.length > 0 ? finalList : [newPackColorVariant()]);
+      setVariationImportReport({
+        total: res.variations.length,
+        fullyMatched,
+        partial,
+        unmatched: unmatchedDetails
+      });
+      const headline =
+        unmatchedDetails.length === 0
+          ? `Se importaron ${res.variations.length} variaciones (${fullyMatched} auto-mapeadas)`
+          : `Importadas ${res.variations.length} variaciones · ${unmatchedDetails.length} necesitan revisión`;
+      showToast(unmatchedDetails.length === 0 ? 'success' : 'error', headline);
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudieron importar las variaciones');
+    } finally {
+      setImportingVariations(false);
+    }
   };
 
   const groupBundlesClientSide = (flat: PublicationBundleDto[]): PublicationBundleGroupDto[] => {
@@ -541,6 +702,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     setSelectedArticleKey('');
     setSuggestionSize('');
     resetSuggestionPicks();
+    setVariationImportReport(null);
   };
 
   const buildPublicationContent = () => {
@@ -885,15 +1047,79 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
               </div>
 
               {linkMode === 'existing' && (
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1">
-                    {platform === 'mercadolibre' ? 'MLA / link publicación pack' : 'ID producto pack TN'}
-                  </label>
-                  <input
-                    value={listingInput}
-                    onChange={(e) => setListingInput(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
-                  />
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[11px] text-slate-500 block mb-1">
+                      {platform === 'mercadolibre' ? 'MLA / link publicación pack' : 'ID producto pack TN'}
+                    </label>
+                    <input
+                      value={listingInput}
+                      onChange={(e) => setListingInput(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void importListingVariations()}
+                      disabled={
+                        importingVariations ||
+                        !listingInput.trim() ||
+                        !selectedArticleKey
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={
+                        !selectedArticleKey
+                          ? 'Seleccioná el artículo del pack antes de importar'
+                          : !listingInput.trim()
+                          ? 'Pegá el MLA / link de la publicación pack'
+                          : `Trae las variaciones de ${platform === 'mercadolibre' ? 'Mercado Libre' : 'Tienda Nube'} y arma las combinaciones automáticamente`
+                      }
+                    >
+                      {importingVariations ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <DownloadCloud size={14} />
+                      )}
+                      Importar variaciones de {platform === 'mercadolibre' ? 'ML' : 'TN'}
+                    </button>
+                    <p className="text-[10px] text-slate-500 flex-1 min-w-0">
+                      Carga cada variación de la publicación e intenta asignar automáticamente las variantes del
+                      artículo a descontar (por color + talle).
+                    </p>
+                  </div>
+                  {variationImportReport && (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-[11px] space-y-1 ${
+                        variationImportReport.unmatched.length === 0
+                          ? 'border-emerald-700/60 bg-emerald-950/30 text-emerald-200'
+                          : 'border-amber-700/60 bg-amber-950/30 text-amber-100'
+                      }`}
+                    >
+                      <p className="font-semibold flex items-center gap-1.5">
+                        {variationImportReport.unmatched.length === 0 ? (
+                          <Sparkles size={12} />
+                        ) : (
+                          <AlertTriangle size={12} />
+                        )}
+                        {variationImportReport.total} variación(es) importadas ·{' '}
+                        {variationImportReport.fullyMatched} auto-mapeadas
+                        {variationImportReport.partial > 0
+                          ? ` · ${variationImportReport.partial} parciales`
+                          : ''}
+                      </p>
+                      {variationImportReport.unmatched.length > 0 && (
+                        <ul className="space-y-0.5 ml-3 list-disc">
+                          {variationImportReport.unmatched.slice(0, 6).map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                          {variationImportReport.unmatched.length > 6 && (
+                            <li>… y {variationImportReport.unmatched.length - 6} más</li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

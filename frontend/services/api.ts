@@ -348,6 +348,10 @@ export const api = {
     profitOrLoss: 'profit' | 'loss';
     expenseCount: number;
     incomeCount: number;
+    invoicedTotal: number;
+    invoicedNet: number;
+    invoicedIva: number;
+    invoicedCount: number;
     pendingInvoicesTotal: number;
     pendingInvoicesCount: number;
     pendingInvoices: Array<{
@@ -773,6 +777,50 @@ export const api = {
   getPublicationBundles: async (): Promise<PublicationBundleDto[]> => {
     const res = await request<any[]>('/publication-bundles', 'GET');
     return Array.isArray(res) ? res.map(mapPublicationBundle) : [];
+  },
+
+  getPublicationBundleListingVariations: async (
+    platform: 'mercadolibre' | 'tiendanube',
+    listingId: string
+  ): Promise<{
+    platform: 'mercadolibre' | 'tiendanube';
+    resolvedId: string;
+    title: string;
+    variations: Array<{
+      variationId: string;
+      colorValueName: string;
+      sizeValueName: string;
+      parsedColors: string[];
+      isAssorted: boolean;
+      sku?: string;
+      availableQuantity?: number;
+      pictureIds?: string[];
+    }>;
+  }> => {
+    const q = new URLSearchParams({ platform, listingId });
+    const res = await request<any>(`/publication-bundles/listing-variations?${q.toString()}`, 'GET');
+    return {
+      platform: res?.platform,
+      resolvedId: String(res?.resolvedId ?? ''),
+      title: String(res?.title ?? ''),
+      variations: Array.isArray(res?.variations)
+        ? res.variations.map((v: any) => ({
+            variationId: String(v?.variationId ?? ''),
+            colorValueName: String(v?.colorValueName ?? ''),
+            sizeValueName: String(v?.sizeValueName ?? ''),
+            parsedColors: Array.isArray(v?.parsedColors)
+              ? v.parsedColors.map((s: any) => String(s))
+              : [],
+            isAssorted: Boolean(v?.isAssorted),
+            sku: v?.sku ? String(v.sku) : undefined,
+            availableQuantity:
+              v?.availableQuantity != null ? Number(v.availableQuantity) : undefined,
+            pictureIds: Array.isArray(v?.pictureIds)
+              ? v.pictureIds.map((p: any) => String(p))
+              : undefined
+          }))
+        : []
+    };
   },
 
   getPublicationBundleSourcePreview: async (
@@ -2914,6 +2962,40 @@ export const api = {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Abre en pestaña nueva el listado HTML imprimible de facturación (con fechas en español).
+   * El HTML dispara `window.print()` al cargar.
+   */
+  openBillingPrint: async (params?: {
+    desde?: string;
+    hasta?: string;
+    customerId?: string;
+    province?: string;
+    tipo?: 'FACTURA' | 'NC';
+  }): Promise<void> => {
+    const queryParams = new URLSearchParams();
+    if (params?.desde) queryParams.append('desde', params.desde);
+    if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.province) queryParams.append('province', params.province);
+    if (params?.tipo) queryParams.append('tipo', params.tipo);
+    const qs = queryParams.toString();
+    const blob = await getBlob(`/billing/print${qs ? '?' + qs : ''}`);
+    const htmlBlob = blob.type.includes('html') ? blob : new Blob([blob], { type: 'text/html' });
+    const url = URL.createObjectURL(htmlBlob);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
 
   /** Exporta Excel "Ventas por Jurisdicción" con el formato del estudio (FAC + NC del rango de fechas). */

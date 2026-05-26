@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Repeat,
   CreditCard,
+  FileText,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -399,7 +400,7 @@ const CompanyFinance: React.FC = () => {
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Ingresos totales</p>
               <p className="text-2xl font-black text-emerald-400 mt-1">{fmt(summary.totalIncome)}</p>
@@ -407,6 +408,19 @@ const CompanyFinance: React.FC = () => {
                 Recibos {fmt(summary.receiptsTotal ?? 0)} · ML {fmt(summary.mlSales ?? 0)} · TN{' '}
                 {fmt(summary.tnSales ?? 0)}
                 {(summary.manualIncome ?? 0) > 0 ? ` · manual ${fmt(summary.manualIncome)}` : ''}
+              </p>
+            </div>
+            <div className="rounded-xl border border-sky-800/40 bg-sky-950/30 p-4">
+              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <FileText size={14} className="text-sky-400" />
+                Facturado AFIP
+              </p>
+              <p className="text-2xl font-black text-sky-300 mt-1">
+                {fmt(summary.invoicedTotal ?? 0)}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                {summary.invoicedCount ?? 0} factura(s) · neto {fmt(summary.invoicedNet ?? 0)} · IVA{' '}
+                {fmt(summary.invoicedIva ?? 0)}
               </p>
             </div>
             <div className="rounded-xl border border-red-800/40 bg-red-950/30 p-4">
