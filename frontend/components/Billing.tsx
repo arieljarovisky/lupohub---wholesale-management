@@ -1006,17 +1006,21 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         {canAfipInvoiceActions &&
                           item.tipo === 'FACTURA' &&
                           item.orderId &&
-                          !String(item.id || '').startsWith('mm-fac-') &&
-                          (Number(item.agipRetPer || 0) > 0.005 || Number(item.agipAlicuota || 0) > 0.005) && (
-                            <>
+                          !String(item.id || '').startsWith('mm-fac-') && (() => {
+                            const tieneIibb =
+                              Number(item.agipRetPer || 0) > 0.005 || Number(item.agipAlicuota || 0) > 0.005;
+                            return (
                               <button
                                 type="button"
                                 onClick={() => {
                                   showConfirm({
-                                    title: 'Guardar IIBB en esta factura (PDF)',
-                                    message:
-                                      'Se recalcula la percepción con el padrón AGIP y el neto del pedido y se guarda en el sistema. Al reabrir el PDF verás percepción y total actualizados. El CAE en AFIP no cambia.',
-                                    confirmLabel: 'Guardar IIBB',
+                                    title: tieneIibb
+                                      ? 'Recalcular IIBB en esta factura (PDF)'
+                                      : 'Agregar IIBB a esta factura (PDF)',
+                                    message: tieneIibb
+                                      ? 'Se vuelve a calcular la percepción con el padrón AGIP del mes del pedido y se actualiza la factura guardada. Al reabrir el PDF verás percepción y total actualizados. El CAE en AFIP no cambia.'
+                                      : 'Se busca al cliente en el padrón AGIP del mes del pedido y, si tiene alícuota, se le agrega la percepción IIBB a la factura. Al reabrir el PDF verás la percepción y el total actualizado. El CAE en AFIP no cambia (la percepción no se informa a AFIP, queda solo en el comprobante impreso).',
+                                    confirmLabel: tieneIibb ? 'Recalcular IIBB' : 'Agregar IIBB',
                                     onConfirm: () => {
                                       setBillingRecalcOrderId(item.orderId);
                                       api
@@ -1037,7 +1041,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 }}
                                 disabled={billingRecalcOrderId === item.orderId}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-amber-200/95 text-xs hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
-                                title="Recalcular IIBB (AGIP) y guardar para el PDF"
+                                title={
+                                  tieneIibb
+                                    ? 'Recalcular IIBB (AGIP) y guardar para el PDF'
+                                    : 'Buscar al cliente en el padrón AGIP y agregar IIBB al PDF de esta factura (no cambia el CAE)'
+                                }
                               >
                                 {billingRecalcOrderId === item.orderId ? (
                                   <Loader2 size={14} className="animate-spin text-amber-300" />
@@ -1045,7 +1053,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                   <Percent size={14} />
                                 )}
                               </button>
-                              {Number(item.creditNotesCount || 0) === 0 && (
+                            );
+                          })()}
+                        {canAfipInvoiceActions &&
+                          item.tipo === 'FACTURA' &&
+                          item.orderId &&
+                          !String(item.id || '').startsWith('mm-fac-') &&
+                          (Number(item.agipRetPer || 0) > 0.005 || Number(item.agipAlicuota || 0) > 0.005) &&
+                          Number(item.creditNotesCount || 0) === 0 && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1087,8 +1102,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                   )}
                                 </button>
                               )}
-                            </>
-                          )}
                       </div>
                     </td>
                   </tr>
