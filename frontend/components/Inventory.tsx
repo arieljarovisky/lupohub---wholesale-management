@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, Store, History, GitMerge } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, History, GitMerge } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -21,7 +21,13 @@ import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
-import { normalizeMercadoLibreItemId, extractMercadoLibreVariationIdFromUrl } from '../utils/mercadoLibreItemId';
+import {
+  normalizeMercadoLibreItemId,
+  extractMercadoLibreVariationIdFromUrl,
+  isVariantLinkedToMercadoLibre,
+  isVariantLinkedToTiendaNube,
+  getChannelStockDisplay
+} from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
 /** Referencia estable: cuando no hay filtro ML≠TN, el agrupado no debe recalcularse por cada actualización de stocks externos. */
@@ -774,8 +780,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: { 
             local: true, 
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre 
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -1442,8 +1448,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: { 
             local: true, 
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre 
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -1747,7 +1753,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               integrations: {
                 local: true,
                 tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-                mercadoLibre: !!v.externalIds?.mercadoLibre,
+                mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds),
               },
               externalIds: v.externalIds,
             }));
@@ -1954,6 +1960,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const mlList = res.variations || [];
       setBulkLinkMlVariations(mlList);
       runBulkAutoMatch(bulkLinkVariants, mlList, bulkLinkTnVariants);
+      if (mlList.length > 0 && bulkLinkVariants.length > mlList.length) {
+        showToast(
+          'info',
+          `ML devolvió ${mlList.length} opción(es) para ${bulkLinkVariants.length} variantes locales. Si faltan colores, pegá el link de la página de catálogo (/p/MLA…) o el MLAU en el campo ML.`
+        );
+      }
     } catch (e) {
       console.error(e);
       showToast('error', 'No se pudieron cargar las variaciones de ML.');
@@ -2058,9 +2070,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setBulkLinkSaving(false);
         return;
       }
+      const allMlOwnPublications =
+        links.every((l) => {
+          const ml = bulkLinkAssignments[l.variantId]?.ml?.trim() || '';
+          return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
+        }) && links.some((l) => {
+          const ml = bulkLinkAssignments[l.variantId]?.ml?.trim() || '';
+          return /^ML[A-Z]{1,5}\d+$/i.test(ml);
+        });
       const res = await api.bulkLinkVariants({
         productId: bulkLinkProductId,
-        mercadoLibreItemId: normalizeMercadoLibreItemId(bulkLinkMlId) || undefined,
+        mercadoLibreItemId: allMlOwnPublications ? undefined : (normalizeMercadoLibreItemId(bulkLinkMlId) || undefined),
         tiendaNubeProductId: (() => {
           const n = normalizeTiendaNubeProductId(bulkLinkTnId);
           return /^\d+$/.test(n) ? n : bulkLinkTnId.trim() || undefined;
@@ -2069,35 +2089,70 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
       const updated = (res as any)?.updated ?? links.length;
       const synced = (res as any)?.synced ?? 0;
-      await api.getVariantsBySku(bulkLinkGroupKey).then(variants => {
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: (v as any).sku || `${bulkLinkGroupKey}-${v.sizeCode}-${v.colorCode}`,
-          name: groupedProducts[bulkLinkGroupKey]?.[0]?.name || '',
-          category: groupedProducts[bulkLinkGroupKey]?.[0]?.category || 'General',
-          price: groupedProducts[bulkLinkGroupKey]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: {
-            local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
-          },
-          externalIds: v.externalIds
-        }));
+      const linkedVariantIds = links.map((l) => l.variantId);
+      const p = await api.getProductBySku(bulkLinkGroupKey);
+      if (p?.variants?.length) {
+        const parentExternalIds = p.externalIds || {};
+        const mapped: Product[] = p.variants.map((v: any) => {
+          const variantId = v.variant_id;
+          const rawSku = (v.variant_sku ?? '').toString().trim();
+          const extSku = (v.external_sku ?? '').toString().trim();
+          const fallbackSku = `${bulkLinkGroupKey}-${v.size_code}-${v.color_code}`;
+          const sku =
+            rawSku && rawSku !== String(variantId)
+              ? rawSku
+              : extSku
+                ? extSku
+                : fallbackSku;
+          return {
+            id: variantId,
+            sku,
+            name: groupedProducts[bulkLinkGroupKey]?.[0]?.name || p.name || '',
+            category: groupedProducts[bulkLinkGroupKey]?.[0]?.category || 'General',
+            price: groupedProducts[bulkLinkGroupKey]?.[0]?.price || 0,
+            description: '',
+            size: v.size_code,
+            color: v.color_name,
+            colorCode: v.color_code,
+            stock: Number(v.stock ?? 0),
+            integrations: {
+              local: true,
+              tiendaNube: !!(parentExternalIds.tiendaNube && (v.externalIds?.tiendaNubeVariant ?? v.tienda_nube_variant_id)),
+              mercadoLibre: isVariantLinkedToMercadoLibre({
+                mercadoLibreItemId: v.externalIds?.mercadoLibreItemId ?? v.mercado_libre_item_id,
+                mercadoLibreVariant: v.externalIds?.mercadoLibreVariant ?? v.mercado_libre_variant_id
+              })
+            },
+            externalIds: {
+              tiendaNube: parentExternalIds.tiendaNube,
+              mercadoLibre: parentExternalIds.mercadoLibre,
+              tiendaNubeVariant: v.externalIds?.tiendaNubeVariant ?? v.tienda_nube_variant_id ?? null,
+              mercadoLibreVariant: v.externalIds?.mercadoLibreVariant ?? v.mercado_libre_variant_id ?? null,
+              mercadoLibreItemId: v.externalIds?.mercadoLibreItemId ?? v.mercado_libre_item_id ?? null
+            }
+          };
+        });
         setLoadedVariants(prev => ({ ...prev, [bulkLinkGroupKey]: mapped }));
-      });
+        const allIds = mapped.map((m) => m.id);
+        if (allIds.length > 0) {
+          api.getVariantExternalStocks(allIds).then((ext) => {
+            if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+          }).catch(() => {});
+        }
+      }
+      if (linkedVariantIds.length > 0 && !p?.variants?.length) {
+        api.getVariantExternalStocks(linkedVariantIds).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }
       setShowBulkLinkModal(false);
       setBulkLinkGroupKey(null);
       if (updated > 0) {
         setServerListRefreshKey(k => k + 1);
         onImportComplete?.();
         const msg = synced > 0
-          ? `Se guardaron ${updated} vinculación(es) y se trajo el stock de Mercado Libre a tu inventario (${synced} variante(s) actualizadas).`
-          : `Se guardaron ${updated} vinculación(es).`;
+          ? `Se guardaron ${updated} vinculación(es) y se envió el stock local a ML/TN (${synced} variante(s)).`
+          : `Se guardaron ${updated} vinculación(es). Revisá que los IDs MLA sean correctos.`;
         showToast('success', msg);
       }
     } catch (e: any) {
@@ -2153,12 +2208,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         return /^\d+$/.test(n) ? n : '';
       })();
       const mlResolved = linkMlId.trim() ? normalizeMercadoLibreItemId(linkMlId) || linkMlId.trim() : '';
-      // 1. Update Variant External IDs (si hay Item ML, el backend trae el stock de ML y lo guarda en inventario)
+      const isMlItemId = /^ML[A-Z]{1,5}\d+$/i.test(mlResolved);
       const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
         tiendaNubeProductId: tnResolved || undefined,
-        mercadoLibreVariantId: linkMlVariantId || mlResolved || undefined,
-        mercadoLibreItemId: mlResolved || undefined,
+        mercadoLibreVariantId: isMlItemId ? undefined : (linkMlVariantId || mlResolved || undefined),
+        mercadoLibreItemId: isMlItemId ? mlResolved : undefined,
         externalSku: linkExternalSku.trim() || undefined
       } as { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string });
       const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
@@ -2199,7 +2254,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         await api.updateProductExternalIds(parentProductId, {
           tiendaNubeId: tnResolved
         });
-        if (mlResolved) {
+        if (mlResolved && !isMlItemId) {
              await api.updateProductExternalIds(parentProductId, {
                 mercadoLibreId: mlResolved
              });
@@ -2229,12 +2284,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               ...p.externalIds,
               tiendaNube: tnResolved || linkTnId,
               tiendaNubeVariant: linkTnVariantId,
-              mercadoLibre: mlResolved || linkMlId
+              mercadoLibre: mlResolved || linkMlId,
+              mercadoLibreVariant: linkMlVariantId || undefined,
+              mercadoLibreItemId: mlResolved || undefined
             },
             integrations: {
                 ...p.integrations,
-                tiendaNube: !!((tnResolved || linkTnId) && linkTnVariantId),
-                mercadoLibre: !!(mlResolved || linkMlId)
+                tiendaNube: isVariantLinkedToTiendaNube({
+                  tiendaNubeVariant: linkTnVariantId
+                }),
+                mercadoLibre: isVariantLinkedToMercadoLibre({
+                  mercadoLibreVariant: linkMlVariantId,
+                  mercadoLibreItemId: mlResolved
+                })
             }
           } : p)
         };
@@ -2255,8 +2317,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -2307,8 +2369,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -2529,8 +2591,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             stock: v.stock,
             integrations: {
               local: true,
-              tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-              mercadoLibre: !!v.externalIds?.mercadoLibre
+              tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+              mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
             },
             externalIds: v.externalIds
           }));
@@ -2612,8 +2674,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           stock: v.stock,
           integrations: {
             local: true,
-            tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-            mercadoLibre: !!v.externalIds?.mercadoLibre
+            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
           },
           externalIds: v.externalIds
         }));
@@ -3508,8 +3570,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                    {product.sku}
                                 </span>
                                 <div className="flex gap-1 shrink-0">
-                                  {product.integrations?.tiendaNube && <Cloud size={12} className="text-blue-400" />}
-                                  {product.integrations?.mercadoLibre && <Zap size={12} className="text-yellow-500" />}
+                                  {isVariantLinkedToTiendaNube(product.externalIds) && <Cloud size={12} className="text-blue-400" />}
+                                  {isVariantLinkedToMercadoLibre(product.externalIds) && <Zap size={12} className="text-yellow-500" />}
                                 </div>
                              </div>
                              <div className="flex items-center gap-3 flex-wrap">
@@ -3574,37 +3636,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                          <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
                                        </div>
                                        <div className="flex flex-col gap-0.5 text-xs">
+                                         {(() => {
+                                           const mlLinked = isVariantLinkedToMercadoLibre(product.externalIds);
+                                           const tnLinked = isVariantLinkedToTiendaNube(product.externalIds);
+                                           const mlDisp = getChannelStockDisplay(mlLinked, variantExternalStocks[product.id]?.stockML);
+                                           const tnDisp = getChannelStockDisplay(tnLinked, variantExternalStocks[product.id]?.stockTN);
+                                           return (
+                                             <>
                                          <div className="flex items-center gap-1.5">
-                                           <Zap size={10} className="text-amber-500 shrink-0" />
+                                           <Zap size={10} className={mlLinked ? 'text-amber-500 shrink-0' : 'text-slate-600 shrink-0'} />
                                            <span className="text-slate-400">ML:</span>
-                                           <span className={product.integrations?.mercadoLibre ? 'text-white font-medium' : 'text-amber-500/90'}>
-                                             {product.integrations?.mercadoLibre
-                                               ? (variantExternalStocks[product.id]?.stockML !== undefined
-                                                 ? String(variantExternalStocks[product.id].stockML)
-                                                 : '—')
-                                               : 'Falta sincronizar'}
-                                           </span>
+                                           <span className={mlDisp.className}>{mlDisp.text}</span>
                                          </div>
                                          <div className="flex items-center gap-1.5">
-                                           <Cloud size={10} className="text-blue-400 shrink-0" />
+                                           <Cloud size={10} className={tnLinked ? 'text-blue-400 shrink-0' : 'text-slate-600 shrink-0'} />
                                            <span className="text-slate-400">TN:</span>
-                                           <span className={product.integrations?.tiendaNube ? 'text-white font-medium' : 'text-amber-500/90'}>
-                                             {product.integrations?.tiendaNube
-                                               ? (variantExternalStocks[product.id]?.stockTN !== undefined
-                                                 ? String(variantExternalStocks[product.id].stockTN)
-                                                 : '—')
-                                               : 'Falta sincronizar'}
-                                           </span>
+                                           <span className={tnDisp.className}>{tnDisp.text}</span>
                                          </div>
-                                         <div className="flex items-center gap-1.5" title="Último stock enviado con éxito al webhook de tu tienda online">
-                                           <Store size={10} className="text-violet-400 shrink-0" />
-                                           <span className="text-slate-400">Tienda:</span>
-                                           <span className={variantExternalStocks[product.id]?.stockLupoShop !== undefined ? 'text-white font-medium' : 'text-slate-500'}>
-                                             {variantExternalStocks[product.id]?.stockLupoShop !== undefined
-                                               ? String(variantExternalStocks[product.id].stockLupoShop)
-                                               : '—'}
-                                           </span>
-                                         </div>
+                                             </>
+                                           );
+                                         })()}
                                        </div>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}

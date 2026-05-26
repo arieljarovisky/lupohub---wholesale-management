@@ -5,6 +5,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { skuToCanonicalString } from '../utils/skuString';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
@@ -561,15 +562,33 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
           () => updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN)
         );
       }
-      if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
+      // Publicación propia por variante (mercado_libre_item_id) tiene prioridad sobre el ítem
+      // padre del producto (mercado_libre_id). Si no, una variante puede poner stock en 6 y otra
+      // pisarlo a 0 usando el mismo MLA vía variación del catálogo padre.
+      const ownMlItemId =
+        variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
+          ? String(variant.mercado_libre_item_id).trim()
+          : null;
+      const ownMlVarId =
+        variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
+          ? String(variant.mercado_libre_variant_id).trim()
+          : null;
+      if (ownMlItemId) {
+        if (ownMlVarId) {
+          await runExternalSyncWithRetries(
+            `ML legacy item=${ownMlItemId} var=${ownMlVarId} variant=${variantId}`,
+            () => updateMercadoLibreStockByVariant(ownMlItemId, ownMlVarId, stockML)
+          );
+        } else {
+          await runExternalSyncWithRetries(
+            `ML legacy item=${ownMlItemId} variant=${variantId}`,
+            () => updateMercadoLibreStockByItem(ownMlItemId, stockML)
+          );
+        }
+      } else if (variant.mercado_libre_id && ownMlVarId) {
         await runExternalSyncWithRetries(
-          `ML legacy=${variant.mercado_libre_id}/${variant.mercado_libre_variant_id} variant=${variantId}`,
-          () => updateMercadoLibreStockByVariant(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML)
-        );
-      } else if (variant.mercado_libre_item_id) {
-        await runExternalSyncWithRetries(
-          `ML legacy item=${variant.mercado_libre_item_id} variant=${variantId}`,
-          () => updateMercadoLibreStockByItem(variant.mercado_libre_item_id, stockML)
+          `ML legacy=${variant.mercado_libre_id}/${ownMlVarId} variant=${variantId}`,
+          () => updateMercadoLibreStockByVariant(variant.mercado_libre_id, ownMlVarId, stockML)
         );
       } else if (skuMLTN) {
         await runExternalSyncWithRetries(
@@ -838,11 +857,16 @@ export const updateTiendaNubeSku = async (
     console.log('[TN SKU] No hay integración configurada');
     return false;
   }
+  const sku = skuToCanonicalString(newSku);
+  if (!sku) {
+    console.log('[TN SKU] SKU vacío, omitido');
+    return false;
+  }
   try {
     await tnPutWithRetry(
       axios,
       `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-      { sku: newSku },
+      { sku },
       {
         headers: {
           'Authentication': `bearer ${integration.access_token}`,
@@ -852,7 +876,7 @@ export const updateTiendaNubeSku = async (
       },
       { maxRetries: 4 }
     );
-    console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
+    console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${sku}"`);
     return true;
   } catch (e: any) {
     console.error('[TN SKU] Error:', e.response?.data || e.message);

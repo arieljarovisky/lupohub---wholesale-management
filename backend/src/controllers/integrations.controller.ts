@@ -5,6 +5,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
+import {
+  fetchAllTiendaNubeProductVariants,
+  mergeTiendaNubeDuplicateVariants,
+} from '../services/tiendanubeVariantMerge.service';
+import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
+import { skuToCanonicalString } from '../utils/skuString';
+import { normalizeSizeToStandard } from '../utils/talleStandard';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -26,10 +33,15 @@ export function normalizeMercadoLibreItemId(raw: unknown): string {
   try { s = decodeURIComponent(s); } catch {}
   s = s.replace(/\s+/g, '');
 
-  // Si pegan URL, extraer token tipo MLA123 / MLAU-123
+  // Si pegan URL: priorizar ID de catálogo /p/MLA... (todos los colores/talles)
   if (/^https?:\/\//i.test(s)) {
-    const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
-    if (m?.[1]) s = m[1];
+    const catalog = s.match(/\/p\/(ML[A-Z]{0,5}-?\d+)/i);
+    if (catalog?.[1]) {
+      s = catalog[1];
+    } else {
+      const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+      if (m?.[1]) s = m[1];
+    }
   }
 
   s = s.toUpperCase();
@@ -252,6 +264,330 @@ export async function resolveMercadoLibreUserProductItems(
       },
     };
   }
+}
+
+type MlVariationRow = { variationId: string; sku: string; color: string; size: string; stock: number };
+
+/** Extrae filas de variación desde un ítem ML (con o sin array item.variations). */
+function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
+  if (!it || it.error) return [];
+  const out: MlVariationRow[] = [];
+  if (Array.isArray(it.variations) && it.variations.length > 0) {
+    for (const v of it.variations) {
+      const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+      const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+      const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
+      let color = '';
+      let size = '';
+      (v.attribute_combinations || []).forEach((attr: any) => {
+        const id = (attr.id || '').toString().toUpperCase();
+        const name = (attr.value_name || attr.name || '').toString().trim();
+        if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+        if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
+      });
+      out.push({
+        variationId: String(v.id),
+        sku,
+        color,
+        size,
+        stock: v.available_quantity || 0
+      });
+    }
+    return out;
+  }
+  const attrs = Array.isArray(it.attributes) ? it.attributes : [];
+  const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+  const sku = (it.seller_sku ?? it.seller_custom_field ?? (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '')).toString().trim();
+  const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
+  const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
+  const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+  out.push({
+    variationId: String(it.id),
+    sku,
+    color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
+    size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
+    stock: it.available_quantity || 0
+  });
+  return out;
+}
+
+/** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
+function catalogProductIdFromMercadoLibreItem(item: any): string {
+  const link = (item?.permalink ?? '').toString();
+  const m = link.match(/\/p\/(ML[A-Z]{0,5}-?\d+)/i);
+  return m?.[1] ? normalizeMercadoLibreItemId(m[1]) : '';
+}
+
+/** Reúne IDs de publicaciones ML asociadas (UP, catálogo /p/MLA..., ítem resuelto). */
+async function gatherMercadoLibreItemIdsForAllVariations(opts: {
+  requestedRaw: string;
+  requestedNormalized: string;
+  shouldResolveAsUserProduct: boolean;
+  resolvedItemId: string;
+  item: any | null;
+  sellerId: string | number;
+  accessToken: string;
+  preloadedCatalogIds?: string[];
+  preloadedUserProductIds?: string[];
+}): Promise<string[]> {
+  const seen = new Set<string>();
+  const add = (id: unknown) => {
+    const s = String(id || '').trim();
+    if (!s) return;
+    for (const c of mercadoLibreItemIdCandidates(s)) seen.add(c);
+  };
+
+  if (opts.resolvedItemId) add(opts.resolvedItemId);
+  for (const id of opts.preloadedCatalogIds || []) add(id);
+  for (const id of opts.preloadedUserProductIds || []) add(id);
+
+  const catalogProductIds = new Set<string>();
+  catalogProductIds.add(opts.requestedRaw);
+  catalogProductIds.add(opts.requestedNormalized);
+  const catalogFromItem = opts.item ? catalogProductIdFromMercadoLibreItem(opts.item) : '';
+  if (catalogFromItem) catalogProductIds.add(catalogFromItem);
+  for (const c of mercadoLibreItemIdCandidates(opts.requestedRaw)) {
+    if (/^MLA\d+$/i.test(c)) catalogProductIds.add(c);
+  }
+  const mUp = opts.requestedNormalized.match(/^MLAU(\d+)$/i);
+  if (mUp) catalogProductIds.add(`MLA${mUp[1]}`);
+  const mLa = opts.requestedNormalized.match(/^MLA(\d+)$/i);
+  if (mLa) catalogProductIds.add(`MLAU${mLa[1]}`);
+
+  for (const pid of catalogProductIds) {
+    const catIds = await resolveMercadoLibreCatalogProductItems(pid, opts.accessToken);
+    for (const id of catIds) add(id);
+  }
+
+  const userProductIds = new Set<string>();
+  if (opts.shouldResolveAsUserProduct) userProductIds.add(opts.requestedNormalized);
+  const upFromItem = (opts.item?.user_product_id ?? '').toString().trim();
+  if (/^MLAU\d+$/i.test(upFromItem)) userProductIds.add(upFromItem);
+  if (mLa) userProductIds.add(`MLAU${mLa[1]}`);
+  if (mUp) userProductIds.add(opts.requestedNormalized);
+
+  for (const upId of userProductIds) {
+    const upResolved = await resolveMercadoLibreUserProductItems(upId, opts.sellerId, opts.accessToken);
+    for (const id of upResolved.itemCandidates) add(id);
+  }
+
+  if (opts.item) {
+    const siblingIds = await findMercadoLibreSiblingListingIds(opts.item, opts.sellerId, opts.accessToken);
+    for (const id of siblingIds) add(id);
+
+    const familyName = mlFamilyNameFromItem(opts.item);
+    if (familyName) {
+      const familyIds = await resolveMercadoLibreItemsByFamilyName(familyName, opts.sellerId, opts.accessToken);
+      for (const id of familyIds) add(id);
+    }
+
+    const skuPrefixes = new Set<string>();
+    for (const sku of collectMercadoLibreItemSkus(opts.item)) {
+      const prefix = extractArticlePrefixFromMlSku(sku);
+      if (prefix) skuPrefixes.add(prefix);
+    }
+    for (const prefix of skuPrefixes) {
+      const skuIds = await resolveMercadoLibreItemsByArticlePrefix(prefix, opts.sellerId, opts.accessToken);
+      for (const id of skuIds) add(id);
+    }
+  }
+
+  return Array.from(seen).slice(0, 120);
+}
+
+/** Agrega variaciones de varias publicaciones ML (todos los colores/talles). */
+async function aggregateMercadoLibreVariationsFromItemIds(
+  itemIds: string[],
+  accessToken: string
+): Promise<MlVariationRow[]> {
+  const byVariationId: Record<string, MlVariationRow> = {};
+  for (const candidate of itemIds) {
+    try {
+      const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      for (const row of extractMlVariationsFromItemData(itemRes?.data)) {
+        byVariationId[row.variationId] = row;
+      }
+    } catch {
+      // ignorar ítem inválido
+    }
+  }
+  return Object.values(byVariationId);
+}
+
+/** Publicaciones del mismo vendedor con el mismo título base (un listing por talle/color). */
+async function findMercadoLibreSiblingListingIds(
+  item: any,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const baseTitle = mlBaseTitle((item?.title || '').toString().trim());
+  const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
+  if (!baseTitle) return [];
+  const siblingIds: string[] = [];
+  const seen = new Set<string>();
+  const pageLimit = 50;
+  for (const status of ['active', 'paused'] as const) {
+    let offset = 0;
+    while (offset < 500) {
+      const searchRes = await axios.get(
+        `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: { q: baseTitleLoose || baseTitle, limit: pageLimit, offset, status },
+          validateStatus: () => true
+        }
+      );
+      const rows: string[] =
+        searchRes.status === 200 && Array.isArray(searchRes.data?.results)
+          ? searchRes.data.results.map((x: any) => String(x || '').trim()).filter(Boolean)
+          : [];
+      for (const id of rows) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          siblingIds.push(id);
+        }
+      }
+      if (rows.length < pageLimit) break;
+      offset += pageLimit;
+    }
+  }
+  const unique = Array.from(new Set(siblingIds));
+  return unique.filter((sid) => {
+    // Se valida título al extraer variaciones; aquí solo limitamos cantidad.
+    return sid && sid !== String(item?.id || '');
+  }).slice(0, 120);
+}
+
+function mlFamilyNameFromItem(item: any): string {
+  return String(item?.family_name ?? '').trim();
+}
+
+/** Prefijo de artículo Lupo/Tango desde SKU (ej. 24650150542 → 24650, 24650-130-280 → 24650). */
+function extractArticlePrefixFromMlSku(sku: string): string | null {
+  const s = String(sku || '').trim();
+  if (!s) return null;
+  const dashHead = s.split('-')[0];
+  if (/^\d{4,7}$/.test(dashHead)) return dashHead;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 11) return digits.slice(0, 5);
+  if (digits.length >= 8) return digits.slice(0, 5);
+  if (/^\d{4,7}$/.test(digits)) return digits;
+  return null;
+}
+
+function collectMercadoLibreItemSkus(it: any): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    const t = String(v ?? '').trim();
+    if (t) out.add(t);
+  };
+  add(it?.seller_sku);
+  add(it?.seller_custom_field);
+  const attrs = Array.isArray(it?.attributes) ? it.attributes : [];
+  const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+  if (skuAttr) add(skuAttr.value_name ?? skuAttr.value);
+  if (Array.isArray(it?.variations)) {
+    for (const v of it.variations) {
+      add(v?.seller_sku);
+      add(v?.seller_custom_field);
+      const vAttr = Array.isArray(v?.attributes) && v.attributes.find((a: any) => (a.id || '').toUpperCase() === 'SELLER_SKU');
+      if (vAttr) add(vAttr.value_name ?? vAttr.value);
+    }
+  }
+  return [...out];
+}
+
+/** Busca publicaciones del vendedor paginando /items/search. */
+async function searchMercadoLibreSellerItems(
+  sellerId: string | number,
+  accessToken: string,
+  params: Record<string, string | number>,
+  maxResults = 200
+): Promise<string[]> {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const pageLimit = 50;
+  let offset = 0;
+  while (out.length < maxResults && offset < 5000) {
+    const res = await axios.get(
+      `https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { ...params, limit: pageLimit, offset },
+        validateStatus: () => true
+      }
+    );
+    if (res.status >= 400 || !res.data) break;
+    const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+    for (const x of rows) {
+      const id = String(x || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    if (rows.length < pageLimit) break;
+    offset += pageLimit;
+  }
+  return out;
+}
+
+/** Publicaciones hermanas por family_name (User Product / catálogo ML). */
+async function resolveMercadoLibreItemsByFamilyName(
+  familyName: string,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const fn = String(familyName || '').trim();
+  if (!fn) return [];
+  const statuses = ['active', 'paused'] as const;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const st of statuses) {
+    const ids = await searchMercadoLibreSellerItems(sellerId, accessToken, { q: fn, status: st }, 120);
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out.slice(0, 120);
+}
+
+/** Publicaciones del mismo artículo por prefijo de SKU (24650 → 24650130542, 24650140542…). */
+async function resolveMercadoLibreItemsByArticlePrefix(
+  prefix: string,
+  sellerId: string | number,
+  accessToken: string
+): Promise<string[]> {
+  const p = String(prefix || '').trim().replace(/\D/g, '');
+  if (!p || p.length < 4) return [];
+  const searchIds = await searchMercadoLibreSellerItems(sellerId, accessToken, { q: p, status: 'active' }, 200);
+  const prefixLoose = p.replace(/^0+/, '') || p;
+  const matched: string[] = [];
+  const seen = new Set<string>();
+  for (const id of searchIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const r = await axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      });
+      const it = r.data;
+      if (!it?.id) continue;
+      const skus = collectMercadoLibreItemSkus(it);
+      const hit = skus.some((s) => {
+        const d = s.replace(/\D/g, '');
+        return d.startsWith(p) || d.startsWith(prefixLoose) || s.startsWith(p) || s.startsWith(prefixLoose);
+      });
+      if (hit) matched.push(String(it.id));
+    } catch {
+      // ignorar ítem inválido
+    }
+  }
+  return matched.slice(0, 120);
 }
 
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
@@ -643,124 +979,473 @@ export const syncProductsFromTiendaNube = async (req: Request, res: Response) =>
   }
 };
 
-/** Talles estándar para el público: P, M, G, GG, XG, XXG, XXXG (+ U para único) */
-const STANDARD_SIZES = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG', 'U'] as const;
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-/** Mapeo de nombres comunes a talle estándar (clave en mayúsculas/normalizada) */
-function normalizeSizeToStandard(raw: string): string {
-  const v = raw.trim().toUpperCase().replace(/\s+/g, ' ');
-  if (!v) return 'U';
-  // Ya estándar
-  if (STANDARD_SIZES.includes(v as any)) return v;
-  // Único / sin talla
-  if (/^U$|UNICO|ÚNICO|LISO|UNICA|ÚNICA/i.test(v)) return 'U';
-  // Pequeño
-  if (/^P$|^S$|^PP$|^XS$|^1$|^2$|^34$|^36$|^35$|^XXS$/i.test(v)) return 'P';
-  // Mediano
-  if (/^M$|^3$|^4$|^38$|^40$/i.test(v)) return 'M';
-  // Grande
-  if (/^G$|^L$|^5$|^6$|^42$|^44$/i.test(v)) return 'G';
-  if (/^GG$|^7$|^8$|^46$/i.test(v)) return 'GG';
-  // Extra grande
-  if (/^XG$|^XL$|^9$|^10$|^48$/i.test(v)) return 'XG';
-  if (/^XXG$|^XXL$|^11$|^12$|^50$/i.test(v)) return 'XXG';
-  if (/^XXXG$|^XXXL$|^13$|^52$/i.test(v)) return 'XXXG';
-  // Por texto
-  if (/EXTRA\s*GRANDE|XXL|XX\s*L/i.test(v) && !/XXX/i.test(v)) return 'XXG';
-  if (/XXX|TRIPLE/i.test(v)) return 'XXXG';
-  if (/XL|EXTRA\s*LARGE/i.test(v)) return 'XG';
-  if (/GRANDE|LARGE|^L$/i.test(v)) return 'G';
-  if (/MEDIANO|MEDIUM|^M$/i.test(v)) return 'M';
-  if (/PEQUEÑO|SMALL|^S$|^P$/i.test(v)) return 'P';
-  return v; // dejar como está si no hay match
+type TnNormalizeResume = { page: number; productIndex: number; variantIndex: number };
+
+function getTiendaNubeStoreId(integration: { store_id?: string | null; user_id?: string | null }): string | null {
+  const id = String(integration.store_id ?? integration.user_id ?? '').trim();
+  return id || null;
 }
 
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+function parseTnNormalizeBatchBody(req: Request): {
+  startPage: number;
+  maxPages: number;
+  maxUpdates: number;
+  resume?: TnNormalizeResume;
+} {
+  const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const startPage = Math.max(1, parseInt(String(body.startPage ?? 1), 10) || 1);
+  const maxPages = Math.min(10, Math.max(1, parseInt(String(body.maxPages ?? 2), 10) || 2));
+  const maxUpdates = Math.min(200, Math.max(1, parseInt(String(body.maxUpdates ?? 25), 10) || 25));
+  const raw = body.resume;
+  let resume: TnNormalizeResume | undefined;
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>;
+    resume = {
+      page: Math.max(1, parseInt(String(r.page ?? startPage), 10) || startPage),
+      productIndex: Math.max(0, parseInt(String(r.productIndex ?? 0), 10) || 0),
+      variantIndex: Math.max(0, parseInt(String(r.variantIndex ?? 0), 10) || 0),
+    };
+  }
+  return { startPage, maxPages, maxUpdates, resume };
+}
+
+function tnAttributeLabel(attr: unknown): string {
+  return (
+    (attr as { es?: string; en?: string; pt?: string })?.es
+    ?? (attr as { es?: string; en?: string; pt?: string })?.en
+    ?? (attr as { es?: string; en?: string; pt?: string })?.pt
+    ?? (typeof attr === 'string' ? attr : '')
+  ).toString();
+}
+
+function tnVariantValueText(val: unknown): string {
+  return (
+    (val as { es?: string; en?: string; pt?: string })?.es
+    ?? (val as { es?: string; en?: string; pt?: string })?.pt
+    ?? (val as { es?: string; en?: string; pt?: string })?.en
+    ?? val
+  )?.toString().trim() || '';
+}
+
+/** Clave única Color+Talle+… para detectar variantes repetidas en Tienda Nube. */
+function tnVariantComboKey(values: unknown[], attrIndex: number, replaceAtAttr?: string): string {
+  const parts: string[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const text =
+      i === attrIndex && replaceAtAttr !== undefined ? replaceAtAttr : tnVariantValueText(values[i]);
+    parts.push(
+      text
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+    );
+  }
+  return parts.join('||');
+}
+
+type TnVariantNormalizePlan = {
+  variant: {
+    id: number | string;
+    values?: unknown[];
+    stock?: number | string | null;
+    stock_management?: boolean;
+  };
+  vi: number;
+  current: string;
+  normalized: string;
+  willUpdate: boolean;
+  newKey: string;
+};
+
+async function normalizeTiendaNubeVariantAttribute(options: {
+  access_token: string;
+  store_id: string;
+  isTargetAttribute: (attrName: string) => boolean;
+  normalizeValue: (raw: string) => string;
+  shouldUpdate?: (current: string, normalized: string) => boolean;
+  completedMessage: string;
+  startPage?: number;
+  maxPages?: number;
+  maxUpdates?: number;
+  resume?: TnNormalizeResume;
+}): Promise<{
+  updatedVariants: number;
+  skippedProducts: number;
+  skippedDuplicates: number;
+  mergedVariants: number;
+  logs: string[];
+  hasMore: boolean;
+  nextPage?: number;
+  resume?: TnNormalizeResume;
+}> {
+  const { access_token, store_id, isTargetAttribute, normalizeValue, completedMessage } = options;
+  const shouldUpdate = options.shouldUpdate ?? ((c, n) => c !== n);
+  const maxPages = options.maxPages ?? 2;
+  const maxUpdates = options.maxUpdates ?? 40;
+  const logs: string[] = [];
+  const log = (msg: string) => {
+    console.log(msg);
+    logs.push(msg);
+  };
+  let updatedVariants = 0;
+  let skippedProducts = 0;
+  let skippedDuplicates = 0;
+  let mergedVariants = 0;
+  let updatesThisBatch = 0;
+  let page = options.resume?.page ?? options.startPage ?? 1;
+  let productStart = options.resume?.productIndex ?? 0;
+  let variantStart = options.resume?.variantIndex ?? 0;
+  let pagesProcessed = 0;
+  let stoppedByCap = false;
+  let lastPageFull = false;
+  const perPage = 50;
+  const tnHeaders = { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT };
+
+  while (pagesProcessed < maxPages && updatesThisBatch < maxUpdates) {
+    let products: unknown[] = [];
+    try {
+      const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
+        headers: tnHeaders,
+        params: { page, per_page: perPage },
+      });
+      products = Array.isArray(response.data) ? response.data : [];
+    } catch (err: unknown) {
+      const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+      if (ax.response?.status === 404) {
+        break;
+      }
+      throw err;
+    }
+
+    if (!products.length) break;
+    lastPageFull = products.length >= perPage;
+    log(`[TN] Página ${page}: ${products.length} productos`);
+
+    for (let pi = productStart; pi < products.length; pi++) {
+      const tnProduct = products[pi] as {
+        id: number | string;
+        attributes?: unknown[];
+        variants?: Array<{
+          id: number | string;
+          values?: unknown[];
+          stock?: number | string | null;
+          stock_management?: boolean;
+        }>;
+      };
+      const productAttributes = tnProduct.attributes || [];
+      let attrIndex = -1;
+      for (let i = 0; i < productAttributes.length; i++) {
+        if (isTargetAttribute(tnAttributeLabel(productAttributes[i]))) {
+          attrIndex = i;
+          break;
+        }
+      }
+      if (attrIndex === -1) {
+        skippedProducts++;
+        variantStart = 0;
+        continue;
+      }
+
+      let variants = tnProduct.variants || [];
+      try {
+        const allVariants = await fetchAllTiendaNubeProductVariants(store_id, tnProduct.id, tnHeaders);
+        if (allVariants.length > 0) variants = allVariants;
+      } catch (fetchErr: unknown) {
+        const m = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        log(`  [WARN] Producto ${tnProduct.id}: no se pudieron listar todas las variantes (${m})`);
+      }
+
+      const plans: TnVariantNormalizePlan[] = [];
+      for (let vi = 0; vi < variants.length; vi++) {
+        const variant = variants[vi];
+        const values = variant.values || [];
+        if (attrIndex >= values.length) continue;
+        let current = '';
+        let normalized = '';
+        try {
+          current = tnVariantValueText(values[attrIndex]);
+          normalized = normalizeValue(current);
+        } catch (normErr: unknown) {
+          const m = normErr instanceof Error ? normErr.message : String(normErr);
+          log(`  [ERROR] Variante ${variant.id}: normalización falló (${m})`);
+          continue;
+        }
+        const willUpdate = shouldUpdate(current, normalized);
+        plans.push({
+          variant,
+          vi,
+          current,
+          normalized,
+          willUpdate,
+          newKey: tnVariantComboKey(values, attrIndex, normalized),
+        });
+      }
+
+      const groupsByEffectiveKey = new Map<string, TnVariantNormalizePlan[]>();
+      for (const p of plans) {
+        const values = p.variant.values || [];
+        const key = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+        if (!groupsByEffectiveKey.has(key)) groupsByEffectiveKey.set(key, []);
+        groupsByEffectiveKey.get(key)!.push(p);
+      }
+
+      const mergedKeys = new Set<string>();
+
+      for (let pi2 = 0; pi2 < plans.length; pi2++) {
+        const p = plans[pi2];
+        if (pi === productStart && p.vi < variantStart) continue;
+        if (updatesThisBatch >= maxUpdates) {
+          stoppedByCap = true;
+          return {
+            updatedVariants,
+            skippedProducts,
+            skippedDuplicates,
+            mergedVariants,
+            logs,
+            hasMore: true,
+            resume: { page, productIndex: pi, variantIndex: p.vi },
+          };
+        }
+
+        const values = p.variant.values || [];
+        const effKey = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+        const group = groupsByEffectiveKey.get(effKey) || [];
+
+        if (group.length > 1) {
+          if (mergedKeys.has(effKey)) continue;
+          mergedKeys.add(effKey);
+          try {
+            const { mergedCount } = await mergeTiendaNubeDuplicateVariants({
+              storeId: store_id,
+              productId: tnProduct.id,
+              attrIndex,
+              group: group.map((g) => ({
+                variant: g.variant,
+                current: g.current,
+                normalized: g.normalized,
+                willUpdate: g.willUpdate,
+              })),
+              headers: tnHeaders,
+              log,
+            });
+            mergedVariants += mergedCount;
+            updatedVariants += 1;
+            updatesThisBatch++;
+          } catch (err: unknown) {
+            skippedDuplicates++;
+            const m = err instanceof Error ? err.message : String(err);
+            log(`  [ERROR] Producto ${tnProduct.id} fusión (${effKey}): ${m}`);
+          }
+          continue;
+        }
+
+        if (!p.willUpdate) continue;
+
+        const newValues = values.map((obj: unknown, i: number) => {
+          if (i !== attrIndex) return obj;
+          const langKeys = obj && typeof obj === 'object' ? Object.keys(obj as object) : ['es'];
+          const next: Record<string, string> = {};
+          for (const lang of langKeys) next[lang] = p.normalized;
+          return next;
+        });
+
+        try {
+          await tnPutWithRetry(
+            axios,
+            `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${p.variant.id}`,
+            { values: newValues },
+            { headers: tnHeaders }
+          );
+          updatedVariants++;
+          updatesThisBatch++;
+          log(`  [TN] Producto ${tnProduct.id} variante ${p.variant.id}: "${p.current}" → "${p.normalized}"`);
+        } catch (err: unknown) {
+          const ax = err as { response?: { data?: { description?: string } }; message?: string };
+          const desc = ax.response?.data?.description || ax.message || '';
+          if (/cannot be repeated|no pueden repetirse|variantes.*repetid/i.test(desc)) {
+            skippedDuplicates++;
+            log(`  [SKIP] Variante ${p.variant.id}: combinación ya existe (${desc})`);
+          } else {
+            log(`  [ERROR] Variante ${p.variant.id}: ${desc}`);
+          }
+        }
+      }
+      variantStart = 0;
+    }
+
+    productStart = 0;
+    page++;
+    pagesProcessed++;
+    if (!lastPageFull) break;
+    if (page > 300) break;
+  }
+
+  const hasMore = stoppedByCap || (lastPageFull && pagesProcessed >= maxPages);
+  if (!hasMore) log(completedMessage);
+
+  return {
+    updatedVariants,
+    skippedProducts,
+    skippedDuplicates,
+    mergedVariants,
+    logs,
+    hasMore,
+    nextPage: hasMore && !stoppedByCap ? page : undefined,
+  };
+}
 
 export const normalizeSizesInTiendaNube = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration || !integration.access_token) {
+    if (!integration?.access_token) {
       return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
     }
-    const { access_token, user_id: store_id } = integration;
-    const logs: string[] = [];
-    const log = (msg: string) => {
-      console.log(msg);
-      logs.push(msg);
-    };
-    let updatedVariants = 0;
-    let skippedProducts = 0;
-    let page = 1;
-    let hasMore = true;
-    const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+    const batch = parseTnNormalizeBatchBody(req);
+    const result = await normalizeTiendaNubeVariantAttribute({
+      access_token: integration.access_token,
+      store_id,
+      isTargetAttribute: (name) => /talle|talla|size|tamano|tamaño/i.test(name),
+      normalizeValue: normalizeSizeToStandard,
+      completedMessage: 'Normalización de talles en Tienda Nube completada',
+      ...batch,
+    });
+    res.json({
+      message: result.hasMore
+        ? 'Lote de talles procesado; hay más productos pendientes'
+        : 'Normalización de talles en Tienda Nube completada',
+      ...result,
+    });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error normalizing sizes:', ax.response?.data || ax.message);
+    res.status(500).json({
+      message: 'Error normalizando talles en Tienda Nube',
+      error: ax.message,
+      detail: ax.response?.data,
+    });
+  }
+};
 
-    while (hasMore) {
-      const response = await axios.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
-        headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
-        params: { page, per_page: 50 }
-      });
-      const products = response.data;
-      if (!products?.length) {
-        hasMore = false;
-        break;
+export const normalizeColorsInTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+    const batch = parseTnNormalizeBatchBody(req);
+    const result = await normalizeTiendaNubeVariantAttribute({
+      access_token: integration.access_token,
+      store_id,
+      isTargetAttribute: (name) =>
+        /color|colour|colore|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name),
+      normalizeValue: normalizeColorNameToStandard,
+      shouldUpdate: shouldUpdateColorValue,
+      completedMessage: 'Normalización de colores en Tienda Nube completada',
+      ...batch,
+    });
+    res.json({
+      message: result.hasMore
+        ? 'Lote de colores procesado; hay más productos pendientes'
+        : 'Normalización de colores en Tienda Nube completada',
+      ...result,
+    });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error normalizing colors:', ax.response?.data || ax.message);
+    res.status(500).json({
+      message: 'Error normalizando colores en Tienda Nube',
+      error: ax.message,
+      detail: ax.response?.data,
+    });
+  }
+};
+
+/** Envía a Tienda Nube el SKU de LupoHub (base-talle-color) en todas las variantes vinculadas. */
+export const syncSkusToTiendaNube = async (req: Request, res: Response) => {
+  try {
+    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+    if (!integration?.access_token) {
+      return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+    }
+    const store_id = getTiendaNubeStoreId(integration);
+    if (!store_id) {
+      return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+    }
+
+    const rows = await query(
+      `SELECT pv.id AS variant_id, pv.sku, pv.tienda_nube_variant_id, p.tienda_nube_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.tienda_nube_variant_id IS NOT NULL
+         AND p.tienda_nube_id IS NOT NULL
+         AND pv.sku IS NOT NULL
+         AND TRIM(pv.sku) <> ''`
+    );
+
+    const headers = {
+      Authentication: `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT,
+      'Content-Type': 'application/json',
+    };
+    const logs: string[] = [];
+    let updated = 0;
+    let errors = 0;
+    let skipped = 0;
+
+    for (const r of rows as Array<{
+      variant_id: string;
+      sku: string;
+      tienda_nube_variant_id: string;
+      tienda_nube_id: string;
+    }>) {
+      const lupoSku = skuToCanonicalString(r.sku);
+      if (!lupoSku) {
+        skipped++;
+        continue;
       }
-      for (const tnProduct of products) {
-        const productAttributes = tnProduct.attributes || [];
-        let sizeAttrIndex = -1;
-        for (let i = 0; i < productAttributes.length; i++) {
-          const attr = productAttributes[i];
-          const name = (attr?.es ?? attr?.en ?? attr?.pt ?? (typeof attr === 'string' ? attr : '')).toString();
-          if (isSizeAttr(name)) {
-            sizeAttrIndex = i;
-            break;
-          }
-        }
-        if (sizeAttrIndex === -1) {
-          skippedProducts++;
-          continue;
-        }
-        for (const variant of tnProduct.variants || []) {
-          const values = variant.values || [];
-          if (sizeAttrIndex >= values.length) continue;
-          const sizeVal = values[sizeAttrIndex];
-          const current = (sizeVal?.es ?? sizeVal?.pt ?? sizeVal?.en ?? sizeVal)?.toString().trim() || '';
-          const normalized = normalizeSizeToStandard(current);
-          if (normalized === current) continue;
-          const newValues = values.map((obj: any, i: number) => {
-            if (i !== sizeAttrIndex) return obj;
-            const langKeys = obj && typeof obj === 'object' ? Object.keys(obj) : ['es'];
-            const next: Record<string, string> = {};
-            for (const lang of langKeys) next[lang] = normalized;
-            return next;
-          });
-          try {
-            await axios.put(
-              `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`,
-              { values: newValues },
-              { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } }
-            );
-            updatedVariants++;
-            log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
-            await delay(250);
-          } catch (err: any) {
-            log(`  [ERROR] Variante ${variant.id}: ${err.response?.data?.description || err.message}`);
-          }
+      try {
+        await tnPutWithRetry(
+          axios,
+          `https://api.tiendanube.com/v1/${store_id}/products/${r.tienda_nube_id}/variants/${r.tienda_nube_variant_id}`,
+          { sku: lupoSku },
+          { headers }
+        );
+        updated++;
+        if (logs.length < 200) logs.push(`[OK] ${lupoSku} (variante ${r.tienda_nube_variant_id})`);
+      } catch (err: unknown) {
+        errors++;
+        const ax = err as { response?: { data?: { description?: string } }; message?: string };
+        if (logs.length < 200) {
+          logs.push(`[ERROR] ${lupoSku}: ${ax.response?.data?.description || ax.message}`);
         }
       }
-      page++;
-      if (page > 300) hasMore = false; // hasta 300 páginas × 50 = 15.000 productos
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
     }
 
     res.json({
-      message: 'Normalización de talles en Tienda Nube completada',
-      updatedVariants,
-      skippedProducts,
-      logs
+      message: 'Sincronización de SKU a Tienda Nube completada',
+      total: rows.length,
+      updated,
+      errors,
+      skipped,
+      logs,
     });
-  } catch (error: any) {
-    console.error('Error normalizing sizes:', error.response?.data || error.message);
-    res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: error.message });
+  } catch (error: unknown) {
+    const ax = error as { response?: { data?: unknown }; message?: string };
+    console.error('Error syncing SKUs to TN:', ax.response?.data || ax.message);
+    res.status(500).json({ message: 'Error sincronizando SKU a Tienda Nube', error: ax.message });
   }
 };
 
@@ -2505,8 +3190,17 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
       for (const r of rows || []) {
         const variantId = (r as any).variant_id;
-        const mlItemId = (r as any).mercado_libre_item_id || (r as any).mercado_libre_id;
-        const variationId = (r as any).mercado_libre_variant_id ? String((r as any).mercado_libre_variant_id) : null;
+        const ownItemId =
+          (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
+            ? String((r as any).mercado_libre_item_id).trim()
+            : null;
+        const mlItemId = ownItemId || (r as any).mercado_libre_id;
+        const variationId =
+          ownItemId
+            ? null
+            : (r as any).mercado_libre_variant_id
+              ? String((r as any).mercado_libre_variant_id)
+              : null;
         if (!mlItemId) continue;
         if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
         mlItemIds.get(mlItemId)!.push({ variantId, variationId });
@@ -2522,8 +3216,8 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
             } else if (variationId) {
               const v = variations.find((x: any) => String(x.id) === String(variationId));
               stocks[variantId].stockML = v ? (v.available_quantity ?? 0) : undefined;
-            } else if (variations.length === 1) {
-              stocks[variantId].stockML = variations[0].available_quantity ?? 0;
+            } else {
+              stocks[variantId].stockML = item.available_quantity ?? 0;
             }
           }
         } catch {
@@ -4484,9 +5178,9 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         // probar siguiente candidato
       }
     }
-    // Si no se encontró como item directo, intentar tratarlo como product/catalog ID (/p/MLA...).
+    // Catálogo /p/MLA...: siempre intentar listar todas las publicaciones hijas (cada color suele ser un ítem).
+    catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
     if (!item || item.error) {
-      catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
       for (const candidate of catalogItemCandidates) {
         if (!triedCandidates.includes(candidate)) triedCandidates.push(candidate);
         try {
@@ -4537,96 +5231,125 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         debug: shouldResolveAsUserProduct ? { userProduct: userProductResolveDebug } : undefined
       });
     }
-    // Caso UP (MLAU...): devolver TODAS las variantes de todos los items del user_product_id.
-    if ((shouldResolveAsUserProduct && userProductItemCandidates.length > 0) || userProductItemCandidates.length > 1) {
-      const byVariationId: Record<string, { variationId: string; sku: string; color: string; size: string; stock: number }> = {};
-      for (const candidate of userProductItemCandidates.slice(0, 120)) {
-        try {
-          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
-            headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-          });
-          const it = itemRes?.data;
-          if (!it || it.error) continue;
 
-          if (Array.isArray(it.variations) && it.variations.length > 0) {
-            for (const v of it.variations) {
-              const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-              const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
-              const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
-              let color = '';
-              let size = '';
-              (v.attribute_combinations || []).forEach((attr: any) => {
-                const id = (attr.id || '').toString().toUpperCase();
-                const name = (attr.value_name || attr.name || '').toString().trim();
-                if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
-                if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
-              });
-              byVariationId[String(v.id)] = {
-                variationId: String(v.id),
-                sku,
-                color,
-                size,
-                stock: v.available_quantity || 0
-              };
-            }
-          } else {
-            const attrs = Array.isArray(it.attributes) ? it.attributes : [];
-            const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
-            const sku = (it.seller_sku ?? it.seller_custom_field ?? (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '')).toString().trim();
-            const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
-            const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
-            const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
-            byVariationId[String(it.id)] = {
-              variationId: String(it.id),
-              sku,
-              color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
-              size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
-              stock: it.available_quantity || 0
-            };
+    const catalogFromPermalink = catalogProductIdFromMercadoLibreItem(item);
+    const itemUserProductId = (item?.user_product_id ?? '').toString().trim();
+    if (catalogFromPermalink && catalogItemCandidates.length === 0) {
+      catalogItemCandidates = await resolveMercadoLibreCatalogProductItems(catalogFromPermalink, mlToken.access_token);
+    }
+    if (/^MLAU\d+$/i.test(itemUserProductId) && userProductItemCandidates.length === 0) {
+      const upResolved = await resolveMercadoLibreUserProductItems(
+        itemUserProductId,
+        mlToken.user_id,
+        mlToken.access_token
+      );
+      userProductItemCandidates = upResolved.itemCandidates;
+      userProductResolveDebug = upResolved.debug;
+    }
+
+    const singleItemVariations = extractMlVariationsFromItemData(item);
+    const allItemIds = await gatherMercadoLibreItemIdsForAllVariations({
+      requestedRaw: String(req.params.itemId || ''),
+      requestedNormalized,
+      shouldResolveAsUserProduct,
+      resolvedItemId,
+      item,
+      sellerId: mlToken.user_id,
+      accessToken: mlToken.access_token,
+      preloadedCatalogIds: catalogItemCandidates,
+      preloadedUserProductIds: userProductItemCandidates
+    });
+    const distinctItemIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+    const familyNameOnItem = mlFamilyNameFromItem(item);
+    const shouldAggregateMulti =
+      shouldResolveAsUserProduct ||
+      Boolean(catalogFromPermalink) ||
+      /^MLAU\d+$/i.test(itemUserProductId) ||
+      Boolean(familyNameOnItem) ||
+      item?.catalog_listing === true ||
+      distinctItemIds.size > 1 ||
+      catalogItemCandidates.length > 1 ||
+      userProductItemCandidates.length > 1;
+
+    const buildAggregatedResponse = (aggregated: MlVariationRow[], extraDebug: Record<string, unknown> = {}) => {
+      const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+      return res.json({
+        variations: aggregated,
+        singleProduct: false,
+        itemId: item.id,
+        requestedItemId: String(req.params.itemId || ''),
+        resolvedItemId,
+        resolvedFromMultiListing: true,
+        debug: {
+          userProduct: userProductResolveDebug,
+          itemIdsCount: distinctItemIds.size,
+          variationCount: aggregated.length,
+          colorCount: distinctColors.size,
+          familyName: familyNameOnItem || undefined,
+          ...extraDebug
+        }
+      });
+    };
+
+    if (shouldAggregateMulti && allItemIds.length > 0) {
+      let aggregated = await aggregateMercadoLibreVariationsFromItemIds(allItemIds, mlToken.access_token);
+      const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+      const distinctSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
+
+      // Si solo aparece un color, ampliar por family_name o prefijo SKU del artículo.
+      if (distinctColors.size <= 1) {
+        const extraIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+        if (familyNameOnItem) {
+          for (const id of await resolveMercadoLibreItemsByFamilyName(familyNameOnItem, mlToken.user_id, mlToken.access_token)) {
+            extraIds.add(normalizeMercadoLibreItemId(id));
           }
-        } catch {
-          // ignorar ítem inválido y continuar
+        }
+        const skuPrefixes = new Set<string>();
+        for (const sku of collectMercadoLibreItemSkus(item)) {
+          const prefix = extractArticlePrefixFromMlSku(sku);
+          if (prefix) skuPrefixes.add(prefix);
+        }
+        for (const row of aggregated) {
+          const prefix = extractArticlePrefixFromMlSku(row.sku);
+          if (prefix) skuPrefixes.add(prefix);
+        }
+        for (const prefix of skuPrefixes) {
+          for (const id of await resolveMercadoLibreItemsByArticlePrefix(prefix, mlToken.user_id, mlToken.access_token)) {
+            extraIds.add(normalizeMercadoLibreItemId(id));
+          }
+        }
+        if (extraIds.size > distinctItemIds.size) {
+          aggregated = await aggregateMercadoLibreVariationsFromItemIds(Array.from(extraIds), mlToken.access_token);
         }
       }
-      const upVariations = Object.values(byVariationId);
-      if (upVariations.length > 1) {
-        return res.json({
-          variations: upVariations,
-          singleProduct: false,
-          itemId: item.id,
-          requestedItemId: String(req.params.itemId || ''),
-          resolvedItemId,
-          resolvedFromUserProduct: true,
-          debug: {
-            userProduct: userProductResolveDebug,
-            upCandidatesCount: userProductItemCandidates.length,
-            upVariationCount: upVariations.length
-          }
-        });
+
+      const finalColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+      const finalSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
+      const moreThanSingleItem =
+        aggregated.length > singleItemVariations.length ||
+        finalColors.size > 1 ||
+        finalSizes.size > 1;
+      if (aggregated.length > 0 && (moreThanSingleItem || distinctItemIds.size > 1 || finalColors.size > 1)) {
+        return buildAggregatedResponse(aggregated);
       }
     }
-    if (item.variations && item.variations.length > 0) {
-      const variations = item.variations.map((v: any) => {
-        const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-        const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
-        const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
-        let color = '';
-        let size = '';
-        (v.attribute_combinations || []).forEach((attr: any) => {
-          const id = (attr.id || '').toString().toUpperCase();
-          const name = (attr.value_name || attr.name || '').toString().trim();
-          if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
-          if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
-        });
-        return {
-          variationId: v.id,
-          sku,
-          color,
-          size,
-          stock: v.available_quantity || 0
-        };
+
+    if (
+      singleItemVariations.length > 0 &&
+      distinctItemIds.size <= 1 &&
+      catalogItemCandidates.length <= 1 &&
+      !catalogFromPermalink &&
+      !/^MLAU\d+$/i.test(itemUserProductId) &&
+      !familyNameOnItem &&
+      item?.catalog_listing !== true
+    ) {
+      return res.json({
+        variations: singleItemVariations,
+        singleProduct: singleItemVariations.length === 1,
+        itemId: item.id,
+        requestedItemId: String(req.params.itemId || ''),
+        resolvedItemId
       });
-      return res.json({ variations, singleProduct: false, itemId: item.id, requestedItemId: String(req.params.itemId || ''), resolvedItemId });
     }
     // Caso catálogo: no hay item.variations pero sí múltiples items hijos (cada uno una "variante").
     if (catalogItemCandidates.length > 1) {
@@ -4675,67 +5398,49 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         });
       }
     }
-    // Caso "una publicación por variante" sin catálogo explícito:
-    // buscar publicaciones hermanas del mismo vendedor por título base.
-    if (!item.variations || item.variations.length === 0) {
+    // Fallback: publicaciones hermanas por título (cada talle/color en su propia MLA).
+    {
       const baseTitle = mlBaseTitle((item.title || '').toString().trim());
       const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
-      if (baseTitle) {
-        const searchRes = await axios.get(
-          `https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`,
-          {
-            headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
-            params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
-            validateStatus: () => true
-          }
-        );
-        const siblingIds: string[] = searchRes.status === 200 && Array.isArray(searchRes.data?.results)
-          ? searchRes.data.results.map((x: any) => String(x || '').trim()).filter(Boolean)
-          : [];
-        const uniqueSiblingIds = Array.from(new Set(siblingIds)).slice(0, 50);
-        if (uniqueSiblingIds.length > 1) {
-          const siblings = await Promise.all(uniqueSiblingIds.map(async (sid) => {
+      const siblingIds = await findMercadoLibreSiblingListingIds(item, mlToken.user_id, mlToken.access_token);
+      if (siblingIds.length > 0) {
+        const siblingRows: MlVariationRow[] = [];
+        const siblings = await Promise.all(
+          siblingIds.map(async (sid) => {
             try {
               const r = await axios.get(`https://api.mercadolibre.com/items/${sid}?include_attributes=all`, {
-                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
+                headers: { Authorization: `Bearer ${mlToken.access_token}` }
               });
               return r.data;
             } catch {
               return null;
             }
-          }));
-          const siblingVariations = (siblings || [])
-            .filter((it: any) => it && !it.error && (!it.variations || it.variations.length === 0))
-            .filter((it: any) => {
-              const siblingBase = mlBaseTitle((it.title || '').toString().trim());
-              const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
-              return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
-            })
-            .map((it: any) => {
-              const attrs = Array.isArray(it.attributes) ? it.attributes : [];
-              const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
-              const sku = (it.seller_sku ?? it.seller_custom_field ?? (skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '') : '')).toString().trim();
-              const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
-              const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
-              const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
-              return {
-                variationId: it.id,
-                sku,
-                color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
-                size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
-                stock: it.available_quantity || 0
-              };
-            });
-          if (siblingVariations.length > 1) {
-            return res.json({
-              variations: siblingVariations,
-              singleProduct: false,
-              itemId: item.id,
-              requestedItemId: String(req.params.itemId || ''),
-              resolvedItemId,
-              resolvedFromSiblingSearch: true
-            });
+          })
+        );
+        for (const it of siblings) {
+          if (!it || it.error) continue;
+          const siblingBase = mlBaseTitle((it.title || '').toString().trim());
+          const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
+          if (baseTitle && siblingBase !== baseTitle && baseTitleLoose && siblingLoose !== baseTitleLoose) continue;
+          siblingRows.push(...extractMlVariationsFromItemData(it));
+        }
+        const merged = [...singleItemVariations];
+        const seenVid = new Set(merged.map((v) => v.variationId));
+        for (const row of siblingRows) {
+          if (!seenVid.has(row.variationId)) {
+            seenVid.add(row.variationId);
+            merged.push(row);
           }
+        }
+        if (merged.length > singleItemVariations.length) {
+          return res.json({
+            variations: merged,
+            singleProduct: false,
+            itemId: item.id,
+            requestedItemId: String(req.params.itemId || ''),
+            resolvedItemId,
+            resolvedFromSiblingSearch: true
+          });
         }
       }
     }
@@ -4896,12 +5601,14 @@ function tiendaNubeCategoryIdsOnly(raw: any): number[] {
 
 function stripVariantForTiendaNubeCreate(v: any, skuSuffix: string, idx: number): any {
   const baseSku =
-    v?.sku != null && String(v.sku).trim() !== '' ? String(v.sku).trim() : `VAR-${idx + 1}`;
+    v?.sku != null && String(v.sku).trim() !== ''
+      ? skuToCanonicalString(v.sku)
+      : `VAR-${idx + 1}`;
   const out: any = {
     price: v.price != null ? String(v.price) : '0',
     stock_management: v.stock_management !== false,
     stock: Number(v.stock) || 0,
-    sku: `${baseSku}${skuSuffix}`,
+    sku: skuToCanonicalString(`${baseSku}${skuSuffix}`),
     values: Array.isArray(v.values) ? v.values : []
   };
   if (v.promotional_price != null && String(v.promotional_price).trim() !== '') {

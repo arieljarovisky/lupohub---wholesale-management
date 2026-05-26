@@ -244,8 +244,24 @@ const Settings: React.FC<SettingsProps> = ({
   const [syncStats, setSyncStats] = useState({ imported: 0, updated: 0, productCount: 0, variantCount: 0 });
   const [loadingNormalizeSizes, setLoadingNormalizeSizes] = useState(false);
   const [showNormalizeSizesModal, setShowNormalizeSizesModal] = useState(false);
+  const [loadingNormalizeColors, setLoadingNormalizeColors] = useState(false);
+  const [loadingSyncTnSkus, setLoadingSyncTnSkus] = useState(false);
+  const [showNormalizeColorsModal, setShowNormalizeColorsModal] = useState(false);
+  const [normalizeColorsResult, setNormalizeColorsResult] = useState<{
+    updatedVariants: number;
+    skippedProducts: number;
+    skippedDuplicates?: number;
+    mergedVariants?: number;
+    logs: string[];
+  } | null>(null);
   const [loadingUnifySizes, setLoadingUnifySizes] = useState(false);
-  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{ updatedVariants: number; skippedProducts: number; logs: string[] } | null>(null);
+  const [normalizeSizesResult, setNormalizeSizesResult] = useState<{
+    updatedVariants: number;
+    skippedProducts: number;
+    skippedDuplicates?: number;
+    mergedVariants?: number;
+    logs: string[];
+  } | null>(null);
   const groupedLogs = React.useMemo(() => {
     const groups: { product: string; variants: string[]; errors: string[] }[] = [];
     let current: { product: string; variants: string[]; errors: string[] } | null = null;
@@ -696,15 +712,92 @@ const Settings: React.FC<SettingsProps> = ({
   const handleNormalizeSizesTiendaNube = async () => {
     setShowNormalizeSizesModal(true);
     setLoadingNormalizeSizes(true);
-    setNormalizeSizesResult(null);
+    setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Iniciando normalización por lotes…'] });
     try {
-      const res = await api.normalizeSizesInTiendaNube();
-      setNormalizeSizesResult({ updatedVariants: res.updatedVariants, skippedProducts: res.skippedProducts, logs: res.logs || [] });
-    } catch (e) {
+      const res = await api.normalizeSizesInTiendaNube((p) => {
+        setNormalizeSizesResult({
+          updatedVariants: p.updatedVariants,
+          skippedProducts: 0,
+          logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
+        });
+      });
+      setNormalizeSizesResult({
+        updatedVariants: res.updatedVariants,
+        skippedProducts: res.skippedProducts,
+        skippedDuplicates: res.skippedDuplicates,
+        mergedVariants: res.mergedVariants,
+        logs: res.logs || [],
+      });
+    } catch (e: unknown) {
       console.error(e);
-      setNormalizeSizesResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Error al conectar con el servidor.'] });
+      const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
+      setNormalizeSizesResult((prev) => ({
+        updatedVariants: prev?.updatedVariants ?? 0,
+        skippedProducts: prev?.skippedProducts ?? 0,
+        skippedDuplicates: prev?.skippedDuplicates,
+        mergedVariants: prev?.mergedVariants,
+        logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
+      }));
     } finally {
       setLoadingNormalizeSizes(false);
+    }
+  };
+
+  const handleSyncSkusTiendaNube = () => {
+    showConfirm({
+      title: 'Sincronizar SKU a Tienda Nube',
+      message:
+        'Se enviará el SKU de cada variante de LupoHub (formato artículo-talle-color) a Tienda Nube, reemplazando valores corruptos como 4,16E+12. ¿Continuar?',
+      confirmLabel: 'Sincronizar',
+      onConfirm: async () => {
+        setLoadingSyncTnSkus(true);
+        try {
+          const res = await api.syncSkusToTiendaNube();
+          if (res.errors > 0) {
+            showToast('error', `SKU TN: ${res.updated} ok, ${res.errors} errores (de ${res.total}).`);
+          } else {
+            showToast('success', `SKU TN: ${res.updated} variantes actualizadas.`);
+          }
+        } catch (e: unknown) {
+          showToast('error', e instanceof Error ? e.message : 'Error sincronizando SKU');
+        } finally {
+          setLoadingSyncTnSkus(false);
+        }
+      },
+    });
+  };
+
+  const handleNormalizeColorsTiendaNube = async () => {
+    setShowNormalizeColorsModal(true);
+    setLoadingNormalizeColors(true);
+    setNormalizeColorsResult({ updatedVariants: 0, skippedProducts: 0, logs: ['Iniciando normalización por lotes…'] });
+    try {
+      const res = await api.normalizeColorsInTiendaNube((p) => {
+        setNormalizeColorsResult({
+          updatedVariants: p.updatedVariants,
+          skippedProducts: 0,
+          logs: [`Lote ${p.batch}…`, ...p.logs.slice(-48)],
+        });
+      });
+      setNormalizeColorsResult({
+        updatedVariants: res.updatedVariants,
+        skippedProducts: res.skippedProducts,
+        skippedDuplicates: res.skippedDuplicates,
+        mergedVariants: res.mergedVariants,
+        logs: res.logs || [],
+      });
+    } catch (e: unknown) {
+      console.error(e);
+      const msg = e instanceof Error ? e.message : 'Error al conectar con el servidor.';
+      setNormalizeColorsResult((prev) => ({
+        updatedVariants: prev?.updatedVariants ?? 0,
+        skippedProducts: prev?.skippedProducts ?? 0,
+        skippedDuplicates: prev?.skippedDuplicates,
+        mergedVariants: prev?.mergedVariants,
+        logs: [...(prev?.logs ?? []), `[ERROR] ${msg}`],
+      }));
+    } finally {
+      setLoadingNormalizeColors(false);
     }
   };
 
@@ -2110,10 +2203,28 @@ const Settings: React.FC<SettingsProps> = ({
                           onClick={handleNormalizeSizesTiendaNube}
                           disabled={loadingNormalizeSizes}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                          title="Convertir todos los talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG"
+                          title="Convertir todos los talles en Tienda Nube a P, M, G, GG, XG, XXG, XXXG, U y 4–14"
                         >
                           {loadingNormalizeSizes ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
                           NORMALIZAR TALLES
+                        </button>
+                        <button 
+                          onClick={handleNormalizeColorsTiendaNube}
+                          disabled={loadingNormalizeColors}
+                          className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Unificar nombres de color en Tienda Nube (Negro, Azul, Bordó, etc.)"
+                        >
+                          {loadingNormalizeColors ? <Loader2 size={14} className="animate-spin" /> : <Palette size={14} />}
+                          NORMALIZAR COLORES
+                        </button>
+                        <button
+                          onClick={handleSyncSkusTiendaNube}
+                          disabled={loadingSyncTnSkus}
+                          className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Copiar SKU de LupoHub a cada variante en Tienda Nube"
+                        >
+                          {loadingSyncTnSkus ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+                          SINCRONIZAR SKU
                         </button>
                       </div>
                     </div>
@@ -2166,7 +2277,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-500">
-                      Sincronizar stock: envía el stock local a Tienda Nube. Normalizar talles: convierte a P, M, G, GG, XG, XXG, XXXG.
+                      Sincronizar stock / SKU / normalizar talles y colores. SKU: usa el código de LupoHub (ej. 0051003-130-280), no notación científica.
                     </p>
                   </div>
                 )}
@@ -3076,6 +3187,72 @@ const Settings: React.FC<SettingsProps> = ({
         </div>
       </Modal>
 
+      {/* Normalize colors modal */}
+      <Modal
+        isOpen={showNormalizeColorsModal}
+        onClose={() => setShowNormalizeColorsModal(false)}
+        title="Normalizar colores en Tienda Nube"
+        footer={
+          <button onClick={() => setShowNormalizeColorsModal(false)} className="bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg font-bold text-sm">
+            Cerrar
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {normalizeColorsResult && (
+            <>
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
+                  <p className="text-xl font-black text-green-400">{normalizeColorsResult.updatedVariants}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Fusionadas</p>
+                  <p className="text-xl font-black text-cyan-400">{normalizeColorsResult.mergedVariants ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores / omitidas</p>
+                  <p className="text-xl font-black text-amber-400">{normalizeColorsResult.skippedDuplicates ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Sin atributo Color</p>
+                  <p className="text-xl font-black text-slate-400">{normalizeColorsResult.skippedProducts}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">
+                Los colores se unifican a nombres cortos; duplicados se fusionan con suma de stock ([MERGE] en el log).
+              </p>
+              {normalizeColorsResult.logs.length > 0 && (
+                <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
+                  {normalizeColorsResult.logs.slice(-50).map((line, i) => (
+                    <div
+                      key={i}
+                      className={
+                        line.includes('[ERROR]')
+                          ? 'text-red-400'
+                          : line.includes('[SKIP]')
+                            ? 'text-amber-300'
+                            : line.includes('[MERGE]')
+                              ? 'text-cyan-300'
+                              : 'text-green-300'
+                      }
+                    >
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {loadingNormalizeColors && (
+            <div className="py-6 flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-violet-500" size={32} />
+              <p className="text-sm text-violet-400 font-bold">Actualizando colores en Tienda Nube (por lotes, puede tardar varios minutos)...</p>
+            </div>
+          )}
+        </div>
+      </Modal>
+
       {/* Normalize sizes modal */}
       <Modal
         isOpen={showNormalizeSizesModal}
@@ -3090,23 +3267,44 @@ const Settings: React.FC<SettingsProps> = ({
         <div className="space-y-4">
           {normalizeSizesResult && (
             <>
-              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex gap-4">
-                <div className="flex-1">
+              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[120px]">
                   <p className="text-[10px] text-slate-500 uppercase font-black">Variantes actualizadas</p>
                   <p className="text-xl font-black text-green-400">{normalizeSizesResult.updatedVariants}</p>
                 </div>
-                <div className="flex-1">
-                  <p className="text-[10px] text-slate-500 uppercase font-black">Productos sin atributo Talle</p>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Fusionadas</p>
+                  <p className="text-xl font-black text-cyan-400">{normalizeSizesResult.mergedVariants ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Errores / omitidas</p>
+                  <p className="text-xl font-black text-amber-400">{normalizeSizesResult.skippedDuplicates ?? 0}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Sin atributo Talle</p>
                   <p className="text-xl font-black text-slate-400">{normalizeSizesResult.skippedProducts}</p>
                 </div>
               </div>
               <p className="text-xs text-slate-400">
-                Los talles en Tienda Nube se convirtieron a: P, M, G, GG, XG, XXG, XXXG (y U para único). Volvé a &quot;Importar productos&quot; para reflejar los cambios en LupoHub.
+                Si hay duplicados (ej. &quot;G&quot; y &quot;G/44-46&quot;), se suma el stock en una variante y se elimina la otra automáticamente. Las líneas [MERGE] en el log muestran cada fusión.
               </p>
               {normalizeSizesResult.logs.length > 0 && (
                 <div className="bg-black/80 p-3 rounded-lg border border-slate-800 h-48 overflow-y-auto font-mono text-[10px]">
                   {normalizeSizesResult.logs.slice(-50).map((line, i) => (
-                    <div key={i} className={line.includes('[ERROR]') ? 'text-red-400' : 'text-green-300'}>{line}</div>
+                    <div
+                      key={i}
+                      className={
+                        line.includes('[ERROR]')
+                          ? 'text-red-400'
+                          : line.includes('[SKIP]')
+                            ? 'text-amber-300'
+                            : line.includes('[MERGE]')
+                              ? 'text-cyan-300'
+                              : 'text-green-300'
+                      }
+                    >
+                      {line}
+                    </div>
                   ))}
                 </div>
               )}
@@ -3115,7 +3313,7 @@ const Settings: React.FC<SettingsProps> = ({
           {loadingNormalizeSizes && (
             <div className="py-6 flex flex-col items-center gap-3">
               <Loader2 className="animate-spin text-blue-500" size={32} />
-              <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube...</p>
+              <p className="text-sm text-blue-400 font-bold">Actualizando talles en Tienda Nube (por lotes, puede tardar varios minutos)...</p>
             </div>
           )}
         </div>
