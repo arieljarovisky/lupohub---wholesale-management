@@ -7,7 +7,8 @@ import {
   importAgipPadronStart,
   importAgipPadronChunk,
   exportBillingByCustomersFile,
-  exportVentasJurisdiccionXlsx
+  exportVentasJurisdiccionXlsx,
+  printBilling
 } from '../controllers/billing.controller';
 import { authMiddleware, billingAccessMiddleware } from '../middleware/auth';
 import multer from 'multer';
@@ -28,6 +29,7 @@ router.use(authMiddleware, billingAccessMiddleware);
 
 router.get('/', listBilling);
 router.get('/export', exportBilling);
+router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);
 router.get('/export-ventas-jurisdiccion', exportVentasJurisdiccionXlsx);
 router.post('/export-by-customers-file', uploadAgipPadronFile, exportBillingByCustomersFile);

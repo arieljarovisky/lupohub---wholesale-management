@@ -46,6 +46,60 @@ function ddmmyyyy(value: any): string {
   return `${dd}${mm}${yy}`;
 }
 
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
+const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+/** Parsea `YYYY-MM-DD` o Date sin sufrir corrimiento de zona horaria. */
+function dateFromYmd(value: any): Date | null {
+  if (typeof value === 'string') {
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const ymd = normalizeDate(value);
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return null;
+}
+
+/** "20/05/2026" */
+function formatDateEsShort(value: any): string {
+  const d = dateFromYmd(value);
+  if (!d) return String(value ?? '');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yy = d.getUTCFullYear();
+  return `${dd}/${mm}/${yy}`;
+}
+
+/** "Miércoles 20 de mayo de 2026" */
+function formatDateEsLong(value: any): string {
+  const d = dateFromYmd(value);
+  if (!d) return String(value ?? '');
+  const diaSemana = DIAS_ES[d.getUTCDay()];
+  const dia = d.getUTCDate();
+  const mes = MESES_ES[d.getUTCMonth()];
+  const yy = d.getUTCFullYear();
+  return `${diaSemana.charAt(0).toUpperCase()}${diaSemana.slice(1)} ${dia} de ${mes} de ${yy}`;
+}
+
+function escapeHtml(value: any): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtMoneyArs(amount: any): string {
+  const n = Number(amount) || 0;
+  return n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 });
+}
+
 function formatAmountFixed(amount: number, intLen = 13): string {
   const n = Math.round((Number(amount) || 0) * 100) / 100;
   const [ints, decs] = n.toFixed(2).split('.');
@@ -480,7 +534,7 @@ export const exportBilling = async (req: Request, res: Response) => {
     const lines = [header.join(',')];
     for (const r of rows as any[]) {
       const line = [
-        r.fecha,
+        formatDateEsShort(r.fecha),
         r.tipo,
         r.cbte_tipo,
         r.punto_venta,
@@ -492,7 +546,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         '"Sistema (AFIP)"',
         Number(r.importe) || 0,
         r.cae,
-        r.cae_fch_vto || ''
+        r.cae_fch_vto ? formatDateEsShort(r.cae_fch_vto) : ''
       ].join(',');
       lines.push(line);
     }
@@ -550,7 +604,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         if (existingKeys.has(key)) continue;
         existingKeys.add(key);
         const line = [
-          fecha,
+          formatDateEsShort(fecha),
           'FACTURA',
           '',
           '',
@@ -579,6 +633,279 @@ export const exportBilling = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error exportando facturación' });
   }
 }
+
+/**
+ * Devuelve una vista HTML imprimible con el listado de facturas y NC del rango.
+ * Pensada para abrir en una pestaña nueva y disparar `window.print()` automáticamente.
+ * Fechas en español (corto en la tabla, largo en el encabezado del período).
+ */
+export const printBilling = async (req: Request, res: Response) => {
+  try {
+    const { desde, hasta, customerId, province, tipo } = req.query as {
+      desde?: string;
+      hasta?: string;
+      customerId?: string;
+      province?: string;
+      tipo?: 'FACTURA' | 'NC';
+    };
+
+    const whereParts: string[] = [];
+    const params: any[] = [];
+    if (desde) {
+      whereParts.push('b.fecha >= ?');
+      params.push(desde);
+    }
+    if (hasta) {
+      whereParts.push('b.fecha <= ?');
+      params.push(hasta);
+    }
+    if (customerId) {
+      whereParts.push('b.customer_id = ?');
+      params.push(customerId);
+    }
+    if (province && String(province).trim()) {
+      whereParts.push(
+        "b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, '')) LIKE ?)"
+      );
+      params.push(`%${String(province).trim().toLowerCase()}%`);
+    }
+    if (tipo === 'FACTURA' || tipo === 'NC') {
+      whereParts.push('b.tipo = ?');
+      params.push(tipo);
+    }
+
+    const authUser = (req as any).user;
+    if (authUser?.role === 'SELLER') {
+      whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE seller_id = ?)');
+      params.push(authUser.id);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const sql = `
+      SELECT *
+      FROM (
+        SELECT
+          i.id,
+          'FACTURA' AS tipo,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde AS numero_desde,
+          i.cbte_hasta AS numero_hasta,
+          o.date AS fecha,
+          o.total AS importe,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS cliente,
+          c.cuit AS cuit,
+          i.cae,
+          i.created_at
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+
+        UNION ALL
+
+        SELECT
+          MIN(cn.id) AS id,
+          'NC' AS tipo,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde AS numero_desde,
+          cn.cbte_hasta AS numero_hasta,
+          MAX(o.date) AS fecha,
+          SUM(cn.amount_credited) AS importe,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS cliente,
+          c.cuit AS cuit,
+          cn.cae,
+          MIN(cn.created_at) AS created_at
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 cn.order_id, c.id, c.business_name, c.name, c.cuit
+      ) AS b
+      ${whereSql}
+      ORDER BY b.fecha ASC, b.created_at ASC
+    `;
+
+    const rows = (await query(sql, params)) as any[];
+
+    let totalFacturas = 0;
+    let totalNC = 0;
+    let countFacturas = 0;
+    let countNC = 0;
+
+    const tableRows = (rows || [])
+      .map((r) => {
+        const importe = Number(r.importe) || 0;
+        const esNC = String(r.tipo) === 'NC';
+        if (esNC) {
+          totalNC += importe;
+          countNC += 1;
+        } else {
+          totalFacturas += importe;
+          countFacturas += 1;
+        }
+        const letra = letraFromCbteTipo(r.cbte_tipo);
+        const pv = String(Number(r.punto_venta) || 0).padStart(4, '0');
+        const nro = String(Number(r.numero_desde) || 0).padStart(8, '0');
+        const comprobante = letra && r.punto_venta ? `${letra}${pv}-${nro}` : '—';
+        const importeStr = fmtMoneyArs(esNC ? -importe : importe);
+        const tipoChip = esNC
+          ? '<span class="chip chip-nc">NC</span>'
+          : '<span class="chip chip-fac">FACTURA</span>';
+        return `
+          <tr class="${esNC ? 'row-nc' : ''}">
+            <td class="col-fecha">${escapeHtml(formatDateEsShort(r.fecha))}</td>
+            <td>${tipoChip}</td>
+            <td class="mono">${escapeHtml(comprobante)}</td>
+            <td>${escapeHtml(r.cliente || '')}</td>
+            <td class="mono">${escapeHtml(r.cuit || '')}</td>
+            <td class="mono num">${escapeHtml(importeStr)}</td>
+            <td class="mono small">${escapeHtml(r.cae || '')}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const periodoTexto = (() => {
+      if (desde && hasta) {
+        return `Del ${formatDateEsLong(desde)} al ${formatDateEsLong(hasta)}`;
+      }
+      if (desde) return `Desde ${formatDateEsLong(desde)}`;
+      if (hasta) return `Hasta ${formatDateEsLong(hasta)}`;
+      return 'Período: todos los comprobantes';
+    })();
+
+    const tipoFiltroTexto = tipo === 'FACTURA' ? 'Solo facturas' : tipo === 'NC' ? 'Solo notas de crédito' : null;
+    const totalNeto = totalFacturas - totalNC;
+    const emitidoEn = formatDateEsLong(new Date().toISOString().slice(0, 10));
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Listado de facturación · ${escapeHtml(periodoTexto)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a202c;
+    margin: 24px 32px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  header { border-bottom: 2px solid #2d3748; padding-bottom: 12px; margin-bottom: 18px; }
+  h1 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
+  .periodo { font-size: 14px; color: #2d3748; font-weight: 600; }
+  .meta { color: #4a5568; font-size: 11px; margin-top: 6px; }
+  .filtros { color: #2c5282; font-size: 11px; margin-top: 4px; font-style: italic; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  thead th {
+    background: #edf2f7;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid #2d3748;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #2d3748;
+  }
+  tbody td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  tbody tr:nth-child(even) { background: #f7fafc; }
+  tbody tr.row-nc { background: #fffaf0; }
+  .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11px; }
+  .small { font-size: 10px; color: #4a5568; }
+  .num { text-align: right; white-space: nowrap; }
+  .col-fecha { white-space: nowrap; }
+  .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+  .chip-fac { background: #c6f6d5; color: #22543d; }
+  .chip-nc { background: #fed7d7; color: #742a2a; }
+  .totales { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .total-card { border: 1px solid #cbd5e0; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 180px; background: #f7fafc; }
+  .total-card .label { font-size: 10px; text-transform: uppercase; color: #4a5568; font-weight: 700; }
+  .total-card .value { font-size: 16px; font-weight: 800; margin-top: 2px; color: #1a202c; font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  .total-card.neto { border-color: #2b6cb0; background: #ebf8ff; }
+  .total-card.neto .value { color: #2b6cb0; }
+  .footer { margin-top: 18px; color: #718096; font-size: 10px; text-align: right; }
+  .actions { margin-bottom: 14px; }
+  .actions button {
+    padding: 8px 14px; font-size: 12px; font-weight: 700;
+    background: #2b6cb0; color: white; border: none; border-radius: 6px;
+    cursor: pointer; margin-right: 8px;
+  }
+  .actions button.secondary { background: #718096; }
+  .empty { padding: 32px; text-align: center; color: #718096; font-style: italic; }
+  @media print {
+    body { margin: 12mm; font-size: 10px; }
+    .actions { display: none; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <div class="actions">
+    <button onclick="window.print()">Imprimir</button>
+    <button class="secondary" onclick="window.close()">Cerrar</button>
+  </div>
+  <header>
+    <h1>Listado de facturación</h1>
+    <div class="periodo">${escapeHtml(periodoTexto)}</div>
+    <div class="meta">Emitido el ${escapeHtml(emitidoEn)}${authUser?.email ? ` · ${escapeHtml(authUser.email)}` : ''}</div>
+    ${tipoFiltroTexto ? `<div class="filtros">${escapeHtml(tipoFiltroTexto)}</div>` : ''}
+  </header>
+  ${rows.length === 0
+    ? '<div class="empty">No hay comprobantes para los filtros seleccionados.</div>'
+    : `<table>
+        <thead>
+          <tr>
+            <th class="col-fecha">Fecha</th>
+            <th>Tipo</th>
+            <th>Comprobante</th>
+            <th>Cliente</th>
+            <th>CUIT</th>
+            <th class="num">Importe</th>
+            <th>CAE</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>`}
+  <div class="totales">
+    <div class="total-card">
+      <div class="label">Facturas (${countFacturas})</div>
+      <div class="value">${escapeHtml(fmtMoneyArs(totalFacturas))}</div>
+    </div>
+    <div class="total-card">
+      <div class="label">Notas de crédito (${countNC})</div>
+      <div class="value">- ${escapeHtml(fmtMoneyArs(totalNC))}</div>
+    </div>
+    <div class="total-card neto">
+      <div class="label">Neto facturado</div>
+      <div class="value">${escapeHtml(fmtMoneyArs(totalNeto))}</div>
+    </div>
+  </div>
+  <div class="footer">LupoHub · Facturación AFIP</div>
+  <script>
+    window.addEventListener('load', function () {
+      if (!window.location.hash.includes('noprint')) {
+        setTimeout(function () { window.print(); }, 300);
+      }
+    });
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error: any) {
+    console.error('printBilling:', error);
+    res.status(500).send(
+      `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:24px"><h1>Error generando el listado</h1><p>${escapeHtml(error?.message || 'Error desconocido')}</p></body>`
+    );
+  }
+};
 
 /** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
 function detectProvincia(city: string, address: string = ''): { code: string; name: string } {

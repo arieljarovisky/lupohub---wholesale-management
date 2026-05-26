@@ -2964,6 +2964,40 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /**
+   * Abre en pestaña nueva el listado HTML imprimible de facturación (con fechas en español).
+   * El HTML dispara `window.print()` al cargar.
+   */
+  openBillingPrint: async (params?: {
+    desde?: string;
+    hasta?: string;
+    customerId?: string;
+    province?: string;
+    tipo?: 'FACTURA' | 'NC';
+  }): Promise<void> => {
+    const queryParams = new URLSearchParams();
+    if (params?.desde) queryParams.append('desde', params.desde);
+    if (params?.hasta) queryParams.append('hasta', params.hasta);
+    if (params?.customerId) queryParams.append('customerId', params.customerId);
+    if (params?.province) queryParams.append('province', params.province);
+    if (params?.tipo) queryParams.append('tipo', params.tipo);
+    const qs = queryParams.toString();
+    const blob = await getBlob(`/billing/print${qs ? '?' + qs : ''}`);
+    const htmlBlob = blob.type.includes('html') ? blob : new Blob([blob], { type: 'text/html' });
+    const url = URL.createObjectURL(htmlBlob);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  },
+
   /** Exporta Excel "Ventas por Jurisdicción" con el formato del estudio (FAC + NC del rango de fechas). */
   exportVentasJurisdiccion: async (params: { desde: string; hasta: string }): Promise<void> => {
     const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta }).toString();
