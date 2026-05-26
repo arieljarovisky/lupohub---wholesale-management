@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { query, execute } from '../database/db';
+import { query, execute, pool } from '../database/db';
 import * as XLSX from 'xlsx';
 
 function parseMoney(value: any): number {
@@ -1405,9 +1405,15 @@ export const importAgipPadron = async (req: Request, res: Response) => {
     }
 
     const entries = Array.from(byCuit.entries());
-    await execute('START TRANSACTION');
+    /*
+     * IMPORTANTE: el pool puede asignar conexiones distintas entre llamadas, así que `START TRANSACTION`
+     * por `execute()` (a) falla con ER_UNSUPPORTED_PS porque execute usa prepared statements y
+     * (b) aunque funcionara, no garantizaría atomicidad. Tomamos una conexión dedicada.
+     */
+    const conn = await pool.getConnection();
     try {
-      await execute(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+      await conn.beginTransaction();
+      await conn.query(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
 
       const CHUNK = 1000;
       for (let i = 0; i < entries.length; i += CHUNK) {
@@ -1417,17 +1423,19 @@ export const importAgipPadron = async (req: Request, res: Response) => {
         for (const [cuit, alicuota] of slice) {
           params.push(period, cuit, alicuota);
         }
-        await execute(
+        await conn.query(
           `INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
            VALUES ${placeholders}`,
           params
         );
       }
 
-      await execute('COMMIT');
+      await conn.commit();
     } catch (e) {
-      await execute('ROLLBACK');
+      try { await conn.rollback(); } catch { /* ignore */ }
       throw e;
+    } finally {
+      conn.release();
     }
     res.json({ message: 'Padrón AGIP importado', period, imported: entries.length });
   } catch (error: any) {
