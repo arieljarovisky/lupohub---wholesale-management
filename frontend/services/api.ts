@@ -352,6 +352,12 @@ export const api = {
     invoicedNet: number;
     invoicedIva: number;
     invoicedCount: number;
+    invoicedPaidTotal: number;
+    invoicedPaidNet: number;
+    invoicedPaidCount: number;
+    invoicedUnpaidTotal: number;
+    invoicedUnpaidNet: number;
+    invoicedUnpaidCount: number;
     pendingInvoicesTotal: number;
     pendingInvoicesCount: number;
     pendingInvoices: Array<{

@@ -422,6 +422,22 @@ const CompanyFinance: React.FC = () => {
                 {summary.invoicedCount ?? 0} factura(s) · neto {fmt(summary.invoicedNet ?? 0)} · IVA{' '}
                 {fmt(summary.invoicedIva ?? 0)}
               </p>
+              <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
+                <div className="rounded-md bg-emerald-950/40 border border-emerald-800/40 px-2 py-1.5">
+                  <p className="text-emerald-300/80 uppercase font-bold tracking-wide">Cobrado</p>
+                  <p className="font-mono text-emerald-300 text-xs leading-tight">
+                    {fmt(summary.invoicedPaidTotal ?? 0)}
+                  </p>
+                  <p className="text-slate-500">{summary.invoicedPaidCount ?? 0} fact.</p>
+                </div>
+                <div className="rounded-md bg-amber-950/40 border border-amber-800/40 px-2 py-1.5">
+                  <p className="text-amber-300/80 uppercase font-bold tracking-wide">Sin cobrar</p>
+                  <p className="font-mono text-amber-200 text-xs leading-tight">
+                    {fmt(summary.invoicedUnpaidTotal ?? 0)}
+                  </p>
+                  <p className="text-slate-500">{summary.invoicedUnpaidCount ?? 0} fact.</p>
+                </div>
+              </div>
             </div>
             <div className="rounded-xl border border-red-800/40 bg-red-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Gastos totales</p>
