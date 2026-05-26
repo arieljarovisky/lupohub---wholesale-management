@@ -1059,49 +1059,48 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                           item.tipo === 'FACTURA' &&
                           item.orderId &&
                           !String(item.id || '').startsWith('mm-fac-') &&
-                          (Number(item.agipRetPer || 0) > 0.005 || Number(item.agipAlicuota || 0) > 0.005) &&
                           Number(item.creditNotesCount || 0) === 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    showConfirm({
-                                      title: 'Nuevo CAE con IIBB en AFIP',
-                                      message:
-                                        'Se emitirá en AFIP una nota de crédito por el total del pedido y enseguida una nueva factura con percepción IIBB. El inventario no se modifica. Solo si el pedido no tiene notas de crédito previas. ¿Continuar?',
-                                      confirmLabel: 'Reemitir con IIBB',
-                                      onConfirm: () => {
-                                        setBillingReemitOrderId(item.orderId);
-                                        api
-                                          .reemitirFacturaConAgip(item.orderId)
-                                          .then((r: any) => {
-                                            showToast('success', r?.message || 'Factura reemitida con nuevo CAE e IIBB en AFIP.');
-                                            void load();
-                                          })
-                                          .catch((err: any) => {
-                                            const d = err?.response?.data;
-                                            const base =
-                                              d?.message || err?.message || 'No se pudo reemitir la factura con IIBB';
-                                            const extra = d?.creditNoteEmitted
-                                              ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
-                                              : '';
-                                            showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
-                                            void load();
-                                          })
-                                          .finally(() => setBillingReemitOrderId(null));
-                                      }
-                                    });
-                                  }}
-                                  disabled={billingReemitOrderId === item.orderId}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-sky-200/95 text-xs hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
-                                  title="NC total + nueva factura AFIP con IIBB (nuevo CAE). Sin cambios de stock."
-                                >
-                                  {billingReemitOrderId === item.orderId ? (
-                                    <Loader2 size={14} className="animate-spin text-sky-300" />
-                                  ) : (
-                                    <RefreshCcw size={14} />
-                                  )}
-                                </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                showConfirm({
+                                  title: 'Rehacer factura con IIBB (nuevo CAE)',
+                                  message:
+                                    'Se emite en AFIP una nota de crédito total que anula la factura actual y enseguida una nueva factura con percepción IIBB calculada con el padrón AGIP del mes del pedido. Si el cliente no está en el padrón AGIP, no se hace nada y se muestra un error. El inventario NO se modifica. Solo si el pedido no tiene notas de crédito previas. ¿Continuar?',
+                                  confirmLabel: 'Rehacer factura',
+                                  onConfirm: () => {
+                                    setBillingReemitOrderId(item.orderId);
+                                    api
+                                      .reemitirFacturaConAgip(item.orderId)
+                                      .then((r: any) => {
+                                        showToast('success', r?.message || 'Factura rehecha con nuevo CAE e IIBB en AFIP.');
+                                        void load();
+                                      })
+                                      .catch((err: any) => {
+                                        const d = err?.response?.data;
+                                        const base =
+                                          d?.message || err?.message || 'No se pudo rehacer la factura con IIBB';
+                                        const extra = d?.creditNoteEmitted
+                                          ? ` NC emitida (CAE ${d?.creditNote?.cae ?? '—'}). ${d?.detail ? String(d.detail) : ''}`
+                                          : '';
+                                        showToast('error', `${base}${extra ? ` — ${extra}` : ''}`);
+                                        void load();
+                                      })
+                                      .finally(() => setBillingReemitOrderId(null));
+                                  }
+                                });
+                              }}
+                              disabled={billingReemitOrderId === item.orderId}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-sky-200/95 text-xs hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
+                              title="Rehacer factura: NC total + nueva factura AFIP con IIBB del padrón AGIP (nuevo CAE). Sin cambios de stock. Falla si el cliente no está en el padrón."
+                            >
+                              {billingReemitOrderId === item.orderId ? (
+                                <Loader2 size={14} className="animate-spin text-sky-300" />
+                              ) : (
+                                <RefreshCcw size={14} />
                               )}
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>
