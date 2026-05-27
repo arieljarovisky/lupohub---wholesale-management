@@ -143,6 +143,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, [readOnly, initialOrder, role]);
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const draftRestoredRef = useRef(false);
+  /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
+  const editHydratedOrderIdRef = useRef<string | null>(null);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
@@ -321,11 +323,17 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
 
-  /** Modo edición: convertir ítems existentes del pedido en filas de planilla. */
+  /** Modo edición: convertir ítems existentes del pedido en filas de planilla (una sola vez por pedido). */
   useEffect(() => {
-    if (!initialOrder) return;
+    if (!initialOrder) {
+      editHydratedOrderIdRef.current = null;
+      return;
+    }
+    if (!products.length) return;
+    if (editHydratedOrderIdRef.current === initialOrder.id) return;
+    editHydratedOrderIdRef.current = initialOrder.id;
+
     setSelectedCustomerId(initialOrder.customerId);
-    applyCustomerPriceList(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
     const productById = new Map<string, Product>();
@@ -376,7 +384,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
-  }, [initialOrder, products, applyCustomerPriceList]);
+  }, [initialOrder, products]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
