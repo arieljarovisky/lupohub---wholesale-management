@@ -24,9 +24,16 @@ function mergeGroupKeys(sku: string): string[] {
   return [...out];
 }
 
+function normalizeColorCode(code: string): string {
+  const t = String(code ?? '').trim();
+  if (!t) return '';
+  if (/^\d+$/.test(t)) return t.replace(/^0+/, '') || '0';
+  return t;
+}
+
 /** Clave estable para agrupar variantes por color (evita fusionar colores con color_code vacío). */
 export function variantColorKey(colorCode: string, colorName: string): string {
-  const code = String(colorCode ?? '').trim();
+  const code = normalizeColorCode(String(colorCode ?? '').trim());
   if (code) return `c:${code}`;
   const name = String(colorName ?? '')
     .trim()
