@@ -147,6 +147,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const editHydratedOrderIdRef = useRef<string | null>(null);
   /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
   const colorPickerRequestRef = useRef(0);
+  /** En edición: evita pisar priceAtMoment al abrir; permite recalcular si cambia la lista. */
+  const appliedPriceListForRowsRef = useRef<string | null | undefined>(undefined);
+  const priceListRecalcPendingRef = useRef(false);
+  /** Productos vigentes al cambiar la lista; recalcular solo cuando el array se actualiza. */
+  const productsAtPriceListChangeRef = useRef<Product[] | null>(null);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
@@ -386,7 +391,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
+    appliedPriceListForRowsRef.current = undefined;
   }, [initialOrder, products]);
+
+  useEffect(() => {
+    appliedPriceListForRowsRef.current = undefined;
+    priceListRecalcPendingRef.current = false;
+    productsAtPriceListChangeRef.current = null;
+  }, [initialOrder?.id]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const listId = selectedPriceListId ?? null;
+    if (appliedPriceListForRowsRef.current === undefined) return;
+    if (appliedPriceListForRowsRef.current !== listId) {
+      priceListRecalcPendingRef.current = true;
+      productsAtPriceListChangeRef.current = products;
+    }
+  }, [selectedPriceListId, isEditing, products]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
@@ -614,16 +636,26 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   };
 
   /**
-   * Recalcula precios de filas cuando cambia la lista de precios activa.
-   * En modo edición se respetan los precios guardados en el pedido (priceAtMoment),
-   * para no pisar descuentos/manuales al reabrir.
+   * Recalcula precios cuando cambia la lista activa o se recargan productos.
+   * En edición: al abrir se conservan priceAtMoment; si el usuario cambia la lista, se actualizan
+   * cuando llegan los productos de esa lista (evita precios viejos durante la carga).
    */
   useEffect(() => {
-    if (isEditing) return;
     if (!rows.length || !products.length) return;
-    setRows(prev => {
+
+    const listId = selectedPriceListId ?? null;
+    if (isEditing) {
+      if (appliedPriceListForRowsRef.current === undefined) {
+        appliedPriceListForRowsRef.current = listId;
+        return;
+      }
+      if (!priceListRecalcPendingRef.current) return;
+      if (products === productsAtPriceListChangeRef.current) return;
+    }
+
+    setRows((prev) => {
       let changed = false;
-      const next = prev.map(r => {
+      const next = prev.map((r) => {
         const nextPrice = getPriceFromList(r.productId, r.productCode, r.price);
         if (!Number.isFinite(nextPrice) || nextPrice === r.price) return r;
         changed = true;
@@ -631,6 +663,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       });
       return changed ? next : prev;
     });
+    priceListRecalcPendingRef.current = false;
+    productsAtPriceListChangeRef.current = null;
+    appliedPriceListForRowsRef.current = listId;
   }, [products, selectedPriceListId, isEditing, rows.length]);
 
   const buildRowForColor = (
