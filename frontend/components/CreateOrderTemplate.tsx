@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
-import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates } from '../utils/articleCodeUtils';
+import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
 
@@ -120,7 +120,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     productCode: string;
     productName: string;
     product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>;
-    options: Array<{ colorCode: string; colorName: string }>;
+    options: Array<{ colorKey: string; colorCode: string; colorName: string; alreadyInOrder: boolean }>;
     loading: boolean;
   } | null>(null);
   /** Códigos de artículo colapsados (solo se muestra resumen). */
@@ -665,11 +665,22 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
   };
 
-  /** Abre modal con colores del artículo que aún no están en el pedido. */
-  const openColorPickerForArticle = async (productCode: string) => {
+  /** Abre modal con todos los colores del artículo en catálogo. */
+  const openColorPickerForArticle = async (productCode: string, productId?: string) => {
     const code = (productCode || '').trim();
     if (!code) return;
-    const displayCode = resolveDisplayArticleCode(code);
+    let lookupSku = code;
+    let displayCode = resolveDisplayArticleCode(code);
+    if (productId) {
+      const byId = products.find(
+        (p) => p.id === productId || String((p as any).product_id || '') === productId
+      );
+      const catalogSku = String((byId as any)?.base_sku || byId?.sku || '').trim();
+      if (catalogSku) {
+        lookupSku = catalogSku;
+        displayCode = resolveDisplayArticleCode(catalogSku);
+      }
+    }
     setColorPicker({
       productCode: displayCode,
       productName: '',
@@ -679,7 +690,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     try {
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
-      for (const candidate of skuLookupCandidates(code)) {
+      for (const candidate of skuLookupCandidates(lookupSku)) {
         product = await api.getProductBySku(candidate);
         if (product?.variants?.length) break;
         product = null;
@@ -692,21 +703,29 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
-        const c = v.color_code ?? '';
-        if (!byColor.has(c)) byColor.set(c, []);
-        byColor.get(c)!.push(v);
+        const key = variantColorKey(v.color_code ?? '', v.color_name ?? '');
+        if (!byColor.has(key)) byColor.set(key, []);
+        byColor.get(key)!.push(v);
       }
-      const existingColorCodes = new Set(
-        rows.filter(r => articleCodesMatch(rowArticlePrefix(r), displayCode)).map(r => r.colorCode)
+      const existingColorKeys = new Set(
+        rows
+          .filter((r) => articleCodesMatch(rowArticlePrefix(r), displayCode))
+          .map((r) => variantColorKey(r.colorCode, r.colorName))
       );
-      const options: Array<{ colorCode: string; colorName: string }> = [];
-      byColor.forEach((vars, colorCode) => {
-        if (existingColorCodes.has(colorCode)) return;
-        options.push({ colorCode, colorName: vars[0]?.color_name ?? colorCode });
+      const options: Array<{ colorKey: string; colorCode: string; colorName: string; alreadyInOrder: boolean }> = [];
+      byColor.forEach((vars, colorKey) => {
+        const colorCode = String(vars[0]?.color_code ?? '').trim();
+        const colorName = vars[0]?.color_name ?? colorCode;
+        options.push({
+          colorKey,
+          colorCode,
+          colorName,
+          alreadyInOrder: existingColorKeys.has(colorKey)
+        });
       });
       options.sort((a, b) => a.colorName.localeCompare(b.colorName, 'es', { sensitivity: 'base' }));
       if (options.length === 0) {
-        showToast('info', 'Este artículo ya tiene todos sus colores en el pedido.');
+        showToast('error', 'El artículo no tiene colores en el catálogo.');
         setColorPicker(null);
         return;
       }
@@ -726,15 +745,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
   };
 
-  const addSelectedColorToArticle = (colorCode: string) => {
+  const addSelectedColorToArticle = (colorKey: string) => {
     if (!colorPicker?.product) return;
+    const opt = colorPicker.options.find((o) => o.colorKey === colorKey);
+    if (opt?.alreadyInOrder) return;
     const { product, productCode: displayCode } = colorPicker;
     const variants = (product.variants || []) as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
-    const vars = variants.filter(v => (v.color_code ?? '') === colorCode);
+    const vars = variants.filter(
+      (v) => variantColorKey(v.color_code ?? '', v.color_name ?? '') === colorKey
+    );
     if (!vars.length) {
       showToast('error', 'Color no encontrado en el catálogo.');
       return;
     }
+    const colorCode = String(vars[0]?.color_code ?? opt?.colorCode ?? '').trim();
     const newRow = buildRowForColor(product, displayCode, colorCode, vars);
     let insertEnd = rows.length;
     for (let i = rows.length - 1; i >= 0; i--) {
@@ -862,12 +886,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   /** Agrupar filas por prefijo de artículo (orden de aparición). */
   const groups = useMemo(() => {
-    const list: Array<{ productCode: string; productName: string; rows: TemplateRow[] }> = [];
-    let current: { productCode: string; productName: string; rows: TemplateRow[] } | null = null;
+    const list: Array<{ productCode: string; productName: string; productId?: string; rows: TemplateRow[] }> = [];
+    let current: { productCode: string; productName: string; productId?: string; rows: TemplateRow[] } | null = null;
     for (const row of rows) {
       const prefix = rowArticlePrefix(row);
       if (!current || current.productCode !== prefix) {
-        current = { productCode: prefix, productName: row.productName, rows: [row] };
+        current = { productCode: prefix, productName: row.productName, productId: row.productId, rows: [row] };
         list.push(current);
       } else {
         current.rows.push(row);
@@ -1285,7 +1309,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
                           <button
                             type="button"
-                            onClick={() => openColorPickerForArticle(group.productCode)}
+                            onClick={() => openColorPickerForArticle(group.productCode, group.productId)}
                             disabled={readOnly || !!colorPicker?.loading}
                             className="flex items-center gap-2 text-slate-400 hover:text-blue-400 text-xs font-semibold transition-colors touch-manipulation disabled:opacity-50"
                           >
@@ -1374,13 +1398,22 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
                 {colorPicker.options.map((opt) => (
                   <button
-                    key={opt.colorCode}
+                    key={opt.colorKey}
                     type="button"
-                    onClick={() => addSelectedColorToArticle(opt.colorCode)}
-                    className="w-full text-left px-4 py-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 hover:bg-slate-700/80 hover:border-blue-500/50 transition flex items-center justify-between gap-3 touch-manipulation"
+                    disabled={opt.alreadyInOrder}
+                    onClick={() => addSelectedColorToArticle(opt.colorKey)}
+                    className={`w-full text-left px-4 py-3.5 rounded-xl border transition flex items-center justify-between gap-3 touch-manipulation ${
+                      opt.alreadyInOrder
+                        ? 'bg-slate-800/40 border-slate-700/50 opacity-60 cursor-not-allowed'
+                        : 'bg-slate-800/80 border-slate-700/80 hover:bg-slate-700/80 hover:border-blue-500/50'
+                    }`}
                   >
                     <span className="font-mono text-white text-sm">{formatColorCell(opt.colorCode, opt.colorName)}</span>
-                    <Plus size={20} className="text-blue-400 shrink-0" />
+                    {opt.alreadyInOrder ? (
+                      <span className="text-xs text-slate-500 shrink-0">Ya en el pedido</span>
+                    ) : (
+                      <Plus size={20} className="text-blue-400 shrink-0" />
+                    )}
                   </button>
                 ))}
               </div>
