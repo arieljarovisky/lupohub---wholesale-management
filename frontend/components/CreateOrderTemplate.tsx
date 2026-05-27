@@ -404,6 +404,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     if (!initialOrder) draftOrderIdRef.current = null;
   }, [initialOrder?.id]);
 
+  /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
   useEffect(() => {
     if (!isEditing) return;
     const listId = selectedPriceListId ?? null;
@@ -412,7 +413,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       priceListRecalcPendingRef.current = true;
       productsAtPriceListChangeRef.current = products;
     }
-  }, [selectedPriceListId, isEditing, products]);
+  }, [selectedPriceListId, isEditing]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
@@ -629,15 +630,52 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     showToast('success', `Descuento global del ${discount}% aplicado a todos los artículos.`);
   };
 
-  /** Precio del producto según la lista de precios (products ya vienen con precio de la lista seleccionada). */
-  const getPriceFromList = (productId: string, productSku: string, fallbackBasePrice?: number): number => {
-    const p = products.find((x: any) => x.product_id === productId || x.base_sku === productSku || (x as any).sku === productSku || x.id === productId);
-    if (p != null) {
-      const listPrice = Number((p as any).price);
-      if (!isNaN(listPrice) && listPrice >= 0) return listPrice;
+  /** Mapa producto padre / SKU → precio de la lista activa (products ya vienen filtrados por lista). */
+  const catalogPriceByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of products) {
+      const price = Number(p.price);
+      if (!Number.isFinite(price) || price < 0) continue;
+      const pid = String((p as any).product_id || '').trim();
+      if (pid) m.set(`id:${pid}`, price);
+      const base = String((p as any).base_sku || '').trim();
+      if (base) {
+        m.set(`sku:${base.toLowerCase()}`, price);
+        m.set(`sku:${resolveDisplayArticleCode(base).toLowerCase()}`, price);
+      }
     }
-    return Math.max(0, Number(fallbackBasePrice) || 0);
-  };
+    return m;
+  }, [products]);
+
+  const getPriceFromList = useCallback(
+    (productId: string, productSku: string, fallbackBasePrice?: number): number => {
+      const pid = String(productId || '').trim();
+      if (pid) {
+        const byId = catalogPriceByKey.get(`id:${pid}`);
+        if (byId != null) return byId;
+      }
+      const sku = String(productSku || '').trim();
+      if (sku) {
+        const bySku =
+          catalogPriceByKey.get(`sku:${sku.toLowerCase()}`) ??
+          catalogPriceByKey.get(`sku:${resolveDisplayArticleCode(sku).toLowerCase()}`);
+        if (bySku != null) return bySku;
+      }
+      for (const p of products) {
+        if (pid && String((p as any).product_id) === pid) {
+          const listPrice = Number(p.price);
+          if (Number.isFinite(listPrice) && listPrice >= 0) return listPrice;
+        }
+        const base = String((p as any).base_sku || '').trim();
+        if (base && articleCodesMatch(base, sku)) {
+          const listPrice = Number(p.price);
+          if (Number.isFinite(listPrice) && listPrice >= 0) return listPrice;
+        }
+      }
+      return Math.max(0, Number(fallbackBasePrice) || 0);
+    },
+    [catalogPriceByKey, products]
+  );
 
   /**
    * Recalcula precios cuando cambia la lista activa o se recargan productos.
@@ -660,7 +698,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setRows((prev) => {
       let changed = false;
       const next = prev.map((r) => {
-        const nextPrice = getPriceFromList(r.productId, r.productCode, r.price);
+        const code = rowArticlePrefix(r);
+        const nextPrice = getPriceFromList(r.productId, code || r.productCode, r.price);
         if (!Number.isFinite(nextPrice) || nextPrice === r.price) return r;
         changed = true;
         return { ...r, price: nextPrice };
@@ -670,7 +709,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
     appliedPriceListForRowsRef.current = listId;
-  }, [products, selectedPriceListId, isEditing, rows.length]);
+  }, [products, selectedPriceListId, isEditing, rows.length, getPriceFromList, rowArticlePrefix]);
 
   const buildRowForColor = (
     product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>,
