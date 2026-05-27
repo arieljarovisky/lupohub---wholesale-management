@@ -583,6 +583,84 @@ export const getOrders = async (req: any, res: any) => {
   }
 };
 
+async function buildPersistedOrderResponse(orderId: string, newOrder: Order, despachoWarnings: string[]): Promise<any> {
+  const created = await get(
+    `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+     FROM orders o
+     LEFT JOIN users cu ON cu.id = o.created_by
+     LEFT JOIN users su ON su.id = o.seller_id
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (!created) {
+    return {
+      ...newOrder,
+      id: orderId,
+      paymentStatus: (newOrder as any).paymentStatus === 'pagado' ? 'pagado' : 'pendiente',
+      despachoWarnings,
+      items: newOrder.items,
+    } as any;
+  }
+  const items = await query(
+    `
+    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+           pc.product_id AS productId,
+           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
+           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
+    FROM order_items i
+    JOIN product_variants pv ON pv.id = i.variant_id
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN sizes s ON s.id = pv.size_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
+    WHERE i.order_id = ?
+    ORDER BY i.id
+  `,
+    [orderId]
+  );
+  const itemsMapped = (items as any[]).map((row: any) => ({
+    variantId: row.variantId,
+    productId: row.productId,
+    despachoId: row.despachoId ?? undefined,
+    quantity: row.quantity,
+    picked: row.picked ?? 0,
+    priceAtMoment: Number(row.priceAtMoment),
+    sellAsPack: !!(row.sellAsPack),
+    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
+    sku: row.sku ?? undefined,
+    productName: row.productName ?? undefined,
+    sizeCode: row.sizeCode ?? undefined,
+    colorName: row.colorName ?? undefined,
+    colorCode: row.colorCode ?? undefined,
+    numeroDespacho: row.numeroDespacho ?? undefined,
+  }));
+  return {
+    id: created.id,
+    customerId: created.customer_id,
+    sellerId: created.seller_id,
+    createdBy: (created as any).created_by ?? undefined,
+    createdByName: (created as any).created_by_name ?? undefined,
+    createdByRole: (created as any).created_by_role ?? undefined,
+    sellerName: (created as any).seller_name ?? undefined,
+    date: created.date,
+    status: created.status,
+    total: Number(created.total),
+    pickedBy: created.picked_by ?? undefined,
+    dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
+    items: itemsMapped,
+    paymentStatus: mapPaymentStatus(created),
+    noStockImpact: !!created.no_stock_impact,
+    matrixImportLabel: (created as any).matrix_import_label
+      ? String((created as any).matrix_import_label)
+      : undefined,
+    despachoWarnings,
+  };
+}
+
 async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrderId?: string): Promise<any> {
   if (!newOrder.customerId || !newOrder.items?.length) {
     const err: any = new Error('Datos de pedido inválidos');
@@ -602,6 +680,11 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   }
 
   const orderId = explicitOrderId || newOrder.id || uuidv4();
+  const alreadyExists = await get('SELECT id FROM orders WHERE id = ? LIMIT 1', [orderId]);
+  if (alreadyExists?.id) {
+    // Idempotencia: si llega un POST duplicado con el mismo id, devolver el mismo pedido.
+    return buildPersistedOrderResponse(orderId, newOrder, []);
+  }
 
   const toSqlDate = (d: string) => {
     try {
@@ -744,81 +827,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
 
   // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
 
-  const created = await get(
-    `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
-     FROM orders o
-     LEFT JOIN users cu ON cu.id = o.created_by
-     LEFT JOIN users su ON su.id = o.seller_id
-     WHERE o.id = ?`,
-    [orderId]
-  );
-  if (!created) {
-    return {
-      ...newOrder,
-      id: orderId,
-      paymentStatus,
-      despachoWarnings,
-      items: newOrder.items,
-    } as any;
-  }
-  const items = await query(
-    `
-    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
-           pc.product_id AS productId,
-           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
-           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
-    FROM order_items i
-    JOIN product_variants pv ON pv.id = i.variant_id
-    JOIN product_colors pc ON pc.id = pv.product_color_id
-    JOIN products p ON p.id = pc.product_id
-    LEFT JOIN sizes s ON s.id = pv.size_id
-    LEFT JOIN colors c ON c.id = pc.color_id
-    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
-    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
-    WHERE i.order_id = ?
-    ORDER BY i.id
-  `,
-    [orderId]
-  );
-  const itemsMapped = (items as any[]).map((row: any) => ({
-    variantId: row.variantId,
-    productId: row.productId,
-    despachoId: row.despachoId ?? undefined,
-    quantity: row.quantity,
-    picked: row.picked ?? 0,
-    priceAtMoment: Number(row.priceAtMoment),
-    sellAsPack: !!(row.sellAsPack),
-    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-    sku: row.sku ?? undefined,
-    productName: row.productName ?? undefined,
-    sizeCode: row.sizeCode ?? undefined,
-    colorName: row.colorName ?? undefined,
-    colorCode: row.colorCode ?? undefined,
-    numeroDespacho: row.numeroDespacho ?? undefined,
-  }));
-  return {
-    id: created.id,
-    customerId: created.customer_id,
-    sellerId: created.seller_id,
-    createdBy: (created as any).created_by ?? undefined,
-    createdByName: (created as any).created_by_name ?? undefined,
-    createdByRole: (created as any).created_by_role ?? undefined,
-    sellerName: (created as any).seller_name ?? undefined,
-    date: created.date,
-    status: created.status,
-    total: Number(created.total),
-    pickedBy: created.picked_by ?? undefined,
-    dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-    items: itemsMapped,
-    paymentStatus: mapPaymentStatus(created),
-    noStockImpact: !!created.no_stock_impact,
-    matrixImportLabel: (created as any).matrix_import_label
-      ? String((created as any).matrix_import_label)
-      : undefined,
-    despachoWarnings,
-  };
+  return buildPersistedOrderResponse(orderId, newOrder, despachoWarnings);
 }
 
 export const createOrder = async (req: any, res: any) => {
