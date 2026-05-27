@@ -124,6 +124,7 @@ const App: React.FC = () => {
   const [myUserTasks, setMyUserTasks] = useState<UserTask[]>([]);
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
+  const saveOrderInFlightRef = useRef<Promise<void> | null>(null);
   const editingOrderIdRef = useRef<string | null>(null);
   const DRAFT_KEY = 'lupo_order_template_draft';
   const allowedByRole: Record<string, Role[]> = {
@@ -469,39 +470,54 @@ const App: React.FC = () => {
   };
 
   const handleCreateOrder = async (newOrder: Order) => {
-    if (savingOrderRef.current) return;
-    savingOrderRef.current = true;
-    try {
-      const effectiveEditId = editingOrder?.id || editingOrderIdRef.current;
-      const isEditing = !!effectiveEditId && orders.some((o) => o.id === effectiveEditId);
-      const orderToSave = { ...newOrder };
-      if (isEditing && effectiveEditId) orderToSave.id = effectiveEditId;
-      if (currentUser?.role === Role.CUSTOMER) orderToSave.sellerId = null;
-      const savedOrder = isEditing ? await api.updateOrder(orderToSave) : await api.createOrder(orderToSave);
-      setOrders(prev => {
-        if (isEditing) {
-          return prev.map(o => o.id === savedOrder.id ? savedOrder : o);
-        }
-        return [savedOrder, ...prev];
-      });
-      setEditingOrder(null);
-      editingOrderIdRef.current = null;
-      setCurrentView('orders');
-      if (Array.isArray((savedOrder as any)?.despachoWarnings) && (savedOrder as any).despachoWarnings.length > 0) {
-        const warnings = (savedOrder as any).despachoWarnings as string[];
-        setDespachoWarningsToShow(warnings);
-      }
+    if (saveOrderInFlightRef.current) return saveOrderInFlightRef.current;
+
+    const run = async () => {
+      if (savingOrderRef.current) return;
+      savingOrderRef.current = true;
+      const wasEditing = !!(editingOrder?.id || editingOrderIdRef.current);
       try {
-        localStorage.removeItem('lupo_order_template_draft');
-      } catch {
-        /* ignore */
+        const effectiveEditId = editingOrder?.id || editingOrderIdRef.current;
+        const isEditing = !!effectiveEditId;
+        const orderToSave = { ...newOrder };
+        if (isEditing && effectiveEditId) orderToSave.id = effectiveEditId;
+        if (currentUser?.role === Role.CUSTOMER) orderToSave.sellerId = null;
+        const savedOrder = isEditing ? await api.updateOrder(orderToSave) : await api.createOrder(orderToSave);
+        setOrders((prev) => {
+          if (isEditing) {
+            const exists = prev.some((o) => o.id === savedOrder.id);
+            if (exists) return prev.map((o) => (o.id === savedOrder.id ? savedOrder : o));
+            return [savedOrder, ...prev];
+          }
+          if (prev.some((o) => o.id === savedOrder.id)) return prev;
+          return [savedOrder, ...prev];
+        });
+        setEditingOrder(null);
+        editingOrderIdRef.current = null;
+        setCurrentView('orders');
+        if (Array.isArray((savedOrder as any)?.despachoWarnings) && (savedOrder as any).despachoWarnings.length > 0) {
+          const warnings = (savedOrder as any).despachoWarnings as string[];
+          setDespachoWarningsToShow(warnings);
+        }
+        try {
+          localStorage.removeItem('lupo_order_template_draft');
+        } catch {
+          /* ignore */
+        }
+      } catch (error) {
+        console.error(error);
+        showToast('error', wasEditing ? 'Error actualizando el pedido' : 'Error creando el pedido');
+        throw error;
+      } finally {
+        savingOrderRef.current = false;
       }
-    } catch (error) {
-      console.error(error);
-      showToast('error', editingOrder ? 'Error actualizando el pedido' : 'Error creando el pedido');
-    } finally {
-      savingOrderRef.current = false;
-    }
+    };
+
+    const p = run().finally(() => {
+      if (saveOrderInFlightRef.current === p) saveOrderInFlightRef.current = null;
+    });
+    saveOrderInFlightRef.current = p;
+    return p;
   };
 
   const handleMatrixImportDone = useCallback(async () => {

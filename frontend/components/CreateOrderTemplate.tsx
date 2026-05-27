@@ -152,6 +152,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const priceListRecalcPendingRef = useRef(false);
   /** Productos vigentes al cambiar la lista; recalcular solo cuando el array se actualiza. */
   const productsAtPriceListChangeRef = useRef<Product[] | null>(null);
+  /** ID estable para pedidos nuevos: evita dos POST con distinto O-xxxxxx al confirmar dos veces. */
+  const draftOrderIdRef = useRef<string | null>(null);
+  const savingOrderLockRef = useRef(false);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
@@ -398,6 +401,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
+    if (!initialOrder) draftOrderIdRef.current = null;
   }, [initialOrder?.id]);
 
   useEffect(() => {
@@ -862,8 +866,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
     }
     if (items.length === 0) return null;
+    const orderId =
+      initialOrder?.id ||
+      draftOrderIdRef.current ||
+      (() => {
+        const id = `O-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 6)}`;
+        draftOrderIdRef.current = id;
+        return id;
+      })();
     return {
-      id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
+      id: orderId,
       customerId: selectedCustomerId,
       sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
@@ -879,35 +891,31 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
   };
 
-  const handleSave = async () => {
-    if (savingOrder) return;
-    const order = buildOrderPayload(false);
+  const persistOrder = async (asDraft: boolean) => {
+    if (savingOrderLockRef.current || savingOrder) return;
+    const order = buildOrderPayload(asDraft);
     if (!order) {
-      showToast('error', 'Agregá al menos una cantidad en algún talle.');
+      showToast(
+        'error',
+        asDraft
+          ? 'Agregá al menos una cantidad en algún talle para guardar el borrador.'
+          : 'Agregá al menos una cantidad en algún talle.'
+      );
       return;
     }
+    savingOrderLockRef.current = true;
     setSavingOrder(true);
     try {
       await Promise.resolve(onSave(order));
     } finally {
+      savingOrderLockRef.current = false;
       setSavingOrder(false);
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (savingOrder) return;
-    const order = buildOrderPayload(true);
-    if (!order) {
-      showToast('error', 'Agregá al menos una cantidad en algún talle para guardar el borrador.');
-      return;
-    }
-    setSavingOrder(true);
-    try {
-      await Promise.resolve(onSave(order));
-    } finally {
-      setSavingOrder(false);
-    }
-  };
+  const handleSave = () => persistOrder(false);
+
+  const handleSaveDraft = () => persistOrder(true);
 
   const totalUnits = useMemo(() => {
     let n = 0;
@@ -935,7 +943,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         if (rows.length > 0 && selectedCustomerId && totalUnits > 0) {
           e.preventDefault();
-          if (!savingOrder) handleSaveRef.current();
+          if (!savingOrder && !savingOrderLockRef.current) handleSaveRef.current();
         }
       }
     };
@@ -1407,6 +1415,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
               </button>
               <button
+                type="button"
                 disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
                 onClick={handleSave}
                 className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
