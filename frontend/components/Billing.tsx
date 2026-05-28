@@ -920,7 +920,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       {item.customerBusinessName}
                     </td>
                     <td className="px-3 py-2 align-middle text-right whitespace-nowrap tabular-nums">
-                      ${formatMoneyAr(item.importe ?? 0)}
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span>${formatMoneyAr(item.importe ?? 0)}</span>
+                        {item.tipo === 'FACTURA' && Number(item.agipRetPer || 0) > 0.005 && (
+                          <span className="text-[10px] font-bold text-amber-300/90">
+                            incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td
                       className="px-3 py-2 align-middle text-xs font-mono max-w-[7rem] truncate text-slate-400"

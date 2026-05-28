@@ -240,7 +240,7 @@ export const listBilling = async (req: Request, res: Response) => {
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -267,8 +267,8 @@ export const listBilling = async (req: Request, res: Response) => {
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -281,6 +281,7 @@ export const listBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
       ) AS b
@@ -472,7 +473,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -495,8 +496,8 @@ export const exportBilling = async (req: Request, res: Response) => {
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -506,6 +507,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
@@ -693,7 +695,7 @@ export const printBilling = async (req: Request, res: Response) => {
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
           c.cuit AS cuit,
@@ -712,8 +714,8 @@ export const printBilling = async (req: Request, res: Response) => {
           cn.punto_venta,
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
           c.cuit AS cuit,
@@ -722,6 +724,7 @@ export const printBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
@@ -1684,7 +1687,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           i.punto_venta,
           i.cbte_desde,
           i.cbte_hasta,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           o.id AS order_id,
           i.cae,
           i.cae_fch_vto,
@@ -1701,7 +1704,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para el export por cliente.
         SELECT
           'NC' AS tipo,
-          MAX(o.date) AS fecha,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1709,7 +1712,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           cn.punto_venta,
           cn.cbte_desde,
           cn.cbte_hasta,
-          SUM(cn.amount_credited) AS importe,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           cn.order_id AS order_id,
           cn.cae,
           cn.cae_fch_vto,
@@ -1720,6 +1723,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
+          AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) x
