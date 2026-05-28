@@ -3815,8 +3815,9 @@ export const assignCustomerSellersFromResumen = async (req: Request, res: Respon
 };
 
 /** Quita pendientes de pedidos ya despachados para un cliente:
- *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
- *  - Elimina renglones con quantity <= 0
+ *  - Si quantity > picked y picked > 0, deja quantity = picked (solo lo enviado)
+ *  - Elimina solo renglones que ya estaban en 0 (nunca pedidos)
+ *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
 export const clearDispatchedPendingsForCustomer = async (req: Request, res: Response) => {
@@ -3837,9 +3838,10 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
     }
 
     const dispatchedOrders = await query(
-      `SELECT id FROM orders
-       WHERE customer_id = ?
-         AND status IN ('Despachado', 'DISPATCHED')`,
+      `SELECT o.id FROM orders o
+       WHERE o.customer_id = ?
+         AND o.status IN ('Despachado', 'DISPATCHED')
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)`,
       [customerId]
     );
     const orderIds = (dispatchedOrders || []).map((o: any) => o.id).filter(Boolean);
@@ -3864,19 +3866,31 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
         await execute(
           `UPDATE order_items
            SET quantity = COALESCE(picked, 0)
-           WHERE order_id = ? AND quantity > COALESCE(picked, 0)`,
+           WHERE order_id = ?
+             AND COALESCE(picked, 0) > 0
+             AND quantity > COALESCE(picked, 0)`,
           [orderId]
         );
         itemsAdjusted += toAdjust;
       }
 
       const beforeDelete = await get(
-        `SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ? AND quantity <= 0`,
+        `SELECT COUNT(*) AS cnt
+         FROM order_items
+         WHERE order_id = ?
+           AND COALESCE(quantity, 0) <= 0
+           AND COALESCE(picked, 0) <= 0`,
         [orderId]
       );
       const toDelete = Number(beforeDelete?.cnt || 0);
       if (toDelete > 0) {
-        await execute(`DELETE FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+        await execute(
+          `DELETE FROM order_items
+           WHERE order_id = ?
+             AND COALESCE(quantity, 0) <= 0
+             AND COALESCE(picked, 0) <= 0`,
+          [orderId]
+        );
         itemsRemoved += toDelete;
       }
 

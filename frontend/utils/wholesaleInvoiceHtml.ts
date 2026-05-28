@@ -349,7 +349,23 @@ export function orderNetoFacturadoEstimado(order: Order): number {
   }
   const netoPicked = orderNetoFromItemsForAfip(order);
   if (netoPicked > 0.005) return netoPicked;
-  return orderNetoFromItemsByQuantity(order);
+  const netoQty = orderNetoFromItemsByQuantity(order);
+  if (netoQty > 0.005) return netoQty;
+  const stored = Math.round((Number(order.total) || 0) * 100) / 100;
+  if (stored > 0.005) return stored;
+  return 0;
+}
+
+/** Unidades a mostrar en tarjeta de pedido (ítems o estimado desde neto si se vació el detalle). */
+export function orderUnitsDisplayCount(order: Order): number | null {
+  const fromItems = (order.items || []).reduce((acc, i) => acc + (Number(i.quantity) || 0), 0);
+  if (fromItems > 0) return fromItems;
+  if (!order.invoice) return fromItems;
+  const neto = orderNetoFacturadoEstimado(order);
+  const prices = (order.items || []).map((i) => Number(i.priceAtMoment ?? 0)).filter((p) => p > 0);
+  const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+  if (neto > 0.005 && avgPrice > 0.005) return Math.round(neto / avgPrice);
+  return null;
 }
 
 /** Total del comprobante facturado (neto + IVA + IIBB según datos guardados). */

@@ -17,6 +17,7 @@ import {
   orderNetoFromItemsForAfip as orderNetoFromItems,
   orderNetoForNotaCreditoTotal,
   orderNetoSaldoForOrderCard,
+  orderUnitsDisplayCount,
   orderTotalesFacturado,
   orderTotalesNotaCredito,
   orderCreditNoteResumenLabel,
@@ -1707,7 +1708,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const showSellerLine = Boolean(
             order.sellerId && sellerDisplayName && (order.createdBy !== order.sellerId || !order.createdByName)
           );
-          const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
+          const totalItemsCount = orderUnitsDisplayCount(order);
+          const itemsMissingButInvoiced =
+            (order.items?.length ?? 0) === 0 && !!order.invoice;
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
           const activeTotalVoid =
@@ -2275,7 +2278,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-3 border-t border-slate-700/50">
                 <div className="text-xs text-slate-500">
-                  {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
+                  {itemsMissingButInvoiced ? (
+                    <span className="text-amber-400/95" title="El detalle del pedido quedó vacío (p. ej. tras «Quitar pendientes despachados» con pickeado en 0). La factura AFIP sigue vigente.">
+                      Sin líneas en el pedido • facturado en AFIP
+                    </span>
+                  ) : totalItemsCount != null ? (
+                    <>
+                      {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'}
+                    </>
+                  ) : (
+                    '— unidades'
+                  )}{' '}
+                  • {formatOrderDate(order.date)}
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap w-full sm:w-auto">
                    {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) &&

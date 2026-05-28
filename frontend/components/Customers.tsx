@@ -1687,7 +1687,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       }
                     }}
                     className="px-3 py-2 bg-amber-700/30 border border-amber-600/50 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-700/50 transition"
-                    title="Quitar pendientes de pedidos despachados de este cliente (deja solo lo efectivamente enviado)"
+                    title="Quitar pendientes de pedidos despachados sin factura AFIP. Solo recorta cantidad cuando hay unidades pickeadas; no borra pedidos facturados."
                   >
                     Quitar pendientes despachados
                   </button>
