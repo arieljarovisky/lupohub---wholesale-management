@@ -889,8 +889,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <th className="px-3 py-2 text-left">Pedido</th>
                 <th className="px-3 py-2 text-left">Cliente</th>
                 <th className="px-3 py-2 text-right">Importe</th>
-                <th className="px-3 py-2 text-left">CAE</th>
-                <th className="px-3 py-2 text-right">Acciones</th>
+                <th className="px-3 py-2 text-left max-w-[7rem]">CAE</th>
+                <th className="px-2 py-2 text-right sticky right-0 z-20 bg-slate-800/95 backdrop-blur-sm min-w-[9.5rem] shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
+                  Acciones
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -904,28 +906,37 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               {pagedItems.map((item: any) => {
                 const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
                 return (
-                  <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60">
-                    <td className="px-3 py-2">{formatDate(item.fecha)}</td>
-                    <td className="px-3 py-2">
+                  <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60 group">
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{formatDate(item.fecha)}</td>
+                    <td className="px-3 py-2 align-middle">
                       <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                         {formatTipo(item)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{item.puntoVta}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{numero}</td>
-                    <td className="px-3 py-2 font-mono whitespace-nowrap">{item.orderId}</td>
-                    <td className="px-3 py-2 max-w-[320px] truncate">{item.customerBusinessName}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">${formatMoneyAr(item.importe ?? 0)}</td>
-                    <td className="px-3 py-2 text-xs font-mono whitespace-nowrap">{item.cae}</td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="inline-flex flex-wrap items-center justify-end gap-1 max-w-[220px]">
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{item.puntoVta}</td>
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{numero}</td>
+                    <td className="px-3 py-2 align-middle font-mono text-xs whitespace-nowrap">{item.orderId}</td>
+                    <td className="px-3 py-2 align-middle max-w-[200px] truncate" title={item.customerBusinessName}>
+                      {item.customerBusinessName}
+                    </td>
+                    <td className="px-3 py-2 align-middle text-right whitespace-nowrap tabular-nums">
+                      ${formatMoneyAr(item.importe ?? 0)}
+                    </td>
+                    <td
+                      className="px-3 py-2 align-middle text-xs font-mono max-w-[7rem] truncate text-slate-400"
+                      title={item.cae}
+                    >
+                      {item.cae}
+                    </td>
+                    <td className="px-2 py-1.5 align-middle text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800/60 shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
+                      <div className="inline-flex flex-nowrap items-center justify-end gap-0.5">
                         <button
                           type="button"
                           onClick={() => handleVer(item)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
-                          title="Ver detalle del comprobante"
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700/80"
+                          title="Ver comprobante"
                         >
-                          <Eye size={14} /> Ver
+                          <Eye size={15} />
                         </button>
                         {item.tipo === 'FACTURA' &&
                           item.orderId &&
@@ -946,10 +957,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                                 onNavigate('orders');
                               }}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
-                              title="Ir al pedido (para emitir NC parcial por ítems, ver historial, etc.)"
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700/80"
+                              title="Ir al pedido"
                             >
-                              <ExternalLink size={14} />
+                              <ExternalLink size={15} />
                             </button>
                           )}
                         {canAfipInvoiceActions &&
@@ -989,13 +1000,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                               }}
                               disabled={billingEmitNCOrderId === item.orderId}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-orange-200/95 text-xs hover:bg-slate-700 border border-orange-900/40 disabled:opacity-50"
-                              title="Emitir NC por el total de la factura (restituye stock). Para NC parcial por ítems, ir al pedido."
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-orange-200/95 hover:bg-slate-700 border border-orange-900/40 disabled:opacity-50"
+                              title="NC total (restituye stock)"
                             >
                               {billingEmitNCOrderId === item.orderId ? (
-                                <Loader2 size={14} className="animate-spin text-orange-300" />
+                                <Loader2 size={15} className="animate-spin text-orange-300" />
                               ) : (
-                                <FileMinus size={14} />
+                                <FileMinus size={15} />
                               )}
                             </button>
                           )}
@@ -1036,17 +1047,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                   });
                                 }}
                                 disabled={billingRecalcOrderId === item.orderId}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-amber-200/95 text-xs hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
-                                title={
-                                  tieneIibb
-                                    ? 'Recalcular IIBB (AGIP) y guardar para el PDF'
-                                    : 'Buscar al cliente en el padrón AGIP y agregar IIBB al PDF de esta factura (no cambia el CAE)'
-                                }
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-amber-200/95 hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
+                                title={tieneIibb ? 'Recalcular IIBB (PDF)' : 'Agregar IIBB (PDF)'}
                               >
                                 {billingRecalcOrderId === item.orderId ? (
-                                  <Loader2 size={14} className="animate-spin text-amber-300" />
+                                  <Loader2 size={15} className="animate-spin text-amber-300" />
                                 ) : (
-                                  <Percent size={14} />
+                                  <Percent size={15} />
                                 )}
                               </button>
                             );
@@ -1087,13 +1094,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                               }}
                               disabled={billingReemitOrderId === item.orderId}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-sky-200/95 text-xs hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
-                              title="Rehacer factura: NC total + nueva factura AFIP con IIBB del padrón AGIP (nuevo CAE). Sin cambios de stock. Falla si el cliente no está en el padrón."
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-sky-200/95 hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
+                              title="Rehacer factura con IIBB (nuevo CAE)"
                             >
                               {billingReemitOrderId === item.orderId ? (
-                                <Loader2 size={14} className="animate-spin text-sky-300" />
+                                <Loader2 size={15} className="animate-spin text-sky-300" />
                               ) : (
-                                <RefreshCcw size={14} />
+                                <RefreshCcw size={15} />
                               )}
                             </button>
                           )}

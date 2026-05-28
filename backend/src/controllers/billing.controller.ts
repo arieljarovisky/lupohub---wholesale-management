@@ -239,7 +239,7 @@ export const listBilling = async (req: Request, res: Response) => {
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           o.total AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
@@ -471,7 +471,7 @@ export const exportBilling = async (req: Request, res: Response) => {
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           o.total AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
@@ -692,7 +692,7 @@ export const printBilling = async (req: Request, res: Response) => {
           i.punto_venta,
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           o.total AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
@@ -996,7 +996,7 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FAC' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           i.cbte_tipo,
           i.punto_venta,
           i.cbte_desde,
@@ -1198,7 +1198,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const rows = await query(
       `
       SELECT
-        o.date AS fecha,
+        COALESCE(DATE(i.created_at), o.date) AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,
@@ -1676,7 +1676,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FACTURA' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,

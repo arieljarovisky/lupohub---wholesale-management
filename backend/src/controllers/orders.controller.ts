@@ -1770,8 +1770,9 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         forceCbteTipo
       );
 
+      const { nowMysqlArgentina } = await import('../utils/argentinaDate');
       await execute(
-        `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?
+        `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?, created_at = ?
          WHERE order_id = ?`,
         [
           faResult.cae,
@@ -1782,6 +1783,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           faResult.cbteHasta,
           agip.alicuota,
           agip.amount,
+          nowMysqlArgentina(),
           id
         ]
       );
