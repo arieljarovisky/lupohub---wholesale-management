@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { canonicalizeCityInput } from './cityNormalize';
 
 export type CustomerImportRow = {
   name?: string;
@@ -97,7 +98,10 @@ export async function parseCustomersExcel(file: File): Promise<CustomerImportRow
       name: name || undefined,
       email,
       address: addressCol >= 0 ? trim(row[addressCol]) || undefined : undefined,
-      city: cityCol >= 0 ? trim(row[cityCol]) || undefined : undefined,
+      city: cityCol >= 0 ? (() => {
+        const raw = trim(row[cityCol]);
+        return raw ? canonicalizeCityInput(raw) : undefined;
+      })() : undefined,
       cuit,
       phone: phoneCol >= 0 ? trim(row[phoneCol]) || undefined : undefined,
       condicionIva: ivaCol >= 0 ? trim(row[ivaCol]) || undefined : undefined

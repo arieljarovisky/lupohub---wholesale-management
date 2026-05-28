@@ -7,6 +7,8 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
+import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
+import { CityInput } from './CityInput';
 
 interface CustomersProps {
   customers: Customer[];
@@ -245,7 +247,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const inText = (s: string) => s.toLowerCase().includes(q);
     if (inText(c.businessName) || inText(c.name)) return true;
     if (c.email && inText(c.email)) return true;
-    if (c.city && inText(c.city)) return true;
+    if (c.city) {
+      if (inText(c.city)) return true;
+      if (normalizeCityKey(qRaw) === 'caba' && isCabaCity(c.city)) return true;
+      if (isCabaCity(qRaw) && isCabaCity(c.city)) return true;
+    }
     if (c.legacyCode && String(c.legacyCode).toLowerCase().includes(q.replace(/\s/g, ''))) return true;
     const qDigits = q.replace(/\D/g, '');
     if (qDigits.length >= 4 && c.cuit) {
@@ -399,7 +405,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         id: (r.id || '').trim() || `da-${Date.now()}-${idx}`,
         label: (r.label || 'Sucursal').trim() || 'Sucursal',
         address: r.address.trim(),
-        city: (r.city || '').trim(),
+        city: canonicalizeCityInput(r.city || ''),
       }))
       .filter((r) => r.address.length > 0);
 
@@ -412,7 +418,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         name: newContactName,
         email: newEmail,
         address: newAddress || undefined,
-        city: newCity || undefined,
+        city: canonicalizeCityInput(newCity) || undefined,
         cuit: newCuit || undefined,
         phone: newPhone || undefined,
         transportNumber: newTransportNumber || undefined,
@@ -455,7 +461,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       name: newContactName,
       email: newEmail,
       address: newAddress,
-      city: newCity,
+      city: canonicalizeCityInput(newCity) || undefined,
       cuit: newCuit || undefined,
       phone: newPhone || undefined,
       transportNumber: newTransportNumber || undefined,
@@ -520,12 +526,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               value={row.address}
               onChange={(e) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, address: e.target.value } : r)))}
             />
-            <input
-              type="text"
-              className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-white text-sm"
-              placeholder="Ciudad / localidad"
+            <CityInput
+              compact
               value={row.city}
-              onChange={(e) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, city: e.target.value } : r)))}
+              onChange={(v) => setDeliveryBranchRows((prev) => prev.map((r, i) => (i === idx ? { ...r, city: v } : r)))}
+              placeholder="Ciudad / localidad"
             />
           </div>
         ))}
@@ -854,7 +859,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Ciudad</label>
-                <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={newCity} onChange={(e) => setNewCity(e.target.value)} placeholder="CABA" />
+                <CityInput value={newCity} onChange={setNewCity} />
               </div>
             </div>
             {renderDeliveryBranchesBlock()}
@@ -904,7 +909,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <div className="flex items-center gap-3 text-sm text-slate-400 flex-wrap">
                   <span className="flex items-center gap-1"><Users size={14}/> {selectedCustomer.name}</span>
                   <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
-                  <span className="flex items-center gap-1"><MapPin size={14}/> {selectedCustomer.city}</span>
+                  <span className="flex items-center gap-1"><MapPin size={14}/> {cityDisplayLabel(selectedCustomer.city || '')}</span>
                   {selectedCustomer.phone && (
                     <>
                       <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
@@ -2293,7 +2298,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   )}
                   <div className="flex items-center text-slate-500 truncate">
                     <MapPin size={12} className="mr-2 text-slate-600 shrink-0" />
-                    {customer.address}, {customer.city}
+                    {customer.address}{customer.city ? `, ${cityDisplayLabel(customer.city)}` : ''}
                   </div>
                 </div>
               </div>
@@ -2467,13 +2472,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
                 <div>
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Ciudad</label>
-                    <input 
-                      type="text" 
-                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                      value={newCity}
-                      onChange={(e) => setNewCity(e.target.value)}
-                      placeholder="CABA"
-                    />
+                    <CityInput value={newCity} onChange={setNewCity} />
                 </div>
               </div>
               {renderDeliveryBranchesBlock()}

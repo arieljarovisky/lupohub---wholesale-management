@@ -12,6 +12,7 @@ import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, Refr
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
+import { buildCityFilterOptions, cityMatchesFilter } from '../utils/cityNormalize';
 
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 const BILLING_PAGE_SIZE = 25;
@@ -532,17 +533,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return out;
   }, [customers]);
   const provinceOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) {
-      const city = (c.city || '').toString().trim();
-      if (city) set.add(city);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+    const cities = customers.map((c) => (c.city || '').toString().trim()).filter(Boolean);
+    return buildCityFilterOptions(cities);
   }, [customers]);
   const customersFilteredByProvince = useMemo(() => {
     if (province === 'ALL') return customers;
-    const p = province.toLowerCase();
-    return customers.filter((c) => (c.city || '').toString().toLowerCase().includes(p));
+    return customers.filter((c) => cityMatchesFilter((c.city || '').toString(), province));
   }, [customers, province]);
   const normalizeDateKey = (v: any): string => {
     if (!v) return '';
@@ -564,7 +560,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       if (customerId !== 'ALL' && String(it.customerId || '') !== customerId) return false;
       if (province !== 'ALL') {
         const city = customerCityById.get(String(it.customerId || '')) || '';
-        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+        if (!cityMatchesFilter(city, province)) return false;
       }
       if (tipo !== 'ALL' && String(it.tipo || '') !== tipo) return false;
       return true;
@@ -578,7 +574,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       if (customerId !== 'ALL' && String(p.customerId || '') !== customerId) return false;
       if (province !== 'ALL') {
         const city = customerCityById.get(String(p.customerId || '')) || '';
-        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+        if (!cityMatchesFilter(city, province)) return false;
       }
       return true;
     });
@@ -838,7 +834,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           </select>
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-black text-slate-500 uppercase">Provincia (en ciudad)</label>
+          <label className="text-[11px] font-black text-slate-500 uppercase">Ciudad / zona</label>
           <select
             value={province}
             onChange={e => setProvince(e.target.value)}
@@ -846,7 +842,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             <option value="ALL">Todas</option>
             {provinceOptions.map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p.value} value={p.value}>{p.label}</option>
             ))}
           </select>
         </div>

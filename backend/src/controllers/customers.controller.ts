@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
+import { canonicalizeCityInput } from '../utils/cityNormalize';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
 
@@ -22,7 +23,7 @@ function parseDeliveryAddressesFromRow(raw: unknown): CustomerDeliveryAddressDto
         id,
         label: (String((it as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
         address,
-        city: String((it as any).city ?? '').trim(),
+        city: canonicalizeCityInput((it as any).city) || '',
       });
     }
     return out;
@@ -45,7 +46,7 @@ function normalizeDeliveryAddressesForDb(input: unknown): string | null {
       id,
       label: (String((raw as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
       address,
-      city: String((raw as any).city ?? '').trim(),
+      city: canonicalizeCityInput((raw as any).city) || '',
     });
   }
   return cleaned.length ? JSON.stringify(cleaned) : null;
@@ -589,7 +590,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     const id = body.id && body.id.trim() ? body.id.trim() : uuidv4();
     const sellerId = body.sellerId?.trim() || null;
     const address = (body.address ?? '').toString().trim() || null;
-    const city = (body.city ?? '').toString().trim() || null;
+    const city = canonicalizeCityInput(body.city);
     const cuit = (body.cuit ?? '').toString().trim() || null;
     const phone = (body.phone ?? '').toString().trim() || null;
     const transportNumber = (body.transportNumber ?? '').toString().trim() || null;
@@ -675,7 +676,10 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.businessName !== undefined) { updates.push('business_name = ?'); params.push(body.businessName?.trim() || null); }
     if (body.email !== undefined) { updates.push('email = ?'); params.push(body.email?.trim() || null); }
     if (body.address !== undefined) { updates.push('address = ?'); params.push(body.address?.trim() || null); }
-    if (body.city !== undefined) { updates.push('city = ?'); params.push(body.city?.trim() || null); }
+    if (body.city !== undefined) {
+      updates.push('city = ?');
+      params.push(body.city != null && String(body.city).trim() ? canonicalizeCityInput(body.city) : null);
+    }
     if (body.cuit !== undefined) { updates.push('cuit = ?'); params.push(body.cuit?.trim() || null); }
     if (body.phone !== undefined) { updates.push('phone = ?'); params.push(body.phone?.trim() || null); }
     if (body.transportNumber !== undefined) { updates.push('transport_number = ?'); params.push(body.transportNumber?.trim() || null); }
@@ -848,7 +852,7 @@ export const importCustomers = async (req: Request, res: Response) => {
       const businessName = (r.businessName ?? '').toString().trim();
       let email = (r.email ?? '').toString().trim();
       const address = (r.address ?? '').toString().trim() || null;
-      const city = (r.city ?? '').toString().trim() || null;
+      const city = canonicalizeCityInput(r.city);
       const cuit = (r.cuit ?? '').toString().trim() || null;
       const cuitSolo = (cuit || '').replace(/\D/g, '');
       const phone = (r.phone ?? '').toString().trim() || null;
