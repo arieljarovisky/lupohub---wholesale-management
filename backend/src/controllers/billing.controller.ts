@@ -130,6 +130,110 @@ function txt(v: any, len: number): string {
   return ascii.slice(0, len).padEnd(len, ' ');
 }
 
+/** Longitud de registro e-Arciba (AGIP, vigente 01/2022+). */
+const ARCIBA_RECORD_LEN = 226;
+/** Código de norma para percepciones (3 dígitos). Configurable por env. */
+const AGIP_PERCEPCION_CODIGO_NORMA = (process.env.AGIP_PERCEPCION_CODIGO_NORMA || '029').padStart(3, '0').slice(-3);
+
+function mapCondicionIvaArciba(condicion: unknown): string {
+  const c = String(condicion || '').toLowerCase();
+  if (c.includes('monotribut')) return '4';
+  if (c.includes('exento')) return '3';
+  if (c.includes('consumidor final')) return '4';
+  if (c.includes('responsable inscripto')) return '1';
+  return '1';
+}
+
+/** Letra de comprobante para percepción según condición IVA del cliente (agente RI). */
+function letraComprobanteArciba(cbteTipo: number, condicionIva: unknown): string {
+  if (Number(cbteTipo) === 6 || Number(cbteTipo) === 8) return 'B';
+  const code = mapCondicionIvaArciba(condicionIva);
+  if (code === '1') return 'A';
+  return 'B';
+}
+
+/** Monto numérico Arciba: alineado a la derecha, coma decimal, ancho fijo. */
+function formatArcibaNumber(amount: number, width: number): string {
+  const capped = Math.min(9999999999999.99, Math.max(0, round2(amount)));
+  const body = capped.toFixed(2).replace('.', ',');
+  return body.length > width ? body.slice(-width) : body.padStart(width, '0');
+}
+
+function formatArcibaAlicuota(alicuota: number): string {
+  const n = Math.min(99.99, Math.max(0, Number(alicuota) || 0));
+  const intPart = Math.floor(n);
+  const dec = Math.round((n - intPart) * 100);
+  return `${String(intPart).padStart(2, '0')},${String(dec).padStart(2, '0')}`;
+}
+
+function formatArcibaComprobanteNumero(puntoVta: number, cbteDesde: number): string {
+  const pv = String(Number(puntoVta) || 0).padStart(5, '0');
+  const num = String(Number(cbteDesde) || 0).padStart(8, '0');
+  return (pv + num).padStart(16, '0');
+}
+
+/** Arma un registro de percepción (tipo op. 2) según diseño AGIP e-Arciba. */
+function buildArcibaPerceptionRecord(row: {
+  fecha: any;
+  cbte_tipo: number;
+  punto_venta: number;
+  cbte_desde: number;
+  neto: number;
+  agip_ret_per: number;
+  cuit: string;
+  razon_social: string;
+  alicuota: number;
+  condicion_iva?: string | null;
+}): string {
+  const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+  const put = (from: number, to: number, val: string, align: 'left' | 'right' = 'left') => {
+    const len = to - from + 1;
+    let v = String(val).slice(0, len);
+    v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+    for (let i = 0; i < len; i++) rec[from - 1 + i] = v[i];
+  };
+
+  const fecha = formatDateEsShort(row.fecha);
+  const letra = letraComprobanteArciba(Number(row.cbte_tipo), row.condicion_iva);
+  const cuit = onlyDigits(row.cuit).slice(0, 11);
+  const neto = round2(Math.abs(Number(row.neto) || 0));
+  const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
+  const otros = 0;
+  const montoComprobante = round2(neto + iva);
+  const montoSujeto = round2(montoComprobante - iva - otros);
+  const alicuota = Math.max(0, Number(row.alicuota) || 0);
+  const retPercStored = Math.abs(Number(row.agip_ret_per) || 0);
+  const retPerc =
+    retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(montoSujeto * (alicuota / 100)) : 0;
+  const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+
+  put(1, 1, '2');
+  put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+  put(5, 14, fecha);
+  put(15, 16, '01');
+  put(17, 17, letra);
+  put(18, 33, formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde), 'right');
+  put(34, 43, fecha);
+  put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+  put(60, 75, '');
+  put(76, 76, '3');
+  put(77, 87, cuit, 'right');
+  put(88, 88, '1');
+  put(89, 99, cuit, 'right');
+  put(100, 100, situacionIva);
+  put(101, 130, txt(row.razon_social, 30));
+  put(131, 146, formatArcibaNumber(otros, 16), 'right');
+  put(147, 162, formatArcibaNumber(iva, 16), 'right');
+  put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+  put(179, 183, formatArcibaAlicuota(alicuota), 'right');
+  put(184, 199, formatArcibaNumber(retPerc, 16), 'right');
+  put(200, 215, formatArcibaNumber(retPerc, 16), 'right');
+  put(216, 216, ' ');
+  put(217, 226, '          ');
+
+  return rec.join('');
+}
+
 function normalizeNameForMatch(v: any): string {
   return String(v || '')
     .normalize('NFD')
@@ -1177,9 +1281,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
     }
     const whereFac: string[] = [];
-    const whereNc: string[] = [];
     const paramsFac: any[] = [];
-    const paramsNc: any[] = [];
     if (fromDate && toDate) {
       // Emisión en el mes, o pedido del mes con IIBB ya guardado (reemisión posterior).
       whereFac.push(`(
@@ -1187,92 +1289,56 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         OR (o.date >= ? AND o.date <= ? AND COALESCE(i.agip_ret_per, 0) > 0.005)
       )`);
       paramsFac.push(fromDate, toDate, fromDate, toDate);
-      whereNc.push('COALESCE(DATE(cn.created_at), o.date) >= ? AND COALESCE(DATE(cn.created_at), o.date) <= ?');
-      paramsNc.push(fromDate, toDate);
     } else {
       if (fromDate) {
         whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
         paramsFac.push(fromDate);
-        whereNc.push('COALESCE(DATE(cn.created_at), o.date) >= ?');
-        paramsNc.push(fromDate);
       }
       if (toDate) {
         whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
         paramsFac.push(toDate);
-        whereNc.push('COALESCE(DATE(cn.created_at), o.date) <= ?');
-        paramsNc.push(toDate);
       }
     }
     if (customerId) {
       whereFac.push('o.customer_id = ?');
       paramsFac.push(customerId);
-      whereNc.push('o.customer_id = ?');
-      paramsNc.push(customerId);
     }
     const authUser = (req as any).user;
     if (authUser?.role === 'SELLER') {
       whereFac.push('c.seller_id = ?');
       paramsFac.push(authUser.id);
-      whereNc.push('c.seller_id = ?');
-      paramsNc.push(authUser.id);
     }
     // Facturas con IIBB guardado en LupoHub o alícuota en padrón del período.
     whereFac.push(
       '(COALESCE(i.agip_ret_per, 0) > 0.005 OR COALESCE(i.agip_alicuota, 0) > 0 OR COALESCE(ap.alicuota, 0) > 0)'
     );
-    whereNc.push('COALESCE(cn.superseded_by_reinvoice, 0) = 0');
     const whereFacSql = whereFac.length ? `WHERE ${whereFac.join(' AND ')}` : '';
-    const whereNcSql = whereNc.length ? `WHERE ${whereNc.join(' AND ')}` : '';
 
     await ensureAgipPadronTable();
     const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
 
     const rowsRaw = await query(
       `
-      SELECT * FROM (
-        SELECT
-          COALESCE(DATE(i.created_at), o.date) AS fecha,
-          i.cbte_tipo,
-          i.punto_venta,
-          i.cbte_desde,
-          o.total AS neto,
-          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe_total,
-          COALESCE(i.agip_ret_per, 0) AS agip_ret_per,
-          c.cuit,
-          c.city AS customer_city,
-          COALESCE(c.business_name, c.name, '') AS razon_social,
-          COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota
-        FROM invoices i
-        JOIN orders o ON o.id = i.order_id
-        JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-        ${whereFacSql}
-
-        UNION ALL
-
-        SELECT
-          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
-          cn.cbte_tipo,
-          cn.punto_venta,
-          cn.cbte_desde,
-          SUM(cn.amount_credited) AS neto,
-          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe_total,
-          0 AS agip_ret_per,
-          c.cuit,
-          c.city AS customer_city,
-          COALESCE(c.business_name, c.name, '') AS razon_social,
-          COALESCE(ap.alicuota, 0) AS alicuota
-        FROM credit_notes cn
-        JOIN orders o ON o.id = cn.order_id
-        JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-        ${whereNcSql}
-        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
-                 c.cuit, c.city, c.business_name, c.name, ap.alicuota
-      ) t
-      ORDER BY t.fecha ASC, t.punto_venta ASC, t.cbte_desde ASC
+      SELECT
+        COALESCE(DATE(i.created_at), o.date) AS fecha,
+        i.cbte_tipo,
+        i.punto_venta,
+        i.cbte_desde,
+        o.total AS neto,
+        COALESCE(i.agip_ret_per, 0) AS agip_ret_per,
+        c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
+        COALESCE(c.business_name, c.name, '') AS razon_social,
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota
+      FROM invoices i
+      JOIN orders o ON o.id = i.order_id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      ${whereFacSql}
+      ORDER BY fecha ASC, i.punto_venta ASC, i.cbte_desde ASC
       `,
-      [period, ...paramsFac, period, ...paramsNc]
+      [period, ...paramsFac]
     ) as any[];
 
     const provinceKey = String(province || '').trim();
@@ -1281,48 +1347,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       return onlyDigits(r.cuit).length === 11;
     });
 
-    const lines = rows.map((r) => {
-      const fecha = ddmmyyyy(r.fecha);
-      const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
-      const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
-      const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
-      const comprobante = `${letraComp}${pv}${nro}`;
-      const cuit = onlyDigits(r.cuit).slice(0, 11);
-      const razon = txt(r.razon_social, 30);
-      const alicuota = Math.max(0, Number(r.alicuota || 0));
-      const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
-      const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
-      const neto = round2(Math.abs(Number(r.neto) || 0));
-      const iva = round2(neto * 0.21);
-      const retPercStored = Math.abs(Number(r.agip_ret_per) || 0);
-      const retPerc =
-        retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(neto * (alicuota / 100)) : 0;
-      const total = round2(neto + iva + retPerc);
-      const importe = formatAmountFixed(total);
-      const otros = round2(Math.max(0, retPerc));
-
-      // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
-      return [
-        '2029', // tipo/agente (fijo por layout legacy)
-        `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-        '01', // campo fijo requerido por layout AGIP entre fecha y tipo/comprobante
-        comprobante,
-        `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-        importe,
-        ' '.repeat(16),
-        '3',
-        cuit,
-        '4000000000001', // condición por defecto legacy
-        razon,
-        formatAmountFixed(otros, 13), // otros conceptos (ajusta para que total = neto + iva + otros)
-        formatAmountFixed(iva, 13),   // IVA 21%
-        formatAmountFixed(neto, 13),  // monto sujeto
-        `3301${aliInt},${aliDec}`, // formato observado válido: 3301xx,xx
-        formatAmountFixed(retPerc, 13), // ret/perc calculada
-        formatAmountFixed(retPerc, 13),
-        ' '.repeat(11)
-      ].join('');
-    });
+    const lines = rows.map((r) => buildArcibaPerceptionRecord(r));
 
     if (!lines.length) {
       const periodHint = period ? ` (${period})` : '';
@@ -1335,8 +1360,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
 
     const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;
-    // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
-    res.setHeader('Content-Type', 'text/plain; charset=us-ascii');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     // Compatibilidad e-Arciba: CRLF entre registros y un único salto final, sin línea vacía extra.
     res.send(`${lines.join('\r\n')}\r\n`);
