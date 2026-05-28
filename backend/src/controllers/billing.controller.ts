@@ -204,13 +204,14 @@ function buildArcibaPerceptionRecord(row: {
   const montoComprobante = round2(neto + iva + otros);
   const montoSujeto = round2(montoComprobante - iva - otros);
   const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
-  const nroComprobante = letra + formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+  const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
 
   put(1, 1, '2');
   put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
   put(5, 14, fecha);
   put(15, 16, '01');
-  put(17, 33, nroComprobante);
+  put(17, 17, letra);
+  put(18, 33, nroComprobante, 'right');
   put(34, 43, fecha);
   put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
   put(60, 75, '');
@@ -251,21 +252,24 @@ function buildArcibaPerceptionNcReemitRecord(row: {
   };
 
   const fecha = formatDateEsShort(row.fecha);
-  const letra = letraComprobanteArciba(Number(row.cbte_tipo));
+  const letraAfip = letraComprobanteArciba(Number(row.cbte_tipo));
   const cuit = onlyDigits(row.cuit).slice(0, 11);
   const neto = round2(Math.abs(Number(row.neto) || 0));
-  const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
+  const ivaEnComprobante = letraAfip === 'A' || letraAfip === 'M' ? round2(neto * 0.21) : 0;
   const otros = 0;
-  const montoComprobante = round2(neto + iva);
-  const montoSujeto = round2(montoComprobante - iva - otros);
+  const montoComprobante = round2(neto + ivaEnComprobante);
+  // Tipo 09: letra en blanco (pos. 17); columna IVA en 0 según diseño AGIP.
+  const ivaColumna = 0;
+  const montoSujeto = round2(montoComprobante - ivaColumna - otros);
   const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
-  const nroComprobante = letra + formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+  const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
 
   put(1, 1, '2');
   put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
   put(5, 14, fecha);
   put(15, 16, '09');
-  put(17, 33, nroComprobante);
+  put(17, 17, ' ');
+  put(18, 33, nroComprobante, 'right');
   put(34, 43, fecha);
   put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
   put(60, 75, '');
@@ -276,7 +280,7 @@ function buildArcibaPerceptionNcReemitRecord(row: {
   put(100, 100, situacionIva);
   put(101, 130, txt(row.razon_social, 30));
   put(131, 146, formatArcibaNumber(otros, 16), 'right');
-  put(147, 162, formatArcibaNumber(iva, 16), 'right');
+  put(147, 162, formatArcibaNumber(ivaColumna, 16), 'right');
   put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
   put(179, 183, formatArcibaAlicuota(0), 'right');
   put(184, 199, formatArcibaNumber(0, 16), 'right');
