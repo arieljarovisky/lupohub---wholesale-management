@@ -210,15 +210,25 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const handleExportRetPerTxt = async () => {
+    const month = (retPerMonth || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      showToast('error', 'Elegí un Mes RetPer válido (formato YYYY-MM, ej. 2026-04).');
+      return;
+    }
     try {
       await api.exportRetPerTxt({
-        month: retPerMonth || undefined,
+        month,
         province: province !== 'ALL' ? province : undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined
       });
       showToast('success', 'TXT Ret/Per descargado');
     } catch (err: any) {
-      showToast('error', err?.message || 'Error exportando TXT Ret/Per');
+      const msg =
+        err?.response?.data?.message ||
+        (typeof err?.response?.data === 'string' ? err.response.data : null) ||
+        err?.message ||
+        'Error exportando TXT Ret/Per';
+      showToast('error', msg);
     }
   };
 

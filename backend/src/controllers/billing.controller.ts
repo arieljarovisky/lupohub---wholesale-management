@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, pool } from '../database/db';
 import * as XLSX from 'xlsx';
+import { cityMatchesFilter } from '../utils/cityNormalize';
 
 function parseMoney(value: any): number {
   if (value == null) return 0;
@@ -107,6 +108,13 @@ function formatAmountFixed(amount: number, intLen = 13): string {
 }
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** Filtro ciudad para export RetPer (alineado con Facturación: CABA = Capital Federal). */
+function customerMatchesProvinceFilter(city: unknown, province: string): boolean {
+  const p = String(province || '').trim();
+  if (!p || p === 'ALL') return true;
+  return cityMatchesFilter(String(city || ''), p);
 }
 
 function onlyDigits(v: any): string {
@@ -1168,95 +1176,130 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       fromDate = `${monthMatch[1]}-${monthMatch[2]}-01`;
       toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
     }
-    const where: string[] = [];
-    const params: any[] = [];
-    if (fromDate) {
-      where.push('o.date >= ?');
-      params.push(fromDate);
-    }
-    if (toDate) {
-      where.push('o.date <= ?');
-      params.push(toDate);
+    const whereFac: string[] = [];
+    const whereNc: string[] = [];
+    const paramsFac: any[] = [];
+    const paramsNc: any[] = [];
+    if (fromDate && toDate) {
+      // Emisión en el mes, o pedido del mes con IIBB ya guardado (reemisión posterior).
+      whereFac.push(`(
+        (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
+        OR (o.date >= ? AND o.date <= ? AND COALESCE(i.agip_ret_per, 0) > 0.005)
+      )`);
+      paramsFac.push(fromDate, toDate, fromDate, toDate);
+      whereNc.push('COALESCE(DATE(cn.created_at), o.date) >= ? AND COALESCE(DATE(cn.created_at), o.date) <= ?');
+      paramsNc.push(fromDate, toDate);
+    } else {
+      if (fromDate) {
+        whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+        paramsFac.push(fromDate);
+        whereNc.push('COALESCE(DATE(cn.created_at), o.date) >= ?');
+        paramsNc.push(fromDate);
+      }
+      if (toDate) {
+        whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+        paramsFac.push(toDate);
+        whereNc.push('COALESCE(DATE(cn.created_at), o.date) <= ?');
+        paramsNc.push(toDate);
+      }
     }
     if (customerId) {
-      where.push('o.customer_id = ?');
-      params.push(customerId);
+      whereFac.push('o.customer_id = ?');
+      paramsFac.push(customerId);
+      whereNc.push('o.customer_id = ?');
+      paramsNc.push(customerId);
     }
-    if (province && String(province).trim()) {
-      where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
-      params.push(`%${String(province).trim().toLowerCase()}%`);
-    }
-    // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período seleccionado.
-    where.push('ap.cuit IS NOT NULL');
     const authUser = (req as any).user;
     if (authUser?.role === 'SELLER') {
-      where.push('c.seller_id = ?');
-      params.push(authUser.id);
+      whereFac.push('c.seller_id = ?');
+      paramsFac.push(authUser.id);
+      whereNc.push('c.seller_id = ?');
+      paramsNc.push(authUser.id);
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    // Facturas con IIBB guardado en LupoHub o alícuota en padrón del período.
+    whereFac.push(
+      '(COALESCE(i.agip_ret_per, 0) > 0.005 OR COALESCE(i.agip_alicuota, 0) > 0 OR COALESCE(ap.alicuota, 0) > 0)'
+    );
+    whereNc.push('COALESCE(cn.superseded_by_reinvoice, 0) = 0');
+    const whereFacSql = whereFac.length ? `WHERE ${whereFac.join(' AND ')}` : '';
+    const whereNcSql = whereNc.length ? `WHERE ${whereNc.join(' AND ')}` : '';
 
     await ensureAgipPadronTable();
     const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
 
-    const rows = await query(
+    const rowsRaw = await query(
       `
-      SELECT
-        COALESCE(DATE(i.created_at), o.date) AS fecha,
-        i.cbte_tipo,
-        i.punto_venta,
-        i.cbte_desde,
-        o.total AS importe,
-        c.cuit,
-        COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
-      FROM invoices i
-      JOIN orders o ON o.id = i.order_id
-      JOIN customers c ON c.id = o.customer_id
-      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
-      UNION ALL
-      -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para AGIP.
-      SELECT
-        MAX(o.date) AS fecha,
-        cn.cbte_tipo,
-        cn.punto_venta,
-        cn.cbte_desde,
-        SUM(cn.amount_credited) AS importe,
-        c.cuit,
-        COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
-      FROM credit_notes cn
-      JOIN orders o ON o.id = cn.order_id
-      JOIN customers c ON c.id = o.customer_id
-      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
-      GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
-               c.cuit, c.business_name, c.name, ap.alicuota
-      ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
+      SELECT * FROM (
+        SELECT
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde,
+          o.total AS neto,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe_total,
+          COALESCE(i.agip_ret_per, 0) AS agip_ret_per,
+          c.cuit,
+          c.city AS customer_city,
+          COALESCE(c.business_name, c.name, '') AS razon_social,
+          COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        ${whereFacSql}
+
+        UNION ALL
+
+        SELECT
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde,
+          SUM(cn.amount_credited) AS neto,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe_total,
+          0 AS agip_ret_per,
+          c.cuit,
+          c.city AS customer_city,
+          COALESCE(c.business_name, c.name, '') AS razon_social,
+          COALESCE(ap.alicuota, 0) AS alicuota
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+        ${whereNcSql}
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
+                 c.cuit, c.city, c.business_name, c.name, ap.alicuota
+      ) t
+      ORDER BY t.fecha ASC, t.punto_venta ASC, t.cbte_desde ASC
       `,
-      [period, ...params, period, ...params]
+      [period, ...paramsFac, period, ...paramsNc]
     ) as any[];
 
-    const lines = rows
-      .filter((r) => onlyDigits(r.cuit).length === 11)
-      .map((r) => {
+    const provinceKey = String(province || '').trim();
+    const rows = rowsRaw.filter((r) => {
+      if (!customerMatchesProvinceFilter(r.customer_city, provinceKey)) return false;
+      return onlyDigits(r.cuit).length === 11;
+    });
+
+    const lines = rows.map((r) => {
       const fecha = ddmmyyyy(r.fecha);
       const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
       const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
       const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
       const comprobante = `${letraComp}${pv}${nro}`;
-      const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
       const cuit = onlyDigits(r.cuit).slice(0, 11);
       const razon = txt(r.razon_social, 30);
       const alicuota = Math.max(0, Number(r.alicuota || 0));
       const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
       const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
-      const total = Math.abs(Number(r.importe) || 0);
-      const divisor = 1 + 0.21 + (alicuota / 100);
-      const neto = divisor > 0 ? round2(total / divisor) : 0;
+      const neto = round2(Math.abs(Number(r.neto) || 0));
       const iva = round2(neto * 0.21);
-      const otros = round2(total - neto - iva);
-      const retPerc = round2(neto * (alicuota / 100));
+      const retPercStored = Math.abs(Number(r.agip_ret_per) || 0);
+      const retPerc =
+        retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(neto * (alicuota / 100)) : 0;
+      const total = round2(neto + iva + retPerc);
+      const importe = formatAmountFixed(total);
+      const otros = round2(Math.max(0, retPerc));
 
       // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
       return [
@@ -1282,8 +1325,11 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     });
 
     if (!lines.length) {
+      const periodHint = period ? ` (${period})` : '';
       return res.status(400).json({
-        message: 'No hay registros para exportar en el período seleccionado. Verificá rango de fechas, cliente y padrón AGIP importado.'
+        message:
+          `No hay comprobantes con IIBB para exportar${periodHint}. ` +
+          'Verificá Mes RetPer, que las facturas tengan percepción guardada o CUIT en el padrón AGIP, y el filtro de ciudad/cliente.'
       });
     }
 
