@@ -1280,12 +1280,19 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const whereFac: string[] = [];
     const paramsFac: any[] = [];
     if (fromDate && toDate) {
-      // Emisión en el mes, o pedido del mes con IIBB ya guardado (reemisión posterior).
+      // Mes del pedido, emisión de la factura actual, o NC de reemisión en el mes (nueva FA con IIBB).
       whereFac.push(`(
-        (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
-        OR (o.date >= ? AND o.date <= ? AND COALESCE(i.agip_ret_per, 0) > 0.005)
+        (o.date >= ? AND o.date <= ?)
+        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
+        OR EXISTS (
+          SELECT 1 FROM credit_notes cn
+          WHERE cn.order_id = o.id
+            AND COALESCE(cn.superseded_by_reinvoice, 0) = 1
+            AND COALESCE(DATE(cn.created_at), o.date) >= ?
+            AND COALESCE(DATE(cn.created_at), o.date) <= ?
+        )
       )`);
-      paramsFac.push(fromDate, toDate, fromDate, toDate);
+      paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
     } else {
       if (fromDate) {
         whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
@@ -1317,7 +1324,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const rowsRaw = await query(
       `
       SELECT
-        COALESCE(DATE(i.created_at), o.date) AS fecha,
+        o.date AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,

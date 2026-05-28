@@ -32,7 +32,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const canAfipInvoiceActions = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   const defaultRetPerMonth = (() => {
     const d = new Date();
-    d.setMonth(d.getMonth() - 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   })();
   const [activeView, setActiveView] = useState<'billing' | 'payments'>('billing');
@@ -715,7 +714,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             type="button"
             onClick={handleExportRetPerTxt}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-700 text-white text-sm font-bold shadow-lg shadow-amber-900/40 hover:bg-amber-600"
-            title="Exportar TXT de retenciones/percepciones (layout RetPer)"
+            title="Percepciones IIBB CABA. Incluye facturas reemitidas con IIBB (mes del pedido o de emisión). Las NC de reemisión no van al TXT; en Arciba anulá a mano la FA vieja si ya la habías cargado."
           >
             <FileSpreadsheet size={16} /> Exportar TXT IIBB (RetPer)
           </button>
@@ -870,7 +869,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           </select>
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer</label>
+          <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer (DDJJ)</label>
+          <p className="text-[10px] text-slate-500 leading-snug">
+            Mayo: facturas emitidas en mayo y reemisión con IIBB. Abril: pedidos de abril (nº 102+ si reemitiste en mayo).
+          </p>
           <input
             type="month"
             value={retPerMonth}
