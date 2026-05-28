@@ -895,14 +895,22 @@ const App: React.FC = () => {
     );
   }
 
-  const mobileNavItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
-    { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
-    { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
-    { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
-    { id: 'sellers', icon: Percent, label: 'Vendedores', roles: [Role.ADMIN, Role.SELLER] },
-    { id: 'catalogs', icon: BookOpen, label: 'Catálogos', roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
-  ];
+  const mobileNavItems =
+    currentUser.role === Role.SELLER
+      ? [
+          { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.SELLER] },
+          { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.SELLER] },
+          { id: 'facturacion', icon: DollarSign, label: 'Facturas', roles: [Role.SELLER] },
+          { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.SELLER] },
+        ]
+      : [
+          { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
+          { id: 'inventory', icon: Package, label: 'Stock', roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
+          { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
+          { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.ADMIN, Role.SELLER] },
+          { id: 'sellers', icon: Percent, label: 'Vendedores', roles: [Role.ADMIN, Role.SELLER] },
+          { id: 'catalogs', icon: BookOpen, label: 'Catálogos', roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
+        ];
 
   const allMobileNavSections = [
     { title: 'Principal', items: [
@@ -950,7 +958,7 @@ const App: React.FC = () => {
         />
       </div>
       
-      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-4 pr-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios">
+      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios mobile-main-scroll">
         {isLoading && (
           <div className="fixed inset-0 bg-slate-950/80 z-[200] flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)] pointer-events-auto">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />

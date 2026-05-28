@@ -83,6 +83,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     >
   >({});
   const [saldosLoading, setSaldosLoading] = useState(false);
+  const [financialSummary, setFinancialSummary] = useState<Awaited<
+    ReturnType<typeof api.getCustomerFinancialSummary>
+  > | null>(null);
+  const [financialSummaryLoading, setFinancialSummaryLoading] = useState(false);
+  const [detailActionsOpen, setDetailActionsOpen] = useState(false);
 
   const loadCarteraTotals = () => {
     if (!canViewSaldos) return;
@@ -142,6 +147,29 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       })
       .finally(() => {
         if (!cancelled) setMultimediaLedgerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.id, canViewSaldos]);
+
+  useEffect(() => {
+    if (!selectedCustomer?.id || !canViewSaldos) {
+      setFinancialSummary(null);
+      return;
+    }
+    let cancelled = false;
+    setFinancialSummaryLoading(true);
+    api
+      .getCustomerFinancialSummary(selectedCustomer.id)
+      .then((d) => {
+        if (!cancelled) setFinancialSummary(d);
+      })
+      .catch(() => {
+        if (!cancelled) setFinancialSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setFinancialSummaryLoading(false);
       });
     return () => {
       cancelled = true;
@@ -217,6 +245,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [customerDetailExportFrom, setCustomerDetailExportFrom] = useState('');
   const [customerDetailExportTo, setCustomerDetailExportTo] = useState('');
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
+  const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
 
@@ -629,6 +658,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     });
   }, [multimediaLedger]);
 
+  const financialMovementsWithSaldo = useMemo(() => {
+    if (!financialSummary?.movements?.length) return [];
+    let saldo = 0;
+    return financialSummary.movements.map((m) => {
+      saldo += Number(m.debe || 0) - Number(m.haber || 0);
+      return { ...m, saldo };
+    });
+  }, [financialSummary]);
+
   const pendingShipLines = useMemo(() => {
     if (!selectedCustomer) return [] as { order: Order; item: OrderItem; pendiente: number }[];
     const customerOrders = orders.filter((o) => o.customerId === selectedCustomer.id);
@@ -657,7 +695,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <span className="text-xs font-black text-slate-100 uppercase tracking-[0.12em]">{title}</span>
           <span className="text-[10px] text-slate-500 ml-auto tabular-nums">{rows.length} mov.</span>
         </div>
-        <div className="overflow-x-auto max-h-56 overflow-y-auto">
+        <div className="overflow-x-auto max-h-[min(70vh,28rem)] mobile-scroll-y touch-scroll">
           <table className="min-w-full text-xs text-left">
             <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-950">
               <tr>
@@ -896,16 +934,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       <>
       <div className="animate-fade-in space-y-6 pb-12">
         {/* Navigation Header */}
-        <div className="flex items-center justify-between">
-           <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-4">
+           <div className="flex items-start gap-3 min-w-0">
              <button 
                onClick={clearSelectedCustomerView} 
-               className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl transition text-slate-300"
+               className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl transition text-slate-300 shrink-0 touch-manipulation"
+               aria-label="Volver al listado"
              >
                <ArrowLeft size={20} />
              </button>
-             <div>
-                <h2 className="text-2xl font-bold text-white">{selectedCustomer.businessName}</h2>
+             <div className="min-w-0 flex-1">
+                <h2 className="text-xl sm:text-2xl font-bold text-white break-words">{selectedCustomer.businessName}</h2>
                 <div className="flex items-center gap-3 text-sm text-slate-400 flex-wrap">
                   <span className="flex items-center gap-1"><Users size={14}/> {selectedCustomer.name}</span>
                   <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
@@ -951,30 +990,41 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
              </div>
            </div>
-           <div className="flex items-center gap-2">
+           <div className="flex flex-wrap gap-2 w-full">
+             <button
+               type="button"
+               onClick={() => setDetailActionsOpen((v) => !v)}
+               className="md:hidden flex-1 min-w-[8rem] px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-200 touch-manipulation"
+             >
+               {detailActionsOpen ? 'Ocultar acciones' : 'Más acciones'}
+             </button>
+             <div className={`${detailActionsOpen ? 'flex' : 'hidden'} md:flex flex-wrap gap-2 w-full md:w-auto`}>
              <button
                onClick={() => {
                  setCustomerDetailExportFrom('');
                  setCustomerDetailExportTo('');
                  setShowCustomerDetailExportModal(true);
                }}
-               className="px-4 py-2 bg-emerald-900/40 border border-emerald-700/50 rounded-xl text-sm font-bold text-emerald-200 hover:bg-emerald-900/60 hover:text-white transition flex items-center gap-2"
+               className="flex-1 sm:flex-none px-3 py-2.5 bg-emerald-900/40 border border-emerald-700/50 rounded-xl text-sm font-bold text-emerald-200 hover:bg-emerald-900/60 hover:text-white transition flex items-center justify-center gap-2 touch-manipulation"
                title="Exportar detalle del cliente con filtro de fechas"
              >
                <FileSpreadsheet size={16} />
-               Exportar detalle
+               <span className="hidden xs:inline">Exportar detalle</span>
+               <span className="xs:hidden">Detalle</span>
              </button>
+             {role === Role.ADMIN && (
              <button
                onClick={() => {
                  setExportSheetSelectedIds([selectedCustomer.id]);
                  setShowExportSheetsModal(true);
                }}
-               className="px-4 py-2 bg-cyan-900/40 border border-cyan-700/50 rounded-xl text-sm font-bold text-cyan-200 hover:bg-cyan-900/60 hover:text-white transition flex items-center gap-2"
+               className="flex-1 sm:flex-none px-3 py-2.5 bg-cyan-900/40 border border-cyan-700/50 rounded-xl text-sm font-bold text-cyan-200 hover:bg-cyan-900/60 hover:text-white transition flex items-center justify-center gap-2 touch-manipulation"
                title="Descargar Excel con una hoja por cliente"
              >
                <Download size={16} />
-               Exportar por hojas
+               Por hojas
              </button>
+             )}
              <button
                onClick={() => {
                  setNewBusinessName(selectedCustomer.businessName);
@@ -995,24 +1045,25 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setDeliveryBranchRows((selectedCustomer.deliveryAddresses ?? []).map((d) => ({ ...d })));
                  setEditingCustomer(selectedCustomer);
                }}
-               className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
+               className="flex-1 sm:flex-none px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition flex items-center justify-center gap-2 touch-manipulation"
              >
                <Pencil size={16} />
-               Editar Datos
+               Editar
              </button>
-             {onDeleteCustomer && (
+             {onDeleteCustomer && role === Role.ADMIN && (
                <button
                  onClick={() => {
                   if (window.confirm(`¿Eliminar el cliente "${selectedCustomer.businessName}"? Esta acción no se puede deshacer.`)) {
                     Promise.resolve(onDeleteCustomer(selectedCustomer.id)).then(() => clearSelectedCustomerView()).catch(() => {});
                    }
                  }}
-                 className="px-4 py-2 bg-red-900/50 border border-red-800 rounded-xl text-sm font-bold text-red-300 hover:bg-red-900 hover:text-white transition flex items-center gap-2"
+                 className="flex-1 sm:flex-none px-3 py-2.5 bg-red-900/50 border border-red-800 rounded-xl text-sm font-bold text-red-300 hover:bg-red-900 hover:text-white transition flex items-center justify-center gap-2 touch-manipulation"
                >
                  <Trash2 size={16} />
                  Eliminar
                </button>
              )}
+             </div>
            </div>
         </div>
 
@@ -1348,6 +1399,165 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 })}
               </p>
             </div>
+          </div>
+        )}
+
+        {canViewSaldos && (
+          <div className="mt-6 rounded-3xl border border-blue-500/30 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 p-4 sm:p-6 shadow-xl ring-1 ring-blue-500/10">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 text-blue-100/90">
+                  <FileText size={22} className="text-blue-400 shrink-0" aria-hidden />
+                  <span className="text-sm font-black uppercase tracking-[0.18em]">Facturas y recibos (LupoHub)</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
+                  Solo comprobantes emitidos o cargados en la app (AFIP y recibos). Incluye número de factura, nota de crédito y recibo.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={exportingFinancialSummary || !selectedCustomer}
+                onClick={async () => {
+                  if (!selectedCustomer) return;
+                  try {
+                    setExportingFinancialSummary(true);
+                    await api.exportCustomerFinancialSummary(selectedCustomer.id);
+                    showToast('success', 'Excel descargado');
+                  } catch (err: any) {
+                    showToast('error', err?.message || 'No se pudo exportar');
+                  } finally {
+                    setExportingFinancialSummary(false);
+                  }
+                }}
+                className="shrink-0 w-full sm:w-auto px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+              >
+                {exportingFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                Exportar Excel
+              </button>
+            </div>
+
+            {financialSummaryLoading ? (
+              <div className="py-8 flex items-center justify-center gap-2 text-slate-400 text-sm">
+                <Loader2 size={18} className="animate-spin" />
+                Cargando comprobantes…
+              </div>
+            ) : financialSummary ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-4">
+                  <div className="rounded-2xl border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5">
+                    <p className="text-[10px] uppercase font-bold text-emerald-400/90 tracking-wide">Facturas</p>
+                    <p className="text-lg font-black text-white tabular-nums">
+                      ${Number(financialSummary.totalFacturas).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-amber-800/50 bg-amber-950/30 px-3 py-2.5">
+                    <p className="text-[10px] uppercase font-bold text-amber-400/90 tracking-wide">Notas crédito</p>
+                    <p className="text-lg font-black text-white tabular-nums">
+                      ${Number(financialSummary.totalNc).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-sky-800/50 bg-sky-950/30 px-3 py-2.5">
+                    <p className="text-[10px] uppercase font-bold text-sky-400/90 tracking-wide">Recibos</p>
+                    <p className="text-lg font-black text-white tabular-nums">
+                      ${Number(financialSummary.totalRecibos).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-600/50 bg-slate-900/80 px-3 py-2.5 col-span-2 sm:col-span-1">
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Saldo pendiente</p>
+                    <p className="text-lg font-black text-white tabular-nums">
+                      ${Number(financialSummary.saldoPendiente).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+
+                {financialMovementsWithSaldo.length === 0 ? (
+                  <p className="text-sm text-slate-500 mt-4 py-4 text-center">Sin facturas ni recibos en LupoHub para este cliente.</p>
+                ) : (
+                  <>
+                    <div className="md:hidden mt-4 space-y-2 mobile-scroll-y touch-scroll max-h-[min(70vh,32rem)]">
+                      {financialMovementsWithSaldo.map((m, idx) => (
+                        <div
+                          key={`${m.tipo}-${m.comprobante}-${idx}`}
+                          className="rounded-2xl border border-slate-700/80 bg-slate-950/60 p-3 space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                m.tipo === 'FACTURA'
+                                  ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50'
+                                  : m.tipo === 'NC'
+                                    ? 'bg-amber-900/50 text-amber-300 border border-amber-700/50'
+                                    : 'bg-sky-900/50 text-sky-300 border border-sky-700/50'
+                              }`}
+                            >
+                              {m.tipo === 'NC' ? 'NC' : m.tipo === 'RECIBO' ? 'Recibo' : 'Factura'}
+                            </span>
+                            <span className="text-[11px] text-slate-500 tabular-nums">{formatLedgerDate(m.fecha)}</span>
+                          </div>
+                          <p className="font-mono text-base font-bold text-white break-all">{m.comprobante || '—'}</p>
+                          {m.orderId && (
+                            <p className="text-[11px] text-slate-500 font-mono">Pedido {m.orderId}</p>
+                          )}
+                          <div className="flex justify-between text-xs tabular-nums">
+                            {Number(m.debe) > 0 && (
+                              <span className="text-emerald-300">Debe ${Number(m.debe).toLocaleString('es-AR')}</span>
+                            )}
+                            {Number(m.haber) > 0 && (
+                              <span className="text-sky-300">Haber ${Number(m.haber).toLocaleString('es-AR')}</span>
+                            )}
+                            <span className="text-slate-400 ml-auto">Saldo ${Number(m.saldo).toLocaleString('es-AR')}</span>
+                          </div>
+                          {m.detalle && (
+                            <p className="text-[11px] text-slate-500 line-clamp-2">{m.detalle}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden md:block mt-4 rounded-2xl border border-slate-700/70 overflow-hidden">
+                      <div className="overflow-x-auto mobile-scroll-x touch-scroll">
+                        <table className="min-w-full text-xs text-left">
+                          <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 bg-slate-950">
+                            <tr>
+                              <th className="px-3 py-2">Fecha</th>
+                              <th className="px-3 py-2">Tipo</th>
+                              <th className="px-3 py-2">Comprobante</th>
+                              <th className="px-3 py-2">Pedido</th>
+                              <th className="px-3 py-2 text-right">Debe</th>
+                              <th className="px-3 py-2 text-right">Haber</th>
+                              <th className="px-3 py-2 text-right">Saldo</th>
+                              <th className="px-3 py-2">Detalle</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-slate-300 divide-y divide-slate-800/80">
+                            {financialMovementsWithSaldo.map((m, idx) => (
+                              <tr key={`desk-${m.tipo}-${m.comprobante}-${idx}`} className="hover:bg-slate-800/30">
+                                <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(m.fecha)}</td>
+                                <td className="px-3 py-1.5">{m.tipo}</td>
+                                <td className="px-3 py-1.5 font-mono text-[11px] font-bold text-white">{m.comprobante || '—'}</td>
+                                <td className="px-3 py-1.5 font-mono text-[11px]">{m.orderId || '—'}</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300/90">
+                                  {Number(m.debe) > 0 ? `$${Number(m.debe).toLocaleString('es-AR')}` : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-sky-300/90">
+                                  {Number(m.haber) > 0 ? `$${Number(m.haber).toLocaleString('es-AR')}` : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums font-bold">${Number(m.saldo).toLocaleString('es-AR')}</td>
+                                <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={m.detalle || ''}>
+                                  {m.detalle || '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-slate-500 mt-4">No se pudo cargar el resumen de facturas y recibos.</p>
+            )}
           </div>
         )}
 
@@ -2199,7 +2409,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                    <Building2 size={24} />
                 </div>
                 <div className="flex items-center gap-2">
-                  {onDeleteCustomer && (
+                  {onDeleteCustomer && role === Role.ADMIN && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -2208,7 +2418,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                           Promise.resolve(onDeleteCustomer(customer.id)).catch(() => {});
                         }
                       }}
-                      className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition"
+                      className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition touch-manipulation"
                       title="Eliminar cliente"
                     >
                       <Trash2 size={18} />
@@ -2227,7 +2437,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 {canViewSaldos && (
                   <div
                     className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px]"
-                    title="Suma del saldo de cuenta importada (Excel) y del saldo pendiente de pedidos en LupoHub."
+                    title="Suma del saldo de cuenta importada (Excel) y del saldo pendiente de pedidos en LupoHub. Tocá el cliente para ver números de facturas y recibos."
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide">
@@ -2254,6 +2464,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                             })}`}
                       </span>
                     </div>
+                    {role === Role.SELLER && (
+                      <p className="text-[10px] text-blue-400/90 mt-1.5 flex items-center gap-1">
+                        <FileText size={11} />
+                        Ver facturas y recibos →
+                      </p>
+                    )}
                   </div>
                 )}
 

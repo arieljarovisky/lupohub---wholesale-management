@@ -29,6 +29,7 @@ interface BillingProps {
 
 const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [], onNavigate }) => {
   const { showToast, showConfirm } = useNotification();
+  const isSeller = role === Role.SELLER;
   const canAfipInvoiceActions = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   const defaultRetPerMonth = (() => {
     const d = new Date();
@@ -640,10 +641,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Filter size={20} className="text-emerald-400" /> Facturación (AFIP)
+          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <Filter size={20} className="text-emerald-400 shrink-0" /> {isSeller ? 'Mis facturas y recibos' : 'Facturación (AFIP)'}
           </h2>
-          <p className="text-slate-400 text-sm">Listá todas las facturas y notas de crédito emitidas desde la app. Podés filtrar por fecha, cliente y tipo de comprobante.</p>
+          <p className="text-slate-400 text-sm">
+            {isSeller
+              ? 'Consultá facturas, notas de crédito y recibos de tus clientes. Tocá un comprobante para ver el detalle.'
+              : 'Listá todas las facturas y notas de crédito emitidas desde la app. Podés filtrar por fecha, cliente y tipo de comprobante.'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="flex items-center bg-slate-900 border border-slate-700 rounded-xl p-1">
@@ -671,6 +676,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             {(activeView === 'billing' ? loading : loadingPayments) ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             Actualizar
           </button>
+          {!isSeller && (
           <button
             type="button"
             onClick={() => {
@@ -685,14 +691,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               setPaySellerId(pre?.sellerId || '');
               setPayDate(new Date().toISOString().slice(0, 10));
             }}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700 touch-manipulation"
           >
             Cargar pago
           </button>
+          )}
+          {!isSeller && (
+          <>
           <button
             type="button"
             onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 touch-manipulation"
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
           </button>
@@ -788,10 +797,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             {importingAgipPadron ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
             Importar padrón AGIP (TXT)
           </button>
+          </>
+          )}
         </div>
       </div>
 
-      {activeView === 'billing' && (
+      {activeView === 'billing' && !isSeller && (
         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 space-y-2">
           <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide">
             Lista de CUIT (export del Mes RetPer: facturas + NC)
@@ -879,6 +890,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <option value="NC">Notas de crédito</option>
           </select>
         </div>
+        {!isSeller && (
         <div className="space-y-1">
           <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer (DDJJ)</label>
           <p className="text-[10px] text-slate-500 leading-snug">
@@ -891,6 +903,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
           />
         </div>
+        )}
       </div>
 
       {activeView === 'billing' && (
@@ -901,7 +914,46 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <span>{filteredCountDisplay} comprobante(s) • Página {billingPage}/{billingTotalPages}</span>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="md:hidden divide-y divide-slate-800 mobile-scroll-y touch-scroll max-h-[min(70vh,36rem)]">
+          {filteredBillingItems.length === 0 && (
+            <div className="px-4 py-8 text-center text-slate-500 text-sm">
+              No hay comprobantes para los filtros seleccionados.
+            </div>
+          )}
+          {pagedItems.map((item: any) => {
+            const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
+            return (
+              <div key={`m-${item.tipo}-${item.id}`} className="p-4 space-y-2 bg-slate-900/40">
+                <div className="flex items-start justify-between gap-2">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                    {formatTipo(item)}
+                  </span>
+                  <span className="text-xs text-slate-500 tabular-nums">{formatDate(item.fecha)}</span>
+                </div>
+                <p className="font-mono text-lg font-bold text-white">
+                  PV {item.puntoVta} · Nº {numero}
+                </p>
+                <p className="text-sm text-slate-300 truncate" title={item.customerBusinessName}>
+                  {item.customerBusinessName}
+                </p>
+                {item.orderId && (
+                  <p className="text-[11px] text-slate-500 font-mono">Pedido {item.orderId}</p>
+                )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-base font-black text-white tabular-nums">${formatMoneyAr(item.importe ?? 0)}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleVer(item)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 touch-manipulation"
+                  >
+                    Ver
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="hidden md:block overflow-x-auto mobile-scroll-x touch-scroll">
           <table className="min-w-full text-sm text-slate-100">
             <thead className="bg-slate-800/80 text-xs uppercase text-slate-400">
               <tr>
@@ -1199,9 +1251,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {!isSeller && (
                   <button
                     type="button"
-                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800"
+                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation"
                     onClick={async () => {
                       const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
                       if (!next) return;
@@ -1230,7 +1283,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   >
                     Editar fecha
                   </button>
-                  <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
+                  )}
+                  <div className="text-sm font-black text-emerald-300 tabular-nums">${formatMoneyAr(Number(p.amount || 0))}</div>
                 </div>
               </div>
             ))}

@@ -42,13 +42,42 @@ body {
   background: #475569;
 }
 
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+/* Área principal scrolleable en iOS (evita scroll “trabado”) */
+.mobile-main-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+/* Tablas / listas horizontales */
+.mobile-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+}
+
+/* Listas verticales con altura máxima (combinar con max-h-* en el elemento) */
+.mobile-scroll-y {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
 @media (max-width: 640px) {
-  .touch-manipulation {
-    touch-action: manipulation;
+  .mobile-scroll-y:not([class*='max-h']) {
+    max-height: min(65vh, 28rem);
   }
 }
 
-/* Scroll horizontal suave en móvil (iOS) — usar junto a overflow-x-auto */
+/* Scroll suave en iOS — usar junto a overflow-auto */
 .touch-scroll {
   -webkit-overflow-scrolling: touch;
 }
