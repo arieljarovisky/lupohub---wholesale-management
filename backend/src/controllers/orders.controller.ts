@@ -267,6 +267,38 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
+/** Neto para NC total: pickeado, o —si quedó en 0— lo facturado (IIBB / cantidades / total del pedido). */
+async function getOrderNetForCreditNoteTotal(orderId: string): Promise<number> {
+  const fromPicked = await getOrderNetFromLineItems(orderId);
+  if (fromPicked > 0.005) return fromPicked;
+
+  const invRow = await get(
+    'SELECT agip_ret_per, agip_alicuota FROM invoices WHERE order_id = ? LIMIT 1',
+    [orderId]
+  ) as { agip_ret_per?: string | number; agip_alicuota?: string | number } | undefined;
+  const retPer = Number(invRow?.agip_ret_per || 0);
+  const alicuota = Number(invRow?.agip_alicuota || 0);
+  if (retPer > 0.005 && alicuota > 0.005) {
+    return Math.round((retPer / (alicuota / 100)) * 100) / 100;
+  }
+
+  const rows = await query(
+    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    [orderId]
+  ) as { quantity: number; price_at_moment: string | number }[];
+  let sumQty = 0;
+  for (const r of rows) {
+    const q = Number(r.quantity) || 0;
+    const price = Number(r.price_at_moment) || 0;
+    sumQty += Math.round(q * price * 100) / 100;
+  }
+  sumQty = Math.round(sumQty * 100) / 100;
+  if (sumQty > 0.005) return sumQty;
+
+  const orderRow = await get('SELECT total FROM orders WHERE id = ?', [orderId]) as { total?: string | number } | undefined;
+  return Math.round((Number(orderRow?.total) || 0) * 100) / 100;
+}
+
 /**
  * Período del padrón AGIP (YYYYMM) a partir de la fecha del pedido.
  * MySQL devuelve `DATE` como `Date` en node: `String(date)` no es ISO y rompía el cálculo IIBB al emitir.
@@ -2141,8 +2173,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     let itemsToCredit: Array<{ itemIndex: number; quantity: number; amount: number }> = [];
 
     if (tipo === 'total') {
-      const netFromItems = await getOrderNetFromLineItems(id);
-      amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
+      amountToCredit = await getOrderNetForCreditNoteTotal(id);
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else if (tipo === 'item') {
       const itemsRows = await query(

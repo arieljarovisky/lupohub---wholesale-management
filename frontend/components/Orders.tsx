@@ -15,6 +15,7 @@ import {
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
+  orderNetoForNotaCreditoTotal,
   orderNetoSaldoForOrderCard,
   orderTotalesFacturado,
   orderTotalesNotaCredito,
@@ -1481,7 +1482,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       } catch {
         /* usar factura en memoria */
       }
-      const netoPed = orderNetoFromItems(orderForPdf);
+      const netoPed = orderNetoForNotaCreditoTotal(orderForPdf);
       const agip = iibbProratedFromInvoiceForNc(orderForPdf.invoice, Number(nc.amountCredited || 0), netoPed);
       const html = buildCreditNoteHtml(orderForPdf, nc, agip);
       if (!html) {
@@ -2983,7 +2984,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           .map((c) => ({ ...c, selectedQty: Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0))) }))
           .filter((c) => c.selectedQty > 0);
         const canEmitItems = selectedMulti.length > 0;
-        const netoPedidoTotalNc = orderNetoFromItems(ncOrder);
+        const netoPedidoTotalNc = orderNetoForNotaCreditoTotal(ncOrder);
         const netCredPreview =
           ncTipo === 'total'
             ? netoPedidoTotalNc
@@ -3232,7 +3233,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 disabled={ncPreviewDisabled}
                 onClick={() => {
                   if (!ncOrder.invoice || ncPreviewDisabled) return;
-                  const netoPed = orderNetoFromItems(ncOrder);
+                  const netoPed = orderNetoForNotaCreditoTotal(ncOrder);
                   let netCred = 0;
                   let nc: CreditNote;
                   if (ncTipo === 'total') {
