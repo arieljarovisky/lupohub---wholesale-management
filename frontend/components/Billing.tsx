@@ -437,7 +437,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
       if (item.tipo === 'NC' || item.cbteTipo === 3 || item.cbteTipo === 8) {
         const notes = await api.getOrderCreditNotes(order.id);
-        const nc = notes.find((n: any) => String(n.cbteDesde) === String(item.cbteDesde) && String(n.puntoVta) === String(item.puntoVta)) || notes[0];
+        const numeroNc = item.numeroDesde ?? item.cbteDesde;
+        const pvNc = item.puntoVta ?? item.punto_venta;
+        const nc =
+          (item.id && notes.find((n) => n.id === item.id)) ||
+          (item.cae && notes.find((n) => String(n.cae) === String(item.cae))) ||
+          (numeroNc != null &&
+            pvNc != null &&
+            notes.find(
+              (n) =>
+                String(n.cbteDesde) === String(numeroNc) &&
+                String(n.puntoVta) === String(pvNc)
+            ));
         if (!nc) {
           showToast('error', 'No se encontró la nota de crédito correspondiente');
           return;
