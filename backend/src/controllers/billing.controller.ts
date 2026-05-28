@@ -231,6 +231,61 @@ function buildArcibaPerceptionRecord(row: {
   return rec.join('');
 }
 
+/** NC de reemisión (mayo u otro mes de emisión): tipo 09, sin percepción en la NC. */
+function buildArcibaPerceptionNcReemitRecord(row: {
+  fecha: any;
+  cbte_tipo: number;
+  punto_venta: number;
+  cbte_desde: number;
+  neto: number;
+  cuit: string;
+  razon_social: string;
+  condicion_iva?: string | null;
+}): string {
+  const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+  const put = (from: number, to: number, val: string, align: 'left' | 'right' = 'left') => {
+    const len = to - from + 1;
+    let v = String(val).slice(0, len);
+    v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+    for (let i = 0; i < len; i++) rec[from - 1 + i] = v[i];
+  };
+
+  const fecha = formatDateEsShort(row.fecha);
+  const letra = letraComprobanteArciba(Number(row.cbte_tipo));
+  const cuit = onlyDigits(row.cuit).slice(0, 11);
+  const neto = round2(Math.abs(Number(row.neto) || 0));
+  const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
+  const otros = 0;
+  const montoComprobante = round2(neto + iva);
+  const montoSujeto = round2(montoComprobante - iva - otros);
+  const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+  const nroComprobante = letra + formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+
+  put(1, 1, '2');
+  put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+  put(5, 14, fecha);
+  put(15, 16, '09');
+  put(17, 33, nroComprobante);
+  put(34, 43, fecha);
+  put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+  put(60, 75, '');
+  put(76, 76, '3');
+  put(77, 87, cuit, 'right');
+  put(88, 88, '4');
+  put(89, 99, '00000000000', 'right');
+  put(100, 100, situacionIva);
+  put(101, 130, txt(row.razon_social, 30));
+  put(131, 146, formatArcibaNumber(otros, 16), 'right');
+  put(147, 162, formatArcibaNumber(iva, 16), 'right');
+  put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+  put(179, 183, formatArcibaAlicuota(0), 'right');
+  put(184, 199, formatArcibaNumber(0, 16), 'right');
+  put(200, 215, formatArcibaNumber(0, 16), 'right');
+  put(216, 226, ' '.repeat(11));
+
+  return rec.join('');
+}
+
 function normalizeNameForMatch(v: any): string {
   return String(v || '')
     .normalize('NFD')
@@ -1280,16 +1335,16 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const whereFac: string[] = [];
     const paramsFac: any[] = [];
     if (fromDate && toDate) {
-      // Mes del pedido, emisión de la factura actual, o NC de reemisión en el mes (nueva FA con IIBB).
+      // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
       whereFac.push(`(
         (o.date >= ? AND o.date <= ?)
         OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
         OR EXISTS (
-          SELECT 1 FROM credit_notes cn
-          WHERE cn.order_id = o.id
-            AND COALESCE(cn.superseded_by_reinvoice, 0) = 1
-            AND COALESCE(DATE(cn.created_at), o.date) >= ?
-            AND COALESCE(DATE(cn.created_at), o.date) <= ?
+          SELECT 1 FROM credit_notes cn_m
+          WHERE cn_m.order_id = o.id
+            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
         )
       )`);
       paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
@@ -1321,10 +1376,42 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     await ensureAgipPadronTable();
     const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
 
+    const ncWhere: string[] = [
+      'COALESCE(cn.superseded_by_reinvoice, 0) = 1',
+      'COALESCE(i.agip_ret_per, 0) > 0.005'
+    ];
+    const ncParams: any[] = [];
+    if (fromDate && toDate) {
+      ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+      ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+      ncParams.push(fromDate, toDate);
+    } else {
+      if (fromDate) {
+        ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+        ncParams.push(fromDate);
+      }
+      if (toDate) {
+        ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+        ncParams.push(toDate);
+      }
+    }
+    if (customerId) {
+      ncWhere.push('o.customer_id = ?');
+      ncParams.push(customerId);
+    }
+    if (authUser?.role === 'SELLER') {
+      ncWhere.push('c.seller_id = ?');
+      ncParams.push(authUser.id);
+    }
+    const ncWhereSql = ncWhere.length ? `WHERE ${ncWhere.join(' AND ')}` : '';
+
     const rowsRaw = await query(
       `
       SELECT
-        o.date AS fecha,
+        CASE
+          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+          ELSE o.date
+        END AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,
@@ -1334,15 +1421,41 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
         c.city AS customer_city,
         c.condicion_iva,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '1' AS line_kind
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN credit_notes cn_reemit
+        ON cn_reemit.order_id = o.id AND COALESCE(cn_reemit.superseded_by_reinvoice, 0) = 1
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
       ${whereFacSql}
-      ORDER BY fecha ASC, i.punto_venta ASC, i.cbte_desde ASC
+
+      UNION ALL
+
+      SELECT
+        COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) AS fecha,
+        cn.cbte_tipo,
+        cn.punto_venta,
+        cn.cbte_desde,
+        cn.amount_credited AS neto,
+        0 AS agip_ret_per,
+        c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
+        COALESCE(c.business_name, c.name, '') AS razon_social,
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '0' AS line_kind
+      FROM credit_notes cn
+      JOIN orders o ON o.id = cn.order_id
+      JOIN invoices i ON i.order_id = o.id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
+      ${ncWhereSql}
+
+      ORDER BY fecha ASC, line_kind ASC, punto_venta ASC, cbte_desde ASC
       `,
-      [period, ...paramsFac]
+      [period, ...paramsFac, period, ...ncParams]
     ) as any[];
 
     const provinceKey = String(province || '').trim();
@@ -1351,7 +1464,9 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       return onlyDigits(r.cuit).length === 11;
     });
 
-    const lines = rows.map((r) => buildArcibaPerceptionRecord(r));
+    const lines = rows.map((r) =>
+      r.line_kind === '0' ? buildArcibaPerceptionNcReemitRecord(r) : buildArcibaPerceptionRecord(r)
+    );
 
     if (!lines.length) {
       const periodHint = period ? ` (${period})` : '';
