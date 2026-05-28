@@ -144,12 +144,9 @@ function mapCondicionIvaArciba(condicion: unknown): string {
   return '1';
 }
 
-/** Letra de comprobante para percepción según condición IVA del cliente (agente RI). */
-function letraComprobanteArciba(cbteTipo: number, condicionIva: unknown): string {
-  if (Number(cbteTipo) === 6 || Number(cbteTipo) === 8) return 'B';
-  const code = mapCondicionIvaArciba(condicionIva);
-  if (code === '1') return 'A';
-  return 'B';
+/** Letra según comprobante AFIP emitido (alineado al TXT histórico importado en Arciba). */
+function letraComprobanteArciba(cbteTipo: number): string {
+  return Number(cbteTipo) === 1 || Number(cbteTipo) === 3 ? 'A' : 'B';
 }
 
 /** Monto numérico Arciba: alineado a la derecha, coma decimal, ancho fijo. */
@@ -194,32 +191,33 @@ function buildArcibaPerceptionRecord(row: {
   };
 
   const fecha = formatDateEsShort(row.fecha);
-  const letra = letraComprobanteArciba(Number(row.cbte_tipo), row.condicion_iva);
+  const letra = letraComprobanteArciba(Number(row.cbte_tipo));
   const cuit = onlyDigits(row.cuit).slice(0, 11);
   const neto = round2(Math.abs(Number(row.neto) || 0));
   const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
-  const otros = 0;
-  const montoComprobante = round2(neto + iva);
-  const montoSujeto = round2(montoComprobante - iva - otros);
   const alicuota = Math.max(0, Number(row.alicuota) || 0);
   const retPercStored = Math.abs(Number(row.agip_ret_per) || 0);
   const retPerc =
-    retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(montoSujeto * (alicuota / 100)) : 0;
+    retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(neto * (alicuota / 100)) : 0;
+  // Misma lógica que RetPer_202604 histórico: otros = IIBB; monto comp = neto + IVA + IIBB; sujeto = neto.
+  const otros = retPerc;
+  const montoComprobante = round2(neto + iva + otros);
+  const montoSujeto = round2(montoComprobante - iva - otros);
   const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+  const nroComprobante = letra + formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
 
   put(1, 1, '2');
   put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
   put(5, 14, fecha);
   put(15, 16, '01');
-  put(17, 17, letra);
-  put(18, 33, formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde), 'right');
+  put(17, 33, nroComprobante);
   put(34, 43, fecha);
   put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
   put(60, 75, '');
   put(76, 76, '3');
   put(77, 87, cuit, 'right');
-  put(88, 88, '1');
-  put(89, 99, cuit, 'right');
+  put(88, 88, '4');
+  put(89, 99, '00000000000', 'right');
   put(100, 100, situacionIva);
   put(101, 130, txt(row.razon_social, 30));
   put(131, 146, formatArcibaNumber(otros, 16), 'right');
@@ -228,8 +226,7 @@ function buildArcibaPerceptionRecord(row: {
   put(179, 183, formatArcibaAlicuota(alicuota), 'right');
   put(184, 199, formatArcibaNumber(retPerc, 16), 'right');
   put(200, 215, formatArcibaNumber(retPerc, 16), 'right');
-  put(216, 216, ' ');
-  put(217, 226, '          ');
+  put(216, 226, ' '.repeat(11));
 
   return rec.join('');
 }
