@@ -324,23 +324,53 @@ async function getAgipRetentionForOrder(args: {
   orderDate: string | Date | null | undefined;
   customerCuit?: string | null;
   netAmount: number;
-}): Promise<{ alicuota: number; amount: number } | null> {
+}): Promise<{ alicuota: number; amount: number; periodUsed?: string } | null> {
   const cuit = String(args.customerCuit || '').replace(/\D/g, '').slice(0, 11);
   if (cuit.length !== 11) return null;
-  const period = agipPeriodYyyymmFromOrderDate(args.orderDate);
-  if (!period || !/^\d{6}$/.test(period)) return null;
-  const row = await get(
-    `SELECT alicuota
-     FROM agip_padron_alicuotas
-     WHERE period_yyyymm = ? AND cuit = ?
-     LIMIT 1`,
-    [period, cuit]
-  );
-  const alicuota = Number((row as any)?.alicuota || 0);
-  if (!(alicuota > 0)) return null;
+  const orderPeriod = agipPeriodYyyymmFromOrderDate(args.orderDate);
+  if (!orderPeriod || !/^\d{6}$/.test(orderPeriod)) return null;
+
+  const lookupPadron = async (periodYyyymm: string) => {
+    const row = await get(
+      `SELECT alicuota FROM agip_padron_alicuotas WHERE period_yyyymm = ? AND cuit = ? LIMIT 1`,
+      [periodYyyymm, cuit]
+    );
+    const alicuota = Number((row as any)?.alicuota || 0);
+    return alicuota > 0 ? { alicuota, periodUsed: periodYyyymm } : null;
+  };
+
+  let hit = await lookupPadron(orderPeriod);
+  if (!hit) {
+    const prior = (await get(
+      `SELECT period_yyyymm AS periodUsed, alicuota
+       FROM agip_padron_alicuotas
+       WHERE cuit = ? AND period_yyyymm <= ? AND alicuota > 0
+       ORDER BY period_yyyymm DESC
+       LIMIT 1`,
+      [cuit, orderPeriod]
+    )) as { periodUsed?: string; alicuota?: number } | undefined;
+    if (prior && Number(prior.alicuota) > 0) {
+      hit = { alicuota: Number(prior.alicuota), periodUsed: String(prior.periodUsed) };
+    }
+  }
+  if (!hit) {
+    const latest = (await get(
+      `SELECT period_yyyymm AS periodUsed, alicuota
+       FROM agip_padron_alicuotas
+       WHERE cuit = ? AND alicuota > 0
+       ORDER BY period_yyyymm DESC
+       LIMIT 1`,
+      [cuit]
+    )) as { periodUsed?: string; alicuota?: number } | undefined;
+    if (latest && Number(latest.alicuota) > 0) {
+      hit = { alicuota: Number(latest.alicuota), periodUsed: String(latest.periodUsed) };
+    }
+  }
+  if (!hit) return null;
+
   const net = Math.max(0, Number(args.netAmount) || 0);
-  const amount = Math.round(net * (alicuota / 100) * 100) / 100;
-  return { alicuota, amount };
+  const amount = Math.round(net * (hit.alicuota / 100) * 100) / 100;
+  return { alicuota: hit.alicuota, amount, periodUsed: hit.periodUsed };
 }
 
 export const getOrders = async (req: any, res: any) => {
@@ -1660,9 +1690,10 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       netAmount: totalForAfip
     });
     if (!agip || !(agip.amount > 0.005)) {
+      const orderPeriod = agipPeriodYyyymmFromOrderDate(orderRow.date);
       return res.status(400).json({
         message:
-          'No hay percepción IIBB calculable para reemitir (padrón AGIP en cero o CUIT incompleto). Si solo querés actualizar el PDF sin nuevo CAE, usá “Guardar IIBB”.'
+          `No hay percepción IIBB calculable para reemitir (CUIT incompleto o sin alícuota en padrón AGIP${orderPeriod ? ` para ${orderPeriod}` : ''}). Cargá el padrón del mes o usá “Guardar IIBB” si solo querés actualizar el PDF sin nuevo CAE.`
       });
     }
 
@@ -1757,9 +1788,13 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
       await execute(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
 
+      const padronHint =
+        agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
+          ? ` (padrón AGIP ${agip.periodUsed})`
+          : '';
       res.status(201).json({
         message:
-          'Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
+          `Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB${padronHint}. El stock del pedido no se modificó.`,
         creditNote: {
           id: creditNoteId,
           orderId: id,
