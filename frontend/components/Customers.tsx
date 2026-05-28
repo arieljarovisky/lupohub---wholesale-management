@@ -6,6 +6,7 @@ import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/cus
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
+import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 
 interface CustomersProps {
   customers: Customer[];
@@ -1743,7 +1744,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     
                     <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
                        <div className="text-right">
-                          <p className="font-black text-white text-lg">${order.total.toLocaleString()}</p>
+                          {(() => {
+                            const fact = order.invoice ? orderTotalesFacturado(order) : null;
+                            const amount = fact?.total ?? orderNetoSaldoForOrderCard(order) * 1.21;
+                            return (
+                              <>
+                                <p className="font-black text-white text-lg">
+                                  ${amount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                                {fact && (
+                                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Total facturado</p>
+                                )}
+                              </>
+                            );
+                          })()}
                        </div>
                        <ChevronRight size={20} className="text-slate-600 group-hover:text-blue-400 transition-transform group-hover:translate-x-1" />
                     </div>

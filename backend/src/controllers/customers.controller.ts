@@ -1078,6 +1078,37 @@ const SQL_CARTERA_MM_REC_SIN_PAGO = `
     )
   GROUP BY e.customer_id`;
 
+/**
+ * Neto gravado del pedido (alias `o`): usa `orders.total` o suma de ítems si el total quedó en 0.
+ * Tras picking: pickeado si hay; si no, cantidad pedida (alineado con factura AFIP / NC).
+ */
+const SQL_ORDER_NETO_GRAVADO = `GREATEST(
+  COALESCE(o.total, 0),
+  COALESCE((
+    SELECT SUM(
+      ROUND(
+        (
+          CASE
+            WHEN NOT COALESCE(o.no_stock_impact, 0)
+              AND o.status IN ('Falta controlar', 'Controlado', 'Despachado')
+            THEN
+              CASE
+                WHEN COALESCE(oi.picked, 0) > 0 THEN LEAST(COALESCE(oi.quantity, 0), COALESCE(oi.picked, 0))
+                ELSE COALESCE(oi.quantity, 0)
+              END
+            ELSE COALESCE(oi.quantity, 0)
+          END
+        ) * COALESCE(oi.price_at_moment, 0),
+        2
+      )
+    )
+    FROM order_items oi
+    WHERE oi.order_id = o.id
+  ), 0)
+)`;
+
+const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
+
 /** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
@@ -1156,7 +1187,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1196,7 +1227,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1370,7 +1401,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -1380,7 +1411,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1414,7 +1445,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -1424,7 +1455,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1568,7 +1599,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1608,7 +1639,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -2834,7 +2865,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+          SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
         FROM orders o
         WHERE o.payment_status = 'pendiente'
           AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -2844,7 +2875,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
         FROM orders o
         LEFT JOIN (
           SELECT order_id, SUM(amount_credited) AS cn_total
@@ -3136,7 +3167,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -3181,7 +3212,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -4328,8 +4359,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
     const orderAgg = await get(
       `SELECT
-         ROUND(COALESCE(SUM(ROUND(o.total * 1.21, 2)), 0), 2) AS facturas_bruto,
-         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)), 0), 2) AS nc_iva
+         ROUND(COALESCE(SUM(${SQL_ORDER_CARGO_CON_IVA}), 0), 2) AS facturas_bruto,
+         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total

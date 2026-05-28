@@ -1962,6 +1962,7 @@ export const emitirFactura = async (req: any, res: any) => {
             agip?.amount ?? 0
           ]
         );
+        await execute('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
         return {
           id: invoiceId,
           orderId: id,
