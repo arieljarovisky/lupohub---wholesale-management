@@ -235,8 +235,10 @@ export interface Order {
   includeInSaldo?: boolean;
   /** Si true, este pedido no debe impactar stock (facturación administrativa). */
   noStockImpact?: boolean;
-  /** Si el backend lo envía: hubo movimiento PEDIDO_MAYORISTA en historial (stock ya descontado de verdad). */
+  /** Descontado en inventario (movimiento PEDIDO_MAYORISTA). */
   mayoristaStockApplied?: boolean;
+  /** Stock ya devuelto al inventario (restauración manual o cancelación). */
+  mayoristaStockRestored?: boolean;
   /** Avisos al guardar: líneas que quedaron (total o parcial) sin despacho. */
   despachoWarnings?: string[];
   /** N° de remito único asignado a este pedido (secuencia incremental que arranca en 31457). */

@@ -1293,6 +1293,13 @@ export const api = {
     return await request(`/orders/${orderId}/apply-mayorista-stock`, 'POST', {});
   },
 
+  /** Devuelve al inventario el stock descontado por el pedido, sin cancelarlo. */
+  restoreMayoristaStock: async (
+    orderId: string
+  ): Promise<{ id: string; success?: boolean; alreadyRestored?: boolean; message?: string; errors?: string[] }> => {
+    return await request(`/orders/${orderId}/restore-mayorista-stock`, 'POST', {});
+  },
+
   /** Indica si AFIP está configurado en el servidor (para mostrar botón Emitir factura). */
   getAfipStatus: async (): Promise<{ configured: boolean; production?: boolean }> => {
     const res = await request<{ configured: boolean; production?: boolean }>('/afip/status', 'GET');

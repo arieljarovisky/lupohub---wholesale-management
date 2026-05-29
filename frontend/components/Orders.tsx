@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy } from 'lucide-react';
+import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, ArrowUpToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
@@ -388,6 +388,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
   const [applyingMayoristaStockId, setApplyingMayoristaStockId] = useState<string | null>(null);
+  const [restoringMayoristaStockId, setRestoringMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
   const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
@@ -2083,6 +2084,55 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <span className="pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-400" aria-hidden />
                     </div>
                   )}
+                  {role !== Role.CUSTOMER &&
+                    !order.noStockImpact &&
+                    order.status !== OrderStatus.CANCELLED &&
+                    order.mayoristaStockApplied === true &&
+                    order.mayoristaStockRestored !== true && (
+                      <OrderCardActionButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          showConfirm({
+                            title: 'Restaurar stock',
+                            message:
+                              '¿Devolver al inventario el stock descontado por este pedido? El pedido no se cancela ni se modifica.',
+                            confirmLabel: 'Restaurar stock',
+                            onConfirm: () => {
+                              setRestoringMayoristaStockId(order.id);
+                              api
+                                .restoreMayoristaStock(order.id)
+                                .then((r) => {
+                                  showToast(
+                                    'success',
+                                    r.message ||
+                                      (r.alreadyRestored
+                                        ? 'El stock de este pedido ya estaba restaurado.'
+                                        : 'Stock restaurado al inventario.')
+                                  );
+                                  refreshOrders?.();
+                                })
+                                .catch((err: any) =>
+                                  showToast(
+                                    'error',
+                                    err?.response?.data?.message || err?.message || 'Error al restaurar stock'
+                                  )
+                                )
+                                .finally(() => setRestoringMayoristaStockId(null));
+                            },
+                          });
+                        }}
+                        disabled={restoringMayoristaStockId === order.id}
+                        title="Devolver al inventario el stock descontado (sin cancelar el pedido)"
+                        icon={
+                          restoringMayoristaStockId === order.id ? (
+                            <Loader2 size={16} className="animate-spin text-emerald-400" />
+                          ) : (
+                            <ArrowUpToLine size={16} />
+                          )
+                        }
+                        label="Restaurar"
+                      />
+                    )}
                   {role !== Role.CUSTOMER &&
                     !order.noStockImpact &&
                     order.status !== OrderStatus.CANCELLED &&

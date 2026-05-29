@@ -16,6 +16,7 @@ import {
   patchOrderPaymentStatus,
   patchOrderIncludeInSaldo,
   applyMayoristaStockDeduction,
+  restoreMayoristaStockDeduction,
   exportTopWholesaleProductsMetricsXlsx,
   getOrderItemsMissingDespacho,
   assignDespachosToOrderItems,
@@ -34,6 +35,7 @@ router.post('/', createOrder);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
 router.patch('/:id/include-in-saldo', authMiddleware, patchOrderIncludeInSaldo);
 router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDeduction);
+router.post('/:id/restore-mayorista-stock', authMiddleware, restoreMayoristaStockDeduction);
 router.patch('/:id/status', authMiddleware, updateOrderStatus);
 router.put('/:id', updateOrder);
 router.patch('/:id/archive', authMiddleware, archiveOrder);

@@ -7,6 +7,8 @@ import {
   restoreStockForOrderItem,
   deductStockForOrder,
   isMayoristaStockDeductedForWholesale,
+  isWholesaleStockRestoredForOrder,
+  wholesaleOrderStockManualRestoreReference,
   resolveVariantIdForGridCell,
 } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
@@ -657,6 +659,7 @@ export const getOrders = async (req: any, res: any) => {
 
     let mayoristaStockLoaded = false;
     let mayoristaStockAppliedByOrder: Record<string, boolean> = {};
+    let mayoristaStockRestoredByOrder: Record<string, boolean> = {};
     try {
       if (orderIds.length > 0) {
         const refs = orderIds.map((oid: string) => `Pedido: ${oid}`);
@@ -669,6 +672,22 @@ export const getOrders = async (req: any, res: any) => {
         const appliedRefs = new Set((mRows as { reference: string }[]).map((r) => r.reference));
         for (const oid of orderIds) {
           mayoristaStockAppliedByOrder[oid] = appliedRefs.has(`Pedido: ${oid}`);
+        }
+        const restoreRefs = orderIds.flatMap((oid: string) => [
+          wholesaleOrderStockManualRestoreReference(oid),
+          `Cancelación pedido: ${oid}`,
+        ]);
+        const restorePh = restoreRefs.map(() => '?').join(',');
+        const restoreRows = await query(
+          `SELECT DISTINCT reference FROM stock_movements
+           WHERE movement_type = 'DEVOLUCION' AND reference IN (${restorePh})`,
+          restoreRefs
+        );
+        const restoredRefs = new Set((restoreRows as { reference: string }[]).map((r) => r.reference));
+        for (const oid of orderIds) {
+          mayoristaStockRestoredByOrder[oid] =
+            restoredRefs.has(wholesaleOrderStockManualRestoreReference(oid)) ||
+            restoredRefs.has(`Cancelación pedido: ${oid}`);
         }
         mayoristaStockLoaded = true;
       }
@@ -715,6 +734,9 @@ export const getOrders = async (req: any, res: any) => {
       noStockImpact: !!order.no_stock_impact,
       mayoristaStockApplied: mayoristaStockLoaded
         ? mayoristaStockAppliedByOrder[order.id] === true
+        : undefined,
+      mayoristaStockRestored: mayoristaStockLoaded
+        ? mayoristaStockRestoredByOrder[order.id] === true
         : undefined
     };
     });
@@ -1346,7 +1368,7 @@ export const updateOrderStatus = async (req: any, res: any) => {
     // Si se cancela y el stock ya estaba descontado de verdad, restaurar.
     const hadStockDeducted =
       !noStockImpact && (await isMayoristaStockDeductedForWholesale(id));
-    if (nextStatus === 'Cancelado' && hadStockDeducted) {
+    if (nextStatus === 'Cancelado' && hadStockDeducted && !(await isWholesaleStockRestoredForOrder(id))) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
       
@@ -1654,6 +1676,60 @@ export const applyMayoristaStockDeduction = async (req: any, res: any) => {
   }
 };
 
+/**
+ * Devuelve al inventario el stock descontado por este pedido, sin cancelarlo ni modificar su estado.
+ */
+export const restoreMayoristaStockDeduction = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  try {
+    const order = await get(
+      'SELECT id, status, no_stock_impact, customer_id FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!order) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (user.role === 'SELLER') {
+      const cust = order.customer_id
+        ? await get('SELECT seller_id FROM customers WHERE id = ?', [order.customer_id])
+        : null;
+      if (cust?.seller_id && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+      }
+    }
+    if (order.no_stock_impact) {
+      return res.status(400).json({ message: 'Este pedido está marcado sin impacto en stock.' });
+    }
+    if (order.status === 'Cancelado') {
+      return res.status(400).json({ message: 'No aplica a pedidos cancelados.' });
+    }
+    if (!(await isMayoristaStockDeductedForWholesale(id))) {
+      return res.status(400).json({ message: 'Este pedido no tiene stock descontado en inventario.' });
+    }
+    if (await isWholesaleStockRestoredForOrder(id)) {
+      return res.json({
+        id,
+        alreadyRestored: true,
+        message: 'El stock de este pedido ya fue restaurado.',
+      });
+    }
+    const result = await restoreStockForOrder(id, wholesaleOrderStockManualRestoreReference(id));
+    if (!result.success) {
+      return res.status(500).json({
+        message: 'Error al restaurar stock: ' + (result.errors?.join(', ') || 'desconocido'),
+        errors: result.errors,
+      });
+    }
+    res.json({ id, success: true, message: 'Stock restaurado al inventario. El pedido no fue modificado.' });
+  } catch (error: any) {
+    console.error('restoreMayoristaStockDeduction:', error);
+    res.status(500).json({ message: error?.message || 'Error al restaurar stock' });
+  }
+};
+
 /** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
 export const archiveOrder = async (req: any, res: any) => {
   const { id } = req.params;
@@ -1699,7 +1775,7 @@ export const deleteOrder = async (req: any, res: any) => {
     const hadStockDeducted =
       !currentOrder?.no_stock_impact &&
       (await isMayoristaStockDeductedForWholesale(id));
-    if (hadStockDeducted) {
+    if (hadStockDeducted && !(await isWholesaleStockRestoredForOrder(id))) {
       const { restoreStockForOrder } = await import('./stock.controller');
       const result = await restoreStockForOrder(id);
       if (!result.success) {

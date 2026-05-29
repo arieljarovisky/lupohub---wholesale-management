@@ -275,6 +275,26 @@ export const isMayoristaStockDeductedForWholesale = async (orderId: string): Pro
   return !!row;
 };
 
+/** Referencia DEVOLUCION al restaurar stock sin cancelar el pedido. */
+export const wholesaleOrderStockManualRestoreReference = (orderId: string) => `Restauración pedido: ${orderId}`;
+
+/** Referencia DEVOLUCION al cancelar/eliminar pedido. */
+export const wholesaleOrderStockCancelRestoreReference = (orderId: string) => `Cancelación pedido: ${orderId}`;
+
+/** True si el stock de este pedido ya fue devuelto al inventario (manual o por cancelación). */
+export const isWholesaleStockRestoredForOrder = async (orderId: string): Promise<boolean> => {
+  const refs = [
+    wholesaleOrderStockManualRestoreReference(orderId),
+    wholesaleOrderStockCancelRestoreReference(orderId),
+  ];
+  const row = await get(
+    `SELECT 1 AS ok FROM stock_movements
+     WHERE movement_type = 'DEVOLUCION' AND reference IN (?, ?) LIMIT 1`,
+    refs
+  );
+  return !!row;
+};
+
 // Descontar stock por pedido mayorista
 export const deductStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
   const errors: string[] = [];
@@ -337,8 +357,12 @@ export const deductStockForOrder = async (orderId: string): Promise<{ success: b
   }
 };
 
-// Restaurar stock cuando se cancela un pedido
-export const restoreStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
+// Restaurar stock de un pedido mayorista (cancelación, NC o restauración manual).
+export const restoreStockForOrder = async (
+  orderId: string,
+  referenceNote?: string
+): Promise<{ success: boolean; errors: string[] }> => {
+  const devolucionRef = referenceNote?.trim() || wholesaleOrderStockCancelRestoreReference(orderId);
   const errors: string[] = [];
 
   try {
@@ -384,7 +408,7 @@ export const restoreStockForOrder = async (orderId: string): Promise<{ success: 
         variantId,
         newStock,
         'DEVOLUCION',
-        `Cancelación pedido: ${orderId}`
+        devolucionRef
       );
 
       if (!success) {
