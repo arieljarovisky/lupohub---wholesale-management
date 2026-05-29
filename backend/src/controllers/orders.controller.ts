@@ -267,6 +267,38 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
+/** Neto para NC total: pickeado, o —si quedó en 0— lo facturado (IIBB / cantidades / total del pedido). */
+async function getOrderNetForCreditNoteTotal(orderId: string): Promise<number> {
+  const fromPicked = await getOrderNetFromLineItems(orderId);
+  if (fromPicked > 0.005) return fromPicked;
+
+  const invRow = await get(
+    'SELECT agip_ret_per, agip_alicuota FROM invoices WHERE order_id = ? LIMIT 1',
+    [orderId]
+  ) as { agip_ret_per?: string | number; agip_alicuota?: string | number } | undefined;
+  const retPer = Number(invRow?.agip_ret_per || 0);
+  const alicuota = Number(invRow?.agip_alicuota || 0);
+  if (retPer > 0.005 && alicuota > 0.005) {
+    return Math.round((retPer / (alicuota / 100)) * 100) / 100;
+  }
+
+  const rows = await query(
+    `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+    [orderId]
+  ) as { quantity: number; price_at_moment: string | number }[];
+  let sumQty = 0;
+  for (const r of rows) {
+    const q = Number(r.quantity) || 0;
+    const price = Number(r.price_at_moment) || 0;
+    sumQty += Math.round(q * price * 100) / 100;
+  }
+  sumQty = Math.round(sumQty * 100) / 100;
+  if (sumQty > 0.005) return sumQty;
+
+  const orderRow = await get('SELECT total FROM orders WHERE id = ?', [orderId]) as { total?: string | number } | undefined;
+  return Math.round((Number(orderRow?.total) || 0) * 100) / 100;
+}
+
 /**
  * Período del padrón AGIP (YYYYMM) a partir de la fecha del pedido.
  * MySQL devuelve `DATE` como `Date` en node: `String(date)` no es ISO y rompía el cálculo IIBB al emitir.
@@ -292,23 +324,53 @@ async function getAgipRetentionForOrder(args: {
   orderDate: string | Date | null | undefined;
   customerCuit?: string | null;
   netAmount: number;
-}): Promise<{ alicuota: number; amount: number } | null> {
+}): Promise<{ alicuota: number; amount: number; periodUsed?: string } | null> {
   const cuit = String(args.customerCuit || '').replace(/\D/g, '').slice(0, 11);
   if (cuit.length !== 11) return null;
-  const period = agipPeriodYyyymmFromOrderDate(args.orderDate);
-  if (!period || !/^\d{6}$/.test(period)) return null;
-  const row = await get(
-    `SELECT alicuota
-     FROM agip_padron_alicuotas
-     WHERE period_yyyymm = ? AND cuit = ?
-     LIMIT 1`,
-    [period, cuit]
-  );
-  const alicuota = Number((row as any)?.alicuota || 0);
-  if (!(alicuota > 0)) return null;
+  const orderPeriod = agipPeriodYyyymmFromOrderDate(args.orderDate);
+  if (!orderPeriod || !/^\d{6}$/.test(orderPeriod)) return null;
+
+  const lookupPadron = async (periodYyyymm: string) => {
+    const row = await get(
+      `SELECT alicuota FROM agip_padron_alicuotas WHERE period_yyyymm = ? AND cuit = ? LIMIT 1`,
+      [periodYyyymm, cuit]
+    );
+    const alicuota = Number((row as any)?.alicuota || 0);
+    return alicuota > 0 ? { alicuota, periodUsed: periodYyyymm } : null;
+  };
+
+  let hit = await lookupPadron(orderPeriod);
+  if (!hit) {
+    const prior = (await get(
+      `SELECT period_yyyymm AS periodUsed, alicuota
+       FROM agip_padron_alicuotas
+       WHERE cuit = ? AND period_yyyymm <= ? AND alicuota > 0
+       ORDER BY period_yyyymm DESC
+       LIMIT 1`,
+      [cuit, orderPeriod]
+    )) as { periodUsed?: string; alicuota?: number } | undefined;
+    if (prior && Number(prior.alicuota) > 0) {
+      hit = { alicuota: Number(prior.alicuota), periodUsed: String(prior.periodUsed) };
+    }
+  }
+  if (!hit) {
+    const latest = (await get(
+      `SELECT period_yyyymm AS periodUsed, alicuota
+       FROM agip_padron_alicuotas
+       WHERE cuit = ? AND alicuota > 0
+       ORDER BY period_yyyymm DESC
+       LIMIT 1`,
+      [cuit]
+    )) as { periodUsed?: string; alicuota?: number } | undefined;
+    if (latest && Number(latest.alicuota) > 0) {
+      hit = { alicuota: Number(latest.alicuota), periodUsed: String(latest.periodUsed) };
+    }
+  }
+  if (!hit) return null;
+
   const net = Math.max(0, Number(args.netAmount) || 0);
-  const amount = Math.round(net * (alicuota / 100) * 100) / 100;
-  return { alicuota, amount };
+  const amount = Math.round(net * (hit.alicuota / 100) * 100) / 100;
+  return { alicuota: hit.alicuota, amount, periodUsed: hit.periodUsed };
 }
 
 export const getOrders = async (req: any, res: any) => {
@@ -583,6 +645,84 @@ export const getOrders = async (req: any, res: any) => {
   }
 };
 
+async function buildPersistedOrderResponse(orderId: string, newOrder: Order, despachoWarnings: string[]): Promise<any> {
+  const created = await get(
+    `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
+            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+     FROM orders o
+     LEFT JOIN users cu ON cu.id = o.created_by
+     LEFT JOIN users su ON su.id = o.seller_id
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (!created) {
+    return {
+      ...newOrder,
+      id: orderId,
+      paymentStatus: (newOrder as any).paymentStatus === 'pagado' ? 'pagado' : 'pendiente',
+      despachoWarnings,
+      items: newOrder.items,
+    } as any;
+  }
+  const items = await query(
+    `
+    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
+           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
+           pc.product_id AS productId,
+           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
+           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
+    FROM order_items i
+    JOIN product_variants pv ON pv.id = i.variant_id
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN sizes s ON s.id = pv.size_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
+    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
+    WHERE i.order_id = ?
+    ORDER BY i.id
+  `,
+    [orderId]
+  );
+  const itemsMapped = (items as any[]).map((row: any) => ({
+    variantId: row.variantId,
+    productId: row.productId,
+    despachoId: row.despachoId ?? undefined,
+    quantity: row.quantity,
+    picked: row.picked ?? 0,
+    priceAtMoment: Number(row.priceAtMoment),
+    sellAsPack: !!(row.sellAsPack),
+    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
+    sku: row.sku ?? undefined,
+    productName: row.productName ?? undefined,
+    sizeCode: row.sizeCode ?? undefined,
+    colorName: row.colorName ?? undefined,
+    colorCode: row.colorCode ?? undefined,
+    numeroDespacho: row.numeroDespacho ?? undefined,
+  }));
+  return {
+    id: created.id,
+    customerId: created.customer_id,
+    sellerId: created.seller_id,
+    createdBy: (created as any).created_by ?? undefined,
+    createdByName: (created as any).created_by_name ?? undefined,
+    createdByRole: (created as any).created_by_role ?? undefined,
+    sellerName: (created as any).seller_name ?? undefined,
+    date: created.date,
+    status: created.status,
+    total: Number(created.total),
+    pickedBy: created.picked_by ?? undefined,
+    dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
+    items: itemsMapped,
+    paymentStatus: mapPaymentStatus(created),
+    noStockImpact: !!created.no_stock_impact,
+    matrixImportLabel: (created as any).matrix_import_label
+      ? String((created as any).matrix_import_label)
+      : undefined,
+    despachoWarnings,
+  };
+}
+
 async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrderId?: string): Promise<any> {
   if (!newOrder.customerId || !newOrder.items?.length) {
     const err: any = new Error('Datos de pedido inválidos');
@@ -602,6 +742,11 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   }
 
   const orderId = explicitOrderId || newOrder.id || uuidv4();
+  const alreadyExists = await get('SELECT id FROM orders WHERE id = ? LIMIT 1', [orderId]);
+  if (alreadyExists?.id) {
+    // Idempotencia: si llega un POST duplicado con el mismo id, devolver el mismo pedido.
+    return buildPersistedOrderResponse(orderId, newOrder, []);
+  }
 
   const toSqlDate = (d: string) => {
     try {
@@ -744,81 +889,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
 
   // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
 
-  const created = await get(
-    `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
-     FROM orders o
-     LEFT JOIN users cu ON cu.id = o.created_by
-     LEFT JOIN users su ON su.id = o.seller_id
-     WHERE o.id = ?`,
-    [orderId]
-  );
-  if (!created) {
-    return {
-      ...newOrder,
-      id: orderId,
-      paymentStatus,
-      despachoWarnings,
-      items: newOrder.items,
-    } as any;
-  }
-  const items = await query(
-    `
-    SELECT i.variant_id AS variantId, i.despacho_id AS despachoId, i.quantity, i.picked, i.price_at_moment AS priceAtMoment,
-           COALESCE(i.sell_as_pack, 0) AS sellAsPack, COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayoristaPackSize,
-           pc.product_id AS productId,
-           COALESCE(pv.sku, p.sku) AS sku, p.name AS productName, s.size_code AS sizeCode, c.name AS colorName, c.code AS colorCode,
-           COALESCE(d_item.numero_despacho, d_prod.numero_despacho) AS numeroDespacho
-    FROM order_items i
-    JOIN product_variants pv ON pv.id = i.variant_id
-    JOIN product_colors pc ON pc.id = pv.product_color_id
-    JOIN products p ON p.id = pc.product_id
-    LEFT JOIN sizes s ON s.id = pv.size_id
-    LEFT JOIN colors c ON c.id = pc.color_id
-    LEFT JOIN despachos d_item ON d_item.id = i.despacho_id
-    LEFT JOIN despachos d_prod ON d_prod.id = p.ultimo_despacho_id
-    WHERE i.order_id = ?
-    ORDER BY i.id
-  `,
-    [orderId]
-  );
-  const itemsMapped = (items as any[]).map((row: any) => ({
-    variantId: row.variantId,
-    productId: row.productId,
-    despachoId: row.despachoId ?? undefined,
-    quantity: row.quantity,
-    picked: row.picked ?? 0,
-    priceAtMoment: Number(row.priceAtMoment),
-    sellAsPack: !!(row.sellAsPack),
-    mayoristaPackSize: row.mayoristaPackSize != null ? Number(row.mayoristaPackSize) : 1,
-    sku: row.sku ?? undefined,
-    productName: row.productName ?? undefined,
-    sizeCode: row.sizeCode ?? undefined,
-    colorName: row.colorName ?? undefined,
-    colorCode: row.colorCode ?? undefined,
-    numeroDespacho: row.numeroDespacho ?? undefined,
-  }));
-  return {
-    id: created.id,
-    customerId: created.customer_id,
-    sellerId: created.seller_id,
-    createdBy: (created as any).created_by ?? undefined,
-    createdByName: (created as any).created_by_name ?? undefined,
-    createdByRole: (created as any).created_by_role ?? undefined,
-    sellerName: (created as any).seller_name ?? undefined,
-    date: created.date,
-    status: created.status,
-    total: Number(created.total),
-    pickedBy: created.picked_by ?? undefined,
-    dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
-    items: itemsMapped,
-    paymentStatus: mapPaymentStatus(created),
-    noStockImpact: !!created.no_stock_impact,
-    matrixImportLabel: (created as any).matrix_import_label
-      ? String((created as any).matrix_import_label)
-      : undefined,
-    despachoWarnings,
-  };
+  return buildPersistedOrderResponse(orderId, newOrder, despachoWarnings);
 }
 
 export const createOrder = async (req: any, res: any) => {
@@ -1619,9 +1690,10 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       netAmount: totalForAfip
     });
     if (!agip || !(agip.amount > 0.005)) {
+      const orderPeriod = agipPeriodYyyymmFromOrderDate(orderRow.date);
       return res.status(400).json({
         message:
-          'No hay percepción IIBB calculable para reemitir (padrón AGIP en cero o CUIT incompleto). Si solo querés actualizar el PDF sin nuevo CAE, usá “Guardar IIBB”.'
+          `No hay percepción IIBB calculable para reemitir (CUIT incompleto o sin alícuota en padrón AGIP${orderPeriod ? ` para ${orderPeriod}` : ''}). Cargá el padrón del mes o usá “Guardar IIBB” si solo querés actualizar el PDF sin nuevo CAE.`
       });
     }
 
@@ -1698,8 +1770,9 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         forceCbteTipo
       );
 
+      const { nowMysqlArgentina } = await import('../utils/argentinaDate');
       await execute(
-        `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?
+        `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?, created_at = ?
          WHERE order_id = ?`,
         [
           faResult.cae,
@@ -1710,15 +1783,20 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           faResult.cbteHasta,
           agip.alicuota,
           agip.amount,
+          nowMysqlArgentina(),
           id
         ]
       );
 
       await execute(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
 
+      const padronHint =
+        agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
+          ? ` (padrón AGIP ${agip.periodUsed})`
+          : '';
       res.status(201).json({
         message:
-          'Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB. El stock del pedido no se modificó.',
+          `Se emitió nota de crédito total (neto + IVA, sin IIBB en la NC) y una nueva factura con percepción IIBB${padronHint}. El stock del pedido no se modificó.`,
         creditNote: {
           id: creditNoteId,
           orderId: id,
@@ -1921,6 +1999,7 @@ export const emitirFactura = async (req: any, res: any) => {
             agip?.amount ?? 0
           ]
         );
+        await execute('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
         return {
           id: invoiceId,
           orderId: id,
@@ -2132,8 +2211,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     let itemsToCredit: Array<{ itemIndex: number; quantity: number; amount: number }> = [];
 
     if (tipo === 'total') {
-      const netFromItems = await getOrderNetFromLineItems(id);
-      amountToCredit = netFromItems > 0 ? netFromItems : Number(orderRow.total) || 0;
+      amountToCredit = await getOrderNetForCreditNoteTotal(id);
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
     } else if (tipo === 'item') {
       const itemsRows = await query(

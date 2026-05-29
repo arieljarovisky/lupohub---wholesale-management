@@ -10,6 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { todayYmdArgentina } from '../utils/argentinaDate';
 
 const PTO_VTA_DEFAULT = 1;
 /** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
@@ -339,8 +340,8 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
   const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
 
-  // Fecha del comprobante = fecha de emisión (hoy), no la fecha del pedido
-  const dateStr = new Date().toISOString().split('T')[0];
+  // Fecha del comprobante = fecha de emisión (hoy en Argentina), no la fecha del pedido
+  const dateStr = todayYmdArgentina();
   const fecha = dateStr.replace(/-/g, '');
   const cbteFch = parseInt(fecha, 10);
   if (isNaN(cbteFch) || fecha.length !== 8) {
@@ -532,7 +533,7 @@ export async function emitirNotaCredito(
     impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
   const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
 
-  const dateStr = new Date().toISOString().split('T')[0];
+  const dateStr = todayYmdArgentina();
   const fecha = dateStr.replace(/-/g, '');
   const cbteFch = parseInt(fecha, 10);
 

@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
+import { canonicalizeCityInput } from '../utils/cityNormalize';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
 
@@ -22,7 +23,7 @@ function parseDeliveryAddressesFromRow(raw: unknown): CustomerDeliveryAddressDto
         id,
         label: (String((it as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
         address,
-        city: String((it as any).city ?? '').trim(),
+        city: canonicalizeCityInput((it as any).city) || '',
       });
     }
     return out;
@@ -45,7 +46,7 @@ function normalizeDeliveryAddressesForDb(input: unknown): string | null {
       id,
       label: (String((raw as any).label ?? 'Sucursal').trim() || 'Sucursal') as string,
       address,
-      city: String((raw as any).city ?? '').trim(),
+      city: canonicalizeCityInput((raw as any).city) || '',
     });
   }
   return cleaned.length ? JSON.stringify(cleaned) : null;
@@ -589,7 +590,7 @@ export const createCustomer = async (req: Request, res: Response) => {
     const id = body.id && body.id.trim() ? body.id.trim() : uuidv4();
     const sellerId = body.sellerId?.trim() || null;
     const address = (body.address ?? '').toString().trim() || null;
-    const city = (body.city ?? '').toString().trim() || null;
+    const city = canonicalizeCityInput(body.city);
     const cuit = (body.cuit ?? '').toString().trim() || null;
     const phone = (body.phone ?? '').toString().trim() || null;
     const transportNumber = (body.transportNumber ?? '').toString().trim() || null;
@@ -675,7 +676,10 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.businessName !== undefined) { updates.push('business_name = ?'); params.push(body.businessName?.trim() || null); }
     if (body.email !== undefined) { updates.push('email = ?'); params.push(body.email?.trim() || null); }
     if (body.address !== undefined) { updates.push('address = ?'); params.push(body.address?.trim() || null); }
-    if (body.city !== undefined) { updates.push('city = ?'); params.push(body.city?.trim() || null); }
+    if (body.city !== undefined) {
+      updates.push('city = ?');
+      params.push(body.city != null && String(body.city).trim() ? canonicalizeCityInput(body.city) : null);
+    }
     if (body.cuit !== undefined) { updates.push('cuit = ?'); params.push(body.cuit?.trim() || null); }
     if (body.phone !== undefined) { updates.push('phone = ?'); params.push(body.phone?.trim() || null); }
     if (body.transportNumber !== undefined) { updates.push('transport_number = ?'); params.push(body.transportNumber?.trim() || null); }
@@ -848,7 +852,7 @@ export const importCustomers = async (req: Request, res: Response) => {
       const businessName = (r.businessName ?? '').toString().trim();
       let email = (r.email ?? '').toString().trim();
       const address = (r.address ?? '').toString().trim() || null;
-      const city = (r.city ?? '').toString().trim() || null;
+      const city = canonicalizeCityInput(r.city);
       const cuit = (r.cuit ?? '').toString().trim() || null;
       const cuitSolo = (cuit || '').replace(/\D/g, '');
       const phone = (r.phone ?? '').toString().trim() || null;
@@ -1078,6 +1082,37 @@ const SQL_CARTERA_MM_REC_SIN_PAGO = `
     )
   GROUP BY e.customer_id`;
 
+/**
+ * Neto gravado del pedido (alias `o`): usa `orders.total` o suma de ítems si el total quedó en 0.
+ * Tras picking: pickeado si hay; si no, cantidad pedida (alineado con factura AFIP / NC).
+ */
+const SQL_ORDER_NETO_GRAVADO = `GREATEST(
+  COALESCE(o.total, 0),
+  COALESCE((
+    SELECT SUM(
+      ROUND(
+        (
+          CASE
+            WHEN NOT COALESCE(o.no_stock_impact, 0)
+              AND o.status IN ('Falta controlar', 'Controlado', 'Despachado')
+            THEN
+              CASE
+                WHEN COALESCE(oi.picked, 0) > 0 THEN LEAST(COALESCE(oi.quantity, 0), COALESCE(oi.picked, 0))
+                ELSE COALESCE(oi.quantity, 0)
+              END
+            ELSE COALESCE(oi.quantity, 0)
+          END
+        ) * COALESCE(oi.price_at_moment, 0),
+        2
+      )
+    )
+    FROM order_items oi
+    WHERE oi.order_id = o.id
+  ), 0)
+)`;
+
+const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
+
 /** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
@@ -1156,7 +1191,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1196,7 +1231,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1370,7 +1405,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -1380,7 +1415,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1414,7 +1449,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
       WHERE o.payment_status = 'pendiente'
         AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -1424,7 +1459,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1568,7 +1603,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1608,7 +1643,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -2834,7 +2869,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
+          SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
         FROM orders o
         WHERE o.payment_status = 'pendiente'
           AND o.status NOT IN ('Cancelado', 'Borrador')
@@ -2844,7 +2879,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
         FROM orders o
         LEFT JOIN (
           SELECT order_id, SUM(amount_credited) AS cn_total
@@ -3136,7 +3171,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -3181,7 +3216,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -3784,8 +3819,9 @@ export const assignCustomerSellersFromResumen = async (req: Request, res: Respon
 };
 
 /** Quita pendientes de pedidos ya despachados para un cliente:
- *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
- *  - Elimina renglones con quantity <= 0
+ *  - Si quantity > picked y picked > 0, deja quantity = picked (solo lo enviado)
+ *  - Elimina solo renglones que ya estaban en 0 (nunca pedidos)
+ *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
 export const clearDispatchedPendingsForCustomer = async (req: Request, res: Response) => {
@@ -3806,9 +3842,10 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
     }
 
     const dispatchedOrders = await query(
-      `SELECT id FROM orders
-       WHERE customer_id = ?
-         AND status IN ('Despachado', 'DISPATCHED')`,
+      `SELECT o.id FROM orders o
+       WHERE o.customer_id = ?
+         AND o.status IN ('Despachado', 'DISPATCHED')
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)`,
       [customerId]
     );
     const orderIds = (dispatchedOrders || []).map((o: any) => o.id).filter(Boolean);
@@ -3833,19 +3870,31 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
         await execute(
           `UPDATE order_items
            SET quantity = COALESCE(picked, 0)
-           WHERE order_id = ? AND quantity > COALESCE(picked, 0)`,
+           WHERE order_id = ?
+             AND COALESCE(picked, 0) > 0
+             AND quantity > COALESCE(picked, 0)`,
           [orderId]
         );
         itemsAdjusted += toAdjust;
       }
 
       const beforeDelete = await get(
-        `SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ? AND quantity <= 0`,
+        `SELECT COUNT(*) AS cnt
+         FROM order_items
+         WHERE order_id = ?
+           AND COALESCE(quantity, 0) <= 0
+           AND COALESCE(picked, 0) <= 0`,
         [orderId]
       );
       const toDelete = Number(beforeDelete?.cnt || 0);
       if (toDelete > 0) {
-        await execute(`DELETE FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+        await execute(
+          `DELETE FROM order_items
+           WHERE order_id = ?
+             AND COALESCE(quantity, 0) <= 0
+             AND COALESCE(picked, 0) <= 0`,
+          [orderId]
+        );
         itemsRemoved += toDelete;
       }
 
@@ -4328,8 +4377,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
     const orderAgg = await get(
       `SELECT
-         ROUND(COALESCE(SUM(ROUND(o.total * 1.21, 2)), 0), 2) AS facturas_bruto,
-         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)), 0), 2) AS nc_iva
+         ROUND(COALESCE(SUM(${SQL_ORDER_CARGO_CON_IVA}), 0), 2) AS facturas_bruto,
+         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total

@@ -12,6 +12,7 @@ import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, Refr
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
+import { buildCityFilterOptions, cityMatchesFilter } from '../utils/cityNormalize';
 
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 const BILLING_PAGE_SIZE = 25;
@@ -28,10 +29,10 @@ interface BillingProps {
 
 const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products = [], onNavigate }) => {
   const { showToast, showConfirm } = useNotification();
+  const isSeller = role === Role.SELLER;
   const canAfipInvoiceActions = role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
   const defaultRetPerMonth = (() => {
     const d = new Date();
-    d.setMonth(d.getMonth() - 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   })();
   const [activeView, setActiveView] = useState<'billing' | 'payments'>('billing');
@@ -209,15 +210,25 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const handleExportRetPerTxt = async () => {
+    const month = (retPerMonth || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      showToast('error', 'Elegí un Mes RetPer válido (formato YYYY-MM, ej. 2026-04).');
+      return;
+    }
     try {
       await api.exportRetPerTxt({
-        month: retPerMonth || undefined,
+        month,
         province: province !== 'ALL' ? province : undefined,
         customerId: customerId !== 'ALL' ? customerId : undefined
       });
       showToast('success', 'TXT Ret/Per descargado');
     } catch (err: any) {
-      showToast('error', err?.message || 'Error exportando TXT Ret/Per');
+      const msg =
+        err?.response?.data?.message ||
+        (typeof err?.response?.data === 'string' ? err.response.data : null) ||
+        err?.message ||
+        'Error exportando TXT Ret/Per';
+      showToast('error', msg);
     }
   };
 
@@ -427,7 +438,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
       if (item.tipo === 'NC' || item.cbteTipo === 3 || item.cbteTipo === 8) {
         const notes = await api.getOrderCreditNotes(order.id);
-        const nc = notes.find((n: any) => String(n.cbteDesde) === String(item.cbteDesde) && String(n.puntoVta) === String(item.puntoVta)) || notes[0];
+        const numeroNc = item.numeroDesde ?? item.cbteDesde;
+        const pvNc = item.puntoVta ?? item.punto_venta;
+        const nc =
+          (item.id && notes.find((n) => n.id === item.id)) ||
+          (item.cae && notes.find((n) => String(n.cae) === String(item.cae))) ||
+          (numeroNc != null &&
+            pvNc != null &&
+            notes.find(
+              (n) =>
+                String(n.cbteDesde) === String(numeroNc) &&
+                String(n.puntoVta) === String(pvNc)
+            ));
         if (!nc) {
           showToast('error', 'No se encontró la nota de crédito correspondiente');
           return;
@@ -532,17 +554,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return out;
   }, [customers]);
   const provinceOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) {
-      const city = (c.city || '').toString().trim();
-      if (city) set.add(city);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+    const cities = customers.map((c) => (c.city || '').toString().trim()).filter(Boolean);
+    return buildCityFilterOptions(cities);
   }, [customers]);
   const customersFilteredByProvince = useMemo(() => {
     if (province === 'ALL') return customers;
-    const p = province.toLowerCase();
-    return customers.filter((c) => (c.city || '').toString().toLowerCase().includes(p));
+    return customers.filter((c) => cityMatchesFilter((c.city || '').toString(), province));
   }, [customers, province]);
   const normalizeDateKey = (v: any): string => {
     if (!v) return '';
@@ -564,7 +581,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       if (customerId !== 'ALL' && String(it.customerId || '') !== customerId) return false;
       if (province !== 'ALL') {
         const city = customerCityById.get(String(it.customerId || '')) || '';
-        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+        if (!cityMatchesFilter(city, province)) return false;
       }
       if (tipo !== 'ALL' && String(it.tipo || '') !== tipo) return false;
       return true;
@@ -578,7 +595,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       if (customerId !== 'ALL' && String(p.customerId || '') !== customerId) return false;
       if (province !== 'ALL') {
         const city = customerCityById.get(String(p.customerId || '')) || '';
-        if (!city.toLowerCase().includes(province.toLowerCase())) return false;
+        if (!cityMatchesFilter(city, province)) return false;
       }
       return true;
     });
@@ -624,10 +641,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Filter size={20} className="text-emerald-400" /> Facturación (AFIP)
+          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <Filter size={20} className="text-emerald-400 shrink-0" /> {isSeller ? 'Mis facturas y recibos' : 'Facturación (AFIP)'}
           </h2>
-          <p className="text-slate-400 text-sm">Listá todas las facturas y notas de crédito emitidas desde la app. Podés filtrar por fecha, cliente y tipo de comprobante.</p>
+          <p className="text-slate-400 text-sm">
+            {isSeller
+              ? 'Consultá facturas, notas de crédito y recibos de tus clientes. Tocá un comprobante para ver el detalle.'
+              : 'Listá todas las facturas y notas de crédito emitidas desde la app. Podés filtrar por fecha, cliente y tipo de comprobante.'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="flex items-center bg-slate-900 border border-slate-700 rounded-xl p-1">
@@ -655,6 +676,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             {(activeView === 'billing' ? loading : loadingPayments) ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             Actualizar
           </button>
+          {!isSeller && (
           <button
             type="button"
             onClick={() => {
@@ -669,14 +691,17 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               setPaySellerId(pre?.sellerId || '');
               setPayDate(new Date().toISOString().slice(0, 10));
             }}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700 touch-manipulation"
           >
             Cargar pago
           </button>
+          )}
+          {!isSeller && (
+          <>
           <button
             type="button"
             onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 touch-manipulation"
           >
             <FileSpreadsheet size={16} /> Descargar todo (CSV)
           </button>
@@ -709,7 +734,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             type="button"
             onClick={handleExportRetPerTxt}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-700 text-white text-sm font-bold shadow-lg shadow-amber-900/40 hover:bg-amber-600"
-            title="Exportar TXT de retenciones/percepciones (layout RetPer)"
+            title="Percepciones IIBB CABA. Reemisión: NC + factura nueva con fecha de emisión del mes elegido (ej. mayo)."
           >
             <FileSpreadsheet size={16} /> Exportar TXT IIBB (RetPer)
           </button>
@@ -772,10 +797,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             {importingAgipPadron ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
             Importar padrón AGIP (TXT)
           </button>
+          </>
+          )}
         </div>
       </div>
 
-      {activeView === 'billing' && (
+      {activeView === 'billing' && !isSeller && (
         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-4 space-y-2">
           <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide">
             Lista de CUIT (export del Mes RetPer: facturas + NC)
@@ -838,7 +865,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           </select>
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-black text-slate-500 uppercase">Provincia (en ciudad)</label>
+          <label className="text-[11px] font-black text-slate-500 uppercase">Ciudad / zona</label>
           <select
             value={province}
             onChange={e => setProvince(e.target.value)}
@@ -846,7 +873,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           >
             <option value="ALL">Todas</option>
             {provinceOptions.map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p.value} value={p.value}>{p.label}</option>
             ))}
           </select>
         </div>
@@ -863,8 +890,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <option value="NC">Notas de crédito</option>
           </select>
         </div>
+        {!isSeller && (
         <div className="space-y-1">
-          <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer</label>
+          <label className="text-[11px] font-black text-slate-500 uppercase">Mes RetPer (DDJJ)</label>
+          <p className="text-[10px] text-slate-500 leading-snug">
+            Reemitidas en mayo: exportá 2026-05 (NC y FA nuevas con fecha de mayo, no la del pedido).
+          </p>
           <input
             type="month"
             value={retPerMonth}
@@ -872,6 +903,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-100"
           />
         </div>
+        )}
       </div>
 
       {activeView === 'billing' && (
@@ -882,7 +914,46 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <span>{filteredCountDisplay} comprobante(s) • Página {billingPage}/{billingTotalPages}</span>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="md:hidden divide-y divide-slate-800 mobile-scroll-y touch-scroll max-h-[min(70vh,36rem)]">
+          {filteredBillingItems.length === 0 && (
+            <div className="px-4 py-8 text-center text-slate-500 text-sm">
+              No hay comprobantes para los filtros seleccionados.
+            </div>
+          )}
+          {pagedItems.map((item: any) => {
+            const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
+            return (
+              <div key={`m-${item.tipo}-${item.id}`} className="p-4 space-y-2 bg-slate-900/40">
+                <div className="flex items-start justify-between gap-2">
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                    {formatTipo(item)}
+                  </span>
+                  <span className="text-xs text-slate-500 tabular-nums">{formatDate(item.fecha)}</span>
+                </div>
+                <p className="font-mono text-lg font-bold text-white">
+                  PV {item.puntoVta} · Nº {numero}
+                </p>
+                <p className="text-sm text-slate-300 truncate" title={item.customerBusinessName}>
+                  {item.customerBusinessName}
+                </p>
+                {item.orderId && (
+                  <p className="text-[11px] text-slate-500 font-mono">Pedido {item.orderId}</p>
+                )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-base font-black text-white tabular-nums">${formatMoneyAr(item.importe ?? 0)}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleVer(item)}
+                    className="px-3 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 touch-manipulation"
+                  >
+                    Ver
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="hidden md:block overflow-x-auto mobile-scroll-x touch-scroll">
           <table className="min-w-full text-sm text-slate-100">
             <thead className="bg-slate-800/80 text-xs uppercase text-slate-400">
               <tr>
@@ -893,8 +964,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <th className="px-3 py-2 text-left">Pedido</th>
                 <th className="px-3 py-2 text-left">Cliente</th>
                 <th className="px-3 py-2 text-right">Importe</th>
-                <th className="px-3 py-2 text-left">CAE</th>
-                <th className="px-3 py-2 text-right">Acciones</th>
+                <th className="px-3 py-2 text-left max-w-[7rem]">CAE</th>
+                <th className="px-2 py-2 text-right sticky right-0 z-20 bg-slate-800/95 backdrop-blur-sm min-w-[9.5rem] shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
+                  Acciones
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -908,28 +981,44 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               {pagedItems.map((item: any) => {
                 const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
                 return (
-                  <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60">
-                    <td className="px-3 py-2">{formatDate(item.fecha)}</td>
-                    <td className="px-3 py-2">
+                  <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60 group">
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{formatDate(item.fecha)}</td>
+                    <td className="px-3 py-2 align-middle">
                       <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                         {formatTipo(item)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{item.puntoVta}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{numero}</td>
-                    <td className="px-3 py-2 font-mono whitespace-nowrap">{item.orderId}</td>
-                    <td className="px-3 py-2 max-w-[320px] truncate">{item.customerBusinessName}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">${formatMoneyAr(item.importe ?? 0)}</td>
-                    <td className="px-3 py-2 text-xs font-mono whitespace-nowrap">{item.cae}</td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="inline-flex flex-wrap items-center justify-end gap-1 max-w-[220px]">
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{item.puntoVta}</td>
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">{numero}</td>
+                    <td className="px-3 py-2 align-middle font-mono text-xs whitespace-nowrap">{item.orderId}</td>
+                    <td className="px-3 py-2 align-middle max-w-[200px] truncate" title={item.customerBusinessName}>
+                      {item.customerBusinessName}
+                    </td>
+                    <td className="px-3 py-2 align-middle text-right whitespace-nowrap tabular-nums">
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span>${formatMoneyAr(item.importe ?? 0)}</span>
+                        {item.tipo === 'FACTURA' && Number(item.agipRetPer || 0) > 0.005 && (
+                          <span className="text-[10px] font-bold text-amber-300/90">
+                            incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td
+                      className="px-3 py-2 align-middle text-xs font-mono max-w-[7rem] truncate text-slate-400"
+                      title={item.cae}
+                    >
+                      {item.cae}
+                    </td>
+                    <td className="px-2 py-1.5 align-middle text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800/60 shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
+                      <div className="inline-flex flex-nowrap items-center justify-end gap-0.5">
                         <button
                           type="button"
                           onClick={() => handleVer(item)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
-                          title="Ver detalle del comprobante"
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700/80"
+                          title="Ver comprobante"
                         >
-                          <Eye size={14} /> Ver
+                          <Eye size={15} />
                         </button>
                         {item.tipo === 'FACTURA' &&
                           item.orderId &&
@@ -950,10 +1039,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                                 onNavigate('orders');
                               }}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700"
-                              title="Ir al pedido (para emitir NC parcial por ítems, ver historial, etc.)"
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700/80"
+                              title="Ir al pedido"
                             >
-                              <ExternalLink size={14} />
+                              <ExternalLink size={15} />
                             </button>
                           )}
                         {canAfipInvoiceActions &&
@@ -993,13 +1082,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                               }}
                               disabled={billingEmitNCOrderId === item.orderId}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-orange-200/95 text-xs hover:bg-slate-700 border border-orange-900/40 disabled:opacity-50"
-                              title="Emitir NC por el total de la factura (restituye stock). Para NC parcial por ítems, ir al pedido."
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-orange-200/95 hover:bg-slate-700 border border-orange-900/40 disabled:opacity-50"
+                              title="NC total (restituye stock)"
                             >
                               {billingEmitNCOrderId === item.orderId ? (
-                                <Loader2 size={14} className="animate-spin text-orange-300" />
+                                <Loader2 size={15} className="animate-spin text-orange-300" />
                               ) : (
-                                <FileMinus size={14} />
+                                <FileMinus size={15} />
                               )}
                             </button>
                           )}
@@ -1040,17 +1129,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                   });
                                 }}
                                 disabled={billingRecalcOrderId === item.orderId}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-amber-200/95 text-xs hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
-                                title={
-                                  tieneIibb
-                                    ? 'Recalcular IIBB (AGIP) y guardar para el PDF'
-                                    : 'Buscar al cliente en el padrón AGIP y agregar IIBB al PDF de esta factura (no cambia el CAE)'
-                                }
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-amber-200/95 hover:bg-slate-700 border border-amber-900/40 disabled:opacity-50"
+                                title={tieneIibb ? 'Recalcular IIBB (PDF)' : 'Agregar IIBB (PDF)'}
                               >
                                 {billingRecalcOrderId === item.orderId ? (
-                                  <Loader2 size={14} className="animate-spin text-amber-300" />
+                                  <Loader2 size={15} className="animate-spin text-amber-300" />
                                 ) : (
-                                  <Percent size={14} />
+                                  <Percent size={15} />
                                 )}
                               </button>
                             );
@@ -1091,13 +1176,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 });
                               }}
                               disabled={billingReemitOrderId === item.orderId}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 text-sky-200/95 text-xs hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
-                              title="Rehacer factura: NC total + nueva factura AFIP con IIBB del padrón AGIP (nuevo CAE). Sin cambios de stock. Falla si el cliente no está en el padrón."
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-sky-200/95 hover:bg-slate-700 border border-sky-900/40 disabled:opacity-50"
+                              title="Rehacer factura con IIBB (nuevo CAE)"
                             >
                               {billingReemitOrderId === item.orderId ? (
-                                <Loader2 size={14} className="animate-spin text-sky-300" />
+                                <Loader2 size={15} className="animate-spin text-sky-300" />
                               ) : (
-                                <RefreshCcw size={14} />
+                                <RefreshCcw size={15} />
                               )}
                             </button>
                           )}
@@ -1166,9 +1251,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {!isSeller && (
                   <button
                     type="button"
-                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800"
+                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation"
                     onClick={async () => {
                       const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
                       if (!next) return;
@@ -1197,7 +1283,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   >
                     Editar fecha
                   </button>
-                  <div className="text-sm font-black text-emerald-300">${formatMoneyAr(Number(p.amount || 0))}</div>
+                  )}
+                  <div className="text-sm font-black text-emerald-300 tabular-nums">${formatMoneyAr(Number(p.amount || 0))}</div>
                 </div>
               </div>
             ))}

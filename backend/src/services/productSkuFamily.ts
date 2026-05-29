@@ -26,7 +26,8 @@ export function skuLookupCandidates(sku: string): string[] {
     if (base && base !== t) out.add(base);
   }
   const digits = digitsOnly(t);
-  if (digits) {
+  const looksNumericOnly = digits.length > 0 && !/[A-Za-z]/.test(t);
+  if (digits && looksNumericOnly) {
     out.add(digits);
     const stripped = digits.replace(/^0+/, '') || '0';
     out.add(stripped);

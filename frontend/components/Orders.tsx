@@ -15,7 +15,9 @@ import {
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
+  orderNetoForNotaCreditoTotal,
   orderNetoSaldoForOrderCard,
+  orderUnitsDisplayCount,
   orderTotalesFacturado,
   orderTotalesNotaCredito,
   orderCreditNoteResumenLabel,
@@ -1481,7 +1483,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       } catch {
         /* usar factura en memoria */
       }
-      const netoPed = orderNetoFromItems(orderForPdf);
+      const netoPed = orderNetoForNotaCreditoTotal(orderForPdf);
       const agip = iibbProratedFromInvoiceForNc(orderForPdf.invoice, Number(nc.amountCredited || 0), netoPed);
       const html = buildCreditNoteHtml(orderForPdf, nc, agip);
       if (!html) {
@@ -1706,7 +1708,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           const showSellerLine = Boolean(
             order.sellerId && sellerDisplayName && (order.createdBy !== order.sellerId || !order.createdByName)
           );
-          const totalItemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
+          const totalItemsCount = orderUnitsDisplayCount(order);
+          const itemsMissingButInvoiced =
+            (order.items?.length ?? 0) === 0 && !!order.invoice;
           const hasBackorders = order.items.some(i => i.isBackorder);
           const stockImpact = getWholesaleStockImpactMeta(order);
           const activeTotalVoid =
@@ -2274,7 +2278,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-3 border-t border-slate-700/50">
                 <div className="text-xs text-slate-500">
-                  {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'} • {formatOrderDate(order.date)}
+                  {itemsMissingButInvoiced ? (
+                    <span className="text-amber-400/95" title="El detalle del pedido quedó vacío (p. ej. tras «Quitar pendientes despachados» con pickeado en 0). La factura AFIP sigue vigente.">
+                      Sin líneas en el pedido • facturado en AFIP
+                    </span>
+                  ) : totalItemsCount != null ? (
+                    <>
+                      {totalItemsCount} {totalItemsCount === 1 ? 'unidad' : 'unidades'}
+                    </>
+                  ) : (
+                    '— unidades'
+                  )}{' '}
+                  • {formatOrderDate(order.date)}
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap w-full sm:w-auto">
                    {(role === Role.WAREHOUSE || role === Role.DEPOSITO || role === Role.ADMIN) &&
@@ -2983,7 +2998,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           .map((c) => ({ ...c, selectedQty: Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0))) }))
           .filter((c) => c.selectedQty > 0);
         const canEmitItems = selectedMulti.length > 0;
-        const netoPedidoTotalNc = orderNetoFromItems(ncOrder);
+        const netoPedidoTotalNc = orderNetoForNotaCreditoTotal(ncOrder);
         const netCredPreview =
           ncTipo === 'total'
             ? netoPedidoTotalNc
@@ -3232,7 +3247,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 disabled={ncPreviewDisabled}
                 onClick={() => {
                   if (!ncOrder.invoice || ncPreviewDisabled) return;
-                  const netoPed = orderNetoFromItems(ncOrder);
+                  const netoPed = orderNetoForNotaCreditoTotal(ncOrder);
                   let netCred = 0;
                   let nc: CreditNote;
                   if (ncTipo === 'total') {

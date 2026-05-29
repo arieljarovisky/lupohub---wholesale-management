@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
-import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates } from '../utils/articleCodeUtils';
+import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
 const DRAFT_KEY = 'lupo_order_template_draft';
 
@@ -120,7 +120,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     productCode: string;
     productName: string;
     product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>;
-    options: Array<{ colorCode: string; colorName: string }>;
+    options: Array<{ colorKey: string; colorCode: string; colorName: string }>;
     loading: boolean;
   } | null>(null);
   /** Códigos de artículo colapsados (solo se muestra resumen). */
@@ -143,6 +143,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, [readOnly, initialOrder, role]);
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   const draftRestoredRef = useRef(false);
+  /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
+  const editHydratedOrderIdRef = useRef<string | null>(null);
+  /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
+  const colorPickerRequestRef = useRef(0);
+  /** En edición: evita pisar priceAtMoment al abrir; permite recalcular si cambia la lista. */
+  const appliedPriceListForRowsRef = useRef<string | null | undefined>(undefined);
+  const priceListRecalcPendingRef = useRef(false);
+  /** Productos vigentes al cambiar la lista; recalcular solo cuando el array se actualiza. */
+  const productsAtPriceListChangeRef = useRef<Product[] | null>(null);
+  /** ID estable para pedidos nuevos: evita dos POST con distinto O-xxxxxx al confirmar dos veces. */
+  const draftOrderIdRef = useRef<string | null>(null);
+  const savingOrderLockRef = useRef(false);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
@@ -321,11 +333,17 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
 
-  /** Modo edición: convertir ítems existentes del pedido en filas de planilla. */
+  /** Modo edición: convertir ítems existentes del pedido en filas de planilla (una sola vez por pedido). */
   useEffect(() => {
-    if (!initialOrder) return;
+    if (!initialOrder) {
+      editHydratedOrderIdRef.current = null;
+      return;
+    }
+    if (!products.length) return;
+    if (editHydratedOrderIdRef.current === initialOrder.id) return;
+    editHydratedOrderIdRef.current = initialOrder.id;
+
     setSelectedCustomerId(initialOrder.customerId);
-    applyCustomerPriceList(initialOrder.customerId);
     setOrderDate(initialOrder.date);
 
     const productById = new Map<string, Product>();
@@ -376,7 +394,26 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
-  }, [initialOrder, products, applyCustomerPriceList]);
+    appliedPriceListForRowsRef.current = undefined;
+  }, [initialOrder, products]);
+
+  useEffect(() => {
+    appliedPriceListForRowsRef.current = undefined;
+    priceListRecalcPendingRef.current = false;
+    productsAtPriceListChangeRef.current = null;
+    if (!initialOrder) draftOrderIdRef.current = null;
+  }, [initialOrder?.id]);
+
+  /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
+  useEffect(() => {
+    if (!isEditing) return;
+    const listId = selectedPriceListId ?? null;
+    if (appliedPriceListForRowsRef.current === undefined) return;
+    if (appliedPriceListForRowsRef.current !== listId) {
+      priceListRecalcPendingRef.current = true;
+      productsAtPriceListChangeRef.current = products;
+    }
+  }, [selectedPriceListId, isEditing]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
@@ -593,35 +630,86 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     showToast('success', `Descuento global del ${discount}% aplicado a todos los artículos.`);
   };
 
-  /** Precio del producto según la lista de precios (products ya vienen con precio de la lista seleccionada). */
-  const getPriceFromList = (productId: string, productSku: string, fallbackBasePrice?: number): number => {
-    const p = products.find((x: any) => x.product_id === productId || x.base_sku === productSku || (x as any).sku === productSku || x.id === productId);
-    if (p != null) {
-      const listPrice = Number((p as any).price);
-      if (!isNaN(listPrice) && listPrice >= 0) return listPrice;
+  /** Mapa producto padre / SKU → precio de la lista activa (products ya vienen filtrados por lista). */
+  const catalogPriceByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of products) {
+      const price = Number(p.price);
+      if (!Number.isFinite(price) || price < 0) continue;
+      const pid = String((p as any).product_id || '').trim();
+      if (pid) m.set(`id:${pid}`, price);
+      const base = String((p as any).base_sku || '').trim();
+      if (base) {
+        m.set(`sku:${base.toLowerCase()}`, price);
+        m.set(`sku:${resolveDisplayArticleCode(base).toLowerCase()}`, price);
+      }
     }
-    return Math.max(0, Number(fallbackBasePrice) || 0);
-  };
+    return m;
+  }, [products]);
+
+  const getPriceFromList = useCallback(
+    (productId: string, productSku: string, fallbackBasePrice?: number): number => {
+      const pid = String(productId || '').trim();
+      if (pid) {
+        const byId = catalogPriceByKey.get(`id:${pid}`);
+        if (byId != null) return byId;
+      }
+      const sku = String(productSku || '').trim();
+      if (sku) {
+        const bySku =
+          catalogPriceByKey.get(`sku:${sku.toLowerCase()}`) ??
+          catalogPriceByKey.get(`sku:${resolveDisplayArticleCode(sku).toLowerCase()}`);
+        if (bySku != null) return bySku;
+      }
+      for (const p of products) {
+        if (pid && String((p as any).product_id) === pid) {
+          const listPrice = Number(p.price);
+          if (Number.isFinite(listPrice) && listPrice >= 0) return listPrice;
+        }
+        const base = String((p as any).base_sku || '').trim();
+        if (base && articleCodesMatch(base, sku)) {
+          const listPrice = Number(p.price);
+          if (Number.isFinite(listPrice) && listPrice >= 0) return listPrice;
+        }
+      }
+      return Math.max(0, Number(fallbackBasePrice) || 0);
+    },
+    [catalogPriceByKey, products]
+  );
 
   /**
-   * Recalcula precios de filas cuando cambia la lista de precios activa.
-   * En modo edición se respetan los precios guardados en el pedido (priceAtMoment),
-   * para no pisar descuentos/manuales al reabrir.
+   * Recalcula precios cuando cambia la lista activa o se recargan productos.
+   * En edición: al abrir se conservan priceAtMoment; si el usuario cambia la lista, se actualizan
+   * cuando llegan los productos de esa lista (evita precios viejos durante la carga).
    */
   useEffect(() => {
-    if (isEditing) return;
     if (!rows.length || !products.length) return;
-    setRows(prev => {
+
+    const listId = selectedPriceListId ?? null;
+    if (isEditing) {
+      if (appliedPriceListForRowsRef.current === undefined) {
+        appliedPriceListForRowsRef.current = listId;
+        return;
+      }
+      if (!priceListRecalcPendingRef.current) return;
+      if (products === productsAtPriceListChangeRef.current) return;
+    }
+
+    setRows((prev) => {
       let changed = false;
-      const next = prev.map(r => {
-        const nextPrice = getPriceFromList(r.productId, r.productCode, r.price);
+      const next = prev.map((r) => {
+        const code = rowArticlePrefix(r);
+        const nextPrice = getPriceFromList(r.productId, code || r.productCode, r.price);
         if (!Number.isFinite(nextPrice) || nextPrice === r.price) return r;
         changed = true;
         return { ...r, price: nextPrice };
       });
       return changed ? next : prev;
     });
-  }, [products, selectedPriceListId, isEditing, rows.length]);
+    priceListRecalcPendingRef.current = false;
+    productsAtPriceListChangeRef.current = null;
+    appliedPriceListForRowsRef.current = listId;
+  }, [products, selectedPriceListId, isEditing, rows.length, getPriceFromList, rowArticlePrefix]);
 
   const buildRowForColor = (
     product: NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>,
@@ -657,11 +745,52 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
   };
 
-  /** Abre modal con colores del artículo que aún no están en el pedido. */
-  const openColorPickerForArticle = async (productCode: string) => {
+  const closeColorPicker = useCallback(() => {
+    colorPickerRequestRef.current += 1;
+    setColorPicker(null);
+  }, []);
+
+  const isColorAlreadyInOrder = useCallback(
+    (displayCode: string, colorKey: string) =>
+      rows.some(
+        (r) =>
+          articleCodesMatch(rowArticlePrefix(r), displayCode) &&
+          variantColorKey(r.colorCode, r.colorName) === colorKey
+      ),
+    [rows, rowArticlePrefix]
+  );
+
+  /** Opciones del modal: `alreadyInOrder` se recalcula al borrar filas (no queda cacheado). */
+  const colorPickerOptions = useMemo(() => {
+    if (!colorPicker || colorPicker.loading) return [];
+    const displayCode = colorPicker.productCode;
+    return colorPicker.options.map((opt) => ({
+      ...opt,
+      alreadyInOrder: rows.some(
+        (r) =>
+          articleCodesMatch(rowArticlePrefix(r), displayCode) &&
+          variantColorKey(r.colorCode, r.colorName) === opt.colorKey
+      )
+    }));
+  }, [colorPicker, rows, rowArticlePrefix]);
+
+  /** Abre modal con todos los colores del artículo en catálogo. */
+  const openColorPickerForArticle = async (productCode: string, productId?: string) => {
     const code = (productCode || '').trim();
     if (!code) return;
-    const displayCode = resolveDisplayArticleCode(code);
+    const requestId = ++colorPickerRequestRef.current;
+    let lookupSku = code;
+    let displayCode = resolveDisplayArticleCode(code);
+    if (productId) {
+      const byId = products.find(
+        (p) => p.id === productId || String((p as any).product_id || '') === productId
+      );
+      const catalogSku = String((byId as any)?.base_sku || byId?.sku || '').trim();
+      if (catalogSku) {
+        lookupSku = catalogSku;
+        displayCode = resolveDisplayArticleCode(catalogSku);
+      }
+    }
     setColorPicker({
       productCode: displayCode,
       productName: '',
@@ -671,11 +800,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     try {
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
-      for (const candidate of skuLookupCandidates(code)) {
+      for (const candidate of skuLookupCandidates(lookupSku)) {
         product = await api.getProductBySku(candidate);
         if (product?.variants?.length) break;
         product = null;
       }
+      if (requestId !== colorPickerRequestRef.current) return;
       if (!product || !product.variants?.length) {
         showToast('error', 'No se pudo cargar el artículo o no tiene variantes.');
         setColorPicker(null);
@@ -684,21 +814,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
-        const c = v.color_code ?? '';
-        if (!byColor.has(c)) byColor.set(c, []);
-        byColor.get(c)!.push(v);
+        const key = variantColorKey(v.color_code ?? '', v.color_name ?? '');
+        if (!byColor.has(key)) byColor.set(key, []);
+        byColor.get(key)!.push(v);
       }
-      const existingColorCodes = new Set(
-        rows.filter(r => articleCodesMatch(rowArticlePrefix(r), displayCode)).map(r => r.colorCode)
-      );
-      const options: Array<{ colorCode: string; colorName: string }> = [];
-      byColor.forEach((vars, colorCode) => {
-        if (existingColorCodes.has(colorCode)) return;
-        options.push({ colorCode, colorName: vars[0]?.color_name ?? colorCode });
+      const options: Array<{ colorKey: string; colorCode: string; colorName: string }> = [];
+      byColor.forEach((vars, colorKey) => {
+        const colorCode = String(vars[0]?.color_code ?? '').trim();
+        const colorName = vars[0]?.color_name ?? colorCode;
+        options.push({ colorKey, colorCode, colorName });
       });
       options.sort((a, b) => a.colorName.localeCompare(b.colorName, 'es', { sensitivity: 'base' }));
       if (options.length === 0) {
-        showToast('info', 'Este artículo ya tiene todos sus colores en el pedido.');
+        showToast('error', 'El artículo no tiene colores en el catálogo.');
         setColorPicker(null);
         return;
       }
@@ -710,6 +838,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         loading: false
       });
     } catch (e: any) {
+      if (requestId !== colorPickerRequestRef.current) return;
       const msg = e?.response?.status === 401
         ? 'Sesión vencida. Cerrá sesión y volvé a iniciar sesión.'
         : (e?.message || 'Error al cargar colores.');
@@ -718,15 +847,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
   };
 
-  const addSelectedColorToArticle = (colorCode: string) => {
+  const addSelectedColorToArticle = (colorKey: string) => {
     if (!colorPicker?.product) return;
+    const opt = colorPicker.options.find((o) => o.colorKey === colorKey);
+    if (isColorAlreadyInOrder(colorPicker.productCode, colorKey)) return;
     const { product, productCode: displayCode } = colorPicker;
     const variants = (product.variants || []) as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
-    const vars = variants.filter(v => (v.color_code ?? '') === colorCode);
+    const vars = variants.filter(
+      (v) => variantColorKey(v.color_code ?? '', v.color_name ?? '') === colorKey
+    );
     if (!vars.length) {
       showToast('error', 'Color no encontrado en el catálogo.');
       return;
     }
+    const colorCode = String(vars[0]?.color_code ?? opt?.colorCode ?? '').trim();
     const newRow = buildRowForColor(product, displayCode, colorCode, vars);
     let insertEnd = rows.length;
     for (let i = rows.length - 1; i >= 0; i--) {
@@ -740,7 +874,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       next.splice(insertEnd, 0, newRow);
       return next;
     });
-    setColorPicker(null);
+    closeColorPicker();
     showToast('success', `Color ${formatColorCell(colorCode, newRow.colorName)} agregado.`);
   };
 
@@ -771,8 +905,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
     }
     if (items.length === 0) return null;
+    const orderId =
+      initialOrder?.id ||
+      draftOrderIdRef.current ||
+      (() => {
+        const id = `O-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 6)}`;
+        draftOrderIdRef.current = id;
+        return id;
+      })();
     return {
-      id: initialOrder?.id || `O-${Date.now().toString().slice(-6)}`,
+      id: orderId,
       customerId: selectedCustomerId,
       sellerId: initialOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
@@ -788,35 +930,31 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
   };
 
-  const handleSave = async () => {
-    if (savingOrder) return;
-    const order = buildOrderPayload(false);
+  const persistOrder = async (asDraft: boolean) => {
+    if (savingOrderLockRef.current || savingOrder) return;
+    const order = buildOrderPayload(asDraft);
     if (!order) {
-      showToast('error', 'Agregá al menos una cantidad en algún talle.');
+      showToast(
+        'error',
+        asDraft
+          ? 'Agregá al menos una cantidad en algún talle para guardar el borrador.'
+          : 'Agregá al menos una cantidad en algún talle.'
+      );
       return;
     }
+    savingOrderLockRef.current = true;
     setSavingOrder(true);
     try {
       await Promise.resolve(onSave(order));
     } finally {
+      savingOrderLockRef.current = false;
       setSavingOrder(false);
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (savingOrder) return;
-    const order = buildOrderPayload(true);
-    if (!order) {
-      showToast('error', 'Agregá al menos una cantidad en algún talle para guardar el borrador.');
-      return;
-    }
-    setSavingOrder(true);
-    try {
-      await Promise.resolve(onSave(order));
-    } finally {
-      setSavingOrder(false);
-    }
-  };
+  const handleSave = () => persistOrder(false);
+
+  const handleSaveDraft = () => persistOrder(true);
 
   const totalUnits = useMemo(() => {
     let n = 0;
@@ -844,7 +982,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         if (rows.length > 0 && selectedCustomerId && totalUnits > 0) {
           e.preventDefault();
-          if (!savingOrder) handleSaveRef.current();
+          if (!savingOrder && !savingOrderLockRef.current) handleSaveRef.current();
         }
       }
     };
@@ -854,12 +992,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   /** Agrupar filas por prefijo de artículo (orden de aparición). */
   const groups = useMemo(() => {
-    const list: Array<{ productCode: string; productName: string; rows: TemplateRow[] }> = [];
-    let current: { productCode: string; productName: string; rows: TemplateRow[] } | null = null;
+    const list: Array<{ productCode: string; productName: string; productId?: string; rows: TemplateRow[] }> = [];
+    let current: { productCode: string; productName: string; productId?: string; rows: TemplateRow[] } | null = null;
     for (const row of rows) {
       const prefix = rowArticlePrefix(row);
       if (!current || current.productCode !== prefix) {
-        current = { productCode: prefix, productName: row.productName, rows: [row] };
+        current = { productCode: prefix, productName: row.productName, productId: row.productId, rows: [row] };
         list.push(current);
       } else {
         current.rows.push(row);
@@ -1277,7 +1415,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
                           <button
                             type="button"
-                            onClick={() => openColorPickerForArticle(group.productCode)}
+                            onClick={() => openColorPickerForArticle(group.productCode, group.productId)}
                             disabled={readOnly || !!colorPicker?.loading}
                             className="flex items-center gap-2 text-slate-400 hover:text-blue-400 text-xs font-semibold transition-colors touch-manipulation disabled:opacity-50"
                           >
@@ -1316,6 +1454,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
               </button>
               <button
+                type="button"
                 disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
                 onClick={handleSave}
                 className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
@@ -1343,7 +1482,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <div className="shrink-0 py-3 flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setColorPicker(null)}
+              onClick={closeColorPicker}
               className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition touch-manipulation"
               aria-label="Cerrar"
             >
@@ -1364,15 +1503,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <>
               <p className="text-xs text-slate-500 mb-2">Elegí el color a agregar al pedido</p>
               <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
-                {colorPicker.options.map((opt) => (
+                {colorPickerOptions.map((opt) => (
                   <button
-                    key={opt.colorCode}
+                    key={opt.colorKey}
                     type="button"
-                    onClick={() => addSelectedColorToArticle(opt.colorCode)}
-                    className="w-full text-left px-4 py-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 hover:bg-slate-700/80 hover:border-blue-500/50 transition flex items-center justify-between gap-3 touch-manipulation"
+                    disabled={opt.alreadyInOrder}
+                    onClick={() => addSelectedColorToArticle(opt.colorKey)}
+                    className={`w-full text-left px-4 py-3.5 rounded-xl border transition flex items-center justify-between gap-3 touch-manipulation ${
+                      opt.alreadyInOrder
+                        ? 'bg-slate-800/40 border-slate-700/50 opacity-60 cursor-not-allowed'
+                        : 'bg-slate-800/80 border-slate-700/80 hover:bg-slate-700/80 hover:border-blue-500/50'
+                    }`}
                   >
                     <span className="font-mono text-white text-sm">{formatColorCell(opt.colorCode, opt.colorName)}</span>
-                    <Plus size={20} className="text-blue-400 shrink-0" />
+                    {opt.alreadyInOrder ? (
+                      <span className="text-xs text-slate-500 shrink-0">Ya en el pedido</span>
+                    ) : (
+                      <Plus size={20} className="text-blue-400 shrink-0" />
+                    )}
                   </button>
                 ))}
               </div>
@@ -1382,7 +1530,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <div className="pt-4 border-t border-slate-700 shrink-0">
             <button
               type="button"
-              onClick={() => setColorPicker(null)}
+              onClick={closeColorPicker}
               className="w-full min-h-[48px] py-3 rounded-xl bg-slate-700/90 hover:bg-slate-600 text-slate-200 font-semibold border border-slate-600 transition touch-manipulation"
             >
               Cancelar

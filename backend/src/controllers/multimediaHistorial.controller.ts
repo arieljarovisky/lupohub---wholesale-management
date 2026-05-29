@@ -26,6 +26,19 @@ function canManage(role?: string): boolean {
   return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }
 
+/** Número AFIP al estilo Tango/Multimedias: A00021000000006 (sin guiones). */
+function formatLedgerAfipNumero(cbteTipo: number, puntoVta: number, cbteDesde: number): string {
+  const letra =
+    cbteTipo === 1 || cbteTipo === 3
+      ? 'A'
+      : cbteTipo === 6 || cbteTipo === 8
+        ? 'B'
+        : cbteTipo === 11 || cbteTipo === 13
+          ? 'C'
+          : 'X';
+  return `${letra}${String(puntoVta || 0).padStart(5, '0')}${String(cbteDesde || 0).padStart(8, '0')}`;
+}
+
 function tryFuzzyNameMatch(
   normSheet: string,
   customerByNorm: Map<string, { id: string; seller_id: string | null }>
@@ -411,6 +424,37 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        ORDER BY p.created_at ASC, p.date ASC`,
       [id]
     )) as any[];
+    const invoiceRows = (await query(
+      `SELECT
+         i.id AS invoice_id,
+         i.order_id,
+         i.cbte_tipo,
+         i.punto_venta,
+         i.cbte_desde,
+         i.created_at,
+         o.date AS order_date,
+         o.total AS order_total
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       WHERE o.customer_id = ?
+       ORDER BY COALESCE(i.created_at, o.date) ASC, i.id ASC`,
+      [id]
+    )) as any[];
+    const creditNoteRows = (await query(
+      `SELECT
+         cn.id,
+         cn.order_id,
+         cn.cbte_tipo,
+         cn.punto_venta,
+         cn.cbte_desde,
+         cn.created_at,
+         cn.amount_credited
+       FROM credit_notes cn
+       JOIN orders o ON o.id = cn.order_id
+       WHERE o.customer_id = ?
+       ORDER BY cn.created_at ASC, cn.id ASC`,
+      [id]
+    )) as any[];
     const normalizeDocNumber = (value: any) => {
       const raw = String(value || '').trim().toUpperCase();
       if (!raw) return '';
@@ -427,6 +471,49 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       return String(tipo || '').trim().toUpperCase();
     };
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
+    const invoiceAsEntries = invoiceRows.map((inv, idx) => {
+      const neto = Number(inv.order_total || 0);
+      const importe = Math.round(neto * 1.21 * 100) / 100;
+      const numero = formatLedgerAfipNumero(
+        Number(inv.cbte_tipo || 0),
+        Number(inv.punto_venta || 0),
+        Number(inv.cbte_desde || 0)
+      );
+      return {
+        lineOrder: maxLineOrder + 50000 + idx,
+        lineDate: inv.created_at || inv.order_date,
+        tipo: 'FAC',
+        numero,
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
+        paginaPdf: null,
+        source: 'system' as const
+      };
+    });
+    const creditNoteAsEntries = creditNoteRows.map((cn, idx) => {
+      const importe = Math.round(Number(cn.amount_credited || 0) * 1.21 * 100) / 100;
+      const numero = formatLedgerAfipNumero(
+        Number(cn.cbte_tipo || 0),
+        Number(cn.punto_venta || 0),
+        Number(cn.cbte_desde || 0)
+      );
+      return {
+        lineOrder: maxLineOrder + 60000 + idx,
+        lineDate: cn.created_at,
+        tipo: 'NC',
+        numero,
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+        paginaPdf: null,
+        source: 'system' as const
+      };
+    });
     const paymentAsEntries = paymentEntries.map((p, idx) => {
       const refs = Array.from(new Set([
         ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x: string) => x.trim()).filter(Boolean),
@@ -460,8 +547,10 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         saldo: e.saldo != null ? Number(e.saldo) : null,
         detalle: e.detalle,
         paginaPdf: e.pagina_pdf,
-        source: 'imported'
+        source: 'imported' as const
       })),
+      ...invoiceAsEntries,
+      ...creditNoteAsEntries,
       ...paymentAsEntries
     ];
 

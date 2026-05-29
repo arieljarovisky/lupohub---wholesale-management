@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, pool } from '../database/db';
 import * as XLSX from 'xlsx';
+import { cityMatchesFilter } from '../utils/cityNormalize';
 
 function parseMoney(value: any): number {
   if (value == null) return 0;
@@ -109,6 +110,13 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/** Filtro ciudad para export RetPer (alineado con Facturación: CABA = Capital Federal). */
+function customerMatchesProvinceFilter(city: unknown, province: string): boolean {
+  const p = String(province || '').trim();
+  if (!p || p === 'ALL') return true;
+  return cityMatchesFilter(String(city || ''), p);
+}
+
 function onlyDigits(v: any): string {
   return String(v || '').replace(/\D/g, '');
 }
@@ -120,6 +128,166 @@ function txt(v: any, len: number): string {
     .replace(/[^\x20-\x7E]/g, ' ')
     .toUpperCase();
   return ascii.slice(0, len).padEnd(len, ' ');
+}
+
+/** Longitud de registro e-Arciba (AGIP, vigente 01/2022+). */
+const ARCIBA_RECORD_LEN = 226;
+/** Código de norma para percepciones (3 dígitos). Configurable por env. */
+const AGIP_PERCEPCION_CODIGO_NORMA = (process.env.AGIP_PERCEPCION_CODIGO_NORMA || '029').padStart(3, '0').slice(-3);
+
+function mapCondicionIvaArciba(condicion: unknown): string {
+  const c = String(condicion || '').toLowerCase();
+  if (c.includes('monotribut')) return '4';
+  if (c.includes('exento')) return '3';
+  if (c.includes('consumidor final')) return '4';
+  if (c.includes('responsable inscripto')) return '1';
+  return '1';
+}
+
+/** Letra según comprobante AFIP emitido (alineado al TXT histórico importado en Arciba). */
+function letraComprobanteArciba(cbteTipo: number): string {
+  return Number(cbteTipo) === 1 || Number(cbteTipo) === 3 ? 'A' : 'B';
+}
+
+/** Monto numérico Arciba: alineado a la derecha, coma decimal, ancho fijo. */
+function formatArcibaNumber(amount: number, width: number): string {
+  const capped = Math.min(9999999999999.99, Math.max(0, round2(amount)));
+  const body = capped.toFixed(2).replace('.', ',');
+  return body.length > width ? body.slice(-width) : body.padStart(width, '0');
+}
+
+function formatArcibaAlicuota(alicuota: number): string {
+  const n = Math.min(99.99, Math.max(0, Number(alicuota) || 0));
+  const intPart = Math.floor(n);
+  const dec = Math.round((n - intPart) * 100);
+  return `${String(intPart).padStart(2, '0')},${String(dec).padStart(2, '0')}`;
+}
+
+function formatArcibaComprobanteNumero(puntoVta: number, cbteDesde: number): string {
+  const pv = String(Number(puntoVta) || 0).padStart(5, '0');
+  const num = String(Number(cbteDesde) || 0).padStart(8, '0');
+  return (pv + num).padStart(16, '0');
+}
+
+/** Arma un registro de percepción (tipo op. 2) según diseño AGIP e-Arciba. */
+function buildArcibaPerceptionRecord(row: {
+  fecha: any;
+  cbte_tipo: number;
+  punto_venta: number;
+  cbte_desde: number;
+  neto: number;
+  agip_ret_per: number;
+  cuit: string;
+  razon_social: string;
+  alicuota: number;
+  condicion_iva?: string | null;
+}): string {
+  const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+  const put = (from: number, to: number, val: string, align: 'left' | 'right' = 'left') => {
+    const len = to - from + 1;
+    let v = String(val).slice(0, len);
+    v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+    for (let i = 0; i < len; i++) rec[from - 1 + i] = v[i];
+  };
+
+  const fecha = formatDateEsShort(row.fecha);
+  const letra = letraComprobanteArciba(Number(row.cbte_tipo));
+  const cuit = onlyDigits(row.cuit).slice(0, 11);
+  const neto = round2(Math.abs(Number(row.neto) || 0));
+  const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
+  const alicuota = Math.max(0, Number(row.alicuota) || 0);
+  const retPercStored = Math.abs(Number(row.agip_ret_per) || 0);
+  const retPerc =
+    retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(neto * (alicuota / 100)) : 0;
+  // Misma lógica que RetPer_202604 histórico: otros = IIBB; monto comp = neto + IVA + IIBB; sujeto = neto.
+  const otros = retPerc;
+  const montoComprobante = round2(neto + iva + otros);
+  const montoSujeto = round2(montoComprobante - iva - otros);
+  const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+  const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+
+  put(1, 1, '2');
+  put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+  put(5, 14, fecha);
+  put(15, 16, '01');
+  put(17, 17, letra);
+  put(18, 33, nroComprobante, 'right');
+  put(34, 43, fecha);
+  put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+  put(60, 75, '');
+  put(76, 76, '3');
+  put(77, 87, cuit, 'right');
+  put(88, 88, '4');
+  put(89, 99, '00000000000', 'right');
+  put(100, 100, situacionIva);
+  put(101, 130, txt(row.razon_social, 30));
+  put(131, 146, formatArcibaNumber(otros, 16), 'right');
+  put(147, 162, formatArcibaNumber(iva, 16), 'right');
+  put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+  put(179, 183, formatArcibaAlicuota(alicuota), 'right');
+  put(184, 199, formatArcibaNumber(retPerc, 16), 'right');
+  put(200, 215, formatArcibaNumber(retPerc, 16), 'right');
+  put(216, 226, ' '.repeat(11));
+
+  return rec.join('');
+}
+
+/** NC de reemisión (mayo u otro mes de emisión): tipo 09, sin percepción en la NC. */
+function buildArcibaPerceptionNcReemitRecord(row: {
+  fecha: any;
+  cbte_tipo: number;
+  punto_venta: number;
+  cbte_desde: number;
+  neto: number;
+  cuit: string;
+  razon_social: string;
+  condicion_iva?: string | null;
+}): string {
+  const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+  const put = (from: number, to: number, val: string, align: 'left' | 'right' = 'left') => {
+    const len = to - from + 1;
+    let v = String(val).slice(0, len);
+    v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+    for (let i = 0; i < len; i++) rec[from - 1 + i] = v[i];
+  };
+
+  const fecha = formatDateEsShort(row.fecha);
+  const letraAfip = letraComprobanteArciba(Number(row.cbte_tipo));
+  const cuit = onlyDigits(row.cuit).slice(0, 11);
+  const neto = round2(Math.abs(Number(row.neto) || 0));
+  const ivaEnComprobante = letraAfip === 'A' || letraAfip === 'M' ? round2(neto * 0.21) : 0;
+  const otros = 0;
+  const montoComprobante = round2(neto + ivaEnComprobante);
+  // Tipo 09: letra en blanco (pos. 17); columna IVA en 0 según diseño AGIP.
+  const ivaColumna = 0;
+  const montoSujeto = round2(montoComprobante - ivaColumna - otros);
+  const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+  const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+
+  put(1, 1, '2');
+  put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+  put(5, 14, fecha);
+  put(15, 16, '09');
+  put(17, 17, ' ');
+  put(18, 33, nroComprobante, 'right');
+  put(34, 43, fecha);
+  put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+  put(60, 75, '');
+  put(76, 76, '3');
+  put(77, 87, cuit, 'right');
+  put(88, 88, '4');
+  put(89, 99, '00000000000', 'right');
+  put(100, 100, situacionIva);
+  put(101, 130, txt(row.razon_social, 30));
+  put(131, 146, formatArcibaNumber(otros, 16), 'right');
+  put(147, 162, formatArcibaNumber(ivaColumna, 16), 'right');
+  put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+  put(179, 183, formatArcibaAlicuota(0), 'right');
+  put(184, 199, formatArcibaNumber(0, 16), 'right');
+  put(200, 215, formatArcibaNumber(0, 16), 'right');
+  put(216, 226, ' '.repeat(11));
+
+  return rec.join('');
 }
 
 function normalizeNameForMatch(v: any): string {
@@ -239,8 +407,8 @@ export const listBilling = async (req: Request, res: Response) => {
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
-          o.total AS importe,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -267,8 +435,8 @@ export const listBilling = async (req: Request, res: Response) => {
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -281,6 +449,7 @@ export const listBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
       ) AS b
@@ -471,8 +640,8 @@ export const exportBilling = async (req: Request, res: Response) => {
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
-          o.total AS importe,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -495,8 +664,8 @@ export const exportBilling = async (req: Request, res: Response) => {
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -506,6 +675,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
@@ -692,8 +862,8 @@ export const printBilling = async (req: Request, res: Response) => {
           i.punto_venta,
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
-          o.date AS fecha,
-          o.total AS importe,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
           c.cuit AS cuit,
@@ -712,8 +882,8 @@ export const printBilling = async (req: Request, res: Response) => {
           cn.punto_venta,
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
           c.cuit AS cuit,
@@ -722,6 +892,7 @@ export const printBilling = async (req: Request, res: Response) => {
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
@@ -996,7 +1167,7 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FAC' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           i.cbte_tipo,
           i.punto_venta,
           i.cbte_desde,
@@ -1165,129 +1336,154 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       fromDate = `${monthMatch[1]}-${monthMatch[2]}-01`;
       toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
     }
-    const where: string[] = [];
-    const params: any[] = [];
-    if (fromDate) {
-      where.push('o.date >= ?');
-      params.push(fromDate);
-    }
-    if (toDate) {
-      where.push('o.date <= ?');
-      params.push(toDate);
+    const whereFac: string[] = [];
+    const paramsFac: any[] = [];
+    if (fromDate && toDate) {
+      // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
+      whereFac.push(`(
+        (o.date >= ? AND o.date <= ?)
+        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
+        OR EXISTS (
+          SELECT 1 FROM credit_notes cn_m
+          WHERE cn_m.order_id = o.id
+            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
+        )
+      )`);
+      paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
+    } else {
+      if (fromDate) {
+        whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+        paramsFac.push(fromDate);
+      }
+      if (toDate) {
+        whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+        paramsFac.push(toDate);
+      }
     }
     if (customerId) {
-      where.push('o.customer_id = ?');
-      params.push(customerId);
+      whereFac.push('o.customer_id = ?');
+      paramsFac.push(customerId);
     }
-    if (province && String(province).trim()) {
-      where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
-      params.push(`%${String(province).trim().toLowerCase()}%`);
-    }
-    // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período seleccionado.
-    where.push('ap.cuit IS NOT NULL');
     const authUser = (req as any).user;
     if (authUser?.role === 'SELLER') {
-      where.push('c.seller_id = ?');
-      params.push(authUser.id);
+      whereFac.push('c.seller_id = ?');
+      paramsFac.push(authUser.id);
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    // Facturas con IIBB guardado en LupoHub o alícuota en padrón del período.
+    whereFac.push(
+      '(COALESCE(i.agip_ret_per, 0) > 0.005 OR COALESCE(i.agip_alicuota, 0) > 0 OR COALESCE(ap.alicuota, 0) > 0)'
+    );
+    const whereFacSql = whereFac.length ? `WHERE ${whereFac.join(' AND ')}` : '';
 
     await ensureAgipPadronTable();
     const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
 
-    const rows = await query(
+    const ncWhere: string[] = [
+      'COALESCE(cn.superseded_by_reinvoice, 0) = 1',
+      'COALESCE(i.agip_ret_per, 0) > 0.005'
+    ];
+    const ncParams: any[] = [];
+    if (fromDate && toDate) {
+      ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+      ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+      ncParams.push(fromDate, toDate);
+    } else {
+      if (fromDate) {
+        ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+        ncParams.push(fromDate);
+      }
+      if (toDate) {
+        ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+        ncParams.push(toDate);
+      }
+    }
+    if (customerId) {
+      ncWhere.push('o.customer_id = ?');
+      ncParams.push(customerId);
+    }
+    if (authUser?.role === 'SELLER') {
+      ncWhere.push('c.seller_id = ?');
+      ncParams.push(authUser.id);
+    }
+    const ncWhereSql = ncWhere.length ? `WHERE ${ncWhere.join(' AND ')}` : '';
+
+    const rowsRaw = await query(
       `
       SELECT
-        o.date AS fecha,
+        CASE
+          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+          ELSE o.date
+        END AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,
-        o.total AS importe,
+        o.total AS neto,
+        COALESCE(i.agip_ret_per, 0) AS agip_ret_per,
         c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '1' AS line_kind
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN credit_notes cn_reemit
+        ON cn_reemit.order_id = o.id AND COALESCE(cn_reemit.superseded_by_reinvoice, 0) = 1
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
+      ${whereFacSql}
+
       UNION ALL
-      -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para AGIP.
+
       SELECT
-        MAX(o.date) AS fecha,
+        COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) AS fecha,
         cn.cbte_tipo,
         cn.punto_venta,
         cn.cbte_desde,
-        SUM(cn.amount_credited) AS importe,
+        cn.amount_credited AS neto,
+        0 AS agip_ret_per,
         c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '0' AS line_kind
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
+      JOIN invoices i ON i.order_id = o.id
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
-      GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
-               c.cuit, c.business_name, c.name, ap.alicuota
-      ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
+      ${ncWhereSql}
+
+      ORDER BY fecha ASC, line_kind ASC, punto_venta ASC, cbte_desde ASC
       `,
-      [period, ...params, period, ...params]
+      [period, ...paramsFac, period, ...ncParams]
     ) as any[];
 
-    const lines = rows
-      .filter((r) => onlyDigits(r.cuit).length === 11)
-      .map((r) => {
-      const fecha = ddmmyyyy(r.fecha);
-      const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
-      const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
-      const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
-      const comprobante = `${letraComp}${pv}${nro}`;
-      const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
-      const cuit = onlyDigits(r.cuit).slice(0, 11);
-      const razon = txt(r.razon_social, 30);
-      const alicuota = Math.max(0, Number(r.alicuota || 0));
-      const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
-      const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
-      const total = Math.abs(Number(r.importe) || 0);
-      const divisor = 1 + 0.21 + (alicuota / 100);
-      const neto = divisor > 0 ? round2(total / divisor) : 0;
-      const iva = round2(neto * 0.21);
-      const otros = round2(total - neto - iva);
-      const retPerc = round2(neto * (alicuota / 100));
-
-      // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
-      return [
-        '2029', // tipo/agente (fijo por layout legacy)
-        `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-        '01', // campo fijo requerido por layout AGIP entre fecha y tipo/comprobante
-        comprobante,
-        `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-        importe,
-        ' '.repeat(16),
-        '3',
-        cuit,
-        '4000000000001', // condición por defecto legacy
-        razon,
-        formatAmountFixed(otros, 13), // otros conceptos (ajusta para que total = neto + iva + otros)
-        formatAmountFixed(iva, 13),   // IVA 21%
-        formatAmountFixed(neto, 13),  // monto sujeto
-        `3301${aliInt},${aliDec}`, // formato observado válido: 3301xx,xx
-        formatAmountFixed(retPerc, 13), // ret/perc calculada
-        formatAmountFixed(retPerc, 13),
-        ' '.repeat(11)
-      ].join('');
+    const provinceKey = String(province || '').trim();
+    const rows = rowsRaw.filter((r) => {
+      if (!customerMatchesProvinceFilter(r.customer_city, provinceKey)) return false;
+      return onlyDigits(r.cuit).length === 11;
     });
 
+    const lines = rows.map((r) =>
+      r.line_kind === '0' ? buildArcibaPerceptionNcReemitRecord(r) : buildArcibaPerceptionRecord(r)
+    );
+
     if (!lines.length) {
+      const periodHint = period ? ` (${period})` : '';
       return res.status(400).json({
-        message: 'No hay registros para exportar en el período seleccionado. Verificá rango de fechas, cliente y padrón AGIP importado.'
+        message:
+          `No hay comprobantes con IIBB para exportar${periodHint}. ` +
+          'Verificá Mes RetPer, que las facturas tengan percepción guardada o CUIT en el padrón AGIP, y el filtro de ciudad/cliente.'
       });
     }
 
     const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;
-    // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
-    res.setHeader('Content-Type', 'text/plain; charset=us-ascii');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     // Compatibilidad e-Arciba: CRLF entre registros y un único salto final, sin línea vacía extra.
     res.send(`${lines.join('\r\n')}\r\n`);
@@ -1676,7 +1872,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
       FROM (
         SELECT
           'FACTURA' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1684,7 +1880,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           i.punto_venta,
           i.cbte_desde,
           i.cbte_hasta,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           o.id AS order_id,
           i.cae,
           i.cae_fch_vto,
@@ -1701,7 +1897,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para el export por cliente.
         SELECT
           'NC' AS tipo,
-          MAX(o.date) AS fecha,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1709,7 +1905,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           cn.punto_venta,
           cn.cbte_desde,
           cn.cbte_hasta,
-          SUM(cn.amount_credited) AS importe,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           cn.order_id AS order_id,
           cn.cae,
           cn.cae_fch_vto,
@@ -1720,6 +1916,7 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
         WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
+          AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) x

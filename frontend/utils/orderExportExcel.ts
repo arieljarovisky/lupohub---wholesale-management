@@ -20,12 +20,21 @@ function stripLeadingZeros(s: string): string {
   return digits.replace(/^0+/, '') || '0';
 }
 
+function normalizeArticleCodeForExport(code: string): string {
+  const raw = String(code || '').trim();
+  if (!raw) return '';
+  // Si tiene letras, conservarlo tal cual (no convertir a solo dígitos).
+  if (/[A-Za-z]/.test(raw)) return raw;
+  return stripLeadingZeros(raw);
+}
+
 /** Código de artículo sin ceros a la izquierda (ej. 0127501 → 127501 o 41300). */
 export function articleCodeForExport(skuRaw: string): string {
   const sku = String(skuRaw || '').trim();
   if (!sku) return '';
   const parts = sku.split('-').filter(Boolean);
-  if (parts.length >= 3) return stripLeadingZeros(parts[0]);
+  if (parts.length >= 3) return normalizeArticleCodeForExport(parts[0]);
+  if (/[A-Za-z]/.test(sku)) return normalizeArticleCodeForExport(sku);
   const digits = sku.replace(/\D/g, '');
   if (!digits) return sku;
   if (digits.length > 9) return stripLeadingZeros(digits.slice(0, -6));

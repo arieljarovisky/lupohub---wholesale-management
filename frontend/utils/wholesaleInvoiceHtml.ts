@@ -273,12 +273,49 @@ export function orderNetoFromItemsForAfip(order: Order): number {
     ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
   let s = 0;
   for (const i of order.items) {
-    const q = Number(i.quantity) || 0;
-    const p = Number(i.priceAtMoment ?? 0);
-    const lineQty = postPicking ? Math.min(q, Math.max(0, Number(i.picked) || 0)) : q;
-    s += Math.round(lineQty * p * 100) / 100;
+    s += lineNetoForCreditNoteItem(i, order, postPicking);
   }
   return Math.round(s * 100) / 100;
+}
+
+/** Cantidad y neto por línea para NC / AFIP: usa pickeado si hay; si no, cantidad pedida (pedidos ya facturados). */
+function lineNetoForCreditNoteItem(item: OrderItem, order: Order, postPicking?: boolean): number {
+  const q = Number(item.quantity) || 0;
+  const price = Number(item.priceAtMoment ?? 0);
+  const usePicked =
+    postPicking ??
+    (!order.noStockImpact &&
+      ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || '')));
+  if (!usePicked) return Math.round(q * price * 100) / 100;
+  const picked = Math.max(0, Number(item.picked) || 0);
+  const qty = picked > 0 ? Math.min(q, picked) : q;
+  return Math.round(qty * price * 100) / 100;
+}
+
+function lineQuantityForCreditNoteItem(item: OrderItem, order: Order): number {
+  const q = Number(item.quantity) || 0;
+  const postPicking =
+    !order.noStockImpact &&
+    ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
+  if (!postPicking) return q;
+  const picked = Math.max(0, Number(item.picked) || 0);
+  return picked > 0 ? Math.min(q, picked) : q;
+}
+
+/**
+ * Neto a creditar en NC total: alineado con lo facturado (IIBB guardado, pickeado o cantidades del pedido).
+ * Evita total $0 cuando el pedido ya está facturado pero `picked` quedó en 0 en la UI.
+ */
+export function orderNetoForNotaCreditoTotal(order: Order): number {
+  if (order.invoice) {
+    const fromInvoice = orderNetoFacturadoEstimado(order);
+    if (fromInvoice > 0.005) return fromInvoice;
+  }
+  const fromAfipLines = orderNetoFromItemsForAfip(order);
+  if (fromAfipLines > 0.005) return fromAfipLines;
+  const fromQty = orderNetoFromItemsByQuantity(order);
+  if (fromQty > 0.005) return fromQty;
+  return Math.round((Number(order.total) || 0) * 100) / 100;
 }
 
 /**
@@ -312,7 +349,23 @@ export function orderNetoFacturadoEstimado(order: Order): number {
   }
   const netoPicked = orderNetoFromItemsForAfip(order);
   if (netoPicked > 0.005) return netoPicked;
-  return orderNetoFromItemsByQuantity(order);
+  const netoQty = orderNetoFromItemsByQuantity(order);
+  if (netoQty > 0.005) return netoQty;
+  const stored = Math.round((Number(order.total) || 0) * 100) / 100;
+  if (stored > 0.005) return stored;
+  return 0;
+}
+
+/** Unidades a mostrar en tarjeta de pedido (ítems o estimado desde neto si se vació el detalle). */
+export function orderUnitsDisplayCount(order: Order): number | null {
+  const fromItems = (order.items || []).reduce((acc, i) => acc + (Number(i.quantity) || 0), 0);
+  if (fromItems > 0) return fromItems;
+  if (!order.invoice) return fromItems;
+  const neto = orderNetoFacturadoEstimado(order);
+  const prices = (order.items || []).map((i) => Number(i.priceAtMoment ?? 0)).filter((p) => p > 0);
+  const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+  if (neto > 0.005 && avgPrice > 0.005) return Math.round(neto / avgPrice);
+  return null;
 }
 
 /** Total del comprobante facturado (neto + IVA + IIBB según datos guardados). */
@@ -771,7 +824,7 @@ export function buildWholesaleCreditNoteHtml(params: {
   const totalNota = Number(nc.amountCredited || 0);
   const netoNc = Math.round(totalNota * 100) / 100;
   const cbteTipoNc = Number((nc as { cbteTipo?: number }).cbteTipo ?? (nc as { cbte_tipo?: number }).cbte_tipo ?? 0);
-  const netoPedidoFull = orderNetoFromItemsForAfip(order);
+  const netoPedidoFull = orderNetoForNotaCreditoTotal(order);
   const agipResolved =
     previewAgip && Number(previewAgip.retPer) > 0.005
       ? previewAgip
@@ -844,7 +897,8 @@ export function buildWholesaleCreditNoteHtml(params: {
   } else {
     rows = items
       .map((i) => {
-        const qty = Number(i.quantity || 0);
+        const qty = lineQuantityForCreditNoteItem(i, order);
+        if (qty <= 0) return '';
         const unit = Number(i.priceAtMoment ?? 0);
         const lineNeto = Math.round(qty * unit * 100) / 100;
         const lineTotal = Math.round(lineNeto * factorNc * 100) / 100;
