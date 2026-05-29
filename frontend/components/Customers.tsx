@@ -84,10 +84,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     >
   >({});
   const [saldosLoading, setSaldosLoading] = useState(false);
-  const [financialSummary, setFinancialSummary] = useState<Awaited<
-    ReturnType<typeof api.getCustomerFinancialSummary>
-  > | null>(null);
-  const [financialSummaryLoading, setFinancialSummaryLoading] = useState(false);
+  const LEDGER_MOVEMENTS_PAGE = 40;
+  const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_MOVEMENTS_PAGE);
   const [detailActionsOpen, setDetailActionsOpen] = useState(false);
 
   const loadCarteraTotals = () => {
@@ -155,27 +153,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   }, [selectedCustomer?.id, canViewSaldos]);
 
   useEffect(() => {
-    if (!selectedCustomer?.id || !canViewSaldos) {
-      setFinancialSummary(null);
-      return;
-    }
-    let cancelled = false;
-    setFinancialSummaryLoading(true);
-    api
-      .getCustomerFinancialSummary(selectedCustomer.id)
-      .then((d) => {
-        if (!cancelled) setFinancialSummary(d);
-      })
-      .catch(() => {
-        if (!cancelled) setFinancialSummary(null);
-      })
-      .finally(() => {
-        if (!cancelled) setFinancialSummaryLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCustomer?.id, canViewSaldos]);
+    setLedgerVisibleCount(LEDGER_MOVEMENTS_PAGE);
+  }, [selectedCustomer?.id]);
 
   // Mantiene la vista de cliente al refrescar la página.
   useEffect(() => {
@@ -665,14 +644,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     });
   }, [multimediaLedger]);
 
-  const financialMovementsWithSaldo = useMemo(() => {
-    if (!financialSummary?.movements?.length) return [];
-    let saldo = 0;
-    return financialSummary.movements.map((m) => {
-      saldo += Number(m.debe || 0) - Number(m.haber || 0);
-      return { ...m, saldo };
+  const ledgerDateMs = (raw: string | null | undefined) => {
+    if (!raw) return 0;
+    const m = String(raw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    const d = m
+      ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+      : new Date(raw);
+    const t = d.getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+
+  const unifiedLedgerEntriesNewestFirst = useMemo(() => {
+    if (!unifiedLedgerEntries.length) return [];
+    return [...unifiedLedgerEntries].sort((a, b) => {
+      const byDate = ledgerDateMs(b.lineDate) - ledgerDateMs(a.lineDate);
+      if (byDate !== 0) return byDate;
+      return Number(b.lineOrder || 0) - Number(a.lineOrder || 0);
     });
-  }, [financialSummary]);
+  }, [unifiedLedgerEntries]);
 
   const pendingShipLines = useMemo(() => {
     if (!selectedCustomer) return [] as { order: Order; item: OrderItem; pendiente: number }[];
@@ -693,18 +682,32 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return `${m[3]}/${m[2]}/${m[1]}`;
   };
 
-  const renderLedgerTable = (title: string, icon: React.ReactNode, rows: LedgerEntry[]) => {
+  const renderLedgerTable = (
+    title: string,
+    icon: React.ReactNode,
+    rows: LedgerEntry[],
+    opts?: { visibleCount?: number; onLoadMore?: () => void }
+  ) => {
     if (rows.length === 0) return null;
+    const limit = opts?.visibleCount ?? rows.length;
+    const shown = rows.slice(0, limit);
+    const remaining = rows.length - shown.length;
     return (
       <div className="rounded-2xl border border-slate-600/60 overflow-hidden bg-slate-950/50 shadow-inner shadow-black/20">
-        <div className="px-4 py-3 border-b border-slate-700/70 flex items-center gap-2 bg-gradient-to-r from-slate-900/95 to-slate-950/90">
+        <div className="px-4 py-3 border-b border-slate-700/70 flex flex-wrap items-center gap-2 bg-gradient-to-r from-slate-900/95 to-slate-950/90">
           {icon}
           <span className="text-xs font-black text-slate-100 uppercase tracking-[0.12em]">{title}</span>
-          <span className="text-[10px] text-slate-500 ml-auto tabular-nums">{rows.length} mov.</span>
+          <span className="text-[10px] text-slate-500 ml-auto tabular-nums">
+            {shown.length < rows.length
+              ? `Mostrando ${shown.length} de ${rows.length}`
+              : `${rows.length} mov.`}
+            {' · '}
+            <span className="text-amber-400/90">más recientes primero</span>
+          </span>
         </div>
         <div className="overflow-x-auto max-h-[min(70vh,28rem)] mobile-scroll-y touch-scroll">
           <table className="min-w-full text-xs text-left">
-            <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-950">
+            <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 sticky top-0 bg-slate-950 z-[1]">
               <tr>
                 <th className="px-3 py-2">Fecha</th>
                 <th className="px-3 py-2">Tipo</th>
@@ -715,7 +718,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </tr>
             </thead>
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
-              {rows.map((e, idx) => (
+              {shown.map((e, idx) => (
                 <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
                   <td className="px-3 py-1.5">{e.tipo}</td>
@@ -734,6 +737,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             </tbody>
           </table>
         </div>
+        {remaining > 0 && opts?.onLoadMore && (
+          <div className="px-4 py-3 border-t border-slate-700/70 flex justify-center bg-slate-950/80">
+            <button
+              type="button"
+              onClick={opts.onLoadMore}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold border border-slate-600 touch-manipulation"
+            >
+              Cargar más ({remaining.toLocaleString('es-AR')} restantes)
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -1525,110 +1539,39 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             </div>
 
-            {financialSummaryLoading ? (
-              <div className="py-8 flex items-center justify-center gap-2 text-slate-400 text-sm">
+            {multimediaLedgerLoading ? (
+              <div className="py-8 flex items-center justify-center gap-2 text-slate-400 text-sm border-t border-slate-800/80 mt-4">
                 <Loader2 size={18} className="animate-spin" />
-                Cargando comprobantes…
+                Cargando facturas, NC y recibos…
               </div>
-            ) : financialSummary ? (
-              <>
-                {financialMovementsWithSaldo.length === 0 ? (
-                  <p className="text-sm text-slate-500 mt-4 py-4 text-center border-t border-slate-800/80">
-                    Sin comprobantes en el detalle. El saldo puede provenir solo de la cuenta importada.
+            ) : unifiedLedgerEntriesNewestFirst.length > 0 ? (
+              <div className="mt-4 pt-4 border-t border-slate-800/80">
+                {multimediaLedger?.movementCount ? (
+                  <p className="text-xs text-slate-500 font-medium mb-3">
+                    <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos
+                    {multimediaLedger.legacyCode ? (
+                      <span className="text-slate-500"> · legacy {multimediaLedger.legacyCode}</span>
+                    ) : null}
                   </p>
-                ) : (
-                  <>
-                    <div className="md:hidden mt-4 pt-4 border-t border-slate-800/80 space-y-2 mobile-scroll-y touch-scroll max-h-[min(70vh,32rem)]">
-                      {financialMovementsWithSaldo.map((m, idx) => (
-                        <div
-                          key={`${m.tipo}-${m.comprobante}-${idx}`}
-                          className="rounded-2xl border border-slate-700/80 bg-slate-950/60 p-3 space-y-2"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                m.tipo === 'FACTURA'
-                                  ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50'
-                                  : m.tipo === 'PEDIDO'
-                                    ? 'bg-violet-900/50 text-violet-300 border border-violet-700/50'
-                                    : m.tipo === 'NC'
-                                      ? 'bg-amber-900/50 text-amber-300 border border-amber-700/50'
-                                      : 'bg-sky-900/50 text-sky-300 border border-sky-700/50'
-                              }`}
-                            >
-                              {m.tipo === 'NC'
-                                ? 'NC'
-                                : m.tipo === 'RECIBO'
-                                  ? 'Recibo'
-                                  : m.tipo === 'PEDIDO'
-                                    ? 'Pedido'
-                                    : 'Factura'}
-                            </span>
-                            <span className="text-[11px] text-slate-500 tabular-nums">{formatLedgerDate(m.fecha)}</span>
-                          </div>
-                          <p className="font-mono text-base font-bold text-white break-all">{m.comprobante || '—'}</p>
-                          {m.orderId && (
-                            <p className="text-[11px] text-slate-500 font-mono">Pedido {m.orderId}</p>
-                          )}
-                          <div className="flex justify-between text-xs tabular-nums">
-                            {Number(m.debe) > 0 && (
-                              <span className="text-emerald-300">Debe ${Number(m.debe).toLocaleString('es-AR')}</span>
-                            )}
-                            {Number(m.haber) > 0 && (
-                              <span className="text-sky-300">Haber ${Number(m.haber).toLocaleString('es-AR')}</span>
-                            )}
-                            <span className="text-slate-400 ml-auto">Saldo ${Number(m.saldo).toLocaleString('es-AR')}</span>
-                          </div>
-                          {m.detalle && (
-                            <p className="text-[11px] text-slate-500 line-clamp-2">{m.detalle}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="hidden md:block mt-4 pt-4 border-t border-slate-800/80 rounded-2xl border border-slate-700/70 overflow-hidden">
-                      <div className="overflow-x-auto mobile-scroll-x touch-scroll">
-                        <table className="min-w-full text-xs text-left">
-                          <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 bg-slate-950">
-                            <tr>
-                              <th className="px-3 py-2">Fecha</th>
-                              <th className="px-3 py-2">Tipo</th>
-                              <th className="px-3 py-2">Comprobante</th>
-                              <th className="px-3 py-2">Pedido</th>
-                              <th className="px-3 py-2 text-right">Debe</th>
-                              <th className="px-3 py-2 text-right">Haber</th>
-                              <th className="px-3 py-2 text-right">Saldo</th>
-                              <th className="px-3 py-2">Detalle</th>
-                            </tr>
-                          </thead>
-                          <tbody className="text-slate-300 divide-y divide-slate-800/80">
-                            {financialMovementsWithSaldo.map((m, idx) => (
-                              <tr key={`desk-${m.tipo}-${m.comprobante}-${idx}`} className="hover:bg-slate-800/30">
-                                <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(m.fecha)}</td>
-                                <td className="px-3 py-1.5">{m.tipo}</td>
-                                <td className="px-3 py-1.5 font-mono text-[11px] font-bold text-white">{m.comprobante || '—'}</td>
-                                <td className="px-3 py-1.5 font-mono text-[11px]">{m.orderId || '—'}</td>
-                                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300/90">
-                                  {Number(m.debe) > 0 ? `$${Number(m.debe).toLocaleString('es-AR')}` : '—'}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums text-sky-300/90">
-                                  {Number(m.haber) > 0 ? `$${Number(m.haber).toLocaleString('es-AR')}` : '—'}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums font-bold">${Number(m.saldo).toLocaleString('es-AR')}</td>
-                                <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={m.detalle || ''}>
-                                  {m.detalle || '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </>
+                ) : null}
+                {renderLedgerTable(
+                  'Facturas, NC y recibos',
+                  <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />,
+                  unifiedLedgerEntriesNewestFirst,
+                  {
+                    visibleCount: ledgerVisibleCount,
+                    onLoadMore: () =>
+                      setLedgerVisibleCount((n) =>
+                        Math.min(n + LEDGER_MOVEMENTS_PAGE, unifiedLedgerEntriesNewestFirst.length)
+                      )
+                  }
                 )}
-              </>
+              </div>
             ) : (
-              <p className="text-sm text-slate-500 mt-4">No se pudo cargar el resumen de facturas y recibos.</p>
+              <p className="text-sm text-slate-500 mt-4 py-4 text-center border-t border-slate-800/80 leading-relaxed">
+                Sin movimientos en el detalle. El saldo puede provenir solo de pedidos LupoHub pendientes. Importá el Excel
+                de Multimedias desde herramientas de cartera si falta el historial.
+              </p>
             )}
           </div>
         )}
@@ -1853,56 +1796,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             {/* cierre grid de configuración */}
           </div>
         </div>
-        )}
-
-        {canViewSaldos && (
-          <div className="mt-10 space-y-5">
-            <div className="rounded-3xl border border-slate-600/50 bg-gradient-to-b from-slate-900/90 to-slate-950 p-6 shadow-lg ring-1 ring-white/5">
-              <div className="flex flex-col gap-2 border-b border-slate-700/60 pb-4 mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 ring-1 ring-amber-400/30">
-                    <Building2 size={22} className="text-amber-300" aria-hidden />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-white tracking-tight">
-                      Cuenta corriente histórica
-                    </h3>
-                    <p className="text-[11px] text-slate-500 uppercase tracking-[0.2em] font-semibold">
-                      Tango · Multimedias · importación Excel
-                    </p>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-                  Historial unificado: movimientos importados + recibos cargados en Facturación. Todo impacta en el
-                  <strong className="text-slate-300"> saldo unificado</strong>.
-                </p>
-              </div>
-            {multimediaLedgerLoading ? (
-              <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
-                <Loader2 className="animate-spin" size={18} aria-hidden />
-                Cargando historial importado…
-              </div>
-            ) : multimediaLedger && multimediaLedger.movementCount > 0 ? (
-              <div className="space-y-5">
-                <p className="text-xs text-slate-400 font-medium">
-                  <span className="text-white font-bold tabular-nums">{multimediaLedger.movementCount}</span> movimientos
-                  {multimediaLedger.legacyCode ? (
-                    <span className="text-slate-500"> · código legacy {multimediaLedger.legacyCode}</span>
-                  ) : null}
-                </p>
-                {renderLedgerTable('Movimientos unificados', <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />, unifiedLedgerEntries)}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500 leading-relaxed">
-                No hay movimientos importados para este cliente. Desde la cartera importá el Excel de Multimedias: se intenta
-                vincular por <strong className="text-slate-400">código legacy</strong>,{' '}
-                <strong className="text-slate-400">razón social</strong> (nombre parecido),{' '}
-                <strong className="text-slate-400">CUIT</strong> cargado en el cliente o en la fila del Excel, y la columna{' '}
-                <strong className="text-slate-400">Cliente</strong> de la hoja Resumen del archivo.
-              </p>
-            )}
-            </div>
-          </div>
         )}
 
         {pendingShipLines.length > 0 && (
