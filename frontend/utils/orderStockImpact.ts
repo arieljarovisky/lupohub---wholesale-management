@@ -10,6 +10,9 @@ export type WholesaleStockImpactVariant = 'no_impact' | 'pending' | 'deducted' |
 const TITLE_NO_IMPACT =
   'Facturación sin movimiento de inventario: no desconta ni devuelve stock (incluye factura emitida con “sin impacto de stock”).';
 
+const TITLE_STOCK_RESTORED =
+  'El stock descontado por este pedido fue devuelto al inventario. El pedido ya no impacta el stock actual.';
+
 const TITLE_PENDING =
   'El stock no se descuenta al confirmar. Al pasar a control tras picking, se descuenta solo la cantidad pickeada por línea (Falta controlar / Controlado / Despachado).';
 
@@ -20,7 +23,10 @@ const TITLE_NOT_APPLIED =
   'El pedido está confirmado (o en curso) pero no hay registro de descuento de stock. Usá “Descontar stock” para aplicarlo ahora.';
 
 export function getWholesaleStockImpactMeta(
-  order: Pick<Order, 'status' | 'noStockImpact'> & { mayoristaStockApplied?: boolean }
+  order: Pick<Order, 'status' | 'noStockImpact'> & {
+    mayoristaStockApplied?: boolean;
+    mayoristaStockRestored?: boolean;
+  }
 ): {
   variant: WholesaleStockImpactVariant;
   label: string | null;
@@ -35,6 +41,16 @@ export function getWholesaleStockImpactMeta(
       variant: 'no_impact',
       label: 'SIN IMPACTO STOCK',
       title: TITLE_NO_IMPACT,
+      badgeClassName:
+        'bg-amber-900/30 text-amber-200 border-amber-800/50',
+      cardAccentClass: 'border-l-4 border-amber-500/80',
+    };
+  }
+  if (order.mayoristaStockRestored === true) {
+    return {
+      variant: 'no_impact',
+      label: 'NO IMPACTÓ EL STOCK',
+      title: TITLE_STOCK_RESTORED,
       badgeClassName:
         'bg-amber-900/30 text-amber-200 border-amber-800/50',
       cardAccentClass: 'border-l-4 border-amber-500/80',
