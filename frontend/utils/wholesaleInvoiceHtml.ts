@@ -474,6 +474,24 @@ export function normalizeSkuForPrint(raw: unknown): string {
   return String(raw ?? '').trim().replace(/-/g, '');
 }
 
+/** Código impreso en factura/NC: artículo+talle+color sin guiones (mismo criterio que columna CÓDIGO de la factura). */
+export function printCodeForOrderItem(item: OrderItem, products: Product[]): string {
+  const variantId = item.variantId ?? item.productId;
+  const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
+  const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
+  const built = printCodeArticleSizeColor(
+    articleCodeForPrintGroup(variantSku),
+    String(item.sizeCode ?? localProduct?.size ?? ''),
+    colorCodeForPrintItem(item, variantSku)
+  );
+  const rawItemSku = (item.sku ?? '').toString().trim();
+  if (rawItemSku && !rawItemSku.includes('-')) {
+    return normalizeSkuForPrint(rawItemSku);
+  }
+  if (built) return built;
+  return normalizeSkuForPrint(rawItemSku || variantSku);
+}
+
 export function buildWholesaleFacturaHtml(params: {
   order: Order;
   customer?: Customer;
@@ -536,15 +554,7 @@ export function buildWholesaleFacturaHtml(params: {
       const importe = Math.round(qty * unit * 100) / 100;
       const variantId = i.variantId ?? i.productId;
       const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
-      const variantSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
-      const sku = normalizeSkuForPrint(
-        (i.sku ?? '').toString().trim() ||
-          printCodeArticleSizeColor(
-            articleCodeForPrintGroup(variantSku),
-            String(i.sizeCode ?? ''),
-            colorCodeForPrintItem(i, variantSku)
-          )
-      );
+      const sku = printCodeForOrderItem(i, products);
       const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
       const despachoCell = despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
       const desc = descriptionForPrintLine(i);
@@ -675,6 +685,7 @@ export function buildWholesaleFacturaHtml(params: {
       tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
       tfoot td { padding: 6px; }
       .col-c { text-align: center; }
+      .col-code { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; }
       .col-r { text-align: right; }
       .col-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
@@ -846,14 +857,10 @@ export function buildWholesaleCreditNoteHtml(params: {
     const despacho = (i as OrderItem & { numero_despacho?: string }).numeroDespacho ?? (i as OrderItem & { numero_despacho?: string }).numero_despacho ?? null;
     return despacho != null && String(despacho).trim() ? String(despacho).trim() : '—';
   };
-  const descOf = (i: OrderItem) => {
-    const variantId = i.variantId ?? i.productId;
-    const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
-    const localSku = (localProduct?.sku ?? i.sku ?? '').toString().trim();
-    const name = (i.productName ?? '').toString().trim();
-    if (localSku && name) return `${localSku} — ${name}`;
-    return localSku || name || '—';
-  };
+  const codeOf = (i: OrderItem) => printCodeForOrderItem(i, products) || '—';
+  const descOf = (i: OrderItem) => descriptionForPrintLine(i);
+  const ncProductCells = (i: OrderItem) =>
+    `<td class="col-c col-code">${codeOf(i)}</td><td>${descOf(i)}</td>`;
 
   const scope = nc.scope || 'total';
   const itemIdx = nc.itemIndex;
@@ -880,9 +887,9 @@ export function buildWholesaleCreditNoteHtml(params: {
         if (discriminaIvaNc) {
           const ivaLinea = Math.round(netoSafe * 0.21 * 100) / 100;
           const totalConIva = Math.round((netoSafe + ivaLinea) * 100) / 100;
-          return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoSafe)}</td><td class="col-r">$${formatMoneyAr(ivaLinea)}</td><td class="col-r">$${formatMoneyAr(totalConIva)}</td></tr>`;
+          return `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoSafe)}</td><td class="col-r">$${formatMoneyAr(ivaLinea)}</td><td class="col-r">$${formatMoneyAr(totalConIva)}</td></tr>`;
         }
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalLinea)}</td></tr>`;
+        return `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalLinea)}</td></tr>`;
       });
     rows = selectedRows.join('');
   } else if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
@@ -892,22 +899,26 @@ export function buildWholesaleCreditNoteHtml(params: {
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     const qtyStr = Number.isInteger(qtyNc) ? String(qtyNc) : qtyNc.toLocaleString('es-AR', { maximumFractionDigits: 3 });
     rows = discriminaIvaNc
-      ? `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoNc)}</td><td class="col-r">$${formatMoneyAr(ivaNc)}</td><td class="col-r">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`
-      : `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`;
+      ? `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(netoNc)}</td><td class="col-r">$${formatMoneyAr(ivaNc)}</td><td class="col-r">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`
+      : `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(totalComprobanteNc)}</td></tr>`;
   } else {
-    rows = items
+    const itemsForNc = groupOrderItemsByArticleAndSize(items, products, (i) =>
+      lineQuantityForCreditNoteItem(i, order)
+    );
+    rows = itemsForNc
       .map((i) => {
-        const qty = lineQuantityForCreditNoteItem(i, order);
+        const qty = Number(i.quantity || 0);
         if (qty <= 0) return '';
         const unit = Number(i.priceAtMoment ?? 0);
         const lineNeto = Math.round(qty * unit * 100) / 100;
         const lineTotal = Math.round(lineNeto * factorNc * 100) / 100;
+        const qtyStr = Number.isInteger(qty) ? String(qty) : qty.toLocaleString('es-AR', { maximumFractionDigits: 3 });
         if (discriminaIvaNc) {
           const lineIva = Math.round(lineNeto * 0.21 * 100) / 100;
           const lineTotalA = Math.round((lineNeto + lineIva) * 100) / 100;
-          return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r">$${formatMoneyAr(lineNeto)}</td><td class="col-r">$${formatMoneyAr(lineIva)}</td><td class="col-r">$${formatMoneyAr(lineTotalA)}</td></tr>`;
+          return `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r">$${formatMoneyAr(lineNeto)}</td><td class="col-r">$${formatMoneyAr(lineIva)}</td><td class="col-r">$${formatMoneyAr(lineTotalA)}</td></tr>`;
         }
-        return `<tr><td>${descOf(i)}</td><td class="col-c">${despachoOf(i)}</td><td class="col-c">${i.quantity}</td><td class="col-r" colspan="3">$${formatMoneyAr(lineTotal)}</td></tr>`;
+        return `<tr>${ncProductCells(i)}<td class="col-c">${despachoOf(i)}</td><td class="col-c">${qtyStr}</td><td class="col-r" colspan="3">$${formatMoneyAr(lineTotal)}</td></tr>`;
       })
       .join('');
   }
@@ -974,6 +985,7 @@ export function buildWholesaleCreditNoteHtml(params: {
       thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
       tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
       .col-c { text-align: center; }
+      .col-code { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; }
       .col-r { text-align: right; }
       .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
@@ -1034,7 +1046,8 @@ export function buildWholesaleCreditNoteHtml(params: {
         <table>
           <thead>
             <tr>
-              <th>Producto / Descripción</th>
+              <th class="col-c" style="width: 110px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
               <th class="col-c" style="width: 70px;">CANT.</th>
               ${discriminaIvaNc
