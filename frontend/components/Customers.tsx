@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User, CustomerDeliveryAddress } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -238,6 +239,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
   const [wholesaleMetricsExporting, setWholesaleMetricsExporting] = useState(false);
   const [exportingCustomersWithLocation, setExportingCustomersWithLocation] = useState(false);
+  const [customerToolsOpen, setCustomerToolsOpen] = useState(false);
+  const [customerToolsPosition, setCustomerToolsPosition] = useState<{ top: number; left: number } | null>(null);
+  const customerToolsRef = useRef<HTMLDivElement>(null);
+  const [customerOrdersMenuOpen, setCustomerOrdersMenuOpen] = useState(false);
+  const [customerOrdersMenuPosition, setCustomerOrdersMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const customerOrdersMenuRef = useRef<HTMLDivElement>(null);
   const [showExportSheetsModal, setShowExportSheetsModal] = useState(false);
   const [exportSheetSelectedIds, setExportSheetSelectedIds] = useState<string[]>([]);
   const [exportingSheets, setExportingSheets] = useState(false);
@@ -730,6 +737,92 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       </div>
     );
   };
+
+  const customerToolsBusy =
+    exportingCustomersWithLocation ||
+    wholesaleMetricsExporting ||
+    saldosMultimediasExporting ||
+    multimediaExporting ||
+    multimediaImporting ||
+    assigningSellersResumen ||
+    updatingCuit ||
+    importingExcel;
+
+  const closeCustomerTools = () => setCustomerToolsOpen(false);
+
+  useEffect(() => {
+    if (!customerToolsOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (customerToolsRef.current?.contains(target)) return;
+      if ((target as Element).closest?.('[data-customer-tools-dropdown]')) return;
+      setCustomerToolsOpen(false);
+    };
+    document.addEventListener('click', onOutside);
+    return () => document.removeEventListener('click', onOutside);
+  }, [customerToolsOpen]);
+
+  useEffect(() => {
+    if (!customerToolsOpen || !customerToolsRef.current) {
+      setCustomerToolsPosition(null);
+      return;
+    }
+    const update = () => {
+      if (!customerToolsRef.current) return;
+      const rect = customerToolsRef.current.getBoundingClientRect();
+      const menuWidth = 300;
+      setCustomerToolsPosition({
+        top: rect.bottom + 6,
+        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+      });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [customerToolsOpen]);
+
+  useEffect(() => {
+    if (!customerOrdersMenuOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (customerOrdersMenuRef.current?.contains(target)) return;
+      if ((target as Element).closest?.('[data-customer-orders-menu]')) return;
+      setCustomerOrdersMenuOpen(false);
+    };
+    document.addEventListener('click', onOutside);
+    return () => document.removeEventListener('click', onOutside);
+  }, [customerOrdersMenuOpen]);
+
+  useEffect(() => {
+    if (!customerOrdersMenuOpen || !customerOrdersMenuRef.current) {
+      setCustomerOrdersMenuPosition(null);
+      return;
+    }
+    const update = () => {
+      if (!customerOrdersMenuRef.current) return;
+      const rect = customerOrdersMenuRef.current.getBoundingClientRect();
+      const menuWidth = 280;
+      setCustomerOrdersMenuPosition({
+        top: rect.bottom + 6,
+        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+      });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [customerOrdersMenuOpen]);
+
+  useEffect(() => {
+    setCustomerOrdersMenuOpen(false);
+  }, [selectedCustomer?.id]);
 
   // --- VIEWS ---
 
@@ -1862,50 +1955,96 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
         {/* Orders List Section */}
         <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-           <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h3 className="font-bold text-white flex items-center gap-2">
-                   <ShoppingBag size={20} className="text-blue-500"/> Pedidos en LupoHub
+           <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                <h3 className="font-bold text-white flex items-center gap-2 text-sm sm:text-base min-w-0">
+                   <ShoppingBag size={18} className="text-blue-500 shrink-0"/> 
+                   <span className="truncate">Pedidos en LupoHub</span>
                 </h3>
-                <span className="text-xs font-bold text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
-                  {visibleOrders.length} / {stats.orders.length} pedidos
+                <span className="text-[11px] sm:text-xs font-bold text-slate-500 bg-slate-800 px-2.5 py-1 rounded-full shrink-0 tabular-nums">
+                  {visibleOrders.length} / {stats.orders.length}
                 </span>
+                {onlyPendingDispatchInCustomer && (
+                  <span className="hidden sm:inline text-[10px] font-bold uppercase tracking-wide text-blue-300 bg-blue-900/30 px-2 py-0.5 rounded-full shrink-0">
+                    Filtro activo
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="relative shrink-0" ref={customerOrdersMenuRef}>
                 <button
                   type="button"
-                  onClick={() => setOnlyPendingDispatchInCustomer(v => !v)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${
+                  onClick={() => setCustomerOrdersMenuOpen((prev) => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition border min-h-[40px] ${
                     onlyPendingDispatchInCustomer
-                      ? 'bg-blue-700/30 border-blue-600/50 text-blue-200'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-blue-700/25 border-blue-600/40 text-blue-200'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white'
                   }`}
-                  title="Filtrar pedidos que todavía tienen unidades pendientes de envío"
+                  aria-expanded={customerOrdersMenuOpen}
+                  aria-haspopup="menu"
                 >
-                  {onlyPendingDispatchInCustomer ? 'Solo con pendientes' : 'Filtrar pendientes'}
+                  <SlidersHorizontal size={15} className="shrink-0" />
+                  <span className="hidden sm:inline">Opciones</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform ${customerOrdersMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-                {(role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!selectedCustomer) return;
-                      try {
-                        const res = await api.clearCustomerDispatchedPendings(selectedCustomer.id);
-                        if ((res.ordersUpdated || 0) > 0 || (res.itemsAdjusted || 0) > 0 || (res.itemsRemoved || 0) > 0) {
-                          showToast('success', `Listo. Pedidos ajustados: ${res.ordersUpdated}. Ítems ajustados: ${res.itemsAdjusted}.`);
-                        } else {
-                          showToast('info', 'No había pendientes para quitar en pedidos despachados.');
-                        }
-                        await onRefreshData?.();
-                      } catch (e: any) {
-                        showToast('error', e?.message || 'No se pudieron quitar pendientes');
-                      }
+                {customerOrdersMenuOpen && customerOrdersMenuPosition && createPortal(
+                  <div
+                    data-customer-orders-menu
+                    role="menu"
+                    className="py-2 w-[280px] bg-slate-900/95 backdrop-blur-md border border-slate-600 rounded-2xl shadow-2xl z-[9999]"
+                    style={{
+                      position: 'fixed',
+                      top: customerOrdersMenuPosition.top,
+                      left: customerOrdersMenuPosition.left,
+                      zIndex: 9999,
                     }}
-                    className="px-3 py-2 bg-amber-700/30 border border-amber-600/50 rounded-xl text-xs font-bold text-amber-200 hover:bg-amber-700/50 transition"
-                    title="Quitar pendientes de pedidos despachados sin factura AFIP. Solo recorta cantidad cuando hay unidades pickeadas; no borra pedidos facturados."
                   >
-                    Quitar pendientes despachados
-                  </button>
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={onlyPendingDispatchInCustomer}
+                      onClick={() => {
+                        setOnlyPendingDispatchInCustomer((v) => !v);
+                        setCustomerOrdersMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition ${
+                        onlyPendingDispatchInCustomer
+                          ? 'text-blue-200 bg-blue-500/10'
+                          : 'text-slate-200 hover:bg-slate-700/80'
+                      }`}
+                    >
+                      <Filter size={16} className={`shrink-0 ${onlyPendingDispatchInCustomer ? 'text-blue-400' : 'text-slate-400'}`} />
+                      <span className="leading-snug">
+                        {onlyPendingDispatchInCustomer ? 'Mostrar todos los pedidos' : 'Filtrar solo con pendientes'}
+                      </span>
+                    </button>
+                    {(role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={async () => {
+                          setCustomerOrdersMenuOpen(false);
+                          if (!selectedCustomer) return;
+                          try {
+                            const res = await api.clearCustomerDispatchedPendings(selectedCustomer.id);
+                            if ((res.ordersUpdated || 0) > 0 || (res.itemsAdjusted || 0) > 0 || (res.itemsRemoved || 0) > 0) {
+                              showToast('success', `Listo. Pedidos ajustados: ${res.ordersUpdated}. Ítems ajustados: ${res.itemsAdjusted}.`);
+                            } else {
+                              showToast('info', 'No había pendientes para quitar en pedidos despachados.');
+                            }
+                            await onRefreshData?.();
+                          } catch (e: any) {
+                            showToast('error', e?.message || 'No se pudieron quitar pendientes');
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-amber-100 hover:bg-amber-500/10 border-t border-slate-700/80 mt-1 pt-3"
+                        title="Quitar pendientes de pedidos despachados sin factura AFIP. Solo recorta cantidad cuando hay unidades pickeadas; no borra pedidos facturados."
+                      >
+                        <PackageCheck size={16} className="text-amber-400 shrink-0" />
+                        <span className="leading-snug">Quitar pendientes despachados</span>
+                      </button>
+                    )}
+                  </div>,
+                  document.body
                 )}
               </div>
            </div>
@@ -2128,9 +2267,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   // 3. List View (Default)
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h2 className="text-2xl font-bold text-white">Cartera de Clientes</h2>
-        <div className="flex flex-wrap gap-2 w-full xl:w-auto">
+        <div className="flex items-center gap-2 shrink-0">
           <input
             ref={importExcelInputRef}
             type="file"
@@ -2163,134 +2302,194 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               onChange={handleAssignSellersFromResumen}
             />
           )}
+          <div className="relative" ref={customerToolsRef}>
+            <button
+              type="button"
+              onClick={() => setCustomerToolsOpen((prev) => !prev)}
+              className="flex items-center gap-2 bg-slate-800 text-slate-200 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-700 hover:text-white transition min-h-[44px] font-medium text-sm"
+              aria-expanded={customerToolsOpen}
+              aria-haspopup="menu"
+            >
+              {customerToolsBusy ? (
+                <Loader2 size={18} className="animate-spin text-blue-400" />
+              ) : (
+                <SlidersHorizontal size={18} className="text-slate-400" />
+              )}
+              <span>Herramientas</span>
+              <ChevronDown size={16} className={`text-slate-400 transition-transform ${customerToolsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {customerToolsOpen && customerToolsPosition && createPortal(
+              <div
+                data-customer-tools-dropdown
+                role="menu"
+                className="py-2 w-[300px] max-h-[min(70vh,520px)] overflow-y-auto bg-slate-900/95 backdrop-blur-md border border-slate-600 rounded-2xl shadow-2xl z-[9999]"
+                style={{
+                  position: 'fixed',
+                  top: customerToolsPosition.top,
+                  left: customerToolsPosition.left,
+                  zIndex: 9999,
+                }}
+              >
+                <div className="px-4 py-2 border-b border-slate-700/80">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Exportar</p>
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={async () => {
+                    closeCustomerTools();
+                    setExportingCustomersWithLocation(true);
+                    try {
+                      await api.exportCustomersIndividuals();
+                      showToast('success', 'Excel de clientes con ubicación descargado (incluye ciudad y dirección).');
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'Error al exportar clientes con ubicación.');
+                    }
+                    setExportingCustomersWithLocation(false);
+                  }}
+                  disabled={exportingCustomersWithLocation}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-emerald-100 hover:bg-emerald-500/10 disabled:opacity-50"
+                  title="Excel de clientes (1 fila por cliente) con ciudad y dirección"
+                >
+                  {exportingCustomersWithLocation ? <Loader2 size={16} className="animate-spin shrink-0" /> : <Download size={16} className="text-emerald-400 shrink-0" />}
+                  <span className="leading-snug">Exportar clientes con ubicación</span>
+                </button>
+                {canViewSaldos && (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={async () => {
+                        closeCustomerTools();
+                        setWholesaleMetricsExporting(true);
+                        try {
+                          await api.exportWholesaleTopProductsMetrics();
+                          showToast('success', 'Excel de métricas mayoristas descargado.');
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'Error al exportar métricas mayoristas.');
+                        }
+                        setWholesaleMetricsExporting(false);
+                      }}
+                      disabled={wholesaleMetricsExporting}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-fuchsia-100 hover:bg-fuchsia-500/10 disabled:opacity-50"
+                    >
+                      {wholesaleMetricsExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-fuchsia-400 shrink-0" />}
+                      <span className="leading-snug">Métricas mayorista (Top artículos)</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={async () => {
+                        closeCustomerTools();
+                        setSaldosMultimediasExporting(true);
+                        try {
+                          await api.exportSaldosPendientesMultimedias();
+                          showToast('success', 'Excel descargado: hoja Resumen con saldos pendientes de cobro (formato Multimedias).');
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'Error al exportar.');
+                        }
+                        setSaldosMultimediasExporting(false);
+                      }}
+                      disabled={saldosMultimediasExporting}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-amber-100 hover:bg-amber-500/10 disabled:opacity-50"
+                    >
+                      {saldosMultimediasExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-amber-400 shrink-0" />}
+                      <span className="leading-snug">Excel saldos pendientes (Resumen)</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={async () => {
+                        closeCustomerTools();
+                        setMultimediaExporting(true);
+                        try {
+                          await api.exportMultimediaHistorial();
+                          showToast('success', 'Excel de historial Multimedias descargado.');
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'Error al exportar.');
+                        }
+                        setMultimediaExporting(false);
+                      }}
+                      disabled={multimediaExporting}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700/80 disabled:opacity-50"
+                    >
+                      {multimediaExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <Download size={16} className="text-slate-400 shrink-0" />}
+                      <span className="leading-snug">Exportar historial Multimedias</span>
+                    </button>
+                  </>
+                )}
+                <div className="px-4 py-2 mt-1 border-t border-b border-slate-700/80">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Importar</p>
+                </div>
+                {canViewSaldos && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeCustomerTools();
+                      multimediaHistorialInputRef.current?.click();
+                    }}
+                    disabled={multimediaImporting}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700/80 disabled:opacity-50"
+                  >
+                    {multimediaImporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-blue-400 shrink-0" />}
+                    <span className="leading-snug">Importar historial Multimedias</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeCustomerTools();
+                    importExcelInputRef.current?.click();
+                  }}
+                  disabled={importingExcel}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700/80 disabled:opacity-50"
+                >
+                  {importingExcel ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-cyan-400 shrink-0" />}
+                  <span className="leading-snug">Importar Excel de clientes</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeCustomerTools();
+                    cuitUpdateInputRef.current?.click();
+                  }}
+                  disabled={updatingCuit}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700/80 disabled:opacity-50"
+                >
+                  {updatingCuit ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-violet-400 shrink-0" />}
+                  <span className="leading-snug">Actualizar CUIT en lote</span>
+                </button>
+                {role === Role.ADMIN && (
+                  <>
+                    <div className="px-4 py-2 mt-1 border-t border-slate-700/80">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Administración</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closeCustomerTools();
+                        assignSellersResumenInputRef.current?.click();
+                      }}
+                      disabled={assigningSellersResumen}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-indigo-100 hover:bg-indigo-500/10 disabled:opacity-50"
+                    >
+                      {assigningSellersResumen ? <Loader2 size={16} className="animate-spin shrink-0" /> : <Users size={16} className="text-indigo-400 shrink-0" />}
+                      <span className="leading-snug">Asignar vendedores (Resumen)</span>
+                    </button>
+                  </>
+                )}
+              </div>,
+              document.body
+            )}
+          </div>
           <button
             type="button"
-            onClick={async () => {
-              setExportingCustomersWithLocation(true);
-              try {
-                await api.exportCustomersIndividuals();
-                showToast('success', 'Excel de clientes con ubicación descargado (incluye ciudad y dirección).');
-              } catch (err: any) {
-                showToast('error', err?.message || 'Error al exportar clientes con ubicación.');
-              }
-              setExportingCustomersWithLocation(false);
-            }}
-            disabled={exportingCustomersWithLocation}
-            className="bg-emerald-900/40 text-emerald-100 px-3 py-2.5 rounded-lg hover:bg-emerald-900/55 border border-emerald-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-            title="Excel de clientes (1 fila por cliente) con ciudad y dirección"
-          >
-            {exportingCustomersWithLocation ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-            <span className="leading-tight break-words">{exportingCustomersWithLocation ? 'Exportando…' : 'Exportar clientes con ubicación'}</span>
-          </button>
-          {canViewSaldos && (
-            <button
-              type="button"
-              onClick={async () => {
-                setWholesaleMetricsExporting(true);
-                try {
-                  await api.exportWholesaleTopProductsMetrics();
-                  showToast('success', 'Excel de métricas mayoristas descargado.');
-                } catch (err: any) {
-                  showToast('error', err?.message || 'Error al exportar métricas mayoristas.');
-                }
-                setWholesaleMetricsExporting(false);
-              }}
-              disabled={wholesaleMetricsExporting}
-              className="bg-fuchsia-900/40 text-fuchsia-100 px-3 py-2.5 rounded-lg hover:bg-fuchsia-900/55 border border-fuchsia-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-              title="Top de artículos más pedidos en mayorista"
-            >
-              {wholesaleMetricsExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span className="leading-tight break-words">{wholesaleMetricsExporting ? 'Exportando…' : 'Métricas mayorista (Top artículos)'}</span>
-            </button>
-          )}
-          {canViewSaldos && (
-            <button
-              type="button"
-              onClick={async () => {
-                setSaldosMultimediasExporting(true);
-                try {
-                  await api.exportSaldosPendientesMultimedias();
-                  showToast('success', 'Excel descargado: hoja Resumen con saldos pendientes de cobro (formato Multimedias).');
-                } catch (err: any) {
-                  showToast('error', err?.message || 'Error al exportar.');
-                }
-                setSaldosMultimediasExporting(false);
-              }}
-              disabled={saldosMultimediasExporting}
-              className="bg-amber-900/40 text-amber-100 px-3 py-2.5 rounded-lg hover:bg-amber-900/55 border border-amber-700/50 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-              title="Una hoja Resumen con formato: código, cliente, vendedor, zona, saldo pendiente unificado, movimientos (sin columna Hoja)"
-            >
-              {saldosMultimediasExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span className="leading-tight break-words">{saldosMultimediasExporting ? 'Exportando…' : 'Excel saldos pendientes (Resumen)'}</span>
-            </button>
-          )}
-          {canViewSaldos && (
-            <button
-              type="button"
-              onClick={async () => {
-                setMultimediaExporting(true);
-                try {
-                  await api.exportMultimediaHistorial();
-                  showToast('success', 'Excel de historial Multimedias descargado.');
-                } catch (err: any) {
-                  showToast('error', err?.message || 'Error al exportar.');
-                }
-                setMultimediaExporting(false);
-              }}
-              disabled={multimediaExporting}
-              className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-              title="Genera el mismo formato que el Excel historial_clientes_multimedias (Resumen + una hoja por cliente)"
-            >
-              {multimediaExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-              <span className="leading-tight break-words">{multimediaExporting ? 'Exportando…' : 'Exportar historial Multimedias'}</span>
-            </button>
-          )}
-          {canViewSaldos && (
-            <button
-              type="button"
-              onClick={() => multimediaHistorialInputRef.current?.click()}
-              disabled={multimediaImporting}
-              className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-              title="Importa movimientos desde el Excel; reemplaza el historial guardado por cada cliente que se pueda vincular"
-            >
-              {multimediaImporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-              <span className="leading-tight break-words">{multimediaImporting ? 'Importando…' : 'Importar historial Multimedias'}</span>
-            </button>
-          )}
-          {role === Role.ADMIN && (
-            <button
-              type="button"
-              onClick={() => assignSellersResumenInputRef.current?.click()}
-              disabled={assigningSellersResumen}
-              className="bg-indigo-900/50 text-indigo-100 px-3 py-2.5 rounded-lg hover:bg-indigo-900/70 border border-indigo-700/40 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-              title="Misma hoja Resumen del Excel Multimedias: asigna cada cliente al vendedor de la columna Vendedor habitual (usuarios importados vendedor.N@importado.lupohub.local)"
-            >
-              {assigningSellersResumen ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
-              <span className="leading-tight break-words">{assigningSellersResumen ? 'Asignando…' : 'Asignar vendedores (Resumen)'}</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => cuitUpdateInputRef.current?.click()}
-            disabled={updatingCuit}
-            className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-            title="Excel con Razón social o Email + CUIT para actualizar solo el CUIT de clientes existentes"
-          >
-            {updatingCuit ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-            <span className="leading-tight break-words">{updatingCuit ? 'Actualizando…' : 'Actualizar CUIT en lote'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => importExcelInputRef.current?.click()}
-            disabled={importingExcel}
-            className="bg-slate-700 text-white px-3 py-2.5 rounded-lg hover:bg-slate-600 border border-slate-600 transition flex items-center gap-2 font-medium disabled:opacity-50 min-h-[44px] whitespace-normal text-left"
-          >
-            {importingExcel ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
-            <span className="leading-tight break-words">{importingExcel ? 'Importando…' : 'Importar Excel'}</span>
-          </button>
-          <button 
             onClick={() => { setIsCreating(true); setEditingCustomer(null); setNewBusinessName(''); setNewContactName(''); setNewEmail(''); setNewAddress(''); setNewCity(''); setNewCuit(''); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
-            className="bg-blue-600 text-white px-3 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-lg shadow-blue-900/50 font-medium min-h-[44px] whitespace-normal text-left"
+            className="bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-500 transition flex items-center gap-2 shadow-lg shadow-blue-900/40 font-semibold min-h-[44px] text-sm"
           >
             <Plus size={18} />
             <span>Nuevo Cliente</span>
