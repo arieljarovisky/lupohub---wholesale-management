@@ -112,6 +112,7 @@ const App: React.FC = () => {
   const [transportes, setTransportes] = useState<Transporte[]>([]);
   const [activePickingOrder, setActivePickingOrder] = useState<Order | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [duplicateSourceOrder, setDuplicateSourceOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   /** Modal de aviso post-guardado: artículos cuyas unidades quedaron sin número de despacho. */
   const [despachoWarningsToShow, setDespachoWarningsToShow] = useState<string[] | null>(null);
@@ -173,8 +174,9 @@ const App: React.FC = () => {
       return;
     }
     if (nextBase === 'create_order' || nextBase === 'create_order_template') {
-      // "Nuevo pedido" siempre inicia limpio; editar usa handleEditOrder.
+      // "Nuevo pedido" siempre inicia limpio; editar usa handleEditOrder; duplicar usa handleDuplicateOrder.
       setEditingOrder(null);
+      setDuplicateSourceOrder(null);
       editingOrderIdRef.current = null;
       try {
         localStorage.removeItem(DRAFT_KEY);
@@ -493,6 +495,7 @@ const App: React.FC = () => {
           return [savedOrder, ...prev];
         });
         setEditingOrder(null);
+        setDuplicateSourceOrder(null);
         editingOrderIdRef.current = null;
         setCurrentView('orders');
         if (Array.isArray((savedOrder as any)?.despachoWarnings) && (savedOrder as any).despachoWarnings.length > 0) {
@@ -533,8 +536,21 @@ const App: React.FC = () => {
   }, [showToast]);
 
   const handleEditOrder = (order: Order) => {
+    setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
     setEditingOrder(order);
+    setCurrentView('create_order');
+  };
+
+  const handleDuplicateOrder = (order: Order) => {
+    setEditingOrder(null);
+    editingOrderIdRef.current = null;
+    setDuplicateSourceOrder(order);
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
     setCurrentView('create_order');
   };
   
@@ -1048,7 +1064,7 @@ const App: React.FC = () => {
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
                  {baseView === 'facturacion' && 'Facturación'}
-                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido (Plantilla)' : 'Nuevo Pedido (Plantilla)')}
+                 {baseView === 'create_order' && (editingOrder ? 'Editar Pedido (Plantilla)' : duplicateSourceOrder ? 'Duplicar Pedido' : 'Nuevo Pedido (Plantilla)')}
                  {baseView === 'create_order_template' && 'Nuevo Pedido (Plantilla)'}
                  {baseView === 'order_picking' && 'Preparando Pedido'}
                </h1>
@@ -1099,6 +1115,7 @@ const App: React.FC = () => {
                 onUpdateStatus={handleUpdateOrderStatus} onCreateOrder={handleCreateOrder}
                 onNavigate={handleChangeView} onStartPicking={handleStartPicking}
                 onEditOrder={handleEditOrder}
+                onDuplicateOrder={handleDuplicateOrder}
                 onDeleteOrder={handleDeleteOrder}
                 onFacturaEmitida={(orderId, invoice) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, invoice } : o))}
                 onCreditNoteEmitida={(orderId) => setOrders(prev => prev.map(o => o.id === orderId ? { ...o, creditNotesCount: (o.creditNotesCount ?? 0) + 1 } : o))}
@@ -1193,9 +1210,10 @@ const App: React.FC = () => {
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
+                onCancel={() => { setEditingOrder(null); setDuplicateSourceOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
+                duplicateFromOrder={duplicateSourceOrder}
                 role={currentUser.role}
                 priceLists={priceLists}
                 selectedPriceListId={createOrderPriceListId}

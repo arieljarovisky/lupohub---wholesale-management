@@ -17,6 +17,8 @@ interface CreateOrderTemplateProps {
   onCancel: () => void;
   sellerId?: string | null;
   initialOrder?: Order | null;
+  /** Copia un pedido existente como base de un pedido nuevo (no edita el original). */
+  duplicateFromOrder?: Order | null;
   role?: Role;
   priceLists?: PriceList[];
   selectedPriceListId?: string | null;
@@ -95,6 +97,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   onCancel,
   sellerId,
   initialOrder = null,
+  duplicateFromOrder = null,
   role,
   priceLists = [],
   selectedPriceListId = null,
@@ -132,7 +135,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const { showToast } = useNotification();
   const isCustomerLocked = role === Role.CUSTOMER;
   const canMatrixImport = useMemo(() => {
-    if (readOnly || initialOrder) return false;
+    if (readOnly || initialOrder || duplicateFromOrder) return false;
     if (!role || role === Role.CUSTOMER) return false;
     return (
       role === Role.ADMIN ||
@@ -237,6 +240,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   );
 
   const isEditing = !!initialOrder;
+  const isDuplicating = !!duplicateFromOrder && !initialOrder;
+  const hydrateSourceOrder = initialOrder || duplicateFromOrder;
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
     for (const s of sizes) {
@@ -333,18 +338,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
 
-  /** Modo edición: convertir ítems existentes del pedido en filas de planilla (una sola vez por pedido). */
+  /** Edición o duplicado: convertir ítems del pedido en filas de planilla (una sola vez por pedido origen). */
   useEffect(() => {
-    if (!initialOrder) {
+    if (!hydrateSourceOrder) {
       editHydratedOrderIdRef.current = null;
       return;
     }
     if (!products.length) return;
-    if (editHydratedOrderIdRef.current === initialOrder.id) return;
-    editHydratedOrderIdRef.current = initialOrder.id;
+    const hydrateKey = isDuplicating ? `dup-${hydrateSourceOrder.id}` : hydrateSourceOrder.id;
+    if (editHydratedOrderIdRef.current === hydrateKey) return;
+    editHydratedOrderIdRef.current = hydrateKey;
 
-    setSelectedCustomerId(initialOrder.customerId);
-    setOrderDate(initialOrder.date);
+    setSelectedCustomerId(hydrateSourceOrder.customerId);
+    setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
     const productById = new Map<string, Product>();
     for (const p of products) {
@@ -354,7 +360,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
 
     const rowsByKey = new Map<string, TemplateRow>();
-    for (const item of initialOrder.items || []) {
+    for (const item of hydrateSourceOrder.items || []) {
       const sizeCode = normalizeSizeCode((item as any).sizeCode, String((item as any).sku || ''));
       const colorName = String((item as any).colorName || '').trim() || 'Color';
       const rawSku = String((item as any).sku || '').trim();
@@ -395,14 +401,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     setRows(sorted);
     appliedPriceListForRowsRef.current = undefined;
-  }, [initialOrder, products]);
+    if (isDuplicating) draftOrderIdRef.current = null;
+  }, [hydrateSourceOrder, products, isDuplicating]);
 
   useEffect(() => {
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
-    if (!initialOrder) draftOrderIdRef.current = null;
-  }, [initialOrder?.id]);
+    if (!hydrateSourceOrder) draftOrderIdRef.current = null;
+  }, [hydrateSourceOrder?.id, isDuplicating]);
 
   /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
   useEffect(() => {
@@ -916,7 +923,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return {
       id: orderId,
       customerId: selectedCustomerId,
-      sellerId: initialOrder?.sellerId ?? sellerId ?? null,
+      sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
       // Solo ADMIN/Depósito pueden dejarlo confirmado directo.
@@ -1052,10 +1059,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              {readOnly ? 'Ver pedido (solo lectura)' : (isEditing ? 'Editar pedido' : 'Nuevo pedido')}
+              {readOnly ? 'Ver pedido (solo lectura)' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
             </h1>
             <p className="text-sm text-slate-400 mt-0.5">
-              {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {isDuplicating && duplicateFromOrder ? (
+                <>Basado en pedido #{duplicateFromOrder.id} · {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</>
+              ) : (
+                new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+              )}
             </p>
           </div>
         </div>

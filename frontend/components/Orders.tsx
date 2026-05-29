@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye } from 'lucide-react';
+import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
@@ -107,6 +107,7 @@ interface OrdersProps {
   onNavigate: (view: string) => void;
   onStartPicking?: (order: Order) => void;
   onEditOrder?: (order: Order) => void;
+  onDuplicateOrder?: (order: Order) => void;
   onDeleteOrder?: (orderId: string) => void;
   onFacturaEmitida?: (orderId: string, invoice: OrderInvoice) => void;
   onCreditNoteEmitida?: (orderId: string) => void;
@@ -348,7 +349,7 @@ function syntheticCreditNotePreview(
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
-  onNavigate, onStartPicking, onEditOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida,
+  onNavigate, onStartPicking, onEditOrder, onDuplicateOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida,
   orderArchivedFilter = 'no', setOrderArchivedFilter, refreshOrders
 }) => {
   const { showConfirm, showToast } = useNotification();
@@ -554,6 +555,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   };
 
   const canEditOrderBase = role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER;
+  const canDuplicateOrder =
+    role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.CUSTOMER;
 
   /** Tipo de factura que se emitirá según condición IVA del cliente (misma regla que el backend). */
   const getTipoFacturaParaCliente = (order: Order): 'A' | 'B' => {
@@ -2024,6 +2027,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   )}
                 </div>
                 <div className="flex flex-wrap items-end justify-end gap-y-1 gap-x-0.5 self-end sm:self-auto max-w-full sm:max-w-[min(100%,560px)] border-t border-slate-700/40 sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0">
+                  {canDuplicateOrder && onDuplicateOrder && order.status !== OrderStatus.CANCELLED && (
+                    <OrderCardActionButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDuplicateOrder(order);
+                      }}
+                      title="Crear un pedido nuevo con los mismos artículos y cantidades"
+                      icon={<Copy size={16} />}
+                      label="Duplicar"
+                    />
+                  )}
                   {afipConfigured && canEmitirFactura && !order.invoice && (() => {
                     const tipoFactura = getTipoFacturaParaCliente(order);
                     return (
