@@ -421,19 +421,35 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         };
       });
 
-  const mapOrdersToPedidoOptions = (orders: Order[]) =>
-    orders
-      .filter((o) => o.includeInSaldo && !o.invoice)
-      .map((o) => {
-        const d = new Date(o.date);
-        const dateLabel = Number.isNaN(d.getTime()) ? String(o.date || '') : d.toLocaleDateString('es-AR');
-        const ref = o.remitoNumber ? `Remito ${o.remitoNumber}` : `Pedido ${String(o.id).slice(0, 8)}`;
-        return {
-          orderId: o.id,
-          label: `${ref} — ${dateLabel} — $${formatMoneyAr(Number(o.total || 0) * 1.21)} (c/ IVA est.)`.trim(),
-          customerId: o.customerId
-        };
-      });
+  const mapLinkableRowsToPedidoOptions = (
+    rows: Awaited<ReturnType<typeof api.getLinkableOrdersForPayment>>
+  ) =>
+    rows.map((o) => {
+      const d = new Date(o.date);
+      const dateLabel = Number.isNaN(d.getTime()) ? String(o.date || '') : d.toLocaleDateString('es-AR');
+      const ref = o.remitoNumber ? `Remito ${o.remitoNumber}` : `Pedido ${String(o.orderId).slice(0, 8)}`;
+      return {
+        orderId: o.orderId,
+        label: `${ref} — ${dateLabel} — pend. $${formatMoneyAr(o.outstanding)}`.trim(),
+        customerId: o.customerId,
+        outstanding: o.outstanding
+      };
+    });
+
+  const applyPedidoOptions = (
+    rows: Awaited<ReturnType<typeof api.getLinkableOrdersForPayment>>,
+    setter: React.Dispatch<
+      React.SetStateAction<Array<{ orderId: string; label: string; customerId: string }>>
+    >
+  ) => {
+    const opts = mapLinkableRowsToPedidoOptions(rows);
+    setter(opts);
+    const m: Record<string, number> = {};
+    for (const o of opts) {
+      if (o.outstanding != null) m[o.orderId] = o.outstanding;
+    }
+    setOrderOutstanding((prev) => ({ ...prev, ...m }));
+  };
 
   const facturaOptions = useMemo(() => mapBillingRowsToFacturaOptions(items), [items]);
 
@@ -501,14 +517,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       })
       .finally(() => setLinkFacturasLoading(false));
     api
-      .getOrders()
-      .then((orders) =>
-        setLinkPedidoOptions(
-          mapOrdersToPedidoOptions(
-            (Array.isArray(orders) ? orders : []).filter((o) => o.customerId === p.customerId)
-          )
-        )
-      )
+      .getLinkableOrdersForPayment(p.customerId)
+      .then((rows) => applyPedidoOptions(rows, setLinkPedidoOptions))
       .catch(() => {
         setLinkPedidoOptions([]);
         showToast('error', 'No se pudieron cargar los pedidos del cliente.');
@@ -522,18 +532,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       return;
     }
     let cancelled = false;
+    setLinkPedidosLoading(true);
     api
-      .getOrders()
-      .then((orders) => {
+      .getLinkableOrdersForPayment(payCustomerId)
+      .then((rows) => {
         if (cancelled) return;
-        setCreatePedidoOptions(
-          mapOrdersToPedidoOptions(
-            (Array.isArray(orders) ? orders : []).filter((o) => o.customerId === payCustomerId)
-          )
-        );
+        applyPedidoOptions(rows, setCreatePedidoOptions);
       })
       .catch(() => {
         if (!cancelled) setCreatePedidoOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLinkPedidosLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1680,8 +1690,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   Pedidos sin factura (múltiple)
                 </label>
                 <p className="text-[10px] text-slate-500 mb-1.5 leading-snug">
-                  Solo pedidos marcados «Sumar al saldo» sin factura AFIP. El recibo se imputa después de las facturas
-                  seleccionadas arriba.
+                  Pedidos sin factura AFIP que suman al saldo del cliente (marcados «En saldo» o con cobro
+                  pendiente). El recibo se imputa después de las facturas seleccionadas arriba.
                 </p>
                 <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
                   {linkPedidosLoading ? (

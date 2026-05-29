@@ -1203,6 +1203,26 @@ export const api = {
     }, MOCK_ORDERS, 'getOrders');
   },
 
+  /** Pedidos sin factura imputables a un recibo (en saldo del cliente). */
+  getLinkableOrdersForPayment: async (
+    customerId: string
+  ): Promise<
+    Array<{
+      orderId: string;
+      customerId: string;
+      date: string;
+      total: number;
+      remitoNumber?: number;
+      paymentStatus: 'pendiente' | 'pagado';
+      includeInSaldo: boolean;
+      outstanding: number;
+    }>
+  > => {
+    const q = encodeURIComponent(customerId);
+    const rows = await request<any[]>(`/orders/linkable-for-payment?customerId=${q}`, 'GET');
+    return Array.isArray(rows) ? rows : [];
+  },
+
   archiveOrder: async (orderId: string, archived: boolean): Promise<{ id: string; archived: boolean }> => {
     return await request<{ id: string; archived: boolean }>(`/orders/${orderId}/archive`, 'PATCH', { archived });
   },

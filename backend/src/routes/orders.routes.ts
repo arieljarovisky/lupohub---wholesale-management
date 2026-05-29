@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getOrders,
+  getLinkableOrdersForPayment,
   createOrder,
   updateOrderStatus,
   updateOrder,
@@ -27,6 +28,7 @@ const router = Router();
 router.use(optionalAuthMiddleware);
 
 router.get('/', getOrders);
+router.get('/linkable-for-payment', authMiddleware, getLinkableOrdersForPayment);
 router.post('/import-matrix', authMiddleware, importOrdersFromMatrix);
 router.post('/', createOrder);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);

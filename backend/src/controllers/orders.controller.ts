@@ -11,6 +11,10 @@ import {
 } from './stock.controller';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeMatrixImportArticleSku } from '../utils/matrixImportSku';
+import {
+  SQL_ORDER_IN_SALDO_SCOPE,
+  SQL_ORDER_SALDO_RESIDUAL
+} from '../services/orderPaymentBalance.service';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -376,6 +380,78 @@ async function getAgipRetentionForOrder(args: {
   const amount = Math.round(net * (hit.alicuota / 100) * 100) / 100;
   return { alicuota: hit.alicuota, amount, periodUsed: hit.periodUsed };
 }
+
+/** Pedidos sin factura que pueden imputarse a un recibo (misma lógica que saldo pendiente). */
+export const getLinkableOrdersForPayment = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const customerId = String(req.query.customerId || '').trim();
+    if (!customerId) {
+      return res.status(400).json({ message: 'Indicá customerId' });
+    }
+    const params: string[] = [customerId];
+    let sellerScope = '';
+    if (user.role === 'SELLER') {
+      sellerScope = ' AND c.seller_id = ?';
+      params.push(user.id);
+    }
+    const rows = (await query(
+      `SELECT
+         o.id,
+         o.customer_id,
+         o.date,
+         o.total,
+         o.remito_number,
+         o.payment_status,
+         COALESCE(o.include_in_saldo, 0) AS include_in_saldo,
+         (${SQL_ORDER_SALDO_RESIDUAL}) AS outstanding
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN (
+         SELECT order_id, SUM(amount_credited) AS cn_total
+         FROM credit_notes
+         GROUP BY order_id
+       ) cn ON cn.order_id = o.id
+       WHERE o.customer_id = ?
+         ${sellerScope}
+         AND o.status NOT IN ('Cancelado', 'Borrador')
+         AND (o.archived = 0 OR o.archived IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+         AND ${SQL_ORDER_IN_SALDO_SCOPE}
+       ORDER BY o.date DESC, o.id DESC
+       LIMIT 200`,
+      params
+    )) as Array<{
+      id: string;
+      customer_id: string;
+      date: string;
+      total: number;
+      remito_number?: number;
+      payment_status: string;
+      include_in_saldo: number;
+      outstanding: number;
+    }>;
+
+    return res.json(
+      rows.map((r) => ({
+        orderId: r.id,
+        customerId: r.customer_id,
+        date: r.date,
+        total: Number(r.total) || 0,
+        remitoNumber: r.remito_number != null ? Number(r.remito_number) : undefined,
+        paymentStatus: r.payment_status === 'pendiente' ? 'pendiente' : 'pagado',
+        includeInSaldo: !!Number(r.include_in_saldo),
+        outstanding: Math.max(0, Number(r.outstanding) || 0)
+      }))
+    );
+  } catch (e: any) {
+    console.error('getLinkableOrdersForPayment:', e);
+    return res.status(500).json({ message: 'Error listando pedidos imputables', detail: e?.message });
+  }
+};
 
 export const getOrders = async (req: any, res: any) => {
   try {
