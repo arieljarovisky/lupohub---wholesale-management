@@ -7,28 +7,10 @@ import { setBaseUrl, setAuthToken, request } from '../services/httpClient';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
 import { parseSellersExcel } from '../utils/sellersImportUtils';
-
-/**
- * Exporta la lista de precios a Excel.
- * Columnas: Código, Descripción, Precio.
- * El parser de importación detecta por cabecera, así que agregar Descripción no rompe el reimport.
- */
-function exportPriceListExcel(
-  items: { sku?: string; name?: string; price: number; productId: string }[],
-  listName: string
-) {
-  const rows = items.map(i => ({
-    Código: i.sku || i.productId,
-    Descripción: i.name || '',
-    Precio: i.price
-  }));
-  const ws = XLSX.utils.json_to_sheet(rows, { header: ['Código', 'Descripción', 'Precio'] });
-  ws['!cols'] = [{ wch: 18 }, { wch: 50 }, { wch: 14 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Precios');
-  const safeName = (listName || 'lista-precios').replace(/[^\w\s-]/g, '').trim().slice(0, 30) || 'lista-precios';
-  XLSX.writeFile(wb, `lista-precios-${safeName}.xlsx`);
-}
+import {
+  exportPriceListExcelStyled,
+  downloadPriceListTemplateStyled,
+} from '../utils/priceListExcel';
 
 /** Descarga plantilla Excel con todos los artículos (Código + Precio vacío) para completar y importar. */
 function downloadSellersImportTemplate() {
@@ -40,15 +22,6 @@ function downloadSellersImportTemplate() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Vendedores');
   XLSX.writeFile(wb, 'plantilla-importar-vendedores.xlsx');
-}
-
-function downloadPriceListTemplate(products: { sku: string; name?: string }[]) {
-  const rows = products.map(p => ({ Código: p.sku, Descripción: p.name || '', Precio: '' }));
-  const ws = XLSX.utils.json_to_sheet(rows, { header: ['Código', 'Descripción', 'Precio'] });
-  ws['!cols'] = [{ wch: 18 }, { wch: 50 }, { wch: 14 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Precios');
-  XLSX.writeFile(wb, 'plantilla-lista-precios-todos-articulos.xlsx');
 }
 
 function ymdToday(): string {
@@ -858,6 +831,11 @@ const Settings: React.FC<SettingsProps> = ({
   const [productsForPriceList, setProductsForPriceList] = useState<{ id: string; sku: string; name: string; base_price?: number }[]>([]);
   const [priceListFilter, setPriceListFilter] = useState<'ALL' | 'WITH_PRICE' | 'WITHOUT_PRICE'>('ALL');
   const [priceListSearch, setPriceListSearch] = useState('');
+  const [newListName, setNewListName] = useState('');
+  const [newListSourceId, setNewListSourceId] = useState('');
+  const [newListPercent, setNewListPercent] = useState('0');
+  const [newListPercentMode, setNewListPercentMode] = useState<'increase' | 'decrease'>('increase');
+  const [creatingPriceList, setCreatingPriceList] = useState(false);
 
   const upsertPriceListItem = (productId: string, price: number | null, meta?: { sku?: string; name?: string }) => {
     setPriceListItems(prev => {
@@ -1498,7 +1476,7 @@ const Settings: React.FC<SettingsProps> = ({
                               showToast('error', 'La lista no tiene precios cargados todavía');
                               return;
                             }
-                            exportPriceListExcel(items, pl.name);
+                            await exportPriceListExcelStyled(items, pl.name);
                             showToast('success', `Lista "${pl.name}" descargada`);
                           } catch (err: any) {
                             showToast('error', err?.message || 'Error descargando la lista');
@@ -1543,10 +1521,21 @@ const Settings: React.FC<SettingsProps> = ({
                         onClick={async () => {
                           const name = window.prompt(`Duplicar "${pl.name}". Nombre de la nueva lista:`, `${pl.name} (copia)`);
                           if (!name?.trim()) return;
+                          const pctRaw = window.prompt(
+                            'Ajuste de precios (%). Ej: 10 para subir 10%, -5 para bajar 5%. Dejá 0 o vacío para copiar igual.',
+                            '0'
+                          );
+                          if (pctRaw === null) return;
+                          const pct = parseFloat(String(pctRaw).replace(',', '.'));
+                          const percentAdjust = Number.isFinite(pct) ? pct : 0;
                           try {
-                            const created = await api.duplicatePriceList(pl.id, name.trim());
+                            const created = await api.duplicatePriceList(pl.id, name.trim(), percentAdjust);
                             setPriceLists(prev => [...prev, created]);
-                            showToast('success', 'Lista duplicada');
+                            const msg =
+                              created.itemsCopied != null
+                                ? `Lista duplicada (${created.itemsCopied} precios${percentAdjust ? `, ${percentAdjust > 0 ? '+' : ''}${percentAdjust}%` : ''})`
+                                : 'Lista duplicada';
+                            showToast('success', msg);
                           } catch (err: any) {
                             showToast('error', err?.message || 'Error duplicando');
                           }
@@ -1577,45 +1566,93 @@ const Settings: React.FC<SettingsProps> = ({
                 ))}
                 <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6 space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nueva lista (una)</label>
-                    <div className="flex gap-2">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nueva lista</label>
+                    <p className="text-slate-400 text-xs mb-3">
+                      Podés crearla vacía o copiar precios de otra lista y aplicar un aumento o descuento porcentual.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                       <input
                         type="text"
-                        placeholder="Nombre (ej: Mayorista 10%)"
-                        id="new-price-list-name"
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            const name = (e.target as HTMLInputElement).value?.trim();
-                            if (name) {
-                              api.createPriceList({ name }).then(created => {
-                                setPriceLists(prev => [...prev, created]);
-                                (e.target as HTMLInputElement).value = '';
-                                showToast('success', 'Lista creada');
-                              }).catch((err: any) => showToast('error', err?.message || 'Error creando'));
-                            }
-                          }
-                        }}
+                        placeholder="Nombre (ej: Mayorista +10%)"
+                        value={newListName}
+                        onChange={(e) => setNewListName(e.target.value)}
+                        className="md:col-span-2 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                       />
-                      <button
-                        onClick={async () => {
-                          const input = document.getElementById('new-price-list-name') as HTMLInputElement;
-                          const name = input?.value?.trim();
-                          if (!name) return;
-                          try {
-                            const created = await api.createPriceList({ name });
-                            setPriceLists(prev => [...prev, created]);
-                            input.value = '';
-                            showToast('success', 'Lista creada');
-                          } catch (err: any) {
-                            showToast('error', (err as any)?.message || 'Error creando');
-                          }
-                        }}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shrink-0"
+                      <select
+                        value={newListSourceId}
+                        onChange={(e) => setNewListSourceId(e.target.value)}
+                        className="bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                       >
-                        <Plus size={18} /> Crear lista
-                      </button>
+                        <option value="">Sin copiar (lista vacía)</option>
+                        {priceLists.map((pl) => (
+                          <option key={pl.id} value={pl.id}>
+                            Copiar desde: {pl.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2 items-center">
+                        <select
+                          value={newListPercentMode}
+                          onChange={(e) => setNewListPercentMode(e.target.value as 'increase' | 'decrease')}
+                          disabled={!newListSourceId}
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm disabled:opacity-40"
+                        >
+                          <option value="increase">Aumentar</option>
+                          <option value="decrease">Descontar</option>
+                        </select>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          placeholder="%"
+                          value={newListPercent}
+                          onChange={(e) => setNewListPercent(e.target.value)}
+                          disabled={!newListSourceId}
+                          className="w-24 bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-sm disabled:opacity-40"
+                        />
+                        <span className="text-slate-400 text-sm shrink-0">%</span>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      disabled={creatingPriceList || !newListName.trim()}
+                      onClick={async () => {
+                        const name = newListName.trim();
+                        if (!name) return;
+                        const pctNum = parseFloat(String(newListPercent).replace(',', '.'));
+                        const pctVal = Number.isFinite(pctNum) ? Math.abs(pctNum) : 0;
+                        const percentAdjust =
+                          newListSourceId && pctVal > 0
+                            ? newListPercentMode === 'decrease'
+                              ? -pctVal
+                              : pctVal
+                            : undefined;
+                        setCreatingPriceList(true);
+                        try {
+                          const created = await api.createPriceList({
+                            name,
+                            ...(newListSourceId ? { sourceListId: newListSourceId, percentAdjust: percentAdjust ?? 0 } : {}),
+                          });
+                          setPriceLists((prev) => [...prev, created]);
+                          setNewListName('');
+                          setNewListSourceId('');
+                          setNewListPercent('0');
+                          const extra =
+                            created.itemsCopied != null && created.itemsCopied > 0
+                              ? ` (${created.itemsCopied} precios${percentAdjust ? `, ${percentAdjust > 0 ? '+' : ''}${percentAdjust}%` : ''})`
+                              : '';
+                          showToast('success', `Lista creada${extra}`);
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'Error creando');
+                        } finally {
+                          setCreatingPriceList(false);
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2"
+                    >
+                      {creatingPriceList ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                      Crear lista
+                    </button>
                   </div>
                   <div className="border-t border-slate-700 pt-4">
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Creación masiva (varias listas)</label>
@@ -1769,7 +1806,7 @@ const Settings: React.FC<SettingsProps> = ({
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={() => downloadPriceListTemplate(productsForPriceList)}
+                    onClick={() => void downloadPriceListTemplateStyled(productsForPriceList)}
                     className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-bold"
                     title="Descarga un Excel con todos los artículos del catálogo y columna Precio vacía para completar"
                   >
@@ -1777,7 +1814,7 @@ const Settings: React.FC<SettingsProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => exportPriceListExcel(priceListItems, editingPriceList?.name ?? '')}
+                    onClick={() => void exportPriceListExcelStyled(priceListItems, editingPriceList?.name ?? '')}
                     className="inline-flex items-center gap-2 bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-xl text-sm font-bold"
                   >
                     <Download size={14} /> Exportar Excel

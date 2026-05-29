@@ -537,7 +537,12 @@ export const api = {
   getPriceList: async (id: string): Promise<import('../types').PriceList & { items: { productId: string; price: number }[] }> => {
     return request<any>(`/price-lists/${id}`, 'GET');
   },
-  createPriceList: async (data: { name: string; description?: string }): Promise<import('../types').PriceList> => {
+  createPriceList: async (data: {
+    name: string;
+    description?: string;
+    sourceListId?: string;
+    percentAdjust?: number;
+  }): Promise<import('../types').PriceList & { itemsCopied?: number }> => {
     return request<any>('/price-lists', 'POST', data);
   },
   updatePriceList: async (id: string, data: { name?: string; description?: string }): Promise<import('../types').PriceList> => {
@@ -555,8 +560,15 @@ export const api = {
   createPriceListsBulk: async (names: string[]): Promise<{ created: import('../types').PriceList[]; count: number }> => {
     return request<any>('/price-lists/bulk', 'POST', { names });
   },
-  duplicatePriceList: async (id: string, newName: string): Promise<import('../types').PriceList> => {
-    return request<any>(`/price-lists/${id}/duplicate`, 'POST', { name: newName });
+  duplicatePriceList: async (
+    id: string,
+    newName: string,
+    percentAdjust?: number
+  ): Promise<import('../types').PriceList & { itemsCopied?: number }> => {
+    return request<any>(`/price-lists/${id}/duplicate`, 'POST', {
+      name: newName,
+      ...(percentAdjust != null && Number.isFinite(percentAdjust) ? { percentAdjust } : {}),
+    });
   },
   fillPriceListFromBase: async (id: string, multiplier?: number): Promise<{ items: { productId: string; price: number }[]; count: number; skippedWithoutBase?: number }> => {
     return request<any>(`/price-lists/${id}/fill-from-base`, 'POST', multiplier != null ? { multiplier } : {});

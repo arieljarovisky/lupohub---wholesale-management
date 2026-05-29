@@ -2,6 +2,40 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 
+/** Aplica ajuste porcentual (+10 = 10% más, -5 = 5% menos). */
+function priceWithPercentAdjust(basePrice: number, percentAdjust?: number | null): number {
+  const base = Number(basePrice);
+  if (!Number.isFinite(base) || base < 0) return 0;
+  const pct = percentAdjust != null && Number.isFinite(Number(percentAdjust)) ? Number(percentAdjust) : 0;
+  if (pct === 0) return Math.round(base * 100) / 100;
+  const factor = 1 + pct / 100;
+  const next = Math.round(base * factor * 100) / 100;
+  return next > 0 ? next : 0;
+}
+
+async function copyPriceListItems(
+  sourceListId: string,
+  targetListId: string,
+  percentAdjust?: number | null
+): Promise<number> {
+  const items = await query(
+    `SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ?`,
+    [sourceListId]
+  );
+  let count = 0;
+  for (const it of items || []) {
+    const productId = it?.productId;
+    const price = priceWithPercentAdjust(Number(it?.price), percentAdjust);
+    if (!productId || !Number.isFinite(price) || price <= 0) continue;
+    await execute(
+      `INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`,
+      [uuidv4(), targetListId, productId, price]
+    );
+    count++;
+  }
+  return count;
+}
+
 /** Listar listas de precios. Solo ADMIN. */
 export const listPriceLists = async (req: Request, res: Response) => {
   try {
@@ -47,20 +81,34 @@ export const createPriceList = async (req: Request, res: Response) => {
     if ((req as any).user?.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Solo administradores pueden crear listas de precios' });
     }
-    const { name, description } = req.body as { name?: string; description?: string };
+    const { name, description, sourceListId, percentAdjust } = req.body as {
+      name?: string;
+      description?: string;
+      sourceListId?: string;
+      percentAdjust?: number;
+    };
     if (!name?.trim()) {
       return res.status(400).json({ message: 'El nombre es requerido' });
+    }
+    const sourceId = sourceListId?.trim() || null;
+    if (sourceId) {
+      const source = await get('SELECT id FROM price_lists WHERE id = ?', [sourceId]);
+      if (!source) return res.status(404).json({ message: 'Lista origen no encontrada' });
     }
     const id = uuidv4();
     await execute(
       `INSERT INTO price_lists (id, name, description) VALUES (?, ?, ?)`,
       [id, name.trim(), (description ?? '').toString().trim() || null]
     );
+    let itemsCopied = 0;
+    if (sourceId) {
+      itemsCopied = await copyPriceListItems(sourceId, id, percentAdjust);
+    }
     const created = await get(
       `SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists WHERE id = ?`,
       [id]
     );
-    res.status(201).json(created);
+    res.status(201).json({ ...created, itemsCopied, percentAdjust: percentAdjust ?? 0 });
   } catch (error: any) {
     console.error('createPriceList:', error);
     res.status(500).json({ message: 'Error creando lista de precios' });
@@ -213,33 +261,21 @@ export const duplicatePriceList = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Solo administradores pueden duplicar listas de precios' });
     }
     const { id } = req.params;
-    const { name } = req.body as { name?: string };
+    const { name, percentAdjust } = req.body as { name?: string; percentAdjust?: number };
     if (!name?.trim()) return res.status(400).json({ message: 'El nombre de la nueva lista es requerido' });
     const source = await get('SELECT id, name FROM price_lists WHERE id = ?', [id]);
     if (!source) return res.status(404).json({ message: 'Lista de precios no encontrada' });
-    const items = await query(
-      `SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ?`,
-      [id]
-    );
     const newId = uuidv4();
     await execute(
       `INSERT INTO price_lists (id, name, description) VALUES (?, ?, NULL)`,
       [newId, name.trim()]
     );
-    for (const it of items || []) {
-      const productId = it?.productId;
-      const price = Number(it?.price);
-      if (!productId || isNaN(price) || price < 0) continue;
-      await execute(
-        `INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`,
-        [uuidv4(), newId, productId, price]
-      );
-    }
+    const itemsCopied = await copyPriceListItems(id, newId, percentAdjust);
     const created = await get(
       `SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists WHERE id = ?`,
       [newId]
     );
-    res.status(201).json(created);
+    res.status(201).json({ ...created, itemsCopied, percentAdjust: percentAdjust ?? 0 });
   } catch (error: any) {
     console.error('duplicatePriceList:', error);
     res.status(500).json({ message: 'Error duplicando la lista' });
