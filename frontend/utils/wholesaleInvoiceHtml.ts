@@ -73,6 +73,10 @@ export function articleCodeForPrintGroup(skuRaw: string): string {
   if (parts.length >= 3) return stripLeadingZerosArticle(parts[0]);
   const digits = sku.replace(/\D/g, '');
   if (!digits) return sku;
+  // Código impreso completo (ej. 4268130614130614): artículo = dígitos menos talle(3)+color(3)
+  if (!sku.includes('-') && digits.length >= 11 && digits.length <= 17) {
+    return stripLeadingZerosArticle(digits.slice(0, -6));
+  }
   if (digits.length > 9) return stripLeadingZerosArticle(digits.slice(0, -6));
   if (digits.length >= 7) return stripLeadingZerosArticle(digits.slice(0, 7));
   return stripLeadingZerosArticle(digits);
@@ -140,12 +144,14 @@ export function groupOrderItemsByArticleAndSize(
     const variantId = item.variantId ?? item.productId;
     const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
     const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
+    const completePrint = tryCompletePrintCodeFromSku(variantSku);
+    const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
     const articleCode = articleCodeForPrintGroup(variantSku);
-    const sizeCode = String(item.sizeCode ?? localProduct?.size ?? '').trim();
     const sizeKey = sizeKeyForGroup(sizeCode);
-    const colorCode = colorCodeForPrintItem(item, variantSku);
     const unit = Number(item.priceAtMoment ?? 0);
-    const groupKey = `${articleCode}|${sizeKey}|${colorCode}|${Math.round(unit * 100)}`;
+    const groupKey = completePrint
+      ? `${completePrint}|${Math.round(unit * 100)}`
+      : `${articleCode}|${sizeKey}|${colorCode}|${Math.round(unit * 100)}`;
 
     const despachoRaw =
       (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
@@ -176,7 +182,14 @@ export function groupOrderItemsByArticleAndSize(
     if (qty <= 0) continue;
     const unit = Math.round((acc.lineNeto / qty) * 100) / 100;
     const baseName = String(acc.template.productName ?? '').trim();
-    const printCode = printCodeArticleSizeColor(acc.articleCode, acc.sizeCode, acc.colorCode);
+    const variantSkuGrouped = (() => {
+      const vid = acc.template.variantId ?? acc.template.productId;
+      const lp = vid ? products.find((p: Product) => p.id === vid) : undefined;
+      return (lp?.sku ?? acc.template.sku ?? '').toString().trim();
+    })();
+    const printCode =
+      tryCompletePrintCodeFromSku(variantSkuGrouped) ||
+      printCodeArticleSizeColor(acc.articleCode, acc.sizeCode, acc.colorCode);
     const despachos = [...acc.despachos];
     const numeroDespacho =
       despachos.length === 0 ? undefined : despachos.length === 1 ? despachos[0] : despachos.join(', ');
@@ -474,20 +487,55 @@ export function normalizeSkuForPrint(raw: unknown): string {
   return String(raw ?? '').trim().replace(/-/g, '');
 }
 
+/** SKU ya impreso (solo dígitos, sin guiones): no recomponer artículo+talle+color. */
+export function tryCompletePrintCodeFromSku(skuRaw: string): string | null {
+  const sku = String(skuRaw ?? '').trim();
+  if (!sku || sku.includes('-')) return null;
+  const digits = sku.replace(/\D/g, '');
+  if (!digits || digits.length < 11 || digits.length > 17) return null;
+  return normalizeSkuForPrint(digits);
+}
+
+/** Talle y color del SKU Tango `artículo-talle-color` (prioridad sobre sizeCode del pedido). */
+export function talleColorFromHyphenatedSku(skuRaw: string): { talle: string; color: string } | null {
+  const parts = String(skuRaw ?? '').trim().split('-').filter(Boolean);
+  if (parts.length < 3) return null;
+  const talle = (parts[parts.length - 2].replace(/\D/g, '') || parts[parts.length - 2]).trim();
+  const color = (parts[parts.length - 1].replace(/\D/g, '') || parts[parts.length - 1]).trim();
+  if (!talle || !color) return null;
+  return { talle, color };
+}
+
+function sizeAndColorCodesForPrint(
+  item: OrderItem,
+  variantSku: string,
+  localProduct: Product | undefined
+): { sizeCode: string; colorCode: string } {
+  const fromSku =
+    talleColorFromHyphenatedSku(variantSku) ??
+    talleColorFromHyphenatedSku(String(item.sku ?? '').trim());
+  const sizeCode = fromSku?.talle ?? String(item.sizeCode ?? localProduct?.size ?? '').trim();
+  const colorCode = fromSku?.color ?? colorCodeForPrintItem(item, variantSku);
+  return { sizeCode, colorCode };
+}
+
 /** Código impreso en factura/NC: artículo+talle+color sin guiones (mismo criterio que columna CÓDIGO de la factura). */
 export function printCodeForOrderItem(item: OrderItem, products: Product[]): string {
   const variantId = item.variantId ?? item.productId;
   const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
   const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
-  const built = printCodeArticleSizeColor(
-    articleCodeForPrintGroup(variantSku),
-    String(item.sizeCode ?? localProduct?.size ?? ''),
-    colorCodeForPrintItem(item, variantSku)
-  );
   const rawItemSku = (item.sku ?? '').toString().trim();
-  if (rawItemSku && !rawItemSku.includes('-')) {
-    return normalizeSkuForPrint(rawItemSku);
-  }
+
+  const complete =
+    tryCompletePrintCodeFromSku(rawItemSku) ?? tryCompletePrintCodeFromSku(variantSku);
+  if (complete) return complete;
+
+  const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
+  const built = printCodeArticleSizeColor(
+    articleCodeForPrintGroup(variantSku || rawItemSku),
+    sizeCode,
+    colorCode
+  );
   if (built) return built;
   return normalizeSkuForPrint(rawItemSku || variantSku);
 }
