@@ -65,12 +65,25 @@ function stripLeadingZerosArticle(s: string): string {
   return digits.replace(/^0+/, '') || '0';
 }
 
+/** Segmento artículo conservando prefijo alfabético (trifil: C04268…). */
+function normalizeArticleSegmentForPrint(articleCode: string): string {
+  const raw = String(articleCode || '').trim();
+  if (!raw) return '';
+  const letterPrefix = (raw.match(/^([A-Za-z]+)/)?.[1] ?? '').toUpperCase();
+  if (letterPrefix) {
+    const numeric = raw.slice(letterPrefix.length).replace(/\D/g, '');
+    const stripped = numeric.replace(/^0+/, '') || (numeric ? '0' : '');
+    return stripped ? letterPrefix + stripped : letterPrefix;
+  }
+  return stripLeadingZerosArticle(raw.replace(/\D/g, ''));
+}
+
 /** Código de artículo para agrupar / imprimir (sin color ni talle en el SKU). */
 export function articleCodeForPrintGroup(skuRaw: string): string {
   const sku = String(skuRaw || '').trim();
   if (!sku) return '';
   const parts = sku.split('-').filter(Boolean);
-  if (parts.length >= 3) return stripLeadingZerosArticle(parts[0]);
+  if (parts.length >= 3) return normalizeArticleSegmentForPrint(parts[0]);
   const digits = sku.replace(/\D/g, '');
   if (!digits) return sku;
   // Código impreso completo (ej. 4268130614130614): artículo = dígitos menos talle(3)+color(3)
@@ -100,12 +113,17 @@ export function printCodeArticleSizeColor(
   sizeCode: string,
   colorCode: string
 ): string {
-  const art = stripLeadingZerosArticle(String(articleCode || '').replace(/\D/g, ''));
+  const art = normalizeArticleSegmentForPrint(articleCode);
   const talle = codigoTalleParaSku(sizeCode) || String(sizeCode || '').replace(/\D/g, '');
   const color = String(colorCode || '').replace(/\D/g, '') || String(colorCode || '').trim();
   const parts = [art, talle, color].filter(Boolean);
   if (parts.length === 0) return '';
   return normalizeSkuForPrint(parts.join(''));
+}
+
+function isTrifilPrintItem(item: OrderItem, localProduct?: Product): boolean {
+  const name = String(item.productName ?? localProduct?.name ?? '').toLowerCase();
+  return name.includes('trifil');
 }
 
 /** @deprecated Use printCodeArticleSizeColor */
@@ -187,9 +205,15 @@ export function groupOrderItemsByArticleAndSize(
       const lp = vid ? products.find((p: Product) => p.id === vid) : undefined;
       return (lp?.sku ?? acc.template.sku ?? '').toString().trim();
     })();
-    const printCode =
-      tryCompletePrintCodeFromSku(variantSkuGrouped) ||
-      printCodeArticleSizeColor(acc.articleCode, acc.sizeCode, acc.colorCode);
+    const printCode = printCodeForOrderItem(
+      {
+        ...acc.template,
+        sizeCode: acc.sizeCode,
+        colorCode: acc.colorCode || acc.template.colorCode,
+        sku: undefined,
+      },
+      products
+    );
     const despachos = [...acc.despachos];
     const numeroDespacho =
       despachos.length === 0 ? undefined : despachos.length === 1 ? despachos[0] : despachos.join(', ');
@@ -523,7 +547,16 @@ function wholesalePrintLineRowHtml(
 }
 
 export function normalizeSkuForPrint(raw: unknown): string {
-  return String(raw ?? '').trim().replace(/-/g, '');
+  const s = String(raw ?? '').trim().replace(/-/g, '');
+  if (!s) return '';
+  const letterMatch = s.match(/^([A-Za-z]+)(.*)$/);
+  if (letterMatch?.[1]) {
+    const letters = letterMatch[1].toUpperCase();
+    const num = (letterMatch[2] || '').replace(/\D/g, '').replace(/^0+/, '') || '';
+    return num ? letters + num : letters;
+  }
+  const digits = s.replace(/\D/g, '');
+  return digits.replace(/^0+/, '') || digits;
 }
 
 /** SKU ya impreso (solo dígitos, sin guiones): no recomponer artículo+talle+color. */
@@ -566,6 +599,30 @@ export function printCodeForOrderItem(item: OrderItem, products: Product[]): str
   const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
   const rawItemSku = (item.sku ?? '').toString().trim();
 
+  if (/[A-Za-z]/.test(variantSku) && variantSku.includes('-')) {
+    const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
+    const built = printCodeArticleSizeColor(
+      articleCodeForPrintGroup(variantSku),
+      sizeCode,
+      colorCode
+    );
+    if (built) return built;
+    return normalizeSkuForPrint(variantSku);
+  }
+
+  if (isTrifilPrintItem(item, localProduct) && variantSku) {
+    if (variantSku.includes('-')) {
+      const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
+      const built = printCodeArticleSizeColor(
+        articleCodeForPrintGroup(variantSku),
+        sizeCode,
+        colorCode
+      );
+      if (built) return built;
+    }
+    return normalizeSkuForPrint(variantSku);
+  }
+
   const complete =
     tryCompletePrintCodeFromSku(rawItemSku) ?? tryCompletePrintCodeFromSku(variantSku);
   if (complete) return complete;
@@ -580,6 +637,26 @@ export function printCodeForOrderItem(item: OrderItem, products: Product[]): str
   return normalizeSkuForPrint(rawItemSku || variantSku);
 }
 
+/** Cantidad por línea en PDF factura/NC (misma regla: pickeado si hay, si no cantidad pedida). */
+export function qtyForWholesalePrintLine(order: Order, item: OrderItem): number {
+  const q = Number(item.quantity || 0);
+  const anyPicked = (order.items ?? []).some((i) => Number(i.picked) > 0);
+  if (!anyPicked) return q;
+  const p = Math.max(0, Math.floor(Number(item.picked) || 0));
+  return Math.min(q, p);
+}
+
+/** Ítems agrupados y ordenados igual que en la factura impresa. */
+export function getGroupedItemsForWholesalePrint(
+  order: Order,
+  products: Product[],
+  getQty: (item: OrderItem) => number = (i) => qtyForWholesalePrintLine(order, i)
+): OrderItem[] {
+  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
+  const itemsSorted = sortOrderItemsForPrint(itemsOriginal, products);
+  return groupOrderItemsByArticleAndSize(itemsSorted, products, getQty);
+}
+
 export function buildWholesaleFacturaHtml(params: {
   order: Order;
   customer?: Customer;
@@ -591,16 +668,7 @@ export function buildWholesaleFacturaHtml(params: {
   if (!order.invoice) return '';
   const inv = order.invoice;
 
-  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
-  const itemsSorted = sortOrderItemsForPrint(itemsOriginal, products);
-  const anyPicked = itemsSorted.some((i) => Number(i.picked) > 0);
-  const qtyOnFacturaLine = (i: OrderItem) => {
-    const q = Number(i.quantity || 0);
-    if (!anyPicked) return q;
-    const p = Math.max(0, Math.floor(Number(i.picked) || 0));
-    return Math.min(q, p);
-  };
-  const items = groupOrderItemsByArticleAndSize(itemsSorted, products, qtyOnFacturaLine);
+  const items = getGroupedItemsForWholesalePrint(order, products);
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
@@ -894,7 +962,6 @@ export function buildWholesaleCreditNoteHtml(params: {
   // - original: para mapear nc.itemIndex (guardado contra order.items ORDER BY id)
   // - ordenado: para visualización cuando la NC es total
   const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
-  const items = sortOrderItemsForPrint(itemsOriginal, products);
 
   const formatDateShort = (d: string) => {
     const x = new Date(d);
@@ -960,9 +1027,7 @@ export function buildWholesaleCreditNoteHtml(params: {
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     rows = wholesalePrintLineRowHtml(i, qtyNc, products, factorNc, netoNc);
   } else {
-    const itemsForNc = groupOrderItemsByArticleAndSize(items, products, (i) =>
-      lineQuantityForCreditNoteItem(i, order)
-    );
+    const itemsForNc = getGroupedItemsForWholesalePrint(order, products);
     rows = itemsForNc
       .map((i) => {
         const qty = Number(i.quantity || 0);
@@ -1015,7 +1080,7 @@ export function buildWholesaleCreditNoteHtml(params: {
   const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
   const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><style>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><!-- lupohub-print-nc-v3 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
