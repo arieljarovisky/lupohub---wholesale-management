@@ -126,6 +126,25 @@ function isTrifilPrintItem(item: OrderItem, localProduct?: Product): boolean {
   return name.includes('trifil');
 }
 
+/** Trifil: solo código de artículo (ej. C4268130614), sin concatenar talle ni color. */
+function printCodeForTrifilSku(skuRaw: string): string {
+  const sku = String(skuRaw || '').trim();
+  if (!sku) return '';
+  const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 1) {
+    return normalizeArticleSegmentForPrint(parts[0]);
+  }
+  const compact = normalizeSkuForPrint(sku);
+  const m = compact.match(/^([A-Za-z]+)(\d+)$/);
+  if (m) {
+    const letters = m[1].toUpperCase();
+    const num = m[2].replace(/^0+/, '') || m[2];
+    if (num.length > 10) return letters + num.slice(0, 10);
+    return letters + num;
+  }
+  return normalizeArticleSegmentForPrint(articleCodeForPrintGroup(sku));
+}
+
 /** @deprecated Use printCodeArticleSizeColor */
 export function printCodeArticleAndSize(articleCode: string, sizeCode: string): string {
   return printCodeArticleSizeColor(articleCode, sizeCode, '');
@@ -599,28 +618,8 @@ export function printCodeForOrderItem(item: OrderItem, products: Product[]): str
   const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
   const rawItemSku = (item.sku ?? '').toString().trim();
 
-  if (/[A-Za-z]/.test(variantSku) && variantSku.includes('-')) {
-    const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-    const built = printCodeArticleSizeColor(
-      articleCodeForPrintGroup(variantSku),
-      sizeCode,
-      colorCode
-    );
-    if (built) return built;
-    return normalizeSkuForPrint(variantSku);
-  }
-
-  if (isTrifilPrintItem(item, localProduct) && variantSku) {
-    if (variantSku.includes('-')) {
-      const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-      const built = printCodeArticleSizeColor(
-        articleCodeForPrintGroup(variantSku),
-        sizeCode,
-        colorCode
-      );
-      if (built) return built;
-    }
-    return normalizeSkuForPrint(variantSku);
+  if (isTrifilPrintItem(item, localProduct)) {
+    return printCodeForTrifilSku(variantSku || rawItemSku);
   }
 
   const complete =
@@ -830,8 +829,7 @@ export function buildWholesaleFacturaHtml(params: {
       tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
       tfoot td { padding: 6px; }
       .col-c { text-align: center; }
-      .col-code { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; }
-      .col-despacho { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; letter-spacing: 0.02em; }
+      .col-code, .col-despacho { white-space: nowrap; }
       .col-r { text-align: right; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
       .summary { display: grid; grid-template-columns: 96px 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
@@ -1080,7 +1078,7 @@ export function buildWholesaleCreditNoteHtml(params: {
   const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
   const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><!-- lupohub-print-nc-v3 --><style>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><!-- lupohub-print-nc-v4 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
@@ -1111,8 +1109,7 @@ export function buildWholesaleCreditNoteHtml(params: {
       thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
       tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
       .col-c { text-align: center; }
-      .col-code { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; }
-      .col-despacho { font-family: Consolas, 'Courier New', monospace; font-size: 10px; white-space: nowrap; letter-spacing: 0.02em; }
+      .col-code, .col-despacho { white-space: nowrap; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
       .col-r { text-align: right; }
       .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
