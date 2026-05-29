@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
+  backfillPaymentOrdersFromLegacy,
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
@@ -1303,6 +1304,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   if (!user || !roleCanViewSaldos(user.role)) {
     return res.status(403).json({ message: 'Sin permiso para ver saldos' });
   }
+  await backfillPaymentOrdersFromLegacy();
   const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
   const baseParams: any[] = user.role === 'SELLER' ? [user.id] : [];
 

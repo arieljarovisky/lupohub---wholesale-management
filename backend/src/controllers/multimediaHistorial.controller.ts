@@ -13,6 +13,14 @@ import {
   normalizeCuitDigits,
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
+import {
+  backfillPaymentOrdersFromLegacy,
+  SQL_ORDER_IN_SALDO_SCOPE,
+  SQL_ORDER_NETO_GRAVADO,
+  SQL_ORDER_SALDO_RESIDUAL
+} from '../services/orderPaymentBalance.service';
+
+const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
 function normalizeNameForMatch(v: unknown): string {
   return String(v ?? '')
@@ -400,6 +408,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     if (user.role === 'SELLER' && cust.seller_id !== user.id) {
       return res.status(403).json({ message: 'No autorizado' });
     }
+    await backfillPaymentOrdersFromLegacy();
     const entries = (await query(
       `SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`,
@@ -414,13 +423,16 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          p.amount,
          p.notes,
          p.invoice_id,
+         p.order_id,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
-         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs,
+         GROUP_CONCAT(DISTINCT po.order_id) AS payment_order_ids
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
        LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+       LEFT JOIN payment_orders po ON po.payment_id = p.id
        WHERE p.customer_id = ?
-       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
        ORDER BY p.created_at ASC, p.date ASC`,
       [id]
     )) as any[];
@@ -455,6 +467,35 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        ORDER BY cn.created_at ASC, cn.id ASC`,
       [id]
     )) as any[];
+    const orderWithoutInvoiceRows = (await query(
+      `SELECT
+         o.id,
+         o.date,
+         o.remito_number,
+         o.created_at,
+         ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2) AS cargo_neto,
+         (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
+       FROM orders o
+       LEFT JOIN (
+         SELECT order_id, SUM(amount_credited) AS cn_total
+         FROM credit_notes
+         GROUP BY order_id
+       ) cn ON cn.order_id = o.id
+       WHERE o.customer_id = ?
+         AND ${SQL_ORDER_ACTIVE_COND}
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+         AND (
+           COALESCE(o.include_in_saldo, 0) = 1
+           OR EXISTS (
+             SELECT 1 FROM payment_orders po
+             INNER JOIN payments p ON p.id = po.payment_id
+             WHERE po.order_id = o.id AND p.customer_id = o.customer_id
+           )
+           OR (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+         )
+       ORDER BY COALESCE(o.date, o.created_at) ASC, o.id ASC`,
+      [id]
+    )) as any[];
     const normalizeDocNumber = (value: any) => {
       const raw = String(value || '').trim().toUpperCase();
       if (!raw) return '';
@@ -465,6 +506,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const normalizeDocType = (tipo: any, detalle: any) => {
       const t = `${String(tipo || '')} ${String(detalle || '')}`.toUpperCase();
       if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
+      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
       if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
       if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
       if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
@@ -514,12 +556,39 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         source: 'system' as const
       };
     });
+    const orderWithoutInvoiceAsEntries = orderWithoutInvoiceRows.map((ord, idx) => {
+      const importe = Math.round(Number(ord.cargo_neto || 0) * 100) / 100;
+      const remito =
+        ord.remito_number != null && Number(ord.remito_number) > 0
+          ? String(Number(ord.remito_number))
+          : String(ord.id || '').slice(0, 12);
+      return {
+        lineOrder: maxLineOrder + 55000 + idx,
+        lineDate: ord.date || ord.created_at,
+        tipo: 'PED',
+        numero: remito,
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: `Pedido ${ord.id || ''} · Sin factura AFIP (neto)`,
+        paginaPdf: null,
+        source: 'system' as const
+      };
+    });
     const paymentAsEntries = paymentEntries.map((p, idx) => {
-      const refs = Array.from(new Set([
+      const invoiceRefs = Array.from(new Set([
         ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x: string) => x.trim()).filter(Boolean),
         ...String(p.invoice_refs || '').split(',').map((x: string) => x.trim()).filter(Boolean),
       ]));
-      const refsText = refs.length ? `Factura(s): ${refs.join(' | ')}` : 'Factura(s): -';
+      const orderRefs = Array.from(new Set([
+        ...String(p.payment_order_ids || '').split(',').map((x: string) => x.trim()).filter(Boolean),
+        ...(p.order_id ? [String(p.order_id).trim()] : []),
+      ])).filter((oid) => oid && !oid.startsWith('mm-'));
+      const parts: string[] = [];
+      if (invoiceRefs.length) parts.push(`Factura(s): ${invoiceRefs.join(' | ')}`);
+      if (orderRefs.length) parts.push(`Pedido(s): ${orderRefs.join(' | ')}`);
+      const refsText = parts.length ? parts.join(' · ') : 'Sin imputar';
       const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
       return {
         lineOrder: maxLineOrder + 100000 + idx,
@@ -551,6 +620,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       })),
       ...invoiceAsEntries,
       ...creditNoteAsEntries,
+      ...orderWithoutInvoiceAsEntries,
       ...paymentAsEntries
     ];
 
@@ -559,7 +629,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const movementByKey = new Map<string, any>();
     for (const row of mergedEntries) {
       const tipoNorm = normalizeDocType(row.tipo, row.detalle);
-      if (!['REC', 'FAC', 'NC', 'ND'].includes(tipoNorm)) {
+      if (!['REC', 'FAC', 'NC', 'ND', 'PED'].includes(tipoNorm)) {
         deduped.push(row);
         continue;
       }
@@ -598,7 +668,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         if (tipoNorm === 'REC' || tipoNorm === 'NC') {
           runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
           hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
+        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
           runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
           hasRunningSaldo = true;
         }

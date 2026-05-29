@@ -147,6 +147,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       .finally(() => {
         if (!cancelled) setMultimediaLedgerLoading(false);
       });
+    if (canViewSaldos) loadCarteraTotals();
     return () => {
       cancelled = true;
     };
@@ -613,6 +614,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const normalizeDocType = (tipo: string, detalle?: string | null) => {
       const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
       if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
+      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
       if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
       if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
       if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
@@ -634,7 +636,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         if (tipoNorm === 'REC' || tipoNorm === 'NC') {
           runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
           hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
+        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
           runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
           hasRunningSaldo = true;
         }

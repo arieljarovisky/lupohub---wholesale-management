@@ -1,6 +1,6 @@
 import { execute, get, query } from '../database/db';
 
-const SQL_ORDER_NETO_GRAVADO = `GREATEST(
+export const SQL_ORDER_NETO_GRAVADO = `GREATEST(
   COALESCE(o.total, 0),
   COALESCE((
     SELECT SUM(
@@ -99,6 +99,23 @@ export const SQL_ORDER_IN_SALDO_SCOPE = `(
   COALESCE(o.include_in_saldo, 0) = 1
   OR (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
 )`;
+
+/** Repone vínculos payment_orders desde payments.order_id legacy (una sola vez por recibo). */
+export async function backfillPaymentOrdersFromLegacy(): Promise<void> {
+  try {
+    await execute(`
+      INSERT IGNORE INTO payment_orders (payment_id, order_id, amount_applied)
+      SELECT p.id, p.order_id, ROUND(COALESCE(p.amount, 0), 2)
+      FROM payments p
+      WHERE p.order_id IS NOT NULL AND TRIM(p.order_id) <> ''
+        AND (p.invoice_id IS NULL OR TRIM(p.invoice_id) = '')
+        AND NOT EXISTS (SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id)
+        AND NOT EXISTS (SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id)
+    `);
+  } catch {
+    // Tabla payment_orders puede no existir aún en despliegues parciales.
+  }
+}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -482,6 +499,8 @@ export async function relinkPaymentToInvoices(
   const amount = round2(Number(payment.amount) || 0);
   const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
   const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
+
+  await backfillPaymentOrdersFromLegacy();
 
   const oldOrderRows = (await query(
     `SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
