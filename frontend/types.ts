@@ -231,6 +231,8 @@ export interface Order {
   archived?: boolean;
   /** Cobro del pedido mayorista (cuenta corriente / saldos pendientes) */
   paymentStatus?: 'pendiente' | 'pagado';
+  /** Si true, el pedido suma al saldo aunque no esté facturado (marcado desde Pedidos). */
+  includeInSaldo?: boolean;
   /** Si true, este pedido no debe impactar stock (facturación administrativa). */
   noStockImpact?: boolean;
   /** Si el backend lo envía: hubo movimiento PEDIDO_MAYORISTA en historial (stock ya descontado de verdad). */

@@ -1128,6 +1128,11 @@ const SQL_ORDER_NETO_GRAVADO = `GREATEST(
 
 const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
 
+/** Pedidos que suman al saldo: cobro pendiente o marcados manualmente (p. ej. sin factura). */
+const SQL_ORDER_IN_SALDO_COND = `(o.payment_status = 'pendiente' OR COALESCE(o.include_in_saldo, 0) = 1)`;
+
+const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
+
 /** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
@@ -1215,9 +1220,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1250,9 +1254,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1424,9 +1427,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         o.customer_id,
         SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
@@ -1439,9 +1441,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
@@ -1468,9 +1469,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         o.customer_id,
         SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
       FROM orders o
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
@@ -1483,9 +1483,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
@@ -1629,9 +1628,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1664,9 +1662,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -2889,9 +2886,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           o.customer_id,
           SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
         FROM orders o
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
+        WHERE ${SQL_ORDER_IN_SALDO_COND}
+          AND ${SQL_ORDER_ACTIVE_COND}
         GROUP BY o.customer_id
       ) ob ON ob.customer_id = c.id
       LEFT JOIN (
@@ -2904,9 +2900,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           FROM credit_notes
           GROUP BY order_id
         ) cn ON cn.order_id = o.id
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
+        WHERE ${SQL_ORDER_IN_SALDO_COND}
+          AND ${SQL_ORDER_ACTIVE_COND}
         GROUP BY o.customer_id
       ) ncv ON ncv.customer_id = c.id
       LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
@@ -3198,9 +3193,8 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
     ) t
@@ -3238,9 +3232,8 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
     ) t
@@ -4013,6 +4006,22 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       UNION ALL
 
       SELECT
+        o.date AS fecha,
+        'PEDIDO' AS tipo,
+        o.id AS comprobante,
+        o.id AS order_id,
+        ${SQL_ORDER_CARGO_CON_IVA} AS debe,
+        0 AS haber,
+        'Pedido sin facturar (suma al saldo)' AS detalle
+      FROM orders o
+      WHERE o.customer_id = ?
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+        AND ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
+
+      UNION ALL
+
+      SELECT
         p.date AS fecha,
         'RECIBO' AS tipo,
         COALESCE(p.receipt_number, '') AS comprobante,
@@ -4055,7 +4064,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
     `,
-    [customerId, customerId, customerId]
+    [customerId, customerId, customerId, customerId]
   )) as any[];
 
   const importedEntries = (await query(
@@ -4160,7 +4169,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   const mapped: CustomerFinancialMovement[] = movements.map((m) => {
     const debe = Number(m.debe || 0);
     const haber = Number(m.haber || 0);
-    if (m.tipo === 'FACTURA') totalFacturas += debe;
+    if (m.tipo === 'FACTURA' || m.tipo === 'PEDIDO') totalFacturas += debe;
     if (m.tipo === 'NC') totalNc += haber;
     if (m.tipo === 'RECIBO') totalRecibos += haber;
     return {
@@ -4406,9 +4415,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        WHERE o.customer_id = ?
-         AND o.payment_status = 'pendiente'
-         AND o.status NOT IN ('Cancelado', 'Borrador')
-         AND (o.archived = 0 OR o.archived IS NULL)`,
+         AND ${SQL_ORDER_IN_SALDO_COND}
+         AND ${SQL_ORDER_ACTIVE_COND}`,
       [customerId]
     ) as any;
     const multimediaAgg = await get(

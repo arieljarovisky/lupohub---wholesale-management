@@ -1850,7 +1850,52 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <span className="font-medium">{stockImpact.label}</span>
                       </span>
                     )}
-                    {role !== Role.CUSTOMER && (
+                    {role !== Role.CUSTOMER && !order.invoice && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const inSaldo =
+                            !!order.includeInSaldo || (order.paymentStatus ?? 'pagado') === 'pendiente';
+                          const next = !inSaldo;
+                          showConfirm({
+                            title: inSaldo ? 'Quitar del saldo' : 'Sumar al saldo',
+                            message: inSaldo
+                              ? '¿Este pedido sin factura dejará de sumar al saldo pendiente del cliente?'
+                              : '¿Sumar este pedido al saldo que debe el cliente? (aunque no esté facturado en AFIP)',
+                            confirmLabel: inSaldo ? 'Quitar del saldo' : 'Sumar al saldo',
+                            onConfirm: () => {
+                              api
+                                .patchOrderIncludeInSaldo(order.id, next)
+                                .then(() => {
+                                  showToast(
+                                    'success',
+                                    next
+                                      ? 'Pedido sumado al saldo del cliente.'
+                                      : 'Pedido quitado del saldo del cliente.'
+                                  );
+                                  refreshOrders?.();
+                                })
+                                .catch((err: any) =>
+                                  showToast('error', err?.message || 'No se pudo actualizar el saldo.')
+                                );
+                            },
+                          });
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-left font-medium transition touch-manipulation hover:bg-slate-700/45 ${
+                          order.includeInSaldo || (order.paymentStatus ?? 'pagado') === 'pendiente'
+                            ? 'text-amber-200 bg-amber-950/40 ring-1 ring-amber-700/40'
+                            : 'text-slate-400'
+                        }`}
+                        title="Cuenta corriente: incluir o excluir del saldo pendiente (sin factura AFIP)"
+                      >
+                        <Wallet size={12} className="shrink-0 opacity-80" aria-hidden />
+                        {order.includeInSaldo || (order.paymentStatus ?? 'pagado') === 'pendiente'
+                          ? 'En saldo'
+                          : 'Sumar al saldo'}
+                      </button>
+                    )}
+                    {role !== Role.CUSTOMER && !!order.invoice && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1881,7 +1926,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         className={`inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left font-medium transition touch-manipulation hover:bg-slate-700/45 ${
                           (order.paymentStatus ?? 'pagado') === 'pendiente' ? 'text-amber-200' : 'text-slate-400'
                         }`}
-                        title="Cuenta corriente: tocá para alternar cobro pendiente / cobrado"
+                        title="Cuenta corriente: cobro pendiente / cobrado (factura emitida)"
                       >
                         <Wallet size={12} className="shrink-0 opacity-80" aria-hidden />
                         {(order.paymentStatus ?? 'pagado') === 'pendiente' ? 'Cobro pendiente' : 'Cobro registrado'}

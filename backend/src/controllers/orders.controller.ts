@@ -193,6 +193,10 @@ function mapPaymentStatus(row: any): 'pendiente' | 'pagado' {
   return row?.payment_status === 'pendiente' ? 'pendiente' : 'pagado';
 }
 
+function mapIncludeInSaldo(row: any): boolean {
+  return !!(row?.include_in_saldo);
+}
+
 /**
  * Devuelve una descripción legible de un artículo (nombre + talle + color + SKU) para mostrar
  * en avisos al usuario. Si el item ya trae `sku`/`productName` desde el frontend se usan,
@@ -631,6 +635,7 @@ export const getOrders = async (req: any, res: any) => {
       /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
       creditNotesNetoCredited: creditNotesNetoCreditedByOrderId[order.id] ?? 0,
       paymentStatus: mapPaymentStatus(order),
+      includeInSaldo: mapIncludeInSaldo(order),
       noStockImpact: !!order.no_stock_impact,
       mayoristaStockApplied: mayoristaStockLoaded
         ? mayoristaStockAppliedByOrder[order.id] === true
@@ -1427,6 +1432,58 @@ export const updateOrder = async (req: any, res: any) => {
   }
 }
 
+/** Marca si un pedido sin factura (o cualquier pedido) suma al saldo pendiente del cliente. */
+export const patchOrderIncludeInSaldo = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+    return res.status(403).json({ message: 'Sin permiso para modificar saldo del pedido' });
+  }
+  const raw = req.body?.includeInSaldo ?? req.body?.include_in_saldo;
+  const includeInSaldo = raw === true || raw === 1 || raw === '1' || raw === 'true';
+  if (!id) return res.status(400).json({ message: 'ID inválido' });
+  try {
+    const row = await get('SELECT id, customer_id FROM orders WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (user.role === 'SELLER') {
+      const cust = row.customer_id
+        ? await get('SELECT seller_id FROM customers WHERE id = ?', [row.customer_id])
+        : null;
+      if (cust?.seller_id && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
+      }
+    }
+    if (includeInSaldo) {
+      await execute(
+        'UPDATE orders SET include_in_saldo = 1, payment_status = ? WHERE id = ?',
+        ['pendiente', id]
+      );
+    } else {
+      const hasInv = await get('SELECT 1 AS ok FROM invoices WHERE order_id = ? LIMIT 1', [id]);
+      if (hasInv?.ok) {
+        await execute('UPDATE orders SET include_in_saldo = 0 WHERE id = ?', [id]);
+      } else {
+        await execute(
+          'UPDATE orders SET include_in_saldo = 0, payment_status = ? WHERE id = ?',
+          ['pagado', id]
+        );
+      }
+    }
+    const updated = await get(
+      'SELECT payment_status, include_in_saldo FROM orders WHERE id = ?',
+      [id]
+    );
+    res.json({
+      id,
+      includeInSaldo: mapIncludeInSaldo(updated),
+      paymentStatus: mapPaymentStatus(updated)
+    });
+  } catch (error) {
+    console.error('patchOrderIncludeInSaldo:', error);
+    res.status(500).json({ message: 'Error actualizando saldo del pedido' });
+  }
+};
+
 /** Marca cobro del pedido (pendiente / pagado) sin reenviar ítems. */
 export const patchOrderPaymentStatus = async (req: any, res: any) => {
   const { id } = req.params;
@@ -1449,8 +1506,17 @@ export const patchOrderPaymentStatus = async (req: any, res: any) => {
         return res.status(403).json({ message: 'Solo podés modificar pedidos de tus clientes' });
       }
     }
-    await execute('UPDATE orders SET payment_status = ? WHERE id = ?', [paymentStatus, id]);
-    res.json({ id, paymentStatus });
+    if (paymentStatus === 'pagado') {
+      await execute('UPDATE orders SET payment_status = ?, include_in_saldo = 0 WHERE id = ?', [paymentStatus, id]);
+    } else {
+      await execute('UPDATE orders SET payment_status = ? WHERE id = ?', [paymentStatus, id]);
+    }
+    const updated = await get('SELECT payment_status, include_in_saldo FROM orders WHERE id = ?', [id]);
+    res.json({
+      id,
+      paymentStatus: mapPaymentStatus(updated),
+      includeInSaldo: mapIncludeInSaldo(updated)
+    });
   } catch (error) {
     console.error('patchOrderPaymentStatus:', error);
     res.status(500).json({ message: 'Error actualizando estado de cobro' });

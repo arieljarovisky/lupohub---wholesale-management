@@ -1549,12 +1549,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                               className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
                                 m.tipo === 'FACTURA'
                                   ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50'
-                                  : m.tipo === 'NC'
-                                    ? 'bg-amber-900/50 text-amber-300 border border-amber-700/50'
-                                    : 'bg-sky-900/50 text-sky-300 border border-sky-700/50'
+                                  : m.tipo === 'PEDIDO'
+                                    ? 'bg-violet-900/50 text-violet-300 border border-violet-700/50'
+                                    : m.tipo === 'NC'
+                                      ? 'bg-amber-900/50 text-amber-300 border border-amber-700/50'
+                                      : 'bg-sky-900/50 text-sky-300 border border-sky-700/50'
                               }`}
                             >
-                              {m.tipo === 'NC' ? 'NC' : m.tipo === 'RECIBO' ? 'Recibo' : 'Factura'}
+                              {m.tipo === 'NC'
+                                ? 'NC'
+                                : m.tipo === 'RECIBO'
+                                  ? 'Recibo'
+                                  : m.tipo === 'PEDIDO'
+                                    ? 'Pedido'
+                                    : 'Factura'}
                             </span>
                             <span className="text-[11px] text-slate-500 tabular-nums">{formatLedgerDate(m.fecha)}</span>
                           </div>

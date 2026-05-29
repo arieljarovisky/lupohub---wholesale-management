@@ -13,6 +13,7 @@ import {
   getOrderCreditNotes,
   emitirNotaCredito,
   patchOrderPaymentStatus,
+  patchOrderIncludeInSaldo,
   applyMayoristaStockDeduction,
   exportTopWholesaleProductsMetricsXlsx,
   getOrderItemsMissingDespacho,
@@ -29,6 +30,7 @@ router.get('/', getOrders);
 router.post('/import-matrix', authMiddleware, importOrdersFromMatrix);
 router.post('/', createOrder);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
+router.patch('/:id/include-in-saldo', authMiddleware, patchOrderIncludeInSaldo);
 router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDeduction);
 router.patch('/:id/status', authMiddleware, updateOrderStatus);
 router.put('/:id', updateOrder);

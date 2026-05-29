@@ -1252,8 +1252,18 @@ export const api = {
     }, undefined, 'updateOrderStatus');
   },
 
-  patchOrderPaymentStatus: async (orderId: string, paymentStatus: 'pendiente' | 'pagado'): Promise<{ id: string; paymentStatus: string }> => {
-    return await request<{ id: string; paymentStatus: string }>(`/orders/${orderId}/payment-status`, 'PATCH', { paymentStatus });
+  patchOrderPaymentStatus: async (
+    orderId: string,
+    paymentStatus: 'pendiente' | 'pagado'
+  ): Promise<{ id: string; paymentStatus: string; includeInSaldo?: boolean }> => {
+    return await request(`/orders/${orderId}/payment-status`, 'PATCH', { paymentStatus });
+  },
+
+  patchOrderIncludeInSaldo: async (
+    orderId: string,
+    includeInSaldo: boolean
+  ): Promise<{ id: string; includeInSaldo: boolean; paymentStatus: string }> => {
+    return await request(`/orders/${orderId}/include-in-saldo`, 'PATCH', { includeInSaldo });
   },
 
   /** Desconta stock del pedido mayorista ahora (idempotente; si es borrador pasa a confirmado). */
