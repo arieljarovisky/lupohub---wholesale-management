@@ -47,6 +47,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentModalMode, setPaymentModalMode] = useState<'create' | 'link'>('create');
+  const [linkTargetPayment, setLinkTargetPayment] = useState<Payment | null>(null);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
   const [exportingByCustomerFile, setExportingByCustomerFile] = useState(false);
   const [exportingMovimientosSistema, setExportingMovimientosSistema] = useState(false);
@@ -90,6 +92,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     ReturnType<typeof api.previewPaymentAllocation>
   > | null>(null);
   const [payPreviewLoading, setPayPreviewLoading] = useState(false);
+  const [linkFacturaOptions, setLinkFacturaOptions] = useState<
+    Array<{ invoiceId: string; label: string; customerId: string }>
+  >([]);
+  const [linkFacturasLoading, setLinkFacturasLoading] = useState(false);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   /** Datos completos del remitente (incluye CAI). Necesarios para imprimir el CAI en remitos/facturas. */
   const [remitenteFromApi, setRemitenteFromApi] = useState<any>(null);
@@ -387,28 +393,85 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
-  const facturaOptions = items
-    .filter((x) => x?.tipo === 'FACTURA')
-    .map((x) => {
-      const hasAfipNumber = Number.isFinite(Number(x.puntoVta)) && Number.isFinite(Number(x.numeroDesde));
-      const afipPrefix = x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : '';
-      const comprobante = hasAfipNumber
-        ? `${afipPrefix} ${String(Number(x.puntoVta)).padStart(5, '0')}-${String(Number(x.numeroDesde)).padStart(8, '0')}`.trim()
-        : String(x.numeroDesde || x.numeroHasta || '').trim() || 'Comprobante s/n';
-      return {
-      invoiceId: x.id,
-      label: `${comprobante} — ${x.customerBusinessName || ''} — ${(() => {
-        const d = new Date(x.fecha);
-        return Number.isNaN(d.getTime()) ? String(x.fecha || '') : d.toLocaleDateString('es-AR');
-      })()} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
-      customerId: x.customerId,
-    };});
+  const mapBillingRowsToFacturaOptions = (billingRows: any[]) =>
+    billingRows
+      .filter((x) => x?.tipo === 'FACTURA')
+      .map((x) => {
+        const hasAfipNumber = Number.isFinite(Number(x.puntoVta)) && Number.isFinite(Number(x.numeroDesde));
+        const afipPrefix = x.cbteTipo === 1 ? 'A' : x.cbteTipo === 6 ? 'B' : '';
+        const comprobante = hasAfipNumber
+          ? `${afipPrefix} ${String(Number(x.puntoVta)).padStart(5, '0')}-${String(Number(x.numeroDesde)).padStart(8, '0')}`.trim()
+          : String(x.numeroDesde || x.numeroHasta || '').trim() || 'Comprobante s/n';
+        return {
+          invoiceId: x.id,
+          label: `${comprobante} — ${x.customerBusinessName || ''} — ${(() => {
+            const d = new Date(x.fecha);
+            return Number.isNaN(d.getTime()) ? String(x.fecha || '') : d.toLocaleDateString('es-AR');
+          })()} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
+          customerId: x.customerId
+        };
+      });
+
+  const facturaOptions = useMemo(() => mapBillingRowsToFacturaOptions(items), [items]);
 
   /** Facturas del modal de pago: solo las del cliente elegido (misma lista que la grilla según filtros actuales). */
   const facturaOptionsForPayment = useMemo(() => {
     if (!payCustomerId || payCustomerId === 'ALL') return [];
     return facturaOptions.filter((f) => f.customerId === payCustomerId);
-  }, [items, payCustomerId]);
+  }, [facturaOptions, payCustomerId]);
+
+  const facturaOptionsInModal = useMemo(() => {
+    if (paymentModalMode === 'link') return linkFacturaOptions;
+    return facturaOptionsForPayment;
+  }, [paymentModalMode, linkFacturaOptions, facturaOptionsForPayment]);
+
+  const openCreatePaymentModal = () => {
+    setPaymentModalMode('create');
+    setLinkTargetPayment(null);
+    setPayReceipt('');
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayCustomerId('ALL');
+    setPayInvoiceIds([]);
+    setPaySellerId('');
+    setPayAmount('');
+    setPayNotes('');
+    setShowPaymentModal(true);
+  };
+
+  const openLinkPaymentModal = (p: Payment) => {
+    if (p.source === 'imported' || String(p.id || '').startsWith('mm-')) {
+      showToast('error', 'Los recibos importados de Multimedias no se asocian acá. Cargá un recibo en el sistema.');
+      return;
+    }
+    setPaymentModalMode('link');
+    setLinkTargetPayment(p);
+    setPayReceipt(p.receiptNumber || '');
+    setPayDate(String(p.date || '').slice(0, 10));
+    setPayCustomerId(p.customerId);
+    setPayInvoiceIds(
+      (Array.isArray(p.invoiceIds) ? p.invoiceIds : p.invoiceId ? [p.invoiceId] : []).filter(
+        (id) => id && !id.startsWith('mm-')
+      )
+    );
+    setPaySellerId(p.sellerId || '');
+    setPayAmount(String(p.amount ?? ''));
+    setPayNotes(p.notes || '');
+    setShowPaymentModal(true);
+    setLinkFacturasLoading(true);
+    api
+      .getBilling({ customerId: p.customerId, tipo: 'FACTURA' })
+      .then((rows) => setLinkFacturaOptions(mapBillingRowsToFacturaOptions(Array.isArray(rows) ? rows : [])))
+      .catch(() => {
+        setLinkFacturaOptions([]);
+        showToast('error', 'No se pudieron cargar las facturas del cliente.');
+      })
+      .finally(() => setLinkFacturasLoading(false));
+  };
+
+  const linkExcludePaymentId =
+    paymentModalMode === 'link' && linkTargetPayment && !linkTargetPayment.id.startsWith('mm-')
+      ? linkTargetPayment.id
+      : undefined;
 
   useEffect(() => {
     if (!showPaymentModal || payInvoiceIds.length === 0) {
@@ -417,7 +480,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
     let cancelled = false;
     api
-      .getInvoicesOutstanding(payInvoiceIds)
+      .getInvoicesOutstanding(payInvoiceIds, linkExcludePaymentId)
       .then((rows) => {
         if (cancelled) return;
         const m: Record<string, number> = {};
@@ -430,7 +493,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return () => {
       cancelled = true;
     };
-  }, [showPaymentModal, payInvoiceIds]);
+  }, [showPaymentModal, payInvoiceIds, linkExcludePaymentId]);
 
   useEffect(() => {
     if (!showPaymentModal || payInvoiceIds.length === 0) {
@@ -446,7 +509,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     const timer = window.setTimeout(() => {
       setPayPreviewLoading(true);
       api
-        .previewPaymentAllocation(amount, payInvoiceIds)
+        .previewPaymentAllocation(amount, payInvoiceIds, linkExcludePaymentId)
         .then((p) => {
           if (!cancelled) setPayAllocPreview(p);
         })
@@ -461,7 +524,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [showPaymentModal, payInvoiceIds, payAmount]);
+  }, [showPaymentModal, payInvoiceIds, payAmount, linkExcludePaymentId]);
   const facturaOptionById = useMemo(
     () => new Map(facturaOptions.map((f) => [f.invoiceId, f.label] as const)),
     [facturaOptions]
@@ -738,16 +801,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <button
             type="button"
             onClick={() => {
-              setShowPaymentModal(true);
-              setPayReceipt('');
-              setPayAmount('');
-              setPayNotes('');
-              setPayInvoiceIds([]);
               const cid = customerId !== 'ALL' ? customerId : 'ALL';
-              setPayCustomerId(cid);
-              const pre = cid !== 'ALL' ? customers.find((c) => c.id === cid) : undefined;
-              setPaySellerId(pre?.sellerId || '');
-              setPayDate(new Date().toISOString().slice(0, 10));
+              openCreatePaymentModal();
+              if (cid !== 'ALL') {
+                setPayCustomerId(cid);
+                const pre = customers.find((c) => c.id === cid);
+                setPaySellerId(pre?.sellerId || '');
+              }
             }}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 text-emerald-200 text-sm font-bold border border-emerald-900/60 hover:bg-slate-700 touch-manipulation"
           >
@@ -1308,7 +1368,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {p.source !== 'imported' && !String(p.id || '').startsWith('mm-') && (
+                    <button
+                      type="button"
+                      className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
+                      onClick={() => openLinkPaymentModal(p)}
+                    >
+                      Asociar facturas
+                    </button>
+                  )}
                   {!isSeller && (
                   <button
                     type="button"
@@ -1373,26 +1442,58 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
 
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="text-white font-black text-lg">Cargar pago</h3>
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <h3 className="text-white font-black text-lg">
+                {paymentModalMode === 'link' ? 'Asociar recibo a facturas' : 'Cargar pago'}
+              </h3>
               <button onClick={() => setShowPaymentModal(false)} className="text-slate-400 hover:text-white">✕</button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {paymentModalMode === 'link' && linkTargetPayment && (
+                <p className="text-xs text-slate-400 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
+                  Recibo <span className="font-mono text-white">{linkTargetPayment.receiptNumber}</span> por{' '}
+                  <span className="text-emerald-300 font-bold">${formatMoneyAr(Number(linkTargetPayment.amount || 0))}</span>.
+                  Elegí las facturas a imputar; el importe del recibo no se modifica.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Nº Recibo</label>
-                  <input value={payReceipt} onChange={(e) => setPayReceipt(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="R0001-00001234" />
+                  <input
+                    value={payReceipt}
+                    readOnly={paymentModalMode === 'link'}
+                    onChange={(e) => setPayReceipt(e.target.value)}
+                    className={`w-full border border-slate-800 rounded-xl p-3 text-white outline-none ${
+                      paymentModalMode === 'link' ? 'bg-slate-900 text-slate-400' : 'bg-slate-950'
+                    }`}
+                    placeholder="R0001-00001234"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Fecha</label>
-                  <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" />
+                  <input
+                    type="date"
+                    value={payDate}
+                    readOnly={paymentModalMode === 'link'}
+                    onChange={(e) => setPayDate(e.target.value)}
+                    className={`w-full border border-slate-800 rounded-xl p-3 text-white outline-none ${
+                      paymentModalMode === 'link' ? 'bg-slate-900 text-slate-400' : 'bg-slate-950'
+                    }`}
+                  />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cliente</label>
+                  {paymentModalMode === 'link' ? (
+                    <div className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white text-sm">
+                      {customers.find((c) => c.id === payCustomerId)?.businessName ||
+                        linkTargetPayment?.customerBusinessName ||
+                        payCustomerId}
+                    </div>
+                  ) : (
                   <select
                     value={payCustomerId}
                     onChange={(e) => {
@@ -1413,21 +1514,26 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       <option key={c.id} value={c.id}>{c.businessName || c.name}</option>
                     ))}
                   </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Facturas (múltiple)</label>
                   <p className="text-[10px] text-slate-500 mb-1.5 leading-snug">
                     Una factura puede tener varios recibos. Un recibo puede imputarse a varias facturas (marcá todas y el
-                    importe se reparte en orden).
+                    importe se reparte en orden). Desmarcá todas para quitar la asociación.
                   </p>
                   <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
-                    {payCustomerId === 'ALL' ? (
+                    {linkFacturasLoading ? (
+                      <div className="text-xs text-slate-500 px-1 py-2 flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin" /> Cargando facturas…
+                      </div>
+                    ) : payCustomerId === 'ALL' ? (
                       <div className="text-xs text-slate-500 px-1 py-1">(Elegí un cliente para ver sus facturas)</div>
-                    ) : facturaOptionsForPayment.length === 0 ? (
-                      <div className="text-xs text-slate-500 px-1 py-1">(Sin facturas en el listado actual — ampliá fechas o Actualizar)</div>
+                    ) : facturaOptionsInModal.length === 0 ? (
+                      <div className="text-xs text-slate-500 px-1 py-1">(Sin facturas para este cliente)</div>
                     ) : (
                       <div className="space-y-1">
-                        {facturaOptionsForPayment.map((f) => {
+                        {facturaOptionsInModal.map((f) => {
                           const checked = payInvoiceIds.includes(f.invoiceId);
                           return (
                             <label key={f.invoiceId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900 cursor-pointer">
@@ -1497,28 +1603,39 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {paymentModalMode === 'create' && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Vendedor</label>
+                      <select value={paySellerId} onChange={(e) => setPaySellerId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none">
+                        <option value="">(Opcional) —</option>
+                        {users.filter(u => u.role === 'SELLER').map((u) => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe</label>
+                      <input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="0" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
+                    <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y" />
+                  </div>
+                </>
+              )}
+              {paymentModalMode === 'link' && (
                 <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Vendedor</label>
-                  <select value={paySellerId} onChange={(e) => setPaySellerId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none">
-                    <option value="">(Opcional) —</option>
-                    {users.filter(u => u.role === 'SELLER').map((u) => (
-                      <option key={u.id} value={u.id}>{u.name}</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe del recibo</label>
+                  <div className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-emerald-300 font-black text-lg tabular-nums">
+                    ${formatMoneyAr(Number(parseMoneyInput(payAmount || '0')))}
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe</label>
-                  <input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="0" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
-                <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y" />
-              </div>
+              )}
             </div>
-            <div className="p-5 border-t border-slate-800 flex gap-2">
+            <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0">
               <button onClick={() => setShowPaymentModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl font-bold">Cancelar</button>
               <button
                 type="button"
@@ -1526,12 +1643,19 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 onClick={async () => {
                   if (paySubmitting) return;
                   try {
+                    setPaySubmitting(true);
+                    if (paymentModalMode === 'link' && linkTargetPayment) {
+                      const updated = await api.patchPaymentInvoices(linkTargetPayment.id, payInvoiceIds);
+                      showToast('success', updated.allocationNote || 'Facturas asociadas al recibo.');
+                      setShowPaymentModal(false);
+                      loadPayments();
+                      return;
+                    }
                     const amount = parseMoneyInput(payAmount || '0');
                     if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
-                    setPaySubmitting(true);
                     const created = await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),
@@ -1550,7 +1674,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     setShowPaymentModal(false);
                     loadPayments();
                   } catch (err: any) {
-                    showToast('error', err?.response?.data?.message || err?.message || 'Error cargando pago');
+                    showToast('error', err?.response?.data?.message || err?.message || 'Error guardando');
                   } finally {
                     setPaySubmitting(false);
                   }
@@ -1558,7 +1682,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
               >
                 {paySubmitting && <Loader2 size={18} className="animate-spin shrink-0" aria-hidden />}
-                {paySubmitting ? 'Guardando…' : 'Guardar pago'}
+                {paySubmitting
+                  ? 'Guardando…'
+                  : paymentModalMode === 'link'
+                    ? 'Guardar asociación'
+                    : 'Guardar pago'}
               </button>
             </div>
           </div>

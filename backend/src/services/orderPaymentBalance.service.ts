@@ -191,7 +191,8 @@ export async function allocatePaymentToInvoices(
 /** Vista previa de imputación (misma lógica que allocatePaymentToInvoices, sin grabar). */
 export async function previewPaymentAllocation(
   totalAmount: number,
-  invoiceIds: string[]
+  invoiceIds: string[],
+  excludePaymentId?: string
 ): Promise<{
   appliedTotal: number;
   remainingUnallocated: number;
@@ -203,7 +204,7 @@ export async function previewPaymentAllocation(
 
   for (const invoiceId of invoiceIds) {
     if (remaining <= 0.005) break;
-    const outstandingBefore = await getInvoiceOutstandingConIva(invoiceId);
+    const outstandingBefore = await getInvoiceOutstandingConIva(invoiceId, excludePaymentId);
     if (outstandingBefore <= 0.005) continue;
     const applied = round2(Math.min(remaining, outstandingBefore));
     remaining = round2(remaining - applied);
@@ -221,13 +222,114 @@ export async function previewPaymentAllocation(
 
 /** Saldo pendiente por factura (varios recibos acumulados). */
 export async function getInvoicesOutstanding(
-  invoiceIds: string[]
+  invoiceIds: string[],
+  excludePaymentId?: string
 ): Promise<Array<{ invoiceId: string; outstanding: number }>> {
   const out: Array<{ invoiceId: string; outstanding: number }> = [];
   for (const invoiceId of invoiceIds) {
-    out.push({ invoiceId, outstanding: await getInvoiceOutstandingConIva(invoiceId) });
+    out.push({
+      invoiceId,
+      outstanding: await getInvoiceOutstandingConIva(invoiceId, excludePaymentId)
+    });
   }
   return out;
+}
+
+/** Reasocia un recibo ya cargado a facturas (reemplaza vínculos anteriores). */
+export async function relinkPaymentToInvoices(
+  paymentId: string,
+  invoiceIds: string[]
+): Promise<{
+  appliedTotal: number;
+  remainingUnallocated: number;
+  allocations: PaymentInvoiceAllocation[];
+}> {
+  const payment = (await get(
+    `SELECT id, customer_id, amount, notes FROM payments WHERE id = ?`,
+    [paymentId]
+  )) as { id: string; customer_id: string; amount: number; notes?: string } | undefined;
+  if (!payment) {
+    const err: any = new Error('Recibo no encontrado');
+    err.statusCode = 404;
+    throw err;
+  }
+  const notes = String(payment.notes || '');
+  if (notes.includes('comisión vendedor') || notes.includes('comision vendedor')) {
+    const err: any = new Error('Este recibo es una comisión de vendedor y no se puede asociar a facturas');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const amount = round2(Number(payment.amount) || 0);
+  const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
+
+  const oldOrderRows = (await query(
+    `SELECT DISTINCT COALESCE(i.order_id, p.order_id) AS order_id
+     FROM payments p
+     LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+     LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
+     WHERE p.id = ?
+       AND COALESCE(i.order_id, p.order_id) IS NOT NULL`,
+    [paymentId]
+  )) as Array<{ order_id: string }>;
+
+  await execute('DELETE FROM payment_invoices WHERE payment_id = ?', [paymentId]);
+
+  if (systemInvoiceIds.length === 0) {
+    await execute('UPDATE payments SET invoice_id = NULL, order_id = NULL WHERE id = ?', [paymentId]);
+    for (const r of oldOrderRows) {
+      if (r.order_id) await syncOrderPaymentStatus(r.order_id);
+    }
+    await syncAllOrderPaymentStatusForCustomer(payment.customer_id);
+    return { appliedTotal: 0, remainingUnallocated: amount, allocations: [] };
+  }
+
+  const rows = (await query(
+    `SELECT i.id, o.customer_id
+     FROM invoices i
+     JOIN orders o ON o.id = i.order_id
+     WHERE i.id IN (${systemInvoiceIds.map(() => '?').join(',')})`,
+    systemInvoiceIds
+  )) as Array<{ id: string; customer_id: string }>;
+  if (rows.length !== systemInvoiceIds.length) {
+    const err: any = new Error('Hay facturas inválidas en la selección');
+    err.statusCode = 400;
+    throw err;
+  }
+  const invalid = rows.find((r) => r.customer_id !== payment.customer_id);
+  if (invalid) {
+    const err: any = new Error('Todas las facturas deben ser del mismo cliente que el recibo');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const primaryInvoiceId = systemInvoiceIds[0];
+  const ord = (await get('SELECT order_id FROM invoices WHERE id = ?', [primaryInvoiceId])) as
+    | { order_id: string }
+    | undefined;
+  await execute('UPDATE payments SET invoice_id = ?, order_id = ? WHERE id = ?', [
+    primaryInvoiceId,
+    ord?.order_id ?? null,
+    paymentId
+  ]);
+
+  const result = await allocatePaymentToInvoices(paymentId, amount, systemInvoiceIds);
+
+  const orderIdsToSync = new Set<string>();
+  for (const r of oldOrderRows) {
+    if (r.order_id) orderIdsToSync.add(r.order_id);
+  }
+  for (const invId of systemInvoiceIds) {
+    const o = (await get('SELECT order_id FROM invoices WHERE id = ?', [invId])) as
+      | { order_id: string }
+      | undefined;
+    if (o?.order_id) orderIdsToSync.add(o.order_id);
+  }
+  for (const oid of orderIdsToSync) {
+    await syncOrderPaymentStatus(oid);
+  }
+
+  return result;
 }
 
 /** Marca pedido pagado solo si el saldo residual (post-NC y cobros) es cero. */

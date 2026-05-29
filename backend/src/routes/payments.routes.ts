@@ -8,7 +8,8 @@ import {
   updatePaymentDate,
   updateImportedPaymentDate,
   getInvoicesOutstandingHandler,
-  postPaymentAllocatePreview
+  postPaymentAllocatePreview,
+  patchPaymentInvoices
 } from '../controllers/payments.controller';
 
 const router = Router();
@@ -20,6 +21,7 @@ router.get('/invoice-outstanding', getInvoicesOutstandingHandler as any);
 router.post('/allocate-preview', postPaymentAllocatePreview as any);
 router.post('/', createPayment as any);
 router.patch('/imported/date', updateImportedPaymentDate as any);
+router.patch('/:id/invoices', patchPaymentInvoices as any);
 router.patch('/:id/date', updatePaymentDate as any);
 router.post('/import-excel', upload.array('files', 10), importPaymentsFromExcel as any);
 

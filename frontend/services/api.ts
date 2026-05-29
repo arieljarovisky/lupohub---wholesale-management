@@ -3136,16 +3136,19 @@ export const api = {
   },
 
   getInvoicesOutstanding: async (
-    invoiceIds: string[]
+    invoiceIds: string[],
+    excludePaymentId?: string
   ): Promise<Array<{ invoiceId: string; outstanding: number }>> => {
     if (!invoiceIds.length) return [];
     const q = encodeURIComponent(invoiceIds.join(','));
-    return await request(`/payments/invoice-outstanding?invoiceIds=${q}`, 'GET');
+    const excl = excludePaymentId ? `&excludePaymentId=${encodeURIComponent(excludePaymentId)}` : '';
+    return await request(`/payments/invoice-outstanding?invoiceIds=${q}${excl}`, 'GET');
   },
 
   previewPaymentAllocation: async (
     amount: number,
-    invoiceIds: string[]
+    invoiceIds: string[],
+    excludePaymentId?: string
   ): Promise<{
     appliedTotal: number;
     remainingUnallocated: number;
@@ -3156,7 +3159,25 @@ export const api = {
       outstandingAfter: number;
     }>;
   }> => {
-    return await request('/payments/allocate-preview', 'POST', { amount, invoiceIds });
+    return await request('/payments/allocate-preview', 'POST', { amount, invoiceIds, excludePaymentId });
+  },
+
+  /** Asocia facturas a un recibo ya cargado en el sistema. */
+  patchPaymentInvoices: async (
+    paymentId: string,
+    invoiceIds: string[]
+  ): Promise<{
+    id: string;
+    invoiceIds: string[];
+    allocationNote?: string;
+    allocations?: Array<{
+      invoiceId: string;
+      applied: number;
+      outstandingBefore: number;
+      outstandingAfter: number;
+    }>;
+  }> => {
+    return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', { invoiceIds });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
     return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;

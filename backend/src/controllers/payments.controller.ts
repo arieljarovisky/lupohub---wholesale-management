@@ -7,6 +7,7 @@ import {
   getInvoiceOutstandingConIva,
   getInvoicesOutstanding,
   previewPaymentAllocation,
+  relinkPaymentToInvoices,
   syncAllOrderPaymentStatusForCustomer,
   syncOrderPaymentStatus,
   type PaymentInvoiceAllocation
@@ -649,14 +650,89 @@ export const getInvoicesOutstandingHandler = async (req: any, res: Response) => 
     }
     const raw = String(req.query.invoiceIds || req.query.invoiceId || '').trim();
     const invoiceIds = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    const excludePaymentId = String(req.query.excludePaymentId || '').trim() || undefined;
     if (!invoiceIds.length) {
       return res.status(400).json({ message: 'Indicá invoiceIds (separados por coma)' });
     }
-    const rows = await getInvoicesOutstanding(invoiceIds);
+    const rows = await getInvoicesOutstanding(invoiceIds, excludePaymentId);
     return res.json(rows);
   } catch (e: any) {
     console.error('getInvoicesOutstanding:', e);
     return res.status(500).json({ message: 'Error consultando saldos de facturas' });
+  }
+};
+
+/** Asocia un recibo ya cargado a una o más facturas del mismo cliente. */
+export const patchPaymentInvoices = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const paymentId = String(req.params?.id || '').trim();
+    if (!paymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
+    if (paymentId.startsWith('mm-')) {
+      return res.status(400).json({
+        message: 'Los recibos importados de Multimedias no se asocian desde acá; cargá un recibo en el sistema.'
+      });
+    }
+
+    const invoiceIds = Array.isArray(req.body?.invoiceIds)
+      ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+      : [];
+
+    const payment = (await get(
+      `SELECT p.id, p.customer_id, c.seller_id
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       WHERE p.id = ?`,
+      [paymentId]
+    )) as { id: string; customer_id: string; seller_id?: string } | undefined;
+    if (!payment) return res.status(404).json({ message: 'Recibo no encontrado' });
+    if (user.role === 'SELLER' && payment.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
+    }
+
+    const result = await relinkPaymentToInvoices(paymentId, invoiceIds);
+
+    const row = (await get(
+      `SELECT
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
+         p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       WHERE p.id = ?
+       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
+         p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
+      [paymentId]
+    )) as any;
+
+    const allocationNote = formatAllocationNote(result, Number(row?.amount || 0));
+
+    return res.json({
+      id: row.id,
+      customerId: row.customer_id,
+      orderId: row.order_id ?? undefined,
+      invoiceId: row.invoice_id ?? undefined,
+      invoiceIds: String(row.invoice_ids || row.invoice_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
+      receiptNumber: row.receipt_number,
+      date: row.date,
+      amount: Number(row.amount) || 0,
+      notes: row.notes ?? undefined,
+      allocationNote,
+      allocations: result.allocations
+    });
+  } catch (e: any) {
+    const code = e?.statusCode;
+    if (code === 400 || code === 404) {
+      return res.status(code).json({ message: e.message });
+    }
+    console.error('patchPaymentInvoices:', e);
+    return res.status(500).json({ message: 'Error asociando facturas al recibo', detail: e?.message });
   }
 };
 
@@ -675,7 +751,8 @@ export const postPaymentAllocatePreview = async (req: any, res: Response) => {
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ message: 'Importe inválido' });
     }
-    const preview = await previewPaymentAllocation(amount, invoiceIds);
+    const excludePaymentId = String(req.body?.excludePaymentId || '').trim() || undefined;
+    const preview = await previewPaymentAllocation(amount, invoiceIds, excludePaymentId);
     return res.json(preview);
   } catch (e: any) {
     console.error('postPaymentAllocatePreview:', e);
