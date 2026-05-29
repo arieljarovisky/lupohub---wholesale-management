@@ -3121,8 +3121,42 @@ export const api = {
     date: string;
     amount: number;
     notes?: string;
-  }): Promise<import('../types').Payment> => {
+  }): Promise<
+    import('../types').Payment & {
+      allocationNote?: string;
+      allocations?: Array<{
+        invoiceId: string;
+        applied: number;
+        outstandingBefore: number;
+        outstandingAfter: number;
+      }>;
+    }
+  > => {
     return await request<any>(`/payments`, 'POST', payload) as any;
+  },
+
+  getInvoicesOutstanding: async (
+    invoiceIds: string[]
+  ): Promise<Array<{ invoiceId: string; outstanding: number }>> => {
+    if (!invoiceIds.length) return [];
+    const q = encodeURIComponent(invoiceIds.join(','));
+    return await request(`/payments/invoice-outstanding?invoiceIds=${q}`, 'GET');
+  },
+
+  previewPaymentAllocation: async (
+    amount: number,
+    invoiceIds: string[]
+  ): Promise<{
+    appliedTotal: number;
+    remainingUnallocated: number;
+    allocations: Array<{
+      invoiceId: string;
+      applied: number;
+      outstandingBefore: number;
+      outstandingAfter: number;
+    }>;
+  }> => {
+    return await request('/payments/allocate-preview', 'POST', { amount, invoiceIds });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
     return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;

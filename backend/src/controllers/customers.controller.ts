@@ -5,6 +5,10 @@ import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 import { canonicalizeCityInput } from '../utils/cityNormalize';
+import {
+  SQL_ORDER_IN_SALDO_SCOPE,
+  SQL_ORDER_SALDO_RESIDUAL
+} from '../services/orderPaymentBalance.service';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
 
@@ -1128,17 +1132,20 @@ const SQL_ORDER_NETO_GRAVADO = `GREATEST(
 
 const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
 
-/** Pedidos que suman al saldo: cobro pendiente o marcados manualmente (p. ej. sin factura). */
-const SQL_ORDER_IN_SALDO_COND = `(o.payment_status = 'pendiente' OR COALESCE(o.include_in_saldo, 0) = 1)`;
-
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
-/** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
+/** Recibos sin imputar a factura/pedido (el resto se descuenta del cargo de cada pedido). */
+const SQL_PAYMENT_UNALLOCATED_COND = `NOT EXISTS (
+  SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id
+)
+AND TRIM(COALESCE(p.invoice_id, '')) = ''
+AND TRIM(COALESCE(p.order_id, '')) = ''`;
+
+/** Saldo unificado: arrastre importado + saldo residual por pedido − recibos sin imputar − dedupe import. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
     COALESCE(ob.facturas_bruto, 0)
     + COALESCE(mm.last_saldo, 0)
-    - COALESCE(ncv.nc_iva, 0)
     - COALESCE(pay.total_pagos, 0)
     - CASE
         WHEN ABS(COALESCE(mm.last_saldo, 0)) < 0.005 THEN
@@ -1220,7 +1227,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
@@ -1254,7 +1262,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
@@ -1339,6 +1348,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
             END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
              AND me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_UNALLOCATED_COND}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
@@ -1393,6 +1403,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
               )
             END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_UNALLOCATED_COND}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
@@ -1425,10 +1436,15 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
+        SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
       FROM orders o
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
-        AND ${SQL_ORDER_ACTIVE_COND}
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
@@ -1441,8 +1457,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
-        AND ${SQL_ORDER_ACTIVE_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
@@ -1467,10 +1483,15 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
+        SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
       FROM orders o
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
-        AND ${SQL_ORDER_ACTIVE_COND}
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
@@ -1483,8 +1504,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
-        AND ${SQL_ORDER_ACTIVE_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
@@ -1628,7 +1649,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
@@ -1662,7 +1684,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
@@ -2884,9 +2907,15 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       LEFT JOIN (
         SELECT
           o.customer_id,
-          SUM(${SQL_ORDER_CARGO_CON_IVA}) AS facturas_bruto
+          SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
         FROM orders o
-        WHERE ${SQL_ORDER_IN_SALDO_COND}
+        LEFT JOIN (
+          SELECT order_id, SUM(amount_credited) AS cn_total
+          FROM credit_notes
+          GROUP BY order_id
+        ) cn ON cn.order_id = o.id
+        WHERE ${SQL_ORDER_ACTIVE_COND}
+          AND ${SQL_ORDER_IN_SALDO_SCOPE}
           AND ${SQL_ORDER_ACTIVE_COND}
         GROUP BY o.customer_id
       ) ob ON ob.customer_id = c.id
@@ -2900,7 +2929,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           FROM credit_notes
           GROUP BY order_id
         ) cn ON cn.order_id = o.id
-        WHERE ${SQL_ORDER_IN_SALDO_COND}
+        WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
           AND ${SQL_ORDER_ACTIVE_COND}
         GROUP BY o.customer_id
       ) ncv ON ncv.customer_id = c.id
@@ -3193,7 +3223,8 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
@@ -3232,7 +3263,8 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE ${SQL_ORDER_IN_SALDO_COND}
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
@@ -4016,7 +4048,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       FROM orders o
       WHERE o.customer_id = ?
         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
-        AND ${SQL_ORDER_IN_SALDO_COND}
+        AND ${SQL_ORDER_ACTIVE_COND}
+        AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND ${SQL_ORDER_ACTIVE_COND}
 
       UNION ALL
@@ -4406,7 +4439,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
     const orderAgg = await get(
       `SELECT
-         ROUND(COALESCE(SUM(${SQL_ORDER_CARGO_CON_IVA}), 0), 2) AS facturas_bruto,
+         ROUND(COALESCE(SUM(${SQL_ORDER_SALDO_RESIDUAL}), 0), 2) AS facturas_bruto,
          ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
@@ -4415,8 +4448,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        WHERE o.customer_id = ?
-         AND ${SQL_ORDER_IN_SALDO_COND}
-         AND ${SQL_ORDER_ACTIVE_COND}`,
+         AND ${SQL_ORDER_ACTIVE_COND}
+         AND ${SQL_ORDER_IN_SALDO_SCOPE}`,
       [customerId]
     ) as any;
     const multimediaAgg = await get(
@@ -4479,6 +4512,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
           END
          WHERE p.customer_id = ?
            AND me_rec.customer_id IS NULL
+           AND ${SQL_PAYMENT_UNALLOCATED_COND}
+           AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
          GROUP BY
            p.customer_id,
            DATE(p.date),
@@ -4496,7 +4531,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     const ncIva = Number(orderAgg?.nc_iva || 0);
     const multimediaSaldo = Number(multimediaAgg?.multimediaSaldo || 0);
     const totalPagos = Number(paymentsAgg?.totalPagos || 0);
-    const saldoUnificado = Math.round((multimediaSaldo + facturasBruto - ncIva - totalPagos) * 100) / 100;
+    const saldoUnificado = Math.round((multimediaSaldo + facturasBruto - totalPagos) * 100) / 100;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';

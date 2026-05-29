@@ -2,6 +2,53 @@ import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
+import {
+  allocatePaymentToInvoices,
+  getInvoiceOutstandingConIva,
+  getInvoicesOutstanding,
+  previewPaymentAllocation,
+  syncAllOrderPaymentStatusForCustomer,
+  syncOrderPaymentStatus,
+  type PaymentInvoiceAllocation
+} from '../services/orderPaymentBalance.service';
+
+function formatAllocationNote(
+  alloc: {
+    appliedTotal: number;
+    remainingUnallocated: number;
+    allocations: PaymentInvoiceAllocation[];
+  },
+  paymentAmount: number
+): string | undefined {
+  const parts: string[] = [];
+  if (alloc.allocations.length > 1) {
+    parts.push(
+      `Repartido en ${alloc.allocations.length} facturas ($${alloc.appliedTotal.toLocaleString('es-AR')}).`
+    );
+  }
+  const withBalance = alloc.allocations.filter((a) => a.outstandingAfter > 0.01);
+  if (withBalance.length === 1) {
+    parts.push(
+      `Queda pendiente $${withBalance[0].outstandingAfter.toLocaleString('es-AR')} en una factura.`
+    );
+  } else if (withBalance.length > 1) {
+    const sum = withBalance.reduce((s, a) => s + a.outstandingAfter, 0);
+    parts.push(
+      `Queda pendiente $${sum.toLocaleString('es-AR')} en ${withBalance.length} facturas.`
+    );
+  } else if (alloc.allocations.length === 1 && alloc.allocations[0].outstandingAfter <= 0.01) {
+    parts.push('Factura cobrada en su totalidad.');
+  }
+  if (alloc.remainingUnallocated > 0.01) {
+    parts.push(
+      `Del recibo sobran $${alloc.remainingUnallocated.toLocaleString('es-AR')} sin imputar a las facturas elegidas.`
+    );
+  }
+  if (parts.length === 0 && alloc.appliedTotal + 0.01 < paymentAmount) {
+    return `Imputados $${alloc.appliedTotal.toLocaleString('es-AR')} a factura(s).`;
+  }
+  return parts.length ? parts.join(' ') : undefined;
+}
 
 const canManagePayments = (role?: string) =>
   role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
@@ -468,19 +515,29 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const id = uuidv4();
+    let allocationResult: Awaited<ReturnType<typeof allocatePaymentToInvoices>> | null = null;
     try {
       await execute(
         `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]
       );
-      if (systemInvoiceIds.length > 0 && paymentInvoicesEnabled) {
-        for (const invId of systemInvoiceIds) {
-          await execute(
-            `INSERT IGNORE INTO payment_invoices (payment_id, invoice_id) VALUES (?, ?)`,
-            [id, invId]
-          );
+      let resolvedOrderId = orderId;
+      if (systemInvoiceIds.length > 0) {
+        const invRow = (await get('SELECT order_id FROM invoices WHERE id = ? LIMIT 1', [
+          systemInvoiceIds[0]
+        ])) as { order_id?: string } | undefined;
+        if (invRow?.order_id) resolvedOrderId = invRow.order_id;
+        if (resolvedOrderId && resolvedOrderId !== orderId) {
+          await execute('UPDATE payments SET order_id = ? WHERE id = ?', [resolvedOrderId, id]);
         }
+      }
+      if (systemInvoiceIds.length > 0 && paymentInvoicesEnabled) {
+        allocationResult = await allocatePaymentToInvoices(id, amount, systemInvoiceIds);
+      } else if (resolvedOrderId) {
+        await syncOrderPaymentStatus(resolvedOrderId);
+      } else {
+        await syncAllOrderPaymentStatusForCustomer(customerId);
       }
       if (importedInvoiceRefs.length > 0 && paymentInvoiceRefsEnabled) {
         for (const invRef of importedInvoiceRefs) {
@@ -549,6 +606,10 @@ export const createPayment = async (req: any, res: Response) => {
        WHERE p.id = ?`,
       [id]
     );
+    const allocationNote = allocationResult
+      ? formatAllocationNote(allocationResult, amount)
+      : undefined;
+
     res.status(201).json({
       id: row.id,
       customerId: row.customer_id,
@@ -569,11 +630,56 @@ export const createPayment = async (req: any, res: Response) => {
       date: row.date,
       amount: Number(row.amount) || 0,
       notes: row.notes ?? undefined,
-      createdAt: row.created_at
+      createdAt: row.created_at,
+      allocationNote,
+      allocations: allocationResult?.allocations ?? []
     });
   } catch (e: any) {
     console.error('createPayment:', e);
     res.status(500).json({ message: 'Error creando pago', detail: e?.message });
+  }
+};
+
+/** Saldo pendiente por factura (permite varios recibos sobre la misma). */
+export const getInvoicesOutstandingHandler = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const raw = String(req.query.invoiceIds || req.query.invoiceId || '').trim();
+    const invoiceIds = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    if (!invoiceIds.length) {
+      return res.status(400).json({ message: 'Indicá invoiceIds (separados por coma)' });
+    }
+    const rows = await getInvoicesOutstanding(invoiceIds);
+    return res.json(rows);
+  } catch (e: any) {
+    console.error('getInvoicesOutstanding:', e);
+    return res.status(500).json({ message: 'Error consultando saldos de facturas' });
+  }
+};
+
+/** Vista previa: un recibo repartido en varias facturas (sin guardar). */
+export const postPaymentAllocatePreview = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const amount = Number(req.body?.amount);
+    const invoiceIds = Array.isArray(req.body?.invoiceIds)
+      ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+      : [];
+    if (!invoiceIds.length) return res.status(400).json({ message: 'Seleccioná al menos una factura' });
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: 'Importe inválido' });
+    }
+    const preview = await previewPaymentAllocation(amount, invoiceIds);
+    return res.json(preview);
+  } catch (e: any) {
+    console.error('postPaymentAllocatePreview:', e);
+    return res.status(500).json({ message: 'Error en vista previa de imputación' });
   }
 };
 

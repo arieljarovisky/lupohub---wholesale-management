@@ -85,6 +85,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
   const [paySubmitting, setPaySubmitting] = useState(false);
+  const [invoiceOutstanding, setInvoiceOutstanding] = useState<Record<string, number>>({});
+  const [payAllocPreview, setPayAllocPreview] = useState<Awaited<
+    ReturnType<typeof api.previewPaymentAllocation>
+  > | null>(null);
+  const [payPreviewLoading, setPayPreviewLoading] = useState(false);
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   /** Datos completos del remitente (incluye CAI). Necesarios para imprimir el CAI en remitos/facturas. */
   const [remitenteFromApi, setRemitenteFromApi] = useState<any>(null);
@@ -404,6 +409,59 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     if (!payCustomerId || payCustomerId === 'ALL') return [];
     return facturaOptions.filter((f) => f.customerId === payCustomerId);
   }, [items, payCustomerId]);
+
+  useEffect(() => {
+    if (!showPaymentModal || payInvoiceIds.length === 0) {
+      setInvoiceOutstanding({});
+      return;
+    }
+    let cancelled = false;
+    api
+      .getInvoicesOutstanding(payInvoiceIds)
+      .then((rows) => {
+        if (cancelled) return;
+        const m: Record<string, number> = {};
+        for (const r of rows) m[r.invoiceId] = r.outstanding;
+        setInvoiceOutstanding(m);
+      })
+      .catch(() => {
+        if (!cancelled) setInvoiceOutstanding({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showPaymentModal, payInvoiceIds]);
+
+  useEffect(() => {
+    if (!showPaymentModal || payInvoiceIds.length === 0) {
+      setPayAllocPreview(null);
+      return;
+    }
+    const amount = parseMoneyInput(payAmount || '0');
+    if (amount <= 0) {
+      setPayAllocPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setPayPreviewLoading(true);
+      api
+        .previewPaymentAllocation(amount, payInvoiceIds)
+        .then((p) => {
+          if (!cancelled) setPayAllocPreview(p);
+        })
+        .catch(() => {
+          if (!cancelled) setPayAllocPreview(null);
+        })
+        .finally(() => {
+          if (!cancelled) setPayPreviewLoading(false);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [showPaymentModal, payInvoiceIds, payAmount]);
   const facturaOptionById = useMemo(
     () => new Map(facturaOptions.map((f) => [f.invoiceId, f.label] as const)),
     [facturaOptions]
@@ -1358,6 +1416,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Facturas (múltiple)</label>
+                  <p className="text-[10px] text-slate-500 mb-1.5 leading-snug">
+                    Una factura puede tener varios recibos. Un recibo puede imputarse a varias facturas (marcá todas y el
+                    importe se reparte en orden).
+                  </p>
                   <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
                     {payCustomerId === 'ALL' ? (
                       <div className="text-xs text-slate-500 px-1 py-1">(Elegí un cliente para ver sus facturas)</div>
@@ -1381,7 +1443,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                                 }}
                                 className="accent-emerald-500"
                               />
-                              <span className="text-xs text-slate-200">{f.label}</span>
+                              <span className="text-xs text-slate-200">
+                                {f.label}
+                                {invoiceOutstanding[f.invoiceId] != null && (
+                                  <span className="text-amber-300/90 font-semibold">
+                                    {' '}
+                                    · pend. ${formatMoneyAr(invoiceOutstanding[f.invoiceId])}
+                                  </span>
+                                )}
+                              </span>
                             </label>
                           );
                         })}
@@ -1393,6 +1463,39 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   )}
                 </div>
               </div>
+
+              {(payPreviewLoading || payAllocPreview) && payInvoiceIds.length > 0 && parseMoneyInput(payAmount || '0') > 0 && (
+                <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/25 px-3 py-2.5 text-[11px] text-slate-300 space-y-1.5">
+                  <p className="font-bold text-emerald-300/95 uppercase tracking-wide text-[10px]">Imputación del recibo</p>
+                  {payPreviewLoading ? (
+                    <p className="text-slate-500 flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" /> Calculando…
+                    </p>
+                  ) : payAllocPreview ? (
+                    <>
+                      {payAllocPreview.allocations.map((a) => {
+                        const label = facturaOptionById.get(a.invoiceId)?.split(' — ')[0] || a.invoiceId;
+                        return (
+                          <p key={a.invoiceId}>
+                            <span className="text-white font-medium">{label}</span>: imputa $
+                            {formatMoneyAr(a.applied)}
+                            {a.outstandingAfter > 0.01 ? (
+                              <span className="text-amber-300"> · queda pend. ${formatMoneyAr(a.outstandingAfter)}</span>
+                            ) : (
+                              <span className="text-emerald-400"> · saldada</span>
+                            )}
+                          </p>
+                        );
+                      })}
+                      {payAllocPreview.remainingUnallocated > 0.01 && (
+                        <p className="text-slate-400">
+                          Sin asignar a las facturas elegidas: ${formatMoneyAr(payAllocPreview.remainingUnallocated)}
+                        </p>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1429,7 +1532,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
                     setPaySubmitting(true);
-                    await api.createPayment({
+                    const created = await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),
                       date: payDate,
@@ -1440,7 +1543,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       invoiceIds: payInvoiceIds,
                       orderId: null,
                     });
-                    showToast('success', 'Pago cargado.');
+                    showToast(
+                      'success',
+                      (created as { allocationNote?: string }).allocationNote || 'Pago cargado.'
+                    );
                     setShowPaymentModal(false);
                     loadPayments();
                   } catch (err: any) {
