@@ -980,6 +980,19 @@ function parseSaldoNumero(v: unknown): number {
 }
 
 /** Último saldo de columna en import Multimedia/Tango (arrastre de cuenta). */
+/**
+ * Pagos cargados por import-seller-commissions (PDF de comisiones): no son cobranza del cliente.
+ * Si entran en el saldo, el cliente figura con saldo a favor erróneo.
+ */
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
+  COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+  AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+)`;
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = `(
+  COALESCE(notes, '') NOT LIKE '%comisión vendedor%'
+  AND COALESCE(notes, '') NOT LIKE '%comision vendedor%'
+)`;
+
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
     agg.customer_id,
@@ -1045,6 +1058,7 @@ function sqlCarteraPagosMatchedImportSubquery(sellerScoped: boolean): string {
          )
        END
       WHERE 1=1${sellerWhere}
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
       GROUP BY
         p.customer_id,
         DATE(p.date),
@@ -1071,6 +1085,7 @@ const SQL_CARTERA_MM_REC_SIN_PAGO = `
       WHERE p.customer_id = e.customer_id
         AND DATE(p.date) = DATE(e.line_date)
         AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
         AND UPPER(
           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
         ) = CASE
@@ -1321,6 +1336,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
             END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
              AND me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
              DATE(p.date),
@@ -1374,6 +1390,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
               )
             END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
              DATE(p.date),
@@ -2843,6 +2860,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
                 )
               END
              WHERE me_rec.customer_id IS NULL
+               AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
              GROUP BY
                p.customer_id,
                DATE(p.date),
@@ -4033,6 +4051,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
        END
       WHERE p.customer_id = ?
         AND me_rec.customer_id IS NULL
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
     `,
