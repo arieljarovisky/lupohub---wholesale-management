@@ -836,6 +836,24 @@ const Settings: React.FC<SettingsProps> = ({
   const [newListPercent, setNewListPercent] = useState('0');
   const [newListPercentMode, setNewListPercentMode] = useState<'increase' | 'decrease'>('increase');
   const [creatingPriceList, setCreatingPriceList] = useState(false);
+  const [duplicateModalSource, setDuplicateModalSource] = useState<{ id: string; name: string } | null>(null);
+  const [duplicateListName, setDuplicateListName] = useState('');
+  const [duplicatePercent, setDuplicatePercent] = useState('0');
+  const [duplicatePercentMode, setDuplicatePercentMode] = useState<'increase' | 'decrease'>('increase');
+  const [duplicatingPriceList, setDuplicatingPriceList] = useState(false);
+
+  const openDuplicatePriceListModal = (pl: { id: string; name: string }) => {
+    setDuplicateModalSource({ id: pl.id, name: pl.name });
+    setDuplicateListName(`${pl.name} (copia)`);
+    setDuplicatePercent('0');
+    setDuplicatePercentMode('increase');
+  };
+
+  const closeDuplicatePriceListModal = () => {
+    if (duplicatingPriceList) return;
+    setDuplicateModalSource(null);
+    setDuplicateListName('');
+  };
 
   const upsertPriceListItem = (productId: string, price: number | null, meta?: { sku?: string; name?: string }) => {
     setPriceListItems(prev => {
@@ -1518,28 +1536,8 @@ const Settings: React.FC<SettingsProps> = ({
                         Editar precios
                       </button>
                       <button
-                        onClick={async () => {
-                          const name = window.prompt(`Duplicar "${pl.name}". Nombre de la nueva lista:`, `${pl.name} (copia)`);
-                          if (!name?.trim()) return;
-                          const pctRaw = window.prompt(
-                            'Ajuste de precios (%). Ej: 10 para subir 10%, -5 para bajar 5%. Dejá 0 o vacío para copiar igual.',
-                            '0'
-                          );
-                          if (pctRaw === null) return;
-                          const pct = parseFloat(String(pctRaw).replace(',', '.'));
-                          const percentAdjust = Number.isFinite(pct) ? pct : 0;
-                          try {
-                            const created = await api.duplicatePriceList(pl.id, name.trim(), percentAdjust);
-                            setPriceLists(prev => [...prev, created]);
-                            const msg =
-                              created.itemsCopied != null
-                                ? `Lista duplicada (${created.itemsCopied} precios${percentAdjust ? `, ${percentAdjust > 0 ? '+' : ''}${percentAdjust}%` : ''})`
-                                : 'Lista duplicada';
-                            showToast('success', msg);
-                          } catch (err: any) {
-                            showToast('error', err?.message || 'Error duplicando');
-                          }
-                        }}
+                        type="button"
+                        onClick={() => openDuplicatePriceListModal(pl)}
                         className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-xs font-bold flex items-center gap-1"
                         title="Duplicar lista"
                       >
@@ -1692,6 +1690,106 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: Duplicar lista de precios */}
+      <Modal
+        isOpen={!!duplicateModalSource}
+        onClose={closeDuplicatePriceListModal}
+        title={duplicateModalSource ? `Duplicar: ${duplicateModalSource.name}` : 'Duplicar lista'}
+        footer={
+          <>
+            <button
+              type="button"
+              disabled={duplicatingPriceList}
+              onClick={closeDuplicatePriceListModal}
+              className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={duplicatingPriceList || !duplicateListName.trim()}
+              onClick={async () => {
+                if (!duplicateModalSource) return;
+                const name = duplicateListName.trim();
+                if (!name) return;
+                const pctNum = parseFloat(String(duplicatePercent).replace(',', '.'));
+                const pctVal = Number.isFinite(pctNum) ? Math.abs(pctNum) : 0;
+                const percentAdjust =
+                  pctVal > 0
+                    ? duplicatePercentMode === 'decrease'
+                      ? -pctVal
+                      : pctVal
+                    : 0;
+                setDuplicatingPriceList(true);
+                try {
+                  const created = await api.duplicatePriceList(
+                    duplicateModalSource.id,
+                    name,
+                    percentAdjust
+                  );
+                  setPriceLists((prev) => [...prev, created]);
+                  closeDuplicatePriceListModal();
+                  const msg =
+                    created.itemsCopied != null
+                      ? `Lista duplicada (${created.itemsCopied} precios${percentAdjust ? `, ${percentAdjust > 0 ? '+' : ''}${percentAdjust}%` : ''})`
+                      : 'Lista duplicada';
+                  showToast('success', msg);
+                } catch (err: any) {
+                  showToast('error', err?.message || 'Error duplicando');
+                } finally {
+                  setDuplicatingPriceList(false);
+                }
+              }}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2"
+            >
+              {duplicatingPriceList ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}
+              Duplicar lista
+            </button>
+          </>
+        }
+      >
+        <p className="text-slate-400 text-sm mb-4">
+          Se copiarán todos los precios de la lista original. Opcionalmente podés aplicar un aumento o descuento
+          porcentual a la copia.
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre de la nueva lista</label>
+            <input
+              type="text"
+              value={duplicateListName}
+              onChange={(e) => setDuplicateListName(e.target.value)}
+              placeholder="Ej: Mayorista +10% (copia)"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ajuste de precios (opcional)</label>
+            <div className="flex gap-2 items-center">
+              <select
+                value={duplicatePercentMode}
+                onChange={(e) => setDuplicatePercentMode(e.target.value as 'increase' | 'decrease')}
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="increase">Aumentar</option>
+                <option value="decrease">Descontar</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                placeholder="0"
+                value={duplicatePercent}
+                onChange={(e) => setDuplicatePercent(e.target.value)}
+                className="w-24 bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-sm"
+              />
+              <span className="text-slate-400 text-sm shrink-0">%</span>
+            </div>
+            <p className="text-slate-500 text-xs mt-2">Dejá 0 para copiar los precios sin cambios.</p>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal: Editar ítems de lista de precios */}
       {editingPriceList && (
