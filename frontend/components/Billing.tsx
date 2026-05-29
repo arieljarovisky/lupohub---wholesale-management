@@ -1690,8 +1690,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   Pedidos sin factura (múltiple)
                 </label>
                 <p className="text-[10px] text-slate-500 mb-1.5 leading-snug">
-                  Pedidos sin factura AFIP que suman al saldo del cliente (marcados «En saldo» o con cobro
-                  pendiente). El recibo se imputa después de las facturas seleccionadas arriba.
+                  Pedidos sin factura AFIP: el pendiente es el neto del pedido (sin IVA). El recibo se
+                  imputa después de las facturas seleccionadas arriba.
                 </p>
                 <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
                   {linkPedidosLoading ? (

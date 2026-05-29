@@ -82,9 +82,16 @@ export const SQL_ORDER_PAID_ON_ORDER = `COALESCE((
   ) per_payment
 ), 0)`;
 
-/** Cargo con IVA neto de NC menos cobros imputados al pedido. */
+/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% si hay factura AFIP). */
+export const SQL_ORDER_CARGO_SALDO = `CASE
+  WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+    THEN ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)
+  ELSE ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2)
+END`;
+
+/** Saldo pendiente del pedido menos cobros imputados (neto sin factura; con IVA si está facturado). */
 export const SQL_ORDER_SALDO_RESIDUAL = `GREATEST(0,
-  ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)
+  (${SQL_ORDER_CARGO_SALDO})
   - (${SQL_ORDER_PAID_ON_ORDER})
 )`;
 
