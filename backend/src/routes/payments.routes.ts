@@ -8,6 +8,7 @@ import {
   updatePaymentDate,
   updateImportedPaymentDate,
   getInvoicesOutstandingHandler,
+  getOrdersOutstandingHandler,
   postPaymentAllocatePreview,
   patchPaymentInvoices
 } from '../controllers/payments.controller';
@@ -18,6 +19,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', listPayments as any);
 router.get('/invoice-outstanding', getInvoicesOutstandingHandler as any);
+router.get('/order-outstanding', getOrdersOutstandingHandler as any);
 router.post('/allocate-preview', postPaymentAllocatePreview as any);
 router.post('/', createPayment as any);
 router.patch('/imported/date', updateImportedPaymentDate as any);

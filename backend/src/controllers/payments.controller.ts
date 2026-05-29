@@ -3,50 +3,59 @@ import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import {
-  allocatePaymentToInvoices,
-  getInvoiceOutstandingConIva,
+  allocatePayment,
   getInvoicesOutstanding,
+  getOrdersOutstanding,
   previewPaymentAllocation,
   relinkPaymentToInvoices,
   syncAllOrderPaymentStatusForCustomer,
   syncOrderPaymentStatus,
-  type PaymentInvoiceAllocation
+  validateOrdersForPayment,
+  type PaymentAllocationResult
 } from '../services/orderPaymentBalance.service';
 
 function formatAllocationNote(
-  alloc: {
-    appliedTotal: number;
-    remainingUnallocated: number;
-    allocations: PaymentInvoiceAllocation[];
-  },
+  alloc: PaymentAllocationResult,
   paymentAmount: number
 ): string | undefined {
+  const allTargets = [
+    ...alloc.invoiceAllocations.map((a) => ({ kind: 'factura' as const, ...a })),
+    ...alloc.orderAllocations.map((a) => ({ kind: 'pedido' as const, ...a }))
+  ];
   const parts: string[] = [];
-  if (alloc.allocations.length > 1) {
+  if (alloc.invoiceAllocations.length > 1) {
     parts.push(
-      `Repartido en ${alloc.allocations.length} facturas ($${alloc.appliedTotal.toLocaleString('es-AR')}).`
+      `Repartido en ${alloc.invoiceAllocations.length} facturas ($${alloc.appliedTotal.toLocaleString('es-AR')}).`
     );
-  }
-  const withBalance = alloc.allocations.filter((a) => a.outstandingAfter > 0.01);
-  if (withBalance.length === 1) {
+  } else if (alloc.orderAllocations.length > 1 && alloc.invoiceAllocations.length === 0) {
     parts.push(
-      `Queda pendiente $${withBalance[0].outstandingAfter.toLocaleString('es-AR')} en una factura.`
+      `Repartido en ${alloc.orderAllocations.length} pedidos ($${alloc.appliedTotal.toLocaleString('es-AR')}).`
+    );
+  } else if (alloc.invoiceAllocations.length === 1 && alloc.orderAllocations.length === 0) {
+    if (alloc.invoiceAllocations[0].outstandingAfter <= 0.01) {
+      parts.push('Factura cobrada en su totalidad.');
+    }
+  } else if (alloc.orderAllocations.length === 1 && alloc.invoiceAllocations.length === 0) {
+    if (alloc.orderAllocations[0].outstandingAfter <= 0.01) {
+      parts.push('Pedido cobrado en su totalidad.');
+    }
+  }
+  const withBalance = allTargets.filter((a) => a.outstandingAfter > 0.01);
+  if (withBalance.length === 1 && parts.length === 0) {
+    parts.push(
+      `Queda pendiente $${withBalance[0].outstandingAfter.toLocaleString('es-AR')} en un ${withBalance[0].kind}.`
     );
   } else if (withBalance.length > 1) {
     const sum = withBalance.reduce((s, a) => s + a.outstandingAfter, 0);
-    parts.push(
-      `Queda pendiente $${sum.toLocaleString('es-AR')} en ${withBalance.length} facturas.`
-    );
-  } else if (alloc.allocations.length === 1 && alloc.allocations[0].outstandingAfter <= 0.01) {
-    parts.push('Factura cobrada en su totalidad.');
+    parts.push(`Queda pendiente $${sum.toLocaleString('es-AR')} en ${withBalance.length} comprobantes.`);
   }
   if (alloc.remainingUnallocated > 0.01) {
     parts.push(
-      `Del recibo sobran $${alloc.remainingUnallocated.toLocaleString('es-AR')} sin imputar a las facturas elegidas.`
+      `Del recibo sobran $${alloc.remainingUnallocated.toLocaleString('es-AR')} sin imputar a lo elegido.`
     );
   }
   if (parts.length === 0 && alloc.appliedTotal + 0.01 < paymentAmount) {
-    return `Imputados $${alloc.appliedTotal.toLocaleString('es-AR')} a factura(s).`;
+    return `Imputados $${alloc.appliedTotal.toLocaleString('es-AR')}.`;
   }
   return parts.length ? parts.join(' ') : undefined;
 }
@@ -55,6 +64,7 @@ const canManagePayments = (role?: string) =>
   role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 
 let paymentInvoicesTableReady: boolean | null = null;
+let paymentOrdersTableReady: boolean | null = null;
 let paymentInvoiceRefsTableReady: boolean | null = null;
 async function ensurePaymentInvoicesTable(): Promise<boolean> {
   if (paymentInvoicesTableReady === true) return true;
@@ -84,6 +94,40 @@ async function ensurePaymentInvoicesTable(): Promise<boolean> {
   } catch (e: any) {
     console.error('[payments] ensurePaymentInvoicesTable:', e?.message || e);
     paymentInvoicesTableReady = false;
+    return false;
+  }
+}
+
+async function ensurePaymentOrdersTable(): Promise<boolean> {
+  if (paymentOrdersTableReady === true) return true;
+  try {
+    await execute(`
+      CREATE TABLE IF NOT EXISTS payment_orders (
+        payment_id VARCHAR(36) NOT NULL,
+        order_id VARCHAR(36) NOT NULL,
+        amount_applied DECIMAL(12,2) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (payment_id, order_id),
+        INDEX idx_payment_orders_order (order_id),
+        CONSTRAINT fk_payment_orders_payment
+          FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+        CONSTRAINT fk_payment_orders_order
+          FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      )
+    `);
+    await execute(`
+      INSERT IGNORE INTO payment_orders (payment_id, order_id, amount_applied)
+      SELECT p.id, p.order_id, ROUND(COALESCE(p.amount, 0), 2)
+      FROM payments p
+      WHERE p.order_id IS NOT NULL AND TRIM(p.order_id) <> ''
+        AND (p.invoice_id IS NULL OR TRIM(p.invoice_id) = '')
+        AND NOT EXISTS (SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id)
+    `);
+    paymentOrdersTableReady = true;
+    return true;
+  } catch (e: any) {
+    console.error('[payments] ensurePaymentOrdersTable:', e?.message || e);
+    paymentOrdersTableReady = false;
     return false;
   }
 }
@@ -121,6 +165,7 @@ export const listPayments = async (req: any, res: Response) => {
     }
 
     const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
+    const paymentOrdersEnabled = await ensurePaymentOrdersTable();
     const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
     const { customerId, invoiceId, orderId, desde, hasta, province } = req.query as any;
     const where: string[] = [];
@@ -140,7 +185,16 @@ export const listPayments = async (req: any, res: Response) => {
       where.push('p.invoice_id = ?');
       params.push(invoiceId);
     }
-    if (orderId) { where.push('p.order_id = ?'); params.push(orderId); }
+    if (orderId) {
+      where.push(`(
+        p.order_id = ?
+        ${paymentOrdersEnabled ? `OR EXISTS (
+          SELECT 1 FROM payment_orders po2 WHERE po2.payment_id = p.id AND po2.order_id = ?
+        )` : ''}
+      )`);
+      params.push(orderId);
+      if (paymentOrdersEnabled) params.push(orderId);
+    }
     if (desde) { where.push('p.date >= ?'); params.push(desde); }
     if (hasta) { where.push('p.date <= ?'); params.push(hasta); }
     if (province && String(province).trim()) {
@@ -165,12 +219,14 @@ export const listPayments = async (req: any, res: Response) => {
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+        ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
         ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
       FROM payments p
       JOIN customers c ON c.id = p.customer_id
       LEFT JOIN users u ON u.id = p.seller_id
       LEFT JOIN invoices i ON i.id = p.invoice_id
       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+      ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
       ${whereSql}
       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
@@ -203,6 +259,10 @@ export const listPayments = async (req: any, res: Response) => {
       sellerId: r.seller_id ?? undefined,
       sellerName: r.seller_name ?? undefined,
       orderId: r.order_id ?? undefined,
+      orderIds: String(r.order_ids || r.order_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
       invoiceId: r.invoice_id ?? undefined,
       invoiceIds: Array.from(new Set([
         ...String(r.invoice_ids || r.invoice_id || '')
@@ -419,11 +479,13 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const paymentInvoicesEnabled = await ensurePaymentInvoicesTable();
+    const paymentOrdersEnabled = await ensurePaymentOrdersTable();
     const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
     const body = req.body as {
       customerId?: string;
       sellerId?: string | null;
       orderId?: string | null;
+      orderIds?: string[];
       invoiceId?: string | null;
       invoiceIds?: string[];
       receiptNumber?: string;
@@ -452,6 +514,10 @@ export const createPayment = async (req: any, res: Response) => {
       ? user.id
       : (body.sellerId ? String(body.sellerId).trim() : null);
     const orderId = body.orderId ? String(body.orderId).trim() : null;
+    const orderIds = Array.isArray(body.orderIds)
+      ? Array.from(new Set(body.orderIds.map((x) => String(x || '').trim()).filter(Boolean)))
+      : [];
+    if (orderId && !orderIds.includes(orderId)) orderIds.unshift(orderId);
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
     const invoiceIds = Array.isArray(body.invoiceIds)
       ? Array.from(new Set(body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)))
@@ -460,8 +526,10 @@ export const createPayment = async (req: any, res: Response) => {
 
     if (invoiceId && !invoiceIds.includes(invoiceId)) invoiceIds.unshift(invoiceId);
     const systemInvoiceIds = invoiceIds.filter((id) => !id.startsWith('mm-fac-'));
+    const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
     const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
     const primaryInvoiceId = systemInvoiceIds[0] || null;
+    const primaryOrderId = systemOrderIds[0] || orderId || null;
 
     if (systemInvoiceIds.length > 0) {
       const rows = await query(
@@ -478,6 +546,12 @@ export const createPayment = async (req: any, res: Response) => {
       if (invalidByCustomer) {
         return res.status(400).json({ message: 'Solo podés relacionar facturas del mismo cliente del recibo' });
       }
+    }
+
+    try {
+      await validateOrdersForPayment(systemOrderIds, customerId);
+    } catch (e: any) {
+      return res.status(e?.statusCode || 400).json({ message: e.message });
     }
 
     const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
@@ -516,25 +590,28 @@ export const createPayment = async (req: any, res: Response) => {
     }
 
     const id = uuidv4();
-    let allocationResult: Awaited<ReturnType<typeof allocatePaymentToInvoices>> | null = null;
+    let allocationResult: PaymentAllocationResult | null = null;
     try {
       await execute(
         `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, customerId, sellerId, orderId, primaryInvoiceId, receiptNumber, date, amount, notes]
+        [id, customerId, sellerId, primaryOrderId, primaryInvoiceId, receiptNumber, date, amount, notes]
       );
-      let resolvedOrderId = orderId;
+      let resolvedOrderId = primaryOrderId;
       if (systemInvoiceIds.length > 0) {
         const invRow = (await get('SELECT order_id FROM invoices WHERE id = ? LIMIT 1', [
           systemInvoiceIds[0]
         ])) as { order_id?: string } | undefined;
         if (invRow?.order_id) resolvedOrderId = invRow.order_id;
-        if (resolvedOrderId && resolvedOrderId !== orderId) {
+        if (resolvedOrderId && resolvedOrderId !== primaryOrderId) {
           await execute('UPDATE payments SET order_id = ? WHERE id = ?', [resolvedOrderId, id]);
         }
       }
-      if (systemInvoiceIds.length > 0 && paymentInvoicesEnabled) {
-        allocationResult = await allocatePaymentToInvoices(id, amount, systemInvoiceIds);
+      if (
+        (systemInvoiceIds.length > 0 || systemOrderIds.length > 0) &&
+        (paymentInvoicesEnabled || paymentOrdersEnabled)
+      ) {
+        allocationResult = await allocatePayment(id, amount, systemInvoiceIds, systemOrderIds);
       } else if (resolvedOrderId) {
         await syncOrderPaymentStatus(resolvedOrderId);
       } else {
@@ -593,9 +670,11 @@ export const createPayment = async (req: any, res: Response) => {
         ? `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
          ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
        ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`
@@ -616,6 +695,10 @@ export const createPayment = async (req: any, res: Response) => {
       customerId: row.customer_id,
       sellerId: row.seller_id ?? undefined,
       orderId: row.order_id ?? undefined,
+      orderIds: String(row.order_ids || row.order_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
       invoiceId: row.invoice_id ?? undefined,
       invoiceIds: Array.from(new Set([
         ...String(row.invoice_ids || row.invoice_id || '')
@@ -633,7 +716,8 @@ export const createPayment = async (req: any, res: Response) => {
       notes: row.notes ?? undefined,
       createdAt: row.created_at,
       allocationNote,
-      allocations: allocationResult?.allocations ?? []
+      invoiceAllocations: allocationResult?.invoiceAllocations ?? [],
+      orderAllocations: allocationResult?.orderAllocations ?? []
     });
   } catch (e: any) {
     console.error('createPayment:', e);
@@ -662,7 +746,28 @@ export const getInvoicesOutstandingHandler = async (req: any, res: Response) => 
   }
 };
 
-/** Asocia un recibo ya cargado a una o más facturas del mismo cliente. */
+/** Saldo pendiente por pedido sin factura. */
+export const getOrdersOutstandingHandler = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const raw = String(req.query.orderIds || req.query.orderId || '').trim();
+    const orderIds = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    const excludePaymentId = String(req.query.excludePaymentId || '').trim() || undefined;
+    if (!orderIds.length) {
+      return res.status(400).json({ message: 'Indicá orderIds (separados por coma)' });
+    }
+    const rows = await getOrdersOutstanding(orderIds, excludePaymentId);
+    return res.json(rows);
+  } catch (e: any) {
+    console.error('getOrdersOutstanding:', e);
+    return res.status(500).json({ message: 'Error consultando saldos de pedidos' });
+  }
+};
+
+/** Asocia un recibo ya cargado a facturas y/o pedidos sin factura del mismo cliente. */
 export const patchPaymentInvoices = async (req: any, res: Response) => {
   try {
     const user = req.user;
@@ -680,6 +785,11 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const invoiceIds = Array.isArray(req.body?.invoiceIds)
       ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
       : [];
+    const orderIds = Array.isArray(req.body?.orderIds)
+      ? req.body.orderIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+      : [];
+
+    const paymentOrdersEnabled = await ensurePaymentOrdersTable();
 
     const payment = (await get(
       `SELECT p.id, p.customer_id, c.seller_id
@@ -693,15 +803,17 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
     }
 
-    const result = await relinkPaymentToInvoices(paymentId, invoiceIds);
+    const result = await relinkPaymentToInvoices(paymentId, invoiceIds, orderIds);
 
     const row = (await get(
       `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at,
-         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids
+         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
+         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
@@ -714,6 +826,10 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       id: row.id,
       customerId: row.customer_id,
       orderId: row.order_id ?? undefined,
+      orderIds: String(row.order_ids || row.order_id || '')
+        .split(',')
+        .map((x: string) => x.trim())
+        .filter(Boolean),
       invoiceId: row.invoice_id ?? undefined,
       invoiceIds: String(row.invoice_ids || row.invoice_id || '')
         .split(',')
@@ -724,7 +840,8 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       amount: Number(row.amount) || 0,
       notes: row.notes ?? undefined,
       allocationNote,
-      allocations: result.allocations
+      invoiceAllocations: result.invoiceAllocations,
+      orderAllocations: result.orderAllocations
     });
   } catch (e: any) {
     const code = e?.statusCode;
@@ -732,7 +849,7 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       return res.status(code).json({ message: e.message });
     }
     console.error('patchPaymentInvoices:', e);
-    return res.status(500).json({ message: 'Error asociando facturas al recibo', detail: e?.message });
+    return res.status(500).json({ message: 'Error asociando comprobantes al recibo', detail: e?.message });
   }
 };
 
@@ -747,12 +864,17 @@ export const postPaymentAllocatePreview = async (req: any, res: Response) => {
     const invoiceIds = Array.isArray(req.body?.invoiceIds)
       ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
       : [];
-    if (!invoiceIds.length) return res.status(400).json({ message: 'Seleccioná al menos una factura' });
+    const orderIds = Array.isArray(req.body?.orderIds)
+      ? req.body.orderIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+      : [];
+    if (!invoiceIds.length && !orderIds.length) {
+      return res.status(400).json({ message: 'Seleccioná al menos una factura o un pedido sin factura' });
+    }
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ message: 'Importe inválido' });
     }
     const excludePaymentId = String(req.body?.excludePaymentId || '').trim() || undefined;
-    const preview = await previewPaymentAllocation(amount, invoiceIds, excludePaymentId);
+    const preview = await previewPaymentAllocation(amount, invoiceIds, orderIds, excludePaymentId);
     return res.json(preview);
   } catch (e: any) {
     console.error('postPaymentAllocatePreview:', e);

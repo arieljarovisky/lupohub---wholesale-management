@@ -30,13 +30,23 @@ export const SQL_PAYMENT_EXCLUDE_COMMISSION_P = `(
   AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
 )`;
 
-/** Pagos imputados a este pedido: suma amount_applied por factura; si no hay, el importe total del recibo (legacy). */
+/** Pagos imputados a este pedido: payment_orders, payment_invoices, o legacy order_id/invoice_id. */
 export const SQL_ORDER_PAID_ON_ORDER = `COALESCE((
   SELECT SUM(ROUND(per_payment.applied, 2))
   FROM (
     SELECT
       p.id,
       COALESCE(
+        NULLIF((
+          SELECT SUM(
+            CASE
+              WHEN po.amount_applied IS NOT NULL AND po.amount_applied > 0 THEN po.amount_applied
+              ELSE 0
+            END
+          )
+          FROM payment_orders po
+          WHERE po.payment_id = p.id AND po.order_id = o.id
+        ), 0),
         NULLIF((
           SELECT SUM(
             CASE
@@ -51,14 +61,17 @@ export const SQL_ORDER_PAID_ON_ORDER = `COALESCE((
         CASE
           WHEN EXISTS (SELECT 1 FROM invoices i3 WHERE i3.id = p.invoice_id AND i3.order_id = o.id)
             THEN ROUND(COALESCE(p.amount, 0), 2)
-          WHEN p.order_id = o.id THEN ROUND(COALESCE(p.amount, 0), 2)
+          WHEN p.order_id = o.id
+            AND NOT EXISTS (SELECT 1 FROM payment_orders po2 WHERE po2.payment_id = p.id)
+            THEN ROUND(COALESCE(p.amount, 0), 2)
           ELSE 0
         END
       ) AS applied
     FROM payments p
     WHERE ${SQL_PAYMENT_EXCLUDE_COMMISSION_P}
       AND (
-        EXISTS (
+        EXISTS (SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id AND po.order_id = o.id)
+        OR EXISTS (
           SELECT 1 FROM payment_invoices pi
           INNER JOIN invoices i ON i.id = pi.invoice_id
           WHERE pi.payment_id = p.id AND i.order_id = o.id
@@ -140,6 +153,77 @@ export type PaymentInvoiceAllocation = {
   outstandingAfter: number;
 };
 
+export type PaymentOrderAllocation = {
+  orderId: string;
+  applied: number;
+  outstandingBefore: number;
+  outstandingAfter: number;
+};
+
+export type PaymentAllocationResult = {
+  appliedTotal: number;
+  remainingUnallocated: number;
+  invoiceAllocations: PaymentInvoiceAllocation[];
+  orderAllocations: PaymentOrderAllocation[];
+};
+
+async function getPaymentAppliedToOrder(paymentId: string, orderId: string): Promise<number> {
+  const row = (await get(
+    `SELECT
+       COALESCE(
+         NULLIF((
+           SELECT po.amount_applied FROM payment_orders po
+           WHERE po.payment_id = ? AND po.order_id = ?
+             AND po.amount_applied IS NOT NULL AND po.amount_applied > 0
+           LIMIT 1
+         ), 0),
+         NULLIF((
+           SELECT SUM(pi.amount_applied)
+           FROM payment_invoices pi
+           INNER JOIN invoices i ON i.id = pi.invoice_id
+           WHERE pi.payment_id = ? AND i.order_id = ?
+             AND pi.amount_applied IS NOT NULL AND pi.amount_applied > 0
+         ), 0),
+         CASE
+           WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.id = p.invoice_id AND i.order_id = ?)
+             THEN ROUND(COALESCE(p.amount, 0), 2)
+           WHEN p.order_id = ?
+             AND NOT EXISTS (SELECT 1 FROM payment_orders po2 WHERE po2.payment_id = p.id)
+             THEN ROUND(COALESCE(p.amount, 0), 2)
+           ELSE 0
+         END
+       ) AS applied
+     FROM payments p
+     WHERE p.id = ?`,
+    [paymentId, orderId, paymentId, orderId, orderId, orderId, paymentId]
+  )) as { applied: number } | undefined;
+  return round2(Number(row?.applied ?? 0));
+}
+
+/** Saldo pendiente de un pedido sin factura (con IVA, neto de NC). */
+export async function getOrderOutstandingSinFactura(
+  orderId: string,
+  excludePaymentId?: string
+): Promise<number> {
+  const row = (await get(
+    `SELECT (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
+     FROM orders o
+     LEFT JOIN (
+       SELECT order_id, SUM(amount_credited) AS cn_total
+       FROM credit_notes
+       GROUP BY order_id
+     ) cn ON cn.order_id = o.id
+     WHERE o.id = ?`,
+    [orderId]
+  )) as { residual: number } | undefined;
+  let out = round2(Math.max(0, Number(row?.residual ?? 0)));
+  if (excludePaymentId && out >= 0) {
+    const applied = await getPaymentAppliedToOrder(excludePaymentId, orderId);
+    out = round2(out + applied);
+  }
+  return out;
+}
+
 /** Reparte un recibo entre varias facturas (orden de la lista) y permite varios recibos por factura. */
 export async function allocatePaymentToInvoices(
   paymentId: string,
@@ -188,19 +272,81 @@ export async function allocatePaymentToInvoices(
   return { appliedTotal, remainingUnallocated: remaining, allocations };
 }
 
-/** Vista previa de imputación (misma lógica que allocatePaymentToInvoices, sin grabar). */
-export async function previewPaymentAllocation(
+/** Reparte un recibo entre pedidos sin factura (orden de la lista). */
+export async function allocatePaymentToOrders(
+  paymentId: string,
   totalAmount: number,
-  invoiceIds: string[],
-  excludePaymentId?: string
+  orderIds: string[]
 ): Promise<{
   appliedTotal: number;
   remainingUnallocated: number;
-  allocations: PaymentInvoiceAllocation[];
+  allocations: PaymentOrderAllocation[];
 }> {
   let remaining = round2(totalAmount);
   let appliedTotal = 0;
-  const allocations: PaymentInvoiceAllocation[] = [];
+  const allocations: PaymentOrderAllocation[] = [];
+
+  for (const orderId of orderIds) {
+    if (remaining <= 0.005) break;
+    const outstandingBefore = await getOrderOutstandingSinFactura(orderId, paymentId);
+    if (outstandingBefore <= 0.005) continue;
+    const applied = round2(Math.min(remaining, outstandingBefore));
+    await execute(
+      `INSERT INTO payment_orders (payment_id, order_id, amount_applied)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE amount_applied = VALUES(amount_applied)`,
+      [paymentId, orderId, applied]
+    );
+    remaining = round2(remaining - applied);
+    appliedTotal = round2(appliedTotal + applied);
+    allocations.push({
+      orderId,
+      applied,
+      outstandingBefore,
+      outstandingAfter: round2(Math.max(0, outstandingBefore - applied))
+    });
+    await execute(
+      `UPDATE orders SET include_in_saldo = 1 WHERE id = ? AND COALESCE(include_in_saldo, 0) = 0`,
+      [orderId]
+    );
+    await syncOrderPaymentStatus(orderId);
+  }
+
+  return { appliedTotal, remainingUnallocated: remaining, allocations };
+}
+
+/** Imputa recibo: primero facturas, luego pedidos sin factura. */
+export async function allocatePayment(
+  paymentId: string,
+  totalAmount: number,
+  invoiceIds: string[],
+  orderIds: string[]
+): Promise<PaymentAllocationResult> {
+  const invResult = await allocatePaymentToInvoices(paymentId, totalAmount, invoiceIds);
+  const orderResult = await allocatePaymentToOrders(
+    paymentId,
+    invResult.remainingUnallocated,
+    orderIds
+  );
+  return {
+    appliedTotal: round2(invResult.appliedTotal + orderResult.appliedTotal),
+    remainingUnallocated: orderResult.remainingUnallocated,
+    invoiceAllocations: invResult.allocations,
+    orderAllocations: orderResult.allocations
+  };
+}
+
+/** Vista previa de imputación (misma lógica que allocatePayment, sin grabar). */
+export async function previewPaymentAllocation(
+  totalAmount: number,
+  invoiceIds: string[],
+  orderIds: string[] = [],
+  excludePaymentId?: string
+): Promise<PaymentAllocationResult> {
+  let remaining = round2(totalAmount);
+  let appliedTotal = 0;
+  const invoiceAllocations: PaymentInvoiceAllocation[] = [];
+  const orderAllocations: PaymentOrderAllocation[] = [];
 
   for (const invoiceId of invoiceIds) {
     if (remaining <= 0.005) break;
@@ -209,7 +355,7 @@ export async function previewPaymentAllocation(
     const applied = round2(Math.min(remaining, outstandingBefore));
     remaining = round2(remaining - applied);
     appliedTotal = round2(appliedTotal + applied);
-    allocations.push({
+    invoiceAllocations.push({
       invoiceId,
       applied,
       outstandingBefore,
@@ -217,7 +363,27 @@ export async function previewPaymentAllocation(
     });
   }
 
-  return { appliedTotal, remainingUnallocated: remaining, allocations };
+  for (const orderId of orderIds) {
+    if (remaining <= 0.005) break;
+    const outstandingBefore = await getOrderOutstandingSinFactura(orderId, excludePaymentId);
+    if (outstandingBefore <= 0.005) continue;
+    const applied = round2(Math.min(remaining, outstandingBefore));
+    remaining = round2(remaining - applied);
+    appliedTotal = round2(appliedTotal + applied);
+    orderAllocations.push({
+      orderId,
+      applied,
+      outstandingBefore,
+      outstandingAfter: round2(Math.max(0, outstandingBefore - applied))
+    });
+  }
+
+  return {
+    appliedTotal,
+    remainingUnallocated: remaining,
+    invoiceAllocations,
+    orderAllocations
+  };
 }
 
 /** Saldo pendiente por factura (varios recibos acumulados). */
@@ -235,15 +401,61 @@ export async function getInvoicesOutstanding(
   return out;
 }
 
-/** Reasocia un recibo ya cargado a facturas (reemplaza vínculos anteriores). */
+/** Saldo pendiente por pedido sin factura. */
+export async function getOrdersOutstanding(
+  orderIds: string[],
+  excludePaymentId?: string
+): Promise<Array<{ orderId: string; outstanding: number }>> {
+  const out: Array<{ orderId: string; outstanding: number }> = [];
+  for (const orderId of orderIds) {
+    out.push({
+      orderId,
+      outstanding: await getOrderOutstandingSinFactura(orderId, excludePaymentId)
+    });
+  }
+  return out;
+}
+
+/** Valida pedidos sin factura para imputación de recibo. */
+export async function validateOrdersForPayment(
+  orderIds: string[],
+  customerId: string
+): Promise<void> {
+  if (orderIds.length === 0) return;
+  const rows = (await query(
+    `SELECT o.id, o.customer_id,
+            EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id) AS has_invoice
+     FROM orders o
+     WHERE o.id IN (${orderIds.map(() => '?').join(',')})`,
+    orderIds
+  )) as Array<{ id: string; customer_id: string; has_invoice: number }>;
+  if (rows.length !== orderIds.length) {
+    const err: any = new Error('Hay pedidos inválidos en la selección');
+    err.statusCode = 400;
+    throw err;
+  }
+  const invalidCustomer = rows.find((r) => r.customer_id !== customerId);
+  if (invalidCustomer) {
+    const err: any = new Error('Todos los pedidos deben ser del mismo cliente que el recibo');
+    err.statusCode = 400;
+    throw err;
+  }
+  const invoiced = rows.find((r) => Number(r.has_invoice) === 1);
+  if (invoiced) {
+    const err: any = new Error(
+      'Un pedido facturado se imputa por su factura, no directamente al pedido'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
+/** Reasocia un recibo ya cargado a facturas y/o pedidos sin factura. */
 export async function relinkPaymentToInvoices(
   paymentId: string,
-  invoiceIds: string[]
-): Promise<{
-  appliedTotal: number;
-  remainingUnallocated: number;
-  allocations: PaymentInvoiceAllocation[];
-}> {
+  invoiceIds: string[],
+  orderIds: string[] = []
+): Promise<PaymentAllocationResult> {
   const payment = (await get(
     `SELECT id, customer_id, amount, notes FROM payments WHERE id = ?`,
     [paymentId]
@@ -262,58 +474,77 @@ export async function relinkPaymentToInvoices(
 
   const amount = round2(Number(payment.amount) || 0);
   const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
+  const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
 
   const oldOrderRows = (await query(
-    `SELECT DISTINCT COALESCE(i.order_id, p.order_id) AS order_id
+    `SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
      FROM payments p
      LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+     LEFT JOIN payment_orders po ON po.payment_id = p.id
      LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
      WHERE p.id = ?
-       AND COALESCE(i.order_id, p.order_id) IS NOT NULL`,
+       AND COALESCE(i.order_id, po.order_id, p.order_id) IS NOT NULL`,
     [paymentId]
   )) as Array<{ order_id: string }>;
 
   await execute('DELETE FROM payment_invoices WHERE payment_id = ?', [paymentId]);
+  await execute('DELETE FROM payment_orders WHERE payment_id = ?', [paymentId]);
 
-  if (systemInvoiceIds.length === 0) {
+  if (systemInvoiceIds.length === 0 && systemOrderIds.length === 0) {
     await execute('UPDATE payments SET invoice_id = NULL, order_id = NULL WHERE id = ?', [paymentId]);
     for (const r of oldOrderRows) {
       if (r.order_id) await syncOrderPaymentStatus(r.order_id);
     }
     await syncAllOrderPaymentStatusForCustomer(payment.customer_id);
-    return { appliedTotal: 0, remainingUnallocated: amount, allocations: [] };
+    return {
+      appliedTotal: 0,
+      remainingUnallocated: amount,
+      invoiceAllocations: [],
+      orderAllocations: []
+    };
   }
 
-  const rows = (await query(
-    `SELECT i.id, o.customer_id
-     FROM invoices i
-     JOIN orders o ON o.id = i.order_id
-     WHERE i.id IN (${systemInvoiceIds.map(() => '?').join(',')})`,
-    systemInvoiceIds
-  )) as Array<{ id: string; customer_id: string }>;
-  if (rows.length !== systemInvoiceIds.length) {
-    const err: any = new Error('Hay facturas inválidas en la selección');
-    err.statusCode = 400;
-    throw err;
-  }
-  const invalid = rows.find((r) => r.customer_id !== payment.customer_id);
-  if (invalid) {
-    const err: any = new Error('Todas las facturas deben ser del mismo cliente que el recibo');
-    err.statusCode = 400;
-    throw err;
+  if (systemInvoiceIds.length > 0) {
+    const rows = (await query(
+      `SELECT i.id, o.customer_id
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       WHERE i.id IN (${systemInvoiceIds.map(() => '?').join(',')})`,
+      systemInvoiceIds
+    )) as Array<{ id: string; customer_id: string }>;
+    if (rows.length !== systemInvoiceIds.length) {
+      const err: any = new Error('Hay facturas inválidas en la selección');
+      err.statusCode = 400;
+      throw err;
+    }
+    const invalid = rows.find((r) => r.customer_id !== payment.customer_id);
+    if (invalid) {
+      const err: any = new Error('Todas las facturas deben ser del mismo cliente que el recibo');
+      err.statusCode = 400;
+      throw err;
+    }
   }
 
-  const primaryInvoiceId = systemInvoiceIds[0];
-  const ord = (await get('SELECT order_id FROM invoices WHERE id = ?', [primaryInvoiceId])) as
-    | { order_id: string }
-    | undefined;
+  await validateOrdersForPayment(systemOrderIds, payment.customer_id);
+
+  const primaryInvoiceId = systemInvoiceIds[0] || null;
+  let primaryOrderId: string | null = null;
+  if (primaryInvoiceId) {
+    const ord = (await get('SELECT order_id FROM invoices WHERE id = ?', [primaryInvoiceId])) as
+      | { order_id: string }
+      | undefined;
+    primaryOrderId = ord?.order_id ?? null;
+  } else if (systemOrderIds.length > 0) {
+    primaryOrderId = systemOrderIds[0];
+  }
+
   await execute('UPDATE payments SET invoice_id = ?, order_id = ? WHERE id = ?', [
     primaryInvoiceId,
-    ord?.order_id ?? null,
+    primaryOrderId,
     paymentId
   ]);
 
-  const result = await allocatePaymentToInvoices(paymentId, amount, systemInvoiceIds);
+  const result = await allocatePayment(paymentId, amount, systemInvoiceIds, systemOrderIds);
 
   const orderIdsToSync = new Set<string>();
   for (const r of oldOrderRows) {
@@ -324,6 +555,9 @@ export async function relinkPaymentToInvoices(
       | { order_id: string }
       | undefined;
     if (o?.order_id) orderIdsToSync.add(o.order_id);
+  }
+  for (const oid of systemOrderIds) {
+    orderIdsToSync.add(oid);
   }
   for (const oid of orderIdsToSync) {
     await syncOrderPaymentStatus(oid);

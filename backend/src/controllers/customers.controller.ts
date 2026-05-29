@@ -1138,6 +1138,9 @@ const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.
 const SQL_PAYMENT_UNALLOCATED_COND = `NOT EXISTS (
   SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id
 )
+AND NOT EXISTS (
+  SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id
+)
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
 

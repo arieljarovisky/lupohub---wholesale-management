@@ -83,6 +83,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
   const [payInvoiceIds, setPayInvoiceIds] = useState<string[]>([]);
+  const [payOrderIds, setPayOrderIds] = useState<string[]>([]);
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
@@ -96,6 +97,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     Array<{ invoiceId: string; label: string; customerId: string }>
   >([]);
   const [linkFacturasLoading, setLinkFacturasLoading] = useState(false);
+  const [linkPedidoOptions, setLinkPedidoOptions] = useState<
+    Array<{ orderId: string; label: string; customerId: string }>
+  >([]);
+  const [createPedidoOptions, setCreatePedidoOptions] = useState<
+    Array<{ orderId: string; label: string; customerId: string }>
+  >([]);
+  const [linkPedidosLoading, setLinkPedidosLoading] = useState(false);
+  const [orderOutstanding, setOrderOutstanding] = useState<Record<string, number>>({});
   const [issuerFromApi, setIssuerFromApi] = useState<{ cuit: string; businessName: string; address: string; city: string } | null>(null);
   /** Datos completos del remitente (incluye CAI). Necesarios para imprimir el CAI en remitos/facturas. */
   const [remitenteFromApi, setRemitenteFromApi] = useState<any>(null);
@@ -412,6 +421,20 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         };
       });
 
+  const mapOrdersToPedidoOptions = (orders: Order[]) =>
+    orders
+      .filter((o) => o.includeInSaldo && !o.invoice)
+      .map((o) => {
+        const d = new Date(o.date);
+        const dateLabel = Number.isNaN(d.getTime()) ? String(o.date || '') : d.toLocaleDateString('es-AR');
+        const ref = o.remitoNumber ? `Remito ${o.remitoNumber}` : `Pedido ${String(o.id).slice(0, 8)}`;
+        return {
+          orderId: o.id,
+          label: `${ref} — ${dateLabel} — $${formatMoneyAr(Number(o.total || 0) * 1.21)} (c/ IVA est.)`.trim(),
+          customerId: o.customerId
+        };
+      });
+
   const facturaOptions = useMemo(() => mapBillingRowsToFacturaOptions(items), [items]);
 
   /** Facturas del modal de pago: solo las del cliente elegido (misma lista que la grilla según filtros actuales). */
@@ -425,6 +448,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return facturaOptionsForPayment;
   }, [paymentModalMode, linkFacturaOptions, facturaOptionsForPayment]);
 
+  const pedidoOptionsInModal = useMemo(() => {
+    if (paymentModalMode === 'link') return linkPedidoOptions;
+    return createPedidoOptions;
+  }, [paymentModalMode, linkPedidoOptions, createPedidoOptions]);
+
   const openCreatePaymentModal = () => {
     setPaymentModalMode('create');
     setLinkTargetPayment(null);
@@ -432,9 +460,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setPayDate(new Date().toISOString().slice(0, 10));
     setPayCustomerId('ALL');
     setPayInvoiceIds([]);
+    setPayOrderIds([]);
     setPaySellerId('');
     setPayAmount('');
     setPayNotes('');
+    setCreatePedidoOptions([]);
     setShowPaymentModal(true);
   };
 
@@ -453,11 +483,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         (id) => id && !id.startsWith('mm-')
       )
     );
+    setPayOrderIds(
+      (Array.isArray(p.orderIds) ? p.orderIds : p.orderId ? [p.orderId] : []).filter(Boolean)
+    );
     setPaySellerId(p.sellerId || '');
     setPayAmount(String(p.amount ?? ''));
     setPayNotes(p.notes || '');
     setShowPaymentModal(true);
     setLinkFacturasLoading(true);
+    setLinkPedidosLoading(true);
     api
       .getBilling({ customerId: p.customerId, tipo: 'FACTURA' })
       .then((rows) => setLinkFacturaOptions(mapBillingRowsToFacturaOptions(Array.isArray(rows) ? rows : [])))
@@ -466,7 +500,45 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         showToast('error', 'No se pudieron cargar las facturas del cliente.');
       })
       .finally(() => setLinkFacturasLoading(false));
+    api
+      .getOrders()
+      .then((orders) =>
+        setLinkPedidoOptions(
+          mapOrdersToPedidoOptions(
+            (Array.isArray(orders) ? orders : []).filter((o) => o.customerId === p.customerId)
+          )
+        )
+      )
+      .catch(() => {
+        setLinkPedidoOptions([]);
+        showToast('error', 'No se pudieron cargar los pedidos del cliente.');
+      })
+      .finally(() => setLinkPedidosLoading(false));
   };
+
+  useEffect(() => {
+    if (!showPaymentModal || paymentModalMode !== 'create' || !payCustomerId || payCustomerId === 'ALL') {
+      setCreatePedidoOptions([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getOrders()
+      .then((orders) => {
+        if (cancelled) return;
+        setCreatePedidoOptions(
+          mapOrdersToPedidoOptions(
+            (Array.isArray(orders) ? orders : []).filter((o) => o.customerId === payCustomerId)
+          )
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCreatePedidoOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showPaymentModal, paymentModalMode, payCustomerId]);
 
   const linkExcludePaymentId =
     paymentModalMode === 'link' && linkTargetPayment && !linkTargetPayment.id.startsWith('mm-')
@@ -496,7 +568,29 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   }, [showPaymentModal, payInvoiceIds, linkExcludePaymentId]);
 
   useEffect(() => {
-    if (!showPaymentModal || payInvoiceIds.length === 0) {
+    if (!showPaymentModal || payOrderIds.length === 0) {
+      setOrderOutstanding({});
+      return;
+    }
+    let cancelled = false;
+    api
+      .getOrdersOutstanding(payOrderIds, linkExcludePaymentId)
+      .then((rows) => {
+        if (cancelled) return;
+        const m: Record<string, number> = {};
+        for (const r of rows) m[r.orderId] = r.outstanding;
+        setOrderOutstanding(m);
+      })
+      .catch(() => {
+        if (!cancelled) setOrderOutstanding({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showPaymentModal, payOrderIds, linkExcludePaymentId]);
+
+  useEffect(() => {
+    if (!showPaymentModal || (payInvoiceIds.length === 0 && payOrderIds.length === 0)) {
       setPayAllocPreview(null);
       return;
     }
@@ -509,7 +603,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     const timer = window.setTimeout(() => {
       setPayPreviewLoading(true);
       api
-        .previewPaymentAllocation(amount, payInvoiceIds, linkExcludePaymentId)
+        .previewPaymentAllocation(amount, payInvoiceIds, payOrderIds, linkExcludePaymentId)
         .then((p) => {
           if (!cancelled) setPayAllocPreview(p);
         })
@@ -524,10 +618,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [showPaymentModal, payInvoiceIds, payAmount, linkExcludePaymentId]);
+  }, [showPaymentModal, payInvoiceIds, payOrderIds, payAmount, linkExcludePaymentId]);
   const facturaOptionById = useMemo(
     () => new Map(facturaOptions.map((f) => [f.invoiceId, f.label] as const)),
     [facturaOptions]
+  );
+  const pedidoOptionById = useMemo(
+    () => new Map(pedidoOptionsInModal.map((p) => [p.orderId, p.label] as const)),
+    [pedidoOptionsInModal]
   );
 
   const formatDate = (d: any) => {
@@ -1362,6 +1460,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   <div className="text-xs text-slate-400">
                     Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
                   </div>
+                  {Array.isArray(p.orderIds) && p.orderIds.length > 0 && (
+                    <div className="text-[11px] text-slate-500 truncate">
+                      Pedidos sin factura:{' '}
+                      {p.orderIds.map((id) => pedidoOptionById.get(id) || id).join(' | ')}
+                    </div>
+                  )}
                   {Array.isArray(p.invoiceIds) && p.invoiceIds.length > 0 && (
                     <div className="text-[11px] text-slate-500 truncate">
                       Facturas: {p.invoiceIds.map((id) => facturaOptionById.get(id) || id).join(' | ')}
@@ -1375,7 +1479,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
                       onClick={() => openLinkPaymentModal(p)}
                     >
-                      Asociar facturas
+                      Asociar comprobantes
                     </button>
                   )}
                   {!isSeller && (
@@ -1445,7 +1549,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
               <h3 className="text-white font-black text-lg">
-                {paymentModalMode === 'link' ? 'Asociar recibo a facturas' : 'Cargar pago'}
+                {paymentModalMode === 'link' ? 'Asociar recibo a comprobantes' : 'Cargar pago'}
               </h3>
               <button onClick={() => setShowPaymentModal(false)} className="text-slate-400 hover:text-white">✕</button>
             </div>
@@ -1454,7 +1558,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <p className="text-xs text-slate-400 rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2">
                   Recibo <span className="font-mono text-white">{linkTargetPayment.receiptNumber}</span> por{' '}
                   <span className="text-emerald-300 font-bold">${formatMoneyAr(Number(linkTargetPayment.amount || 0))}</span>.
-                  Elegí las facturas a imputar; el importe del recibo no se modifica.
+                  Elegí facturas y/o pedidos sin factura a imputar; el importe del recibo no se modifica.
                 </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1500,6 +1604,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       const id = e.target.value;
                       setPayCustomerId(id);
                       setPayInvoiceIds([]);
+                      setPayOrderIds([]);
                       if (id === 'ALL' || !id) {
                         setPaySellerId('');
                       } else {
@@ -1570,7 +1675,66 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </div>
               </div>
 
-              {(payPreviewLoading || payAllocPreview) && payInvoiceIds.length > 0 && parseMoneyInput(payAmount || '0') > 0 && (
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1">
+                  Pedidos sin factura (múltiple)
+                </label>
+                <p className="text-[10px] text-slate-500 mb-1.5 leading-snug">
+                  Solo pedidos marcados «Sumar al saldo» sin factura AFIP. El recibo se imputa después de las facturas
+                  seleccionadas arriba.
+                </p>
+                <div className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white max-h-36 overflow-auto">
+                  {linkPedidosLoading ? (
+                    <div className="text-xs text-slate-500 px-1 py-2 flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" /> Cargando pedidos…
+                    </div>
+                  ) : payCustomerId === 'ALL' ? (
+                    <div className="text-xs text-slate-500 px-1 py-1">(Elegí un cliente para ver sus pedidos)</div>
+                  ) : pedidoOptionsInModal.length === 0 ? (
+                    <div className="text-xs text-slate-500 px-1 py-1">
+                      (Sin pedidos sin factura en saldo para este cliente)
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {pedidoOptionsInModal.map((o) => {
+                        const checked = payOrderIds.includes(o.orderId);
+                        return (
+                          <label key={o.orderId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setPayOrderIds((prev) => Array.from(new Set([...prev, o.orderId])));
+                                } else {
+                                  setPayOrderIds((prev) => prev.filter((x) => x !== o.orderId));
+                                }
+                              }}
+                              className="accent-emerald-500"
+                            />
+                            <span className="text-xs text-slate-200">
+                              {o.label}
+                              {orderOutstanding[o.orderId] != null && (
+                                <span className="text-amber-300/90 font-semibold">
+                                  {' '}
+                                  · pend. ${formatMoneyAr(orderOutstanding[o.orderId])}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                {payOrderIds.length > 0 && (
+                  <div className="mt-1 text-[11px] text-slate-400">{payOrderIds.length} pedido(s) seleccionado(s)</div>
+                )}
+              </div>
+
+              {(payPreviewLoading || payAllocPreview) &&
+                (payInvoiceIds.length > 0 || payOrderIds.length > 0) &&
+                parseMoneyInput(payAmount || '0') > 0 && (
                 <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/25 px-3 py-2.5 text-[11px] text-slate-300 space-y-1.5">
                   <p className="font-bold text-emerald-300/95 uppercase tracking-wide text-[10px]">Imputación del recibo</p>
                   {payPreviewLoading ? (
@@ -1579,11 +1743,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </p>
                   ) : payAllocPreview ? (
                     <>
-                      {payAllocPreview.allocations.map((a) => {
+                      {payAllocPreview.invoiceAllocations.map((a) => {
                         const label = facturaOptionById.get(a.invoiceId)?.split(' — ')[0] || a.invoiceId;
                         return (
-                          <p key={a.invoiceId}>
-                            <span className="text-white font-medium">{label}</span>: imputa $
+                          <p key={`inv-${a.invoiceId}`}>
+                            <span className="text-white font-medium">Factura {label}</span>: imputa $
                             {formatMoneyAr(a.applied)}
                             {a.outstandingAfter > 0.01 ? (
                               <span className="text-amber-300"> · queda pend. ${formatMoneyAr(a.outstandingAfter)}</span>
@@ -1593,9 +1757,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                           </p>
                         );
                       })}
+                      {payAllocPreview.orderAllocations.map((a) => {
+                        const label = pedidoOptionById.get(a.orderId)?.split(' — ')[0] || a.orderId;
+                        return (
+                          <p key={`ord-${a.orderId}`}>
+                            <span className="text-white font-medium">{label}</span>: imputa $
+                            {formatMoneyAr(a.applied)}
+                            {a.outstandingAfter > 0.01 ? (
+                              <span className="text-amber-300"> · queda pend. ${formatMoneyAr(a.outstandingAfter)}</span>
+                            ) : (
+                              <span className="text-emerald-400"> · saldado</span>
+                            )}
+                          </p>
+                        );
+                      })}
                       {payAllocPreview.remainingUnallocated > 0.01 && (
                         <p className="text-slate-400">
-                          Sin asignar a las facturas elegidas: ${formatMoneyAr(payAllocPreview.remainingUnallocated)}
+                          Sin asignar a lo elegido: ${formatMoneyAr(payAllocPreview.remainingUnallocated)}
                         </p>
                       )}
                     </>
@@ -1645,8 +1823,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   try {
                     setPaySubmitting(true);
                     if (paymentModalMode === 'link' && linkTargetPayment) {
-                      const updated = await api.patchPaymentInvoices(linkTargetPayment.id, payInvoiceIds);
-                      showToast('success', updated.allocationNote || 'Facturas asociadas al recibo.');
+                      const updated = await api.patchPaymentInvoices(
+                        linkTargetPayment.id,
+                        payInvoiceIds,
+                        payOrderIds
+                      );
+                      showToast('success', updated.allocationNote || 'Comprobantes asociados al recibo.');
                       setShowPaymentModal(false);
                       loadPayments();
                       return;
@@ -1665,7 +1847,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       sellerId: paySellerId || null,
                       invoiceId: payInvoiceIds[0] || null,
                       invoiceIds: payInvoiceIds,
-                      orderId: null,
+                      orderId: payOrderIds[0] || null,
+                      orderIds: payOrderIds,
                     });
                     showToast(
                       'success',

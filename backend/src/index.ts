@@ -46,6 +46,7 @@ import { addRemitenteTable } from './database/add_remitente_table';
 import { addPaymentStatusToOrders } from './database/add_payment_status_orders';
 import { addPaymentsTable } from './database/add_payments_table';
 import { addPaymentInvoicesTable } from './database/add_payment_invoices_table';
+import { addPaymentOrdersTable } from './database/add_payment_orders_table';
 import { addNoStockImpactToOrders } from './database/add_no_stock_impact_orders';
 import { addIncludeInSaldoToOrders } from './database/add_include_in_saldo_orders';
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
@@ -196,6 +197,7 @@ async function initDatabase() {
       await addPaymentStatusToOrders();
       await addPaymentsTable();
       await addPaymentInvoicesTable();
+      await addPaymentOrdersTable();
       await addNoStockImpactToOrders();
       await addIncludeInSaldoToOrders();
       await addCustomerInvoiceFields();

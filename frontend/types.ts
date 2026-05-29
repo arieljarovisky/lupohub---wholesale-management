@@ -320,6 +320,7 @@ export interface Payment {
   sellerId?: string;
   sellerName?: string;
   orderId?: string;
+  orderIds?: string[];
   invoiceId?: string;
   invoiceIds?: string[];
   receiptNumber: string;

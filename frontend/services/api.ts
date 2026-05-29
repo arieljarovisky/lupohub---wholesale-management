@@ -3115,6 +3115,7 @@ export const api = {
     customerId: string;
     sellerId?: string | null;
     orderId?: string | null;
+    orderIds?: string[];
     invoiceId?: string | null;
     invoiceIds?: string[];
     receiptNumber: string;
@@ -3124,8 +3125,14 @@ export const api = {
   }): Promise<
     import('../types').Payment & {
       allocationNote?: string;
-      allocations?: Array<{
+      invoiceAllocations?: Array<{
         invoiceId: string;
+        applied: number;
+        outstandingBefore: number;
+        outstandingAfter: number;
+      }>;
+      orderAllocations?: Array<{
+        orderId: string;
         applied: number;
         outstandingBefore: number;
         outstandingAfter: number;
@@ -3145,39 +3152,72 @@ export const api = {
     return await request(`/payments/invoice-outstanding?invoiceIds=${q}${excl}`, 'GET');
   },
 
+  getOrdersOutstanding: async (
+    orderIds: string[],
+    excludePaymentId?: string
+  ): Promise<Array<{ orderId: string; outstanding: number }>> => {
+    if (!orderIds.length) return [];
+    const q = encodeURIComponent(orderIds.join(','));
+    const excl = excludePaymentId ? `&excludePaymentId=${encodeURIComponent(excludePaymentId)}` : '';
+    return await request(`/payments/order-outstanding?orderIds=${q}${excl}`, 'GET');
+  },
+
   previewPaymentAllocation: async (
     amount: number,
     invoiceIds: string[],
+    orderIds: string[] = [],
     excludePaymentId?: string
   ): Promise<{
     appliedTotal: number;
     remainingUnallocated: number;
-    allocations: Array<{
+    invoiceAllocations: Array<{
       invoiceId: string;
       applied: number;
       outstandingBefore: number;
       outstandingAfter: number;
     }>;
+    orderAllocations: Array<{
+      orderId: string;
+      applied: number;
+      outstandingBefore: number;
+      outstandingAfter: number;
+    }>;
   }> => {
-    return await request('/payments/allocate-preview', 'POST', { amount, invoiceIds, excludePaymentId });
+    return await request('/payments/allocate-preview', 'POST', {
+      amount,
+      invoiceIds,
+      orderIds,
+      excludePaymentId
+    });
   },
 
-  /** Asocia facturas a un recibo ya cargado en el sistema. */
+  /** Asocia facturas y/o pedidos sin factura a un recibo ya cargado. */
   patchPaymentInvoices: async (
     paymentId: string,
-    invoiceIds: string[]
+    invoiceIds: string[],
+    orderIds: string[] = []
   ): Promise<{
     id: string;
     invoiceIds: string[];
+    orderIds?: string[];
     allocationNote?: string;
-    allocations?: Array<{
+    invoiceAllocations?: Array<{
       invoiceId: string;
       applied: number;
       outstandingBefore: number;
       outstandingAfter: number;
     }>;
+    orderAllocations?: Array<{
+      orderId: string;
+      applied: number;
+      outstandingBefore: number;
+      outstandingAfter: number;
+    }>;
   }> => {
-    return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', { invoiceIds });
+    return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', {
+      invoiceIds,
+      orderIds
+    });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
     return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;
