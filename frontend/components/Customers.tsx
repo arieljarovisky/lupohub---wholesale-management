@@ -70,7 +70,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [savingAccessUser, setSavingAccessUser] = useState(false);
 
   const canViewSaldos = role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.DEPOSITO;
-  /** max(0, pedidos LupoHub + cuenta importada − recibos Facturación) por cliente */
+  /** Saldo unificado por cliente: cuenta importada + pedidos LupoHub − NC − recibos. */
   const [carteraById, setCarteraById] = useState<
     Record<
       string,
@@ -1433,19 +1433,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         </div>
 
-        {canViewSaldos && (
-          <div className="mt-6 rounded-3xl border border-amber-500/35 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 p-6 shadow-xl shadow-black/30 ring-1 ring-amber-500/10">
+        {canViewSaldos && selectedCustomer && (
+          <div className="mt-6 rounded-3xl border border-amber-500/35 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 p-4 sm:p-6 shadow-xl shadow-black/30 ring-1 ring-amber-500/10">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2 text-amber-100/90">
                   <Wallet size={22} className="text-amber-400 shrink-0" aria-hidden />
-                  <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente unificado</span>
+                  <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Último saldo de cuenta importada (Tango / Multimedias), más facturas y pedidos LupoHub pendientes con IVA,
-                  menos notas de crédito (IVA) y menos recibos cargados en Facturación.
+                  Cuenta importada (Tango / Multimedias) más facturas y pedidos LupoHub pendientes, menos notas de crédito y recibos.
+                  Abajo, el detalle de cada comprobante (importado y LupoHub).
                 </p>
-                {selectedCustomer && carteraById[selectedCustomer.id] && (
+                {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
                     <span>
                       Cuenta importada: $
@@ -1478,55 +1478,51 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 )}
               </div>
-              <p
-                className={`text-3xl font-black tabular-nums sm:text-right shrink-0 ${
-                  getSaldoPendienteTotal(selectedCustomer) < -0.01
-                    ? 'text-emerald-300'
-                    : 'text-white'
-                }`}
-              >
-                $
-                {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                })}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {canViewSaldos && (
-          <div className="mt-6 rounded-3xl border border-blue-500/30 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-950 p-4 sm:p-6 shadow-xl ring-1 ring-blue-500/10">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-2 text-blue-100/90">
-                  <FileText size={22} className="text-blue-400 shrink-0" aria-hidden />
-                  <span className="text-sm font-black uppercase tracking-[0.18em]">Facturas y recibos (LupoHub)</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Solo comprobantes emitidos o cargados en la app (AFIP y recibos). Incluye número de factura, nota de crédito y recibo.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={exportingFinancialSummary || !selectedCustomer}
-                onClick={async () => {
-                  if (!selectedCustomer) return;
-                  try {
-                    setExportingFinancialSummary(true);
-                    await api.exportCustomerFinancialSummary(selectedCustomer.id);
-                    showToast('success', 'Excel descargado');
-                  } catch (err: any) {
-                    showToast('error', err?.message || 'No se pudo exportar');
-                  } finally {
-                    setExportingFinancialSummary(false);
+              <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
+                <p
+                  className={`text-3xl font-black tabular-nums sm:text-right ${
+                    getSaldoPendienteTotal(selectedCustomer) < -0.01
+                      ? 'text-emerald-300'
+                      : 'text-white'
+                  }`}
+                  title={
+                    getSaldoPendienteTotal(selectedCustomer) < -0.01
+                      ? 'Saldo a favor del cliente (le debés)'
+                      : undefined
                   }
-                }}
-                className="shrink-0 w-full sm:w-auto px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
-              >
-                {exportingFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                Exportar Excel
-              </button>
+                >
+                  {saldosLoading ? (
+                    <Loader2 size={28} className="animate-spin text-amber-400/80" />
+                  ) : (
+                    <>
+                      $
+                      {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  disabled={exportingFinancialSummary}
+                  onClick={async () => {
+                    try {
+                      setExportingFinancialSummary(true);
+                      await api.exportCustomerFinancialSummary(selectedCustomer.id);
+                      showToast('success', 'Excel descargado');
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'No se pudo exportar');
+                    } finally {
+                      setExportingFinancialSummary(false);
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                >
+                  {exportingFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Exportar Excel
+                </button>
+              </div>
             </div>
 
             {financialSummaryLoading ? (
@@ -1536,38 +1532,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             ) : financialSummary ? (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-4">
-                  <div className="rounded-2xl border border-emerald-800/50 bg-emerald-950/30 px-3 py-2.5">
-                    <p className="text-[10px] uppercase font-bold text-emerald-400/90 tracking-wide">Facturas</p>
-                    <p className="text-lg font-black text-white tabular-nums">
-                      ${Number(financialSummary.totalFacturas).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-amber-800/50 bg-amber-950/30 px-3 py-2.5">
-                    <p className="text-[10px] uppercase font-bold text-amber-400/90 tracking-wide">Notas crédito</p>
-                    <p className="text-lg font-black text-white tabular-nums">
-                      ${Number(financialSummary.totalNc).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-sky-800/50 bg-sky-950/30 px-3 py-2.5">
-                    <p className="text-[10px] uppercase font-bold text-sky-400/90 tracking-wide">Recibos</p>
-                    <p className="text-lg font-black text-white tabular-nums">
-                      ${Number(financialSummary.totalRecibos).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-600/50 bg-slate-900/80 px-3 py-2.5 col-span-2 sm:col-span-1">
-                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">Saldo pendiente</p>
-                    <p className="text-lg font-black text-white tabular-nums">
-                      ${Number(financialSummary.saldoPendiente).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                </div>
-
                 {financialMovementsWithSaldo.length === 0 ? (
-                  <p className="text-sm text-slate-500 mt-4 py-4 text-center">Sin facturas ni recibos en LupoHub para este cliente.</p>
+                  <p className="text-sm text-slate-500 mt-4 py-4 text-center border-t border-slate-800/80">
+                    Sin comprobantes en el detalle. El saldo puede provenir solo de la cuenta importada.
+                  </p>
                 ) : (
                   <>
-                    <div className="md:hidden mt-4 space-y-2 mobile-scroll-y touch-scroll max-h-[min(70vh,32rem)]">
+                    <div className="md:hidden mt-4 pt-4 border-t border-slate-800/80 space-y-2 mobile-scroll-y touch-scroll max-h-[min(70vh,32rem)]">
                       {financialMovementsWithSaldo.map((m, idx) => (
                         <div
                           key={`${m.tipo}-${m.comprobante}-${idx}`}
@@ -1607,7 +1578,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       ))}
                     </div>
 
-                    <div className="hidden md:block mt-4 rounded-2xl border border-slate-700/70 overflow-hidden">
+                    <div className="hidden md:block mt-4 pt-4 border-t border-slate-800/80 rounded-2xl border border-slate-700/70 overflow-hidden">
                       <div className="overflow-x-auto mobile-scroll-x touch-scroll">
                         <table className="min-w-full text-xs text-left">
                           <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-800 bg-slate-950">
