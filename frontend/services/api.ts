@@ -717,9 +717,14 @@ export const api = {
     return res?.rows ?? [];
   },
 
-  getProductBySku: async (sku: string): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; mayorista_pack_size?: number; externalIds?: any; variants?: any[] } | null> => {
+  getProductBySku: async (
+    sku: string,
+    opts?: { includeRelated?: boolean }
+  ): Promise<{ id: string; sku: string; name: string; category?: string; base_price?: number; mercado_libre_pack_size?: number; tienda_nube_pack_size?: number; mayorista_pack_size?: number; externalIds?: any; variants?: any[] } | null> => {
     try {
-      const res = await request<any>(`/products/${encodeURIComponent(sku)}`, 'GET');
+      const qs =
+        opts?.includeRelated === false ? '?includeRelated=0' : '';
+      const res = await request<any>(`/products/${encodeURIComponent(sku)}${qs}`, 'GET');
       return res ? { ...res, mercado_libre_pack_size: res.mercado_libre_pack_size ?? 1, tienda_nube_pack_size: res.tienda_nube_pack_size ?? 1, mayorista_pack_size: res.mayorista_pack_size ?? 1 } : null;
     } catch {
       return null;
@@ -735,12 +740,31 @@ export const api = {
     }
   },
 
-  getVariantsBySku: async (sku: string): Promise<Array<{ variantId: string; colorCode: string; colorName: string; sizeCode: string; stock: number; externalIds?: any }>> => {
+  getVariantsBySku: async (
+    sku: string,
+    opts?: { includeRelated?: boolean }
+  ): Promise<
+    Array<{
+      variantId: string;
+      variantSku: string;
+      productSku: string;
+      colorCode: string;
+      colorName: string;
+      sizeCode: string;
+      stock: number;
+      externalIds?: any;
+    }>
+  > => {
     return handleRequest(async () => {
-      const res = await request<any>(`/products/${sku}`, 'GET');
+      const qs =
+        opts?.includeRelated === false ? '?includeRelated=0' : '';
+      const res = await request<any>(`/products/${encodeURIComponent(sku)}${qs}`, 'GET');
       const parentExternalIds = res.externalIds || {};
+      const parentSku = String(res?.sku || sku);
       const variants = (res?.variants || []).map((v: any) => ({
         variantId: v.variant_id,
+        variantSku: String(v.variant_sku || v.sku || '').trim(),
+        productSku: String(v.sku || parentSku).trim(),
         colorCode: v.color_code,
         colorName: v.color_name,
         sizeCode: v.size_code,

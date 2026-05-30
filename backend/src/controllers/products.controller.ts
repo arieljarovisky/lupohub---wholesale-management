@@ -346,8 +346,13 @@ export const getProductById = async (req: Request, res: Response) => {
   }
 };
 
-export const getProductBySku = async (req: any, res: any) => {
+export const getProductBySku = async (req: any, res: Response) => {
   const { sku } = req.params;
+  const includeRelatedRaw = req.query?.includeRelated;
+  const includeRelated =
+    includeRelatedRaw !== '0' &&
+    includeRelatedRaw !== 'false' &&
+    includeRelatedRaw !== 'no';
   try {
     const { resolveProductByArticleSku, findRelatedProductIdsForArticleSku } = await import('../services/productSkuFamily');
     const product = await resolveProductByArticleSku(String(sku));
@@ -355,10 +360,12 @@ export const getProductBySku = async (req: any, res: any) => {
     if (!product) return res.status(404).json({ message: 'Producto no encontrado' });
 
     let productIds = [product.id];
-    try {
-      productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
-    } catch (relatedErr) {
-      console.warn('[getProductBySku] findRelatedProductIds:', (relatedErr as Error)?.message);
+    if (includeRelated) {
+      try {
+        productIds = await findRelatedProductIdsForArticleSku(String(sku), product.id);
+      } catch (relatedErr) {
+        console.warn('[getProductBySku] findRelatedProductIds:', (relatedErr as Error)?.message);
+      }
     }
     const idPlaceholders = productIds.map(() => '?').join(',');
 

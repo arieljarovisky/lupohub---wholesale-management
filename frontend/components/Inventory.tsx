@@ -76,6 +76,36 @@ function formatSizeForLink(size: string | undefined | null): string {
   return code && code !== s ? `${code} - ${s}` : s;
 }
 
+/** Inventario: solo variantes del producto pedido (sin fusionar familias de SKU). */
+const INVENTORY_PRODUCT_FETCH_OPTS = { includeRelated: false } as const;
+
+type InventoryVariantRow = Awaited<ReturnType<typeof api.getVariantsBySku>>[number];
+
+function mapInventoryVariantsFromApi(
+  groupKey: string,
+  variants: InventoryVariantRow[],
+  meta: { name: string; category: string; price: number; description?: string }
+): Product[] {
+  return variants.map((v) => ({
+    id: v.variantId,
+    sku: v.variantSku || `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+    name: meta.name,
+    category: meta.category,
+    price: meta.price,
+    description: meta.description ?? '',
+    size: v.sizeCode,
+    color: v.colorName,
+    colorCode: v.colorCode,
+    stock: v.stock,
+    integrations: {
+      local: true,
+      tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
+      mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds),
+    },
+    externalIds: v.externalIds,
+  }));
+}
+
 function normColorTokenForUnify(s: string): string {
   return String(s || '')
     .trim()
@@ -765,26 +795,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     runWithConcurrency(missing, 2, async (groupName) => {
       if (cancelled) return;
       try {
-        const variants = await api.getVariantsBySku(groupName);
+        const variants = await api.getVariantsBySku(groupName, INVENTORY_PRODUCT_FETCH_OPTS);
         if (cancelled) return;
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
+        const mapped = mapInventoryVariantsFromApi(groupName, variants, {
           name: groupedProducts[groupName]?.[0]?.name || '',
           category: groupedProducts[groupName]?.[0]?.category || 'General',
           price: groupedProducts[groupName]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: { 
-            local: true, 
-            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+        });
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
         const ids = mapped.map((p) => p.id);
         api.getVariantExternalStocks(ids).then(res => {
@@ -1434,25 +1451,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
     if (!loadedVariants[groupName] || (loadedVariants[groupName] && loadedVariants[groupName].length === 0)) {
       setLoadingVariantsByGroup(prev => ({ ...prev, [groupName]: true }));
-      api.getVariantsBySku(groupName).then(variants => {
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: `${groupName}-${v.sizeCode}-${v.colorCode}`,
+      api.getVariantsBySku(groupName, INVENTORY_PRODUCT_FETCH_OPTS).then(variants => {
+        const mapped = mapInventoryVariantsFromApi(groupName, variants, {
           name: groupedProducts[groupName]?.[0]?.name || '',
           category: groupedProducts[groupName]?.[0]?.category || 'General',
           price: groupedProducts[groupName]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: { 
-            local: true, 
-            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+        });
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
         const ids = mapped.map((p) => p.id);
         api.getVariantExternalStocks(ids).then(res => {
@@ -1738,25 +1742,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           setVariantUnifyKeeperId(null);
           setServerListRefreshKey((k) => k + 1);
           try {
-            const variants = await api.getVariantsBySku(groupKey);
-            const mapped: Product[] = variants.map((v) => ({
-              id: v.variantId,
-              sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+            const variants = await api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
+            const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
               name: articleName,
               category: articleCategory,
               price: articlePrice,
-              description: '',
-              size: v.sizeCode,
-              color: v.colorName,
-              colorCode: v.colorCode,
-              stock: v.stock,
-              integrations: {
-                local: true,
-                tiendaNube: !!(v.externalIds?.tiendaNube && v.externalIds?.tiendaNubeVariant),
-                mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds),
-              },
-              externalIds: v.externalIds,
-            }));
+            });
             setLoadedVariants((prev) => ({ ...prev, [groupKey]: mapped }));
             const ids = mapped.map((p) => p.id);
             if (ids.length) {
@@ -1903,7 +1894,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   React.useEffect(() => {
     if (!showBulkLinkModal || !bulkLinkGroupKey) return;
     setBulkLinkLoading(true);
-    api.getProductBySku(bulkLinkGroupKey).then((p: any) => {
+    api.getProductBySku(bulkLinkGroupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((p: any) => {
       if (!p) {
         setBulkLinkVariants([]);
         setBulkLinkProductId(null);
@@ -2090,7 +2081,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const updated = (res as any)?.updated ?? links.length;
       const synced = (res as any)?.synced ?? 0;
       const linkedVariantIds = links.map((l) => l.variantId);
-      const p = await api.getProductBySku(bulkLinkGroupKey);
+      const p = await api.getProductBySku(bulkLinkGroupKey, INVENTORY_PRODUCT_FETCH_OPTS);
       if (p?.variants?.length) {
         const parentExternalIds = p.externalIds || {};
         const mapped: Product[] = p.variants.map((v: any) => {
@@ -2183,7 +2174,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     api.getVariantById(product.id).then((v) => {
       const groupKey = (v?.base_sku || (product as any).base_sku || '').toString().trim();
       if (!groupKey) return;
-      api.getProductBySku(groupKey).then((p) => {
+      api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((p) => {
         if (p) {
           setLinkProduct({ id: p.id, name: p.name, sku: p.sku, price: p.base_price, category: p.category, description: (p as any).description });
           setLinkPackMl(p.mercado_libre_pack_size ?? 1);
@@ -2303,25 +2294,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       });
 
       // Refrescar variantes del grupo desde el servidor para que el stock (y todo) quede al día
-      if (groupKey) api.getVariantsBySku(groupKey).then(variants => {
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+      if (groupKey) api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then(variants => {
+        const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
           name: groupedProducts[groupKey]?.[0]?.name || '',
           category: groupedProducts[groupKey]?.[0]?.category || 'General',
           price: groupedProducts[groupKey]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: {
-            local: true,
-            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+        });
         setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
       }).catch(() => {});
 
@@ -2355,25 +2333,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       await api.unlinkProductPlatforms(parentProductId, opts);
 
       // Refrescar variantes del grupo y cerrar modal
-      if (groupKey) api.getVariantsBySku(groupKey).then(variants => {
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+      if (groupKey) api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then(variants => {
+        const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
           name: groupedProducts[groupKey]?.[0]?.name || '',
           category: groupedProducts[groupKey]?.[0]?.category || 'General',
           price: groupedProducts[groupKey]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: {
-            local: true,
-            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+        });
         setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
       });
 
@@ -2519,9 +2484,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   useEffect(() => {
     if (!editingVariantId) return;
+    const variantId = editingVariantId;
+    setEditVariantForm({ sku: '', externalSku: '' });
     setLoadingEditVariant(true);
     setEditVariantLinkIds({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
-    api.getVariantById(editingVariantId).then((v: any) => {
+    let cancelled = false;
+    api.getVariantById(variantId).then((v: any) => {
+      if (cancelled) return;
       if (v) {
         setEditVariantForm({
           sku: v.sku ?? '',
@@ -2534,7 +2503,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           tnVariantId: v.tienda_nube_variant_id != null ? String(v.tienda_nube_variant_id) : null
         });
       }
-    }).finally(() => setLoadingEditVariant(false));
+    }).finally(() => {
+      if (!cancelled) setLoadingEditVariant(false);
+    });
+    return () => { cancelled = true; };
   }, [editingVariantId]);
 
   const handleSaveEditProduct = async () => {
@@ -2577,25 +2549,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setServerListRefreshKey(k => k + 1);
       onImportComplete?.();
       if (groupKeyToRefetch) {
-        api.getVariantsBySku(groupKeyToRefetch).then(variants => {
-          const mapped: Product[] = variants.map((v) => ({
-            id: v.variantId,
-            sku: `${groupKeyToRefetch}-${v.sizeCode}-${v.colorCode}`,
+        api.getVariantsBySku(groupKeyToRefetch, INVENTORY_PRODUCT_FETCH_OPTS).then(variants => {
+          const mapped = mapInventoryVariantsFromApi(groupKeyToRefetch, variants, {
             name,
             category: editProductForm.category || 'General',
             price: base_price,
             description: editProductForm.description || '',
-            size: v.sizeCode,
-            color: v.colorName,
-            colorCode: v.colorCode,
-            stock: v.stock,
-            integrations: {
-              local: true,
-              tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-              mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-            },
-            externalIds: v.externalIds
-          }));
+          });
           setLoadedVariants(prev => ({ ...prev, [groupKeyToRefetch]: mapped }));
           api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
             if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
@@ -2660,25 +2620,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setServerListRefreshKey(k => k + 1);
       onImportComplete?.();
       if (groupKey) {
-        const variants = await api.getVariantsBySku(groupKey);
-        const mapped: Product[] = variants.map((v) => ({
-          id: v.variantId,
-          sku: `${groupKey}-${v.sizeCode}-${v.colorCode}`,
+        const variants = await api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
+        const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
           name: groupedProducts[groupKey]?.[0]?.name || '',
           category: groupedProducts[groupKey]?.[0]?.category || 'General',
           price: groupedProducts[groupKey]?.[0]?.price || 0,
-          description: '',
-          size: v.sizeCode,
-          color: v.colorName,
-          colorCode: v.colorCode,
-          stock: v.stock,
-          integrations: {
-            local: true,
-            tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
-            mercadoLibre: isVariantLinkedToMercadoLibre(v.externalIds)
-          },
-          externalIds: v.externalIds
-        }));
+        });
         setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
         api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
           if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
