@@ -794,7 +794,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
               {massExportMode === 'saldos' && (
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  El detalle del Excel solo incluye movimientos del rango; el saldo por cliente sigue la misma lógica que el historial unificado (con arrastre de lo anterior al inicio del rango).
+                  El detalle lista facturas, NC y recibos hasta la fecha «hasta». Con «desde», se muestra saldo anterior y luego los movimientos del período. El saldo final es el saldo pendiente a cobrar.
                 </p>
               )}
 
@@ -968,7 +968,7 @@ function SellerDetailView({
             />
           </div>
           <span className="text-[10px] text-slate-500 max-w-md leading-snug">
-            En el Excel solo se listan movimientos del rango; el saldo coincide con el historial unificado (se suma lo anterior al inicio del rango aunque no aparezca en el detalle).
+            El detalle lista facturas, NC y recibos hasta la fecha «hasta». Si ponés «desde», aparece una fila de saldo anterior y luego los movimientos de ese período. El saldo final coincide con el saldo pendiente.
           </span>
         </div>
         <button

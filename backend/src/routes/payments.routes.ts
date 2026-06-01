@@ -10,7 +10,8 @@ import {
   getInvoicesOutstandingHandler,
   getOrdersOutstandingHandler,
   postPaymentAllocatePreview,
-  patchPaymentInvoices
+  patchPaymentInvoices,
+  getImportedReceiptLinkInfo
 } from '../controllers/payments.controller';
 
 const router = Router();
@@ -18,6 +19,7 @@ router.use(authMiddleware as any);
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', listPayments as any);
+router.get('/imported/link-info', getImportedReceiptLinkInfo as any);
 router.get('/invoice-outstanding', getInvoicesOutstandingHandler as any);
 router.get('/order-outstanding', getOrdersOutstandingHandler as any);
 router.post('/allocate-preview', postPaymentAllocatePreview as any);

@@ -13,6 +13,12 @@ import {
   validateOrdersForPayment,
   type PaymentAllocationResult
 } from '../services/orderPaymentBalance.service';
+import {
+  findOrCreatePaymentFromImportedReceipt,
+  findExistingPaymentIdForImportedEntry,
+  getImportedReceiptEntry,
+  getPaymentAllocationIds,
+} from '../services/importedReceiptPayment.service';
 
 function formatAllocationNote(
   alloc: PaymentAllocationResult,
@@ -767,6 +773,68 @@ export const getOrdersOutstandingHandler = async (req: any, res: Response) => {
   }
 };
 
+/** Datos previos para asociar un recibo importado de Tango (sin crear el pago hasta guardar). */
+export const getImportedReceiptLinkInfo = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const customerId = String(req.query?.customerId || '').trim();
+    const importedLineOrder = Number(req.query?.importedLineOrder);
+    if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
+    if (!Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+      return res.status(400).json({ message: 'Falta importedLineOrder válido' });
+    }
+
+    const cust = await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés ver recibos de tus clientes' });
+    }
+
+    const entry = await getImportedReceiptEntry(customerId, importedLineOrder);
+    if (!entry) return res.status(404).json({ message: 'Recibo importado no encontrado' });
+
+    const paymentId = await findExistingPaymentIdForImportedEntry(entry);
+    const { invoiceIds, orderIds } = paymentId
+      ? await getPaymentAllocationIds(paymentId)
+      : { invoiceIds: [], orderIds: [] };
+
+    return res.json({
+      customerId,
+      importedLineOrder,
+      paymentId: paymentId ?? undefined,
+      receiptNumber: String(entry.numero || ''),
+      date: toSqlDate(entry.line_date),
+      amount: Math.round(parseImportedAmountForApi(entry.importe) * 100) / 100,
+      invoiceIds,
+      orderIds,
+    });
+  } catch (e: any) {
+    const code = e?.statusCode;
+    if (code === 400 || code === 404) {
+      return res.status(code).json({ message: e.message });
+    }
+    console.error('getImportedReceiptLinkInfo:', e);
+    return res.status(500).json({ message: 'Error consultando recibo importado', detail: e?.message });
+  }
+};
+
+function parseImportedAmountForApi(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.abs(v) : 0;
+  const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (!s) return 0;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  let n = 0;
+  if (hasComma && hasDot) n = Number(s.replace(/\./g, '').replace(',', '.'));
+  else if (hasComma) n = Number(s.replace(',', '.'));
+  else n = Number(s);
+  return Number.isFinite(n) ? Math.abs(n) : 0;
+}
+
 /** Asocia un recibo ya cargado a facturas y/o pedidos sin factura del mismo cliente. */
 export const patchPaymentInvoices = async (req: any, res: Response) => {
   try {
@@ -774,13 +842,8 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     if (!user || !canManagePayments(user.role)) {
       return res.status(403).json({ message: 'No autorizado' });
     }
-    const paymentId = String(req.params?.id || '').trim();
+    let paymentId = String(req.params?.id || '').trim();
     if (!paymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
-    if (paymentId.startsWith('mm-')) {
-      return res.status(400).json({
-        message: 'Los recibos importados de Multimedias no se asocian desde acá; cargá un recibo en el sistema.'
-      });
-    }
 
     const invoiceIds = Array.isArray(req.body?.invoiceIds)
       ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
@@ -788,6 +851,26 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const orderIds = Array.isArray(req.body?.orderIds)
       ? req.body.orderIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
       : [];
+
+    if (paymentId.startsWith('mm-') || Number(req.body?.importedLineOrder) > 0) {
+      const customerId = String(req.body?.customerId || '').trim();
+      const importedLineOrder = Number(req.body?.importedLineOrder);
+      if (!customerId || !Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+        return res.status(400).json({
+          message:
+            'Para un recibo importado de Tango indicá customerId e importedLineOrder al guardar la asociación.',
+        });
+      }
+      const cust = (await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [
+        customerId,
+      ])) as { id: string; seller_id?: string } | undefined;
+      if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+      if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
+      }
+      const sellerId = user.role === 'SELLER' ? user.id : cust.seller_id ?? null;
+      paymentId = await findOrCreatePaymentFromImportedReceipt(customerId, importedLineOrder, sellerId);
+    }
 
     const paymentOrdersEnabled = await ensurePaymentOrdersTable();
 

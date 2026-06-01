@@ -49,6 +49,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentModalMode, setPaymentModalMode] = useState<'create' | 'link'>('create');
   const [linkTargetPayment, setLinkTargetPayment] = useState<Payment | null>(null);
+  /** Pago real en BD si el recibo importado ya fue materializado (para saldos al imputar). */
+  const [linkResolvedPaymentId, setLinkResolvedPaymentId] = useState<string | undefined>(undefined);
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
   const [exportingByCustomerFile, setExportingByCustomerFile] = useState(false);
   const [exportingMovimientosSistema, setExportingMovimientosSistema] = useState(false);
@@ -497,6 +499,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const openCreatePaymentModal = () => {
     setPaymentModalMode('create');
     setLinkTargetPayment(null);
+    setLinkResolvedPaymentId(undefined);
     setPayReceipt('');
     setPayDate(new Date().toISOString().slice(0, 10));
     setPayCustomerId('ALL');
@@ -510,12 +513,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const openLinkPaymentModal = (p: Payment) => {
-    if (p.source === 'imported' || String(p.id || '').startsWith('mm-')) {
-      showToast('error', 'Los recibos importados de Multimedias no se asocian acá. Cargá un recibo en el sistema.');
-      return;
-    }
+    const isImported = p.source === 'imported' || String(p.id || '').startsWith('mm-');
     setPaymentModalMode('link');
     setLinkTargetPayment(p);
+    setLinkResolvedPaymentId(undefined);
     setPayReceipt(p.receiptNumber || '');
     setPayDate(String(p.date || '').slice(0, 10));
     setPayCustomerId(p.customerId);
@@ -533,22 +534,41 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setShowPaymentModal(true);
     setLinkFacturasLoading(true);
     setLinkPedidosLoading(true);
-    api
-      .getBilling({ customerId: p.customerId, tipo: 'FACTURA' })
-      .then((rows) => setLinkFacturaOptions(mapBillingRowsToFacturaOptions(Array.isArray(rows) ? rows : [])))
-      .catch(() => {
-        setLinkFacturaOptions([]);
-        showToast('error', 'No se pudieron cargar las facturas del cliente.');
-      })
-      .finally(() => setLinkFacturasLoading(false));
-    api
-      .getLinkableOrdersForPayment(p.customerId)
-      .then((rows) => applyPedidoOptions(rows, setLinkPedidoOptions))
-      .catch(() => {
-        setLinkPedidoOptions([]);
-        showToast('error', 'No se pudieron cargar los pedidos del cliente.');
-      })
-      .finally(() => setLinkPedidosLoading(false));
+
+    const loadOptions = () => {
+      api
+        .getBilling({ customerId: p.customerId, tipo: 'FACTURA' })
+        .then((rows) => setLinkFacturaOptions(mapBillingRowsToFacturaOptions(Array.isArray(rows) ? rows : [])))
+        .catch(() => {
+          setLinkFacturaOptions([]);
+          showToast('error', 'No se pudieron cargar las facturas del cliente.');
+        })
+        .finally(() => setLinkFacturasLoading(false));
+      api
+        .getLinkableOrdersForPayment(p.customerId)
+        .then((rows) => applyPedidoOptions(rows, setLinkPedidoOptions))
+        .catch(() => {
+          setLinkPedidoOptions([]);
+          showToast('error', 'No se pudieron cargar los pedidos del cliente.');
+        })
+        .finally(() => setLinkPedidosLoading(false));
+    };
+
+    if (isImported && p.customerId && p.importedLineOrder) {
+      api
+        .getImportedReceiptLinkInfo(p.customerId, p.importedLineOrder)
+        .then((info) => {
+          if (info.paymentId) setLinkResolvedPaymentId(info.paymentId);
+          if (info.invoiceIds?.length) setPayInvoiceIds(info.invoiceIds);
+          if (info.orderIds?.length) setPayOrderIds(info.orderIds);
+        })
+        .catch(() => {
+          /* sin pago previo en sistema */
+        })
+        .finally(() => loadOptions());
+    } else {
+      loadOptions();
+    }
   };
 
   useEffect(() => {
@@ -576,8 +596,9 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   }, [showPaymentModal, paymentModalMode, payCustomerId]);
 
   const linkExcludePaymentId =
-    paymentModalMode === 'link' && linkTargetPayment && !linkTargetPayment.id.startsWith('mm-')
-      ? linkTargetPayment.id
+    paymentModalMode === 'link' && linkTargetPayment
+      ? linkResolvedPaymentId ||
+        (!String(linkTargetPayment.id || '').startsWith('mm-') ? linkTargetPayment.id : undefined)
       : undefined;
 
   useEffect(() => {
@@ -1815,15 +1836,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   )}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {p.source !== 'imported' && !String(p.id || '').startsWith('mm-') && (
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
-                      onClick={() => openLinkPaymentModal(p)}
-                    >
-                      Asociar comprobantes
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
+                    onClick={() => openLinkPaymentModal(p)}
+                  >
+                    Asociar comprobantes
+                  </button>
                   {!isSeller && (
                   <button
                     type="button"
@@ -1901,6 +1920,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   Recibo <span className="font-mono text-white">{linkTargetPayment.receiptNumber}</span> por{' '}
                   <span className="text-emerald-300 font-bold">${formatMoneyAr(Number(linkTargetPayment.amount || 0))}</span>.
                   Elegí facturas y/o pedidos sin factura a imputar; el importe del recibo no se modifica.
+                  {(linkTargetPayment.source === 'imported' ||
+                    String(linkTargetPayment.id || '').startsWith('mm-')) && (
+                    <span className="block mt-1 text-violet-300/90">
+                      Recibo importado de Tango: al guardar se registra en LupoHub y queda vinculado a los comprobantes elegidos.
+                    </span>
+                  )}
                 </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2165,10 +2190,19 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   try {
                     setPaySubmitting(true);
                     if (paymentModalMode === 'link' && linkTargetPayment) {
+                      const isImportedLink =
+                        linkTargetPayment.source === 'imported' ||
+                        String(linkTargetPayment.id || '').startsWith('mm-');
                       const updated = await api.patchPaymentInvoices(
                         linkTargetPayment.id,
                         payInvoiceIds,
-                        payOrderIds
+                        payOrderIds,
+                        isImportedLink && linkTargetPayment.customerId && linkTargetPayment.importedLineOrder
+                          ? {
+                              customerId: linkTargetPayment.customerId,
+                              importedLineOrder: linkTargetPayment.importedLineOrder,
+                            }
+                          : undefined
                       );
                       showToast('success', updated.allocationNote || 'Comprobantes asociados al recibo.');
                       setShowPaymentModal(false);

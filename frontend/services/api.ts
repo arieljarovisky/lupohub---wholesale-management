@@ -3379,11 +3379,33 @@ export const api = {
     });
   },
 
+  /** Recibo importado Tango: imputaciones ya guardadas (si existe pago en sistema) y datos del movimiento. */
+  getImportedReceiptLinkInfo: async (
+    customerId: string,
+    importedLineOrder: number
+  ): Promise<{
+    customerId: string;
+    importedLineOrder: number;
+    paymentId?: string;
+    receiptNumber: string;
+    date: string;
+    amount: number;
+    invoiceIds: string[];
+    orderIds: string[];
+  }> => {
+    const qs = new URLSearchParams({
+      customerId,
+      importedLineOrder: String(importedLineOrder),
+    });
+    return await request(`/payments/imported/link-info?${qs.toString()}`, 'GET');
+  },
+
   /** Asocia facturas y/o pedidos sin factura a un recibo ya cargado. */
   patchPaymentInvoices: async (
     paymentId: string,
     invoiceIds: string[],
-    orderIds: string[] = []
+    orderIds: string[] = [],
+    importedMeta?: { customerId: string; importedLineOrder: number }
   ): Promise<{
     id: string;
     invoiceIds: string[];
@@ -3404,7 +3426,13 @@ export const api = {
   }> => {
     return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', {
       invoiceIds,
-      orderIds
+      orderIds,
+      ...(importedMeta
+        ? {
+            customerId: importedMeta.customerId,
+            importedLineOrder: importedMeta.importedLineOrder,
+          }
+        : {}),
     });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
