@@ -947,7 +947,7 @@ const Settings: React.FC<SettingsProps> = ({
         onCreateAttribute({
           id: created.id,
           type: 'color',
-          name: created.name ?? nameTrim || codeTrim,
+          name: created.name ?? (nameTrim || codeTrim),
           value: created.hex ?? undefined,
           code: created.code,
         });
