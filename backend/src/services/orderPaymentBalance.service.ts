@@ -101,6 +101,25 @@ export const SQL_INVOICE_AGIP_RET_PER = `COALESCE((
   SELECT i.agip_ret_per FROM invoices i WHERE i.order_id = o.id LIMIT 1
 ), 0)`;
 
+/** Pedido con NC de reemisión (NC + factura nueva con IIBB); no se descuenta el recibo imputado al cargo viejo. */
+export const SQL_ORDER_HAS_SUPERSEDED_REINVOICE = `EXISTS (
+  SELECT 1 FROM credit_notes cn_r
+  WHERE cn_r.order_id = o.id AND COALESCE(cn_r.superseded_by_reinvoice, 0) = 1
+)`;
+
+/** Cargo neto+IVA de la factura reemitida (sin IIBB en saldo; el IIBB queda en AFIP). */
+export const SQL_ORDER_CARGO_REINVOICE_NET = `ROUND(
+  GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21,
+  2
+)`;
+
+/** Contribución al saldo de cartera por pedido (reemisión = cargo completo sin restar cobros). */
+export const SQL_ORDER_CARTERA_NET = `CASE
+  WHEN ${SQL_ORDER_HAS_SUPERSEDED_REINVOICE}
+    THEN (${SQL_ORDER_CARGO_REINVOICE_NET})
+  ELSE (${SQL_ORDER_SALDO_RESIDUAL})
+END`;
+
 /** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% + IIBB si hay factura AFIP). */
 export const SQL_ORDER_CARGO_SALDO = `CASE
   WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)

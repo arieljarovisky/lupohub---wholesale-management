@@ -9,6 +9,7 @@ import {
   backfillPaymentOrdersFromLegacy,
   SQL_CN_TOTAL_SUBQUERY,
   SQL_ORDER_CARGO_SALDO,
+  SQL_ORDER_CARTERA_NET,
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
@@ -1159,15 +1160,18 @@ const SQL_CARTERA_OB_GROSS_SUBQUERY = `
   GROUP BY o.customer_id
 `;
 
-/** Subquery agregada: saldo neto por cliente (cargo − cobros imputados al pedido). */
+/** Subquery agregada: saldo neto por cliente (reemisión = cargo factura nueva; resto = cargo − cobros). */
 const SQL_CARTERA_OB_NET_SUBQUERY = `
   SELECT
     o.customer_id,
-    SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_neto
+    SUM(${SQL_ORDER_CARTERA_NET}) AS facturas_neto
   FROM orders o
   LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
   WHERE ${SQL_ORDER_ACTIVE_COND}
-    AND ${SQL_ORDER_IN_SALDO_SCOPE}
+    AND (
+      ${SQL_ORDER_IN_SALDO_SCOPE}
+      OR ${SQL_ORDER_CARGO_GROSS_SCOPE}
+    )
   GROUP BY o.customer_id
 `;
 
@@ -4145,6 +4149,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         AND ${SQL_ORDER_ACTIVE_COND}
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
         AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
 
       UNION ALL
 
