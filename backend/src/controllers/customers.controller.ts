@@ -2424,20 +2424,20 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     /**
-     * Detalle del Excel: todos los movimientos hasta `to` (sin cortar por `from`).
-     * Si hay `from`, la fila «Saldo anterior» resume lo previo; el saldo final = saldo pendiente.
+     * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen en la URL).
+     * El saldo corrido arranca en «Saldo al inicio del período» y cierra en saldo pendiente (cartera).
      */
-    const invoiceRangeFilter = `${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
+    const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
     const invoiceOpeningFilter = ' AND DATE(COALESCE(i.created_at, o.date)) < ?';
-    const ncRangeFilter = `${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
+    const ncRangeFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
     const ncOpeningFilter = ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) < ?';
-    const externalNcRangeFilter = `${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
+    const externalNcRangeFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
     const externalNcOpeningFilter = ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) < ?';
-    const receiptRangeFilter = `${to ? ' AND DATE(p.date) <= ?' : ''}`;
+    const receiptRangeFilter = `${from ? ' AND DATE(p.date) >= ?' : ''}${to ? ' AND DATE(p.date) <= ?' : ''}`;
     const receiptOpeningFilter = ' AND DATE(p.date) < ?';
-    const importedRangeFilter = `${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
+    const importedRangeFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
     const importedOpeningFilter = ' AND DATE(e.line_date) < ?';
-    const manualRangeFilter = `${to ? ' AND DATE(m.fecha) <= ?' : ''}`;
+    const manualRangeFilter = `${from ? ' AND DATE(m.fecha) >= ?' : ''}${to ? ' AND DATE(m.fecha) <= ?' : ''}`;
     const manualOpeningFilter = ' AND DATE(m.fecha) < ?';
 
     const branchFacturaSistema = `
@@ -2935,6 +2935,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
     const movementParams: any[] = [];
     for (let b = 0; b < branches.length; b += 1) {
+      if (from) movementParams.push(from);
       if (to) movementParams.push(to);
     }
     if (sellerIdFilter) movementParams.push(sellerIdFilter);
@@ -3105,13 +3106,15 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         netoTabla = Math.round((netoTabla + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
 
-      /** Saldo previo a la 1.ª fila listada: hace que el corrido cierre en saldo pendiente (cartera). */
+      /** Saldo al empezar el período listado: cierra en saldo pendiente (cartera) al final de las filas. */
       let saldoCorrido = Math.round((saldoCartera - netoTabla) * 100) / 100;
 
-      if (movsOrdenados.length > 0 && Math.abs(saldoCorrido) > 0.005) {
+      const showSaldoInicioPeriodo =
+        movsOrdenados.length > 0 && (from || Math.abs(saldoCorrido) > 0.005);
+      if (showSaldoInicioPeriodo) {
         const saldoIniRow = wsDetalle.addRow({
-          fecha: movsOrdenados[0].fecha ? new Date(movsOrdenados[0].fecha) : from ? new Date(from) : null,
-          tipo: 'Saldo inicial',
+          fecha: from ? new Date(from) : movsOrdenados[0].fecha ? new Date(movsOrdenados[0].fecha) : null,
+          tipo: from ? 'Saldo al inicio del período' : 'Saldo inicial',
           comprobante: '',
           pedido: '',
           debe: 0,

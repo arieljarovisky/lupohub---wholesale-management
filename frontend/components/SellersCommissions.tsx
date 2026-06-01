@@ -794,7 +794,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
               {massExportMode === 'saldos' && (
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  El detalle lista facturas, NC y recibos hasta «hasta». La última fila de la columna Saldo coincide con el saldo pendiente a cobrar.
+                  El detalle respeta el rango «desde» / «hasta». La columna Saldo termina en el saldo pendiente a cobrar (deuda actual, no solo del mes).
                 </p>
               )}
 
@@ -968,7 +968,7 @@ function SellerDetailView({
             />
           </div>
           <span className="text-[10px] text-slate-500 max-w-md leading-snug">
-            El detalle lista facturas, NC y recibos hasta «hasta». La columna Saldo cierra en el mismo importe que Saldo pendiente (fila verde).
+            El detalle solo incluye movimientos entre «desde» y «hasta». La columna Saldo cierra en el saldo pendiente (fila verde).
           </span>
         </div>
         <button
