@@ -44,6 +44,58 @@ const toYmd = (value?: string) => {
   return String(value).slice(0, 10);
 };
 
+const formatYmdLocal = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+type MassExportRangePreset =
+  | 'current_month'
+  | 'last_month'
+  | 'last_3_months'
+  | 'last_6_months'
+  | 'last_12_months'
+  | 'ytd';
+
+const MASS_EXPORT_RANGE_PRESETS: { id: MassExportRangePreset; label: string }[] = [
+  { id: 'current_month', label: 'Mes en curso' },
+  { id: 'last_month', label: 'Mes anterior' },
+  { id: 'last_3_months', label: 'Últimos 3 meses' },
+  { id: 'last_6_months', label: 'Últimos 6 meses' },
+  { id: 'last_12_months', label: 'Últimos 12 meses' },
+  { id: 'ytd', label: 'Año en curso' }
+];
+
+function massExportRangeForPreset(preset: MassExportRangePreset): { from: string; to: string } {
+  const today = new Date();
+  const to = formatYmdLocal(today);
+  const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const addMonths = (anchor: Date, delta: number) =>
+    new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
+
+  switch (preset) {
+    case 'current_month':
+      return { from: formatYmdLocal(monthStart(today)), to };
+    case 'last_month': {
+      const from = addMonths(monthStart(today), -1);
+      const toLast = new Date(today.getFullYear(), today.getMonth(), 0);
+      return { from: formatYmdLocal(from), to: formatYmdLocal(toLast) };
+    }
+    case 'last_3_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -2)), to };
+    case 'last_6_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -5)), to };
+    case 'last_12_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -11)), to };
+    case 'ytd':
+      return { from: `${today.getFullYear()}-01-01`, to };
+    default:
+      return { from: '', to: '' };
+  }
+}
+
 const salesTotalForSeller = (olist: Order[], sellerId: string) =>
   olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
@@ -159,6 +211,33 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     if (from && to && from > to) return '"Desde" no puede ser mayor que "Hasta".';
     return '';
   };
+
+  const openMassExportModal = (mode: 'saldos' | 'commissionDetail') => {
+    const { from, to } = massExportRangeForPreset('current_month');
+    setMassExportMode(mode);
+    setMassExportFrom(from);
+    setMassExportTo(to);
+    setMassExportError('');
+    setMassExportModalOpen(true);
+  };
+
+  const applyMassExportPreset = (preset: MassExportRangePreset) => {
+    const { from, to } = massExportRangeForPreset(preset);
+    setMassExportFrom(from);
+    setMassExportTo(to);
+    setMassExportError('');
+  };
+
+  const activeMassExportPreset = useMemo((): MassExportRangePreset | null => {
+    const from = massExportFrom.trim();
+    const to = massExportTo.trim();
+    if (!from || !to) return null;
+    for (const p of MASS_EXPORT_RANGE_PRESETS) {
+      const r = massExportRangeForPreset(p.id);
+      if (r.from === from && r.to === to) return p.id;
+    }
+    return null;
+  }, [massExportFrom, massExportTo]);
 
   const runMassExport = async () => {
     const from = massExportFrom.trim();
@@ -506,11 +585,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         </p>
         <button
           type="button"
-          onClick={() => {
-            setMassExportMode('saldos');
-            setMassExportError('');
-            setMassExportModalOpen(true);
-          }}
+          onClick={() => openMassExportModal('saldos')}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
           title="Descargar un Excel por cada vendedor (solicita fechas)"
           disabled={massExporting}
@@ -520,11 +595,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => {
-            setMassExportMode('commissionDetail');
-            setMassExportError('');
-            setMassExportModalOpen(true);
-          }}
+          onClick={() => openMassExportModal('commissionDetail')}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition disabled:opacity-60"
           title="Descargar detalle de comisiones por cada vendedor (solicita fechas)"
           disabled={massExporting}
@@ -602,6 +673,30 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
             </div>
 
             <div className="px-5 py-4 space-y-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Rango rápido</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {MASS_EXPORT_RANGE_PRESETS.map((p) => {
+                    const active = activeMassExportPreset === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => applyMassExportPreset(p.id)}
+                        disabled={massExporting}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition touch-manipulation ${
+                          active
+                            ? 'bg-blue-600/30 border-blue-500/70 text-blue-100'
+                            : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white'
+                        } disabled:opacity-50`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Desde</label>
                 <input
