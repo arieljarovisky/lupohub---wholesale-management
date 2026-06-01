@@ -653,46 +653,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     });
   }, [financialSummaryMovements]);
 
-  const unifiedLedgerEntries = useMemo(() => {
-    const entries = multimediaLedger?.entries?.length
-      ? multimediaLedger.entries
-      : financialSummaryAsLedger;
-    if (!entries?.length) return [];
-    const normalizeDocType = (tipo: string, detalle?: string | null) => {
-      const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
-      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
-      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
-      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
-      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
-      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
-      return (tipo || '').toUpperCase();
-    };
-    const rows = [...entries];
-    let runningSaldo = 0;
-    let hasRunningSaldo = false;
-    return rows.map((row) => {
-      const next = { ...row };
-      if (next.saldo != null && Number.isFinite(Number(next.saldo))) {
-        runningSaldo = Number(next.saldo);
-        hasRunningSaldo = true;
-        return next;
-      }
-      if (next.importe != null && Number.isFinite(Number(next.importe))) {
-        const amount = Number(next.importe);
-        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
-        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
-          hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
-          hasRunningSaldo = true;
-        }
-      }
-      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
-      return next;
-    });
-  }, [multimediaLedger, financialSummaryAsLedger]);
-
   const ledgerDateMs = (raw: string | null | undefined) => {
     if (!raw) return 0;
     const m = String(raw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -702,6 +662,57 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const t = d.getTime();
     return Number.isFinite(t) ? t : 0;
   };
+
+  const unifiedLedgerEntries = useMemo(() => {
+    const entries = multimediaLedger?.entries?.length
+      ? multimediaLedger.entries
+      : financialSummaryAsLedger;
+    if (!entries?.length) return [];
+    const normalizeDocType = (tipo: string, detalle?: string | null) => {
+      const t0 = String(tipo || '').trim().toUpperCase();
+      if (t0 === 'NC' || t0 === 'N/C') return 'NC';
+      if (t0 === 'REC' || t0 === 'RECIBO') return 'REC';
+      if (t0 === 'PED' || t0 === 'PEDIDO') return 'PED';
+      if (t0 === 'FAC' || t0 === 'FACTURA') return 'FAC';
+      if (t0 === 'ND') return 'ND';
+      const t = `${t0} ${detalle || ''}`.toUpperCase();
+      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
+      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
+      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b|N\/C/.test(t)) return 'NC';
+      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
+      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE/.test(t)) return 'FAC';
+      return t0 || 'OTRO';
+    };
+    const rows = [...entries].sort((a, b) => {
+      const da = ledgerDateMs(a.lineDate) - ledgerDateMs(b.lineDate);
+      if (da !== 0) return da;
+      return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
+    });
+    let runningSaldo = 0;
+    let hasRunningSaldo = false;
+    const withSaldo = rows.map((row) => {
+      const next = { ...row };
+      if (next.importe != null && Number.isFinite(Number(next.importe))) {
+        const amount = Math.abs(Number(next.importe));
+        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
+        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
+          runningSaldo -= amount;
+          hasRunningSaldo = true;
+        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
+          runningSaldo += amount;
+          hasRunningSaldo = true;
+        }
+      }
+      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+      return next;
+    });
+    return withSaldo;
+  }, [multimediaLedger, financialSummaryAsLedger]);
+
+  const ledgerSaldoCorridoFinal =
+    unifiedLedgerEntries.length > 0
+      ? unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null
+      : null;
 
   const unifiedLedgerEntriesNewestFirst = useMemo(() => {
     if (!unifiedLedgerEntries.length) return [];
@@ -762,7 +773,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <th className="px-3 py-2">Tipo</th>
                 <th className="px-3 py-2">Número</th>
                 <th className="px-3 py-2 text-right">Importe</th>
-                <th className="px-3 py-2 text-right">Saldo</th>
+                <th className="px-3 py-2 text-right" title="Reconstruido desde importes; puede diferir del saldo pendiente oficial">
+                  Saldo corrido
+                </th>
                 <th className="px-3 py-2">Detalle</th>
               </tr>
             </thead>
@@ -1603,6 +1616,21 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     ) : null}
                   </p>
                 ) : null}
+                {carteraById[selectedCustomer.id] &&
+                  ledgerSaldoCorridoFinal != null &&
+                  Math.abs(ledgerSaldoCorridoFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 && (
+                    <div className="mb-3 rounded-xl border border-amber-600/40 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100/90 leading-relaxed">
+                      El <span className="font-bold">saldo pendiente</span> arriba ($
+                      {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
+                        minimumFractionDigits: 2
+                      })}
+                      ) usa el <span className="font-bold">cierre importado de Multimedias</span> más pedidos/recibos
+                      LupoHub pendientes. La columna «Saldo corrido» reconstruye todo el historial (
+                      {ledgerSaldoCorridoFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })} al último
+                      movimiento) y puede diferir si hay comprobantes duplicados entre el Excel y LupoHub (ej. pedido con
+                      factura + NC + recibo ya imputado).
+                    </div>
+                  )}
                 {renderLedgerTable(
                   'Facturas, NC y recibos',
                   <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />,

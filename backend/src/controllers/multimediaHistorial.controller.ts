@@ -501,13 +501,19 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       return parts.join('-');
     };
     const normalizeDocType = (tipo: any, detalle: any) => {
-      const t = `${String(tipo || '')} ${String(detalle || '')}`.toUpperCase();
+      const t0 = String(tipo || '').trim().toUpperCase();
+      if (t0 === 'NC' || t0 === 'N/C') return 'NC';
+      if (t0 === 'REC' || t0 === 'RECIBO') return 'REC';
+      if (t0 === 'PED' || t0 === 'PEDIDO') return 'PED';
+      if (t0 === 'FAC' || t0 === 'FACTURA') return 'FAC';
+      if (t0 === 'ND') return 'ND';
+      const t = `${t0} ${String(detalle || '')}`.toUpperCase();
       if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
       if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
-      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
-      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
+      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b|N\/C/.test(t)) return 'NC';
       if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
-      return String(tipo || '').trim().toUpperCase();
+      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE/.test(t)) return 'FAC';
+      return t0 || 'OTRO';
     };
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
     const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
@@ -671,21 +677,19 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     let runningSaldo = 0;
     let hasRunningSaldo = false;
     for (const row of deduped) {
-      if (row.saldo != null) {
-        runningSaldo = Number(row.saldo) || 0;
-        hasRunningSaldo = true;
-      } else if (row.importe != null) {
+      if (row.importe != null && Number.isFinite(Number(row.importe))) {
         const tipoNorm = normalizeDocType(row.tipo, row.detalle);
-        const amount = Number(row.importe) || 0;
+        const amount = Math.abs(Number(row.importe)) || 0;
         if (tipoNorm === 'REC' || tipoNorm === 'NC') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
+          runningSaldo -= amount;
           hasRunningSaldo = true;
         } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
+          runningSaldo += amount;
           hasRunningSaldo = true;
         }
       }
-      row.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+      row.saldoCorrido = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+      row.saldo = row.saldoCorrido;
     }
     const lastSaldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : 0;
 
