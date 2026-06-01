@@ -476,6 +476,123 @@ export const updateImportedPaymentDate = async (req: any, res: Response) => {
   }
 };
 
+/** Elimina un recibo del sistema o una línea REC importada de Tango. */
+export const deletePayment = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const routeId = String(req.params?.id || '').trim();
+    const customerId = String(req.body?.customerId || '').trim();
+    const importedLineOrder = Number(req.body?.importedLineOrder);
+
+    if (routeId.startsWith('mm-') || (Number.isFinite(importedLineOrder) && importedLineOrder > 0)) {
+      if (!customerId || !Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+        return res.status(400).json({
+          message: 'Para un recibo importado de Tango indicá customerId e importedLineOrder',
+        });
+      }
+      const cust = (await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [
+        customerId,
+      ])) as { id: string; seller_id?: string } | undefined;
+      if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+      if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés eliminar recibos de tus clientes' });
+      }
+      const entry = await getImportedReceiptEntry(customerId, importedLineOrder);
+      if (!entry) return res.status(404).json({ message: 'Recibo importado no encontrado' });
+
+      const linkedPaymentId = await findExistingPaymentIdForImportedEntry(entry);
+      if (linkedPaymentId) {
+        const orderRows = (await query(
+          `SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
+           FROM payments p
+           LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+           LEFT JOIN payment_orders po ON po.payment_id = p.id
+           LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
+           WHERE p.id = ?
+             AND COALESCE(i.order_id, po.order_id, p.order_id) IS NOT NULL`,
+          [linkedPaymentId]
+        )) as Array<{ order_id: string }>;
+        await execute('DELETE FROM payment_invoices WHERE payment_id = ?', [linkedPaymentId]);
+        try {
+          await execute('DELETE FROM payment_orders WHERE payment_id = ?', [linkedPaymentId]);
+        } catch {
+          /* tabla opcional */
+        }
+        try {
+          await execute('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [linkedPaymentId]);
+        } catch {
+          /* tabla opcional */
+        }
+        await execute('DELETE FROM payments WHERE id = ?', [linkedPaymentId]);
+        for (const r of orderRows) {
+          if (r.order_id) await syncOrderPaymentStatus(r.order_id);
+        }
+      }
+
+      await execute(
+        `DELETE FROM customer_multimedia_entries WHERE customer_id = ? AND line_order = ?`,
+        [customerId, importedLineOrder]
+      );
+      await syncAllOrderPaymentStatusForCustomer(customerId);
+      return res.json({ ok: true, customerId, importedLineOrder });
+    }
+
+    const paymentId = routeId;
+    if (!paymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
+
+    const payment = (await get(
+      `SELECT p.id, p.customer_id, c.seller_id
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       WHERE p.id = ?`,
+      [paymentId]
+    )) as { id: string; customer_id: string; seller_id?: string } | undefined;
+    if (!payment) return res.status(404).json({ message: 'Recibo no encontrado' });
+    if (user.role === 'SELLER' && payment.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés eliminar recibos de tus clientes' });
+    }
+
+    const orderRows = (await query(
+      `SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_orders po ON po.payment_id = p.id
+       LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
+       WHERE p.id = ?
+         AND COALESCE(i.order_id, po.order_id, p.order_id) IS NOT NULL`,
+      [paymentId]
+    )) as Array<{ order_id: string }>;
+
+    await execute('DELETE FROM payment_invoices WHERE payment_id = ?', [paymentId]);
+    try {
+      await execute('DELETE FROM payment_orders WHERE payment_id = ?', [paymentId]);
+    } catch {
+      /* tabla opcional */
+    }
+    try {
+      await execute('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [paymentId]);
+    } catch {
+      /* tabla opcional */
+    }
+    await execute('DELETE FROM payments WHERE id = ?', [paymentId]);
+
+    const orderIds = new Set(orderRows.map((r) => r.order_id).filter(Boolean));
+    for (const oid of orderIds) {
+      await syncOrderPaymentStatus(oid);
+    }
+    await syncAllOrderPaymentStatusForCustomer(payment.customer_id);
+
+    return res.json({ ok: true, id: paymentId });
+  } catch (e: any) {
+    console.error('deletePayment:', e);
+    return res.status(500).json({ message: 'Error eliminando recibo', detail: e?.message });
+  }
+};
+
 /** Crear pago/recibo. */
 export const createPayment = async (req: any, res: Response) => {
   try {

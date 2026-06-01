@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addInvoicesTable = void 0;
+exports.addInvoicesTable = addInvoicesTable;
 const db_1 = require("./db");
 /** Tabla de facturas AFIP emitidas por pedido (una factura por pedido). */
 function addInvoicesTable() {
@@ -56,4 +56,3 @@ function addInvoicesTable() {
         }
     });
 }
-exports.addInvoicesTable = addInvoicesTable;

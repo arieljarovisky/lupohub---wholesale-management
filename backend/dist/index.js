@@ -13,7 +13,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyCorsHeaders = exports.isAllowedOrigin = void 0;
+exports.isAllowedOrigin = isAllowedOrigin;
+exports.applyCorsHeaders = applyCorsHeaders;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -110,7 +111,6 @@ function isAllowedOrigin(origin) {
         return true;
     return false;
 }
-exports.isAllowedOrigin = isAllowedOrigin;
 /** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
 function applyCorsHeaders(req, res) {
     const origin = req.headers.origin;
@@ -120,7 +120,6 @@ function applyCorsHeaders(req, res) {
         res.setHeader('Vary', 'Origin');
     }
 }
-exports.applyCorsHeaders = applyCorsHeaders;
 const corsOpts = {
     origin: (origin, cb) => {
         if (isAllowedOrigin(origin))

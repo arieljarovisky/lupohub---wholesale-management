@@ -12,7 +12,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchMercadoPagoMovements = exports.getMercadoPagoAccessToken = void 0;
+exports.getMercadoPagoAccessToken = getMercadoPagoAccessToken;
+exports.fetchMercadoPagoMovements = fetchMercadoPagoMovements;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const MP_API = 'https://api.mercadopago.com';
@@ -26,8 +27,8 @@ function dateInRange(iso, from, to) {
     return ymd >= from && ymd <= to;
 }
 function getMercadoPagoAccessToken() {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const env = (_a = process.env.MERCADOPAGO_ACCESS_TOKEN) === null || _a === void 0 ? void 0 : _a.trim();
         if (env)
             return env;
@@ -41,7 +42,6 @@ function getMercadoPagoAccessToken() {
         }
     });
 }
-exports.getMercadoPagoAccessToken = getMercadoPagoAccessToken;
 function sumPaymentFees(payment) {
     const fees = Array.isArray(payment.fee_details) ? payment.fee_details : [];
     return fees.reduce((sum, f) => {
@@ -111,8 +111,8 @@ function mapPaymentToMovement(payment) {
     };
 }
 function fetchMercadoPagoMovements(from, to) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const token = yield getMercadoPagoAccessToken();
         if (!token) {
             return {
@@ -214,4 +214,3 @@ function fetchMercadoPagoMovements(from, to) {
         };
     });
 }
-exports.fetchMercadoPagoMovements = fetchMercadoPagoMovements;

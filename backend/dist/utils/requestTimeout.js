@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.withRequestTimeout = void 0;
+exports.withRequestTimeout = withRequestTimeout;
 /** Ejecuta una promesa con tope de tiempo; evita que el proxy (Railway) corte con 502 sin CORS. */
 function withRequestTimeout(ms, fn, timeoutMessage) {
     return new Promise((resolve, reject) => {
@@ -21,4 +21,3 @@ function withRequestTimeout(ms, fn, timeoutMessage) {
         });
     });
 }
-exports.withRequestTimeout = withRequestTimeout;

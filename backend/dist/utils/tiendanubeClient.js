@@ -9,7 +9,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tnDeleteWithRetry = exports.tnGetWithRetry = exports.tnPostWithRetry = exports.tnPutWithRetry = void 0;
+exports.tnPutWithRetry = tnPutWithRetry;
+exports.tnPostWithRetry = tnPostWithRetry;
+exports.tnGetWithRetry = tnGetWithRetry;
+exports.tnDeleteWithRetry = tnDeleteWithRetry;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /**
  * Rate limiter global (en memoria) para requests a Tienda Nube.
@@ -49,8 +52,8 @@ function scheduleTn(fn, minIntervalMs) {
     });
 }
 function tnPutWithRetry(axiosInstance, url, body, config, opts) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -75,10 +78,9 @@ function tnPutWithRetry(axiosInstance, url, body, config, opts) {
         }
     });
 }
-exports.tnPutWithRetry = tnPutWithRetry;
 function tnPostWithRetry(axiosInstance, url, body, config, opts) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -103,10 +105,9 @@ function tnPostWithRetry(axiosInstance, url, body, config, opts) {
         throw new Error('tnPostWithRetry: retries exhausted');
     });
 }
-exports.tnPostWithRetry = tnPostWithRetry;
 function tnGetWithRetry(axiosInstance, url, config, opts) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -131,10 +132,9 @@ function tnGetWithRetry(axiosInstance, url, config, opts) {
         throw new Error('tnGetWithRetry: retries exhausted');
     });
 }
-exports.tnGetWithRetry = tnGetWithRetry;
 function tnDeleteWithRetry(axiosInstance, url, config, opts) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -159,4 +159,3 @@ function tnDeleteWithRetry(axiosInstance, url, config, opts) {
         }
     });
 }
-exports.tnDeleteWithRetry = tnDeleteWithRetry;

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerSellerCommission = void 0;
+exports.addCustomerSellerCommission = addCustomerSellerCommission;
 /**
  * Comisión del vendedor por cliente (%). Si es NULL, se usa users.commission_percentage del vendedor asignado.
  */
@@ -26,4 +26,3 @@ function addCustomerSellerCommission() {
         console.log('[DB] Columna seller_commission_percentage agregada a customers');
     });
 }
-exports.addCustomerSellerCommission = addCustomerSellerCommission;

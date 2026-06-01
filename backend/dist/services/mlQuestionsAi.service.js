@@ -12,7 +12,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runMlQuestionsAiIfEnabled = exports.processUnansweredBatch = exports.processOneQuestion = exports.searchUnansweredQuestions = exports.fetchQuestion = exports.buildLocalCatalogSummaryForMlQuestions = exports.getLlmStatus = exports.llmConfigured = exports.openAiConfigured = exports.saveMlQuestionsAiConfig = exports.getMlQuestionsAiConfigRow = exports.ensureMlQuestionsAiConfigTable = void 0;
+exports.ensureMlQuestionsAiConfigTable = ensureMlQuestionsAiConfigTable;
+exports.getMlQuestionsAiConfigRow = getMlQuestionsAiConfigRow;
+exports.saveMlQuestionsAiConfig = saveMlQuestionsAiConfig;
+exports.openAiConfigured = openAiConfigured;
+exports.llmConfigured = llmConfigured;
+exports.getLlmStatus = getLlmStatus;
+exports.buildLocalCatalogSummaryForMlQuestions = buildLocalCatalogSummaryForMlQuestions;
+exports.fetchQuestion = fetchQuestion;
+exports.searchUnansweredQuestions = searchUnansweredQuestions;
+exports.processOneQuestion = processOneQuestion;
+exports.processUnansweredBatch = processUnansweredBatch;
+exports.runMlQuestionsAiIfEnabled = runMlQuestionsAiIfEnabled;
 /**
  * Respuestas automáticas a preguntas de Mercado Libre con IA.
  * Proveedores soportados (configuración por .env):
@@ -51,10 +62,9 @@ function ensureMlQuestionsAiConfigTable() {
   `);
     });
 }
-exports.ensureMlQuestionsAiConfigTable = ensureMlQuestionsAiConfigTable;
 function getMlQuestionsAiConfigRow() {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         yield ensureMlQuestionsAiConfigTable();
         const row = yield (0, db_1.get)(`SELECT enabled, extra_system_prompt AS extraSystemPrompt FROM ml_questions_ai_config WHERE id = 1`);
         if (!row) {
@@ -67,7 +77,6 @@ function getMlQuestionsAiConfigRow() {
         };
     });
 }
-exports.getMlQuestionsAiConfigRow = getMlQuestionsAiConfigRow;
 function saveMlQuestionsAiConfig(enabled, extraSystemPrompt) {
     return __awaiter(this, void 0, void 0, function* () {
         yield ensureMlQuestionsAiConfigTable();
@@ -76,7 +85,6 @@ function saveMlQuestionsAiConfig(enabled, extraSystemPrompt) {
      ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), extra_system_prompt = VALUES(extra_system_prompt)`, [enabled ? 1 : 0, (extraSystemPrompt === null || extraSystemPrompt === void 0 ? void 0 : extraSystemPrompt.trim()) || null]);
     });
 }
-exports.saveMlQuestionsAiConfig = saveMlQuestionsAiConfig;
 function hasGeminiKey() {
     return !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
 }
@@ -109,11 +117,9 @@ function resolveProvider() {
 function openAiConfigured() {
     return resolveProvider() !== null;
 }
-exports.openAiConfigured = openAiConfigured;
 function llmConfigured() {
     return resolveProvider() !== null;
 }
-exports.llmConfigured = llmConfigured;
 function getLlmStatus() {
     const provider = resolveProvider();
     const labels = {
@@ -127,7 +133,6 @@ function getLlmStatus() {
         label: provider ? labels[provider] : 'Ninguna clave configurada'
     };
 }
-exports.getLlmStatus = getLlmStatus;
 /** Modelo estable actual (Google dejó de exponer gemini-1.5-flash en v1beta para muchas cuentas). */
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-flash-latest'];
@@ -215,7 +220,6 @@ function buildLocalCatalogSummaryForMlQuestions() {
         }
     });
 }
-exports.buildLocalCatalogSummaryForMlQuestions = buildLocalCatalogSummaryForMlQuestions;
 function getCachedCatalogSummary() {
     return __awaiter(this, void 0, void 0, function* () {
         if (!catalogEnabled())
@@ -248,8 +252,8 @@ function buildMlQuestionUserPrompt(params) {
         `Pregunta del comprador:\n${params.questionText}`);
 }
 function callGeminiAnswer(params) {
-    var _a, _b, _c, _d, _e, _f, _g;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g;
         const key = (_a = process.env.GEMINI_API_KEY) === null || _a === void 0 ? void 0 : _a.trim();
         if (!key)
             throw new Error('GEMINI_API_KEY no configurada');
@@ -296,8 +300,8 @@ function callGeminiAnswer(params) {
     });
 }
 function callGroqAnswer(params) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         const key = (_a = process.env.GROQ_API_KEY) === null || _a === void 0 ? void 0 : _a.trim();
         if (!key)
             throw new Error('GROQ_API_KEY no configurada');
@@ -326,8 +330,8 @@ function callGroqAnswer(params) {
     });
 }
 function callOpenAiAnswer(params) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         const key = (_a = process.env.OPENAI_API_KEY) === null || _a === void 0 ? void 0 : _a.trim();
         if (!key)
             throw new Error('OPENAI_API_KEY no configurada en el servidor');
@@ -356,8 +360,8 @@ function callOpenAiAnswer(params) {
     });
 }
 function generateLlmAnswer(params) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const provider = resolveProvider();
         if (!provider) {
             throw new Error('Ningún proveedor de IA configurado. Agregá GEMINI_API_KEY (recomendado, gratis), GROQ_API_KEY (gratis) u OPENAI_API_KEY en el servidor.');
@@ -412,10 +416,9 @@ function fetchQuestion(accessToken, questionId) {
         return res.data;
     });
 }
-exports.fetchQuestion = fetchQuestion;
 /** Lista preguntas sin responder del vendedor. */
-function searchUnansweredQuestions(accessToken, sellerId, limit = 20) {
-    return __awaiter(this, void 0, void 0, function* () {
+function searchUnansweredQuestions(accessToken_1, sellerId_1) {
+    return __awaiter(this, arguments, void 0, function* (accessToken, sellerId, limit = 20) {
         const res = yield mlGet(accessToken, `/questions/search`, {
             seller_id: sellerId,
             status: 'UNANSWERED',
@@ -424,7 +427,6 @@ function searchUnansweredQuestions(accessToken, sellerId, limit = 20) {
         return res.data;
     });
 }
-exports.searchUnansweredQuestions = searchUnansweredQuestions;
 function fetchItem(accessToken, itemId) {
     return __awaiter(this, void 0, void 0, function* () {
         const res = yield mlGet(accessToken, `/items/${encodeURIComponent(itemId)}`, {
@@ -434,8 +436,8 @@ function fetchItem(accessToken, itemId) {
     });
 }
 function fetchDescription(accessToken, itemId) {
-    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         try {
             const res = yield mlGet(accessToken, `/items/${encodeURIComponent(itemId)}/description`);
             const plain = (_d = (_b = (_a = res.data) === null || _a === void 0 ? void 0 : _a.plain_text) !== null && _b !== void 0 ? _b : (_c = res.data) === null || _c === void 0 ? void 0 : _c.text) !== null && _d !== void 0 ? _d : '';
@@ -522,8 +524,8 @@ function formatMlSizeChartForPrompt(chart) {
     return text;
 }
 function fetchMlSizeChartForPrompt(accessToken, chartId) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const id = String(chartId || '').trim();
         if (!id)
             return '';
@@ -584,10 +586,9 @@ function processOneQuestion(accessToken, questionId, opts) {
         return { questionId, status: 'answered', preview: answerText.slice(0, 160) };
     });
 }
-exports.processOneQuestion = processOneQuestion;
 function processUnansweredBatch(mlToken, opts) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const limit = Math.min(Math.max((_a = opts === null || opts === void 0 ? void 0 : opts.limit) !== null && _a !== void 0 ? _a : 10, 1), 25);
         const search = yield searchUnansweredQuestions(mlToken.access_token, mlToken.user_id, limit);
         const questions = search.questions || [];
@@ -611,11 +612,10 @@ function processUnansweredBatch(mlToken, opts) {
         return { processed: results.length, results };
     });
 }
-exports.processUnansweredBatch = processUnansweredBatch;
 /** Si la configuración y OpenAI están activos, procesa preguntas sin responder (para webhook o cron). */
 function runMlQuestionsAiIfEnabled(getToken, opts) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const cfg = yield getMlQuestionsAiConfigRow();
         if (!cfg.enabled) {
             return { ran: false, message: 'Auto-respuesta desactivada' };
@@ -634,4 +634,3 @@ function runMlQuestionsAiIfEnabled(getToken, opts) {
         return { ran: true, processed, results };
     });
 }
-exports.runMlQuestionsAiIfEnabled = runMlQuestionsAiIfEnabled;

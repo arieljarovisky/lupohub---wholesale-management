@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ensureAdminUser = void 0;
+exports.ensureAdminUser = ensureAdminUser;
 /**
  * Asegura que exista un usuario admin (para producción y desarrollo).
  * En producción usa ADMIN_EMAIL y ADMIN_PASSWORD; en desarrollo usa valores por defecto si no están definidos.
@@ -43,4 +43,3 @@ function ensureAdminUser() {
         }
     });
 }
-exports.ensureAdminUser = ensureAdminUser;

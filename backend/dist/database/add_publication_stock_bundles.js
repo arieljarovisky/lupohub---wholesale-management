@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPublicationStockBundles = void 0;
+exports.addPublicationStockBundles = addPublicationStockBundles;
 /**
  * Packs de publicación: una publicación ML/TN descuenta stock de varias variantes (ej. pack 3 boxer: 1 negro + 1 gris + 1 blanco).
  */
@@ -48,4 +48,3 @@ function addPublicationStockBundles() {
         console.log('[DB] Tablas publication_stock_bundles y publication_stock_bundle_items creadas');
     });
 }
-exports.addPublicationStockBundles = addPublicationStockBundles;

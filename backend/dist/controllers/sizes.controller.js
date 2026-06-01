@@ -95,7 +95,7 @@ const createSize = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.createSize = createSize;
 /** Eliminar un talle por id. No permite eliminar si hay variantes que lo usan. */
 const deleteSize = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _b;
+    var _a;
     try {
         const sizeId = req.params.id;
         if (!sizeId)
@@ -104,7 +104,7 @@ const deleteSize = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
       SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'sizes'
     `);
-        const hasSizesTable = Number(((_b = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _b === void 0 ? void 0 : _b.cnt) || 0) > 0;
+        const hasSizesTable = Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) > 0;
         if (hasSizesTable) {
             const existing = yield (0, db_1.get)(`SELECT id FROM sizes WHERE id = ?`, [sizeId]);
             if (!existing)
@@ -132,13 +132,13 @@ const deleteSize = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.deleteSize = deleteSize;
 /** Unifica talles por letra (G, GG, M, P, etc.) al talle canónico con código numérico (150, 160, 140, 130...). Reasigna variantes y elimina los talles duplicados. */
 const unifySizes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c, _d, _e;
+    var _a, _b, _c;
     try {
         const tblCheck = yield (0, db_1.query)(`
       SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'sizes'
     `);
-        const hasSizesTable = Number(((_c = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _c === void 0 ? void 0 : _c.cnt) || 0) > 0;
+        const hasSizesTable = Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) > 0;
         if (!hasSizesTable) {
             return res.status(400).json({ message: 'La unificación de talles solo está disponible con la tabla sizes.' });
         }
@@ -168,7 +168,7 @@ const unifySizes = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             if (canonicalId === size.id)
                 continue;
             const countResult = yield (0, db_1.query)(`SELECT COUNT(*) AS n FROM product_variants WHERE size_id = ?`, [size.id]);
-            const variantCount = Number((_e = (_d = countResult === null || countResult === void 0 ? void 0 : countResult[0]) === null || _d === void 0 ? void 0 : _d.n) !== null && _e !== void 0 ? _e : 0);
+            const variantCount = Number((_c = (_b = countResult === null || countResult === void 0 ? void 0 : countResult[0]) === null || _b === void 0 ? void 0 : _b.n) !== null && _c !== void 0 ? _c : 0);
             if (variantCount > 0) {
                 yield (0, db_1.execute)(`UPDATE product_variants SET size_id = ? WHERE size_id = ?`, [canonicalId, size.id]);
                 totalUpdated += variantCount;

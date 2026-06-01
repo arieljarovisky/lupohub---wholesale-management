@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addLupoStockWebhookConfigTable = void 0;
+exports.addLupoStockWebhookConfigTable = addLupoStockWebhookConfigTable;
 const db_1 = require("./db");
 function addLupoStockWebhookConfigTable() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -50,4 +50,3 @@ function addLupoStockWebhookConfigTable() {
         }
     });
 }
-exports.addLupoStockWebhookConfigTable = addLupoStockWebhookConfigTable;

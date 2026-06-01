@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -234,7 +244,7 @@ const exportMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.exportMultimediaHistorial = exportMultimediaHistorial;
 /** POST multipart file → importa movimientos por cliente */
 const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -259,19 +269,19 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
             if (c.legacy_code) {
                 const lc = String(c.legacy_code).trim();
                 if (lc) {
-                    customerByLegacy.set(lc, { id: c.id, seller_id: (_e = c.seller_id) !== null && _e !== void 0 ? _e : null });
-                    customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), { id: c.id, seller_id: (_f = c.seller_id) !== null && _f !== void 0 ? _f : null });
+                    customerByLegacy.set(lc, { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null });
+                    customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
                 }
             }
             const k1 = normalizeNameForMatch(c.business_name);
             const k2 = normalizeNameForMatch(c.name);
             if (k1 && !customerByNorm.has(k1))
-                customerByNorm.set(k1, { id: c.id, seller_id: (_g = c.seller_id) !== null && _g !== void 0 ? _g : null });
+                customerByNorm.set(k1, { id: c.id, seller_id: (_c = c.seller_id) !== null && _c !== void 0 ? _c : null });
             if (k2 && !customerByNorm.has(k2))
-                customerByNorm.set(k2, { id: c.id, seller_id: (_h = c.seller_id) !== null && _h !== void 0 ? _h : null });
+                customerByNorm.set(k2, { id: c.id, seller_id: (_d = c.seller_id) !== null && _d !== void 0 ? _d : null });
             const cu = (0, multimediaHistorialExcel_1.normalizeCuitDigits)(c.cuit);
             if (cu.length >= 8 && !customerByCuit.has(cu)) {
-                customerByCuit.set(cu, { id: c.id, seller_id: (_j = c.seller_id) !== null && _j !== void 0 ? _j : null });
+                customerByCuit.set(cu, { id: c.id, seller_id: (_e = c.seller_id) !== null && _e !== void 0 ? _e : null });
             }
         }
         let sheetsProcessed = 0;
@@ -299,8 +309,8 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                 continue;
             }
             sheetsProcessed++;
-            const legacy = (0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code || ((_k = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _k === void 0 ? void 0 : _k.code) || '');
-            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_l = parsed.zona) === null || _l === void 0 ? void 0 : _l.trim()) || null, ((_m = parsed.vendedorHabitual) === null || _m === void 0 ? void 0 : _m.trim()) || null, cust.id]);
+            const legacy = (0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code || ((_f = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _f === void 0 ? void 0 : _f.code) || '');
+            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_g = parsed.zona) === null || _g === void 0 ? void 0 : _g.trim()) || null, ((_h = parsed.vendedorHabitual) === null || _h === void 0 ? void 0 : _h.trim()) || null, cust.id]);
             customersUpdated++;
             yield (0, db_1.execute)(`DELETE FROM customer_multimedia_entries WHERE customer_id = ?`, [cust.id]);
             let order = 0;
@@ -319,13 +329,13 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                     order++,
                     lineDate,
                     tipo,
-                    ((_o = m.numero) === null || _o === void 0 ? void 0 : _o.trim()) || null,
-                    ((_p = m.edc) === null || _p === void 0 ? void 0 : _p.trim()) || null,
+                    ((_j = m.numero) === null || _j === void 0 ? void 0 : _j.trim()) || null,
+                    ((_k = m.edc) === null || _k === void 0 ? void 0 : _k.trim()) || null,
                     vto,
                     m.importe,
                     m.saldo,
-                    ((_q = m.detalle) === null || _q === void 0 ? void 0 : _q.trim()) || null,
-                    ((_r = m.paginaPdf) === null || _r === void 0 ? void 0 : _r.trim()) || null,
+                    ((_l = m.detalle) === null || _l === void 0 ? void 0 : _l.trim()) || null,
+                    ((_m = m.paginaPdf) === null || _m === void 0 ? void 0 : _m.trim()) || null,
                 ]);
                 rowsInserted++;
             }
@@ -353,7 +363,7 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.importMultimediaHistorial = importMultimediaHistorial;
 /** GET /customers/:id/multimedia-ledger — movimientos importados (Excel Tango/Multimedias) para la ficha del cliente. */
 const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _s, _t, _u, _v;
+    var _a, _b, _c, _d;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -428,7 +438,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          WHERE customer_id = ?
          ORDER BY fecha ASC, created_at ASC`, [id]));
         }
-        catch (_w) {
+        catch (_e) {
             manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, created_at
          FROM customer_manual_comprobantes
          WHERE customer_id = ?
@@ -498,6 +508,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 saldo: null,
                 detalle: `${pedidoRef} · Comprobante manual${pdfNote}${detalleExtra ? ` · ${detalleExtra}` : ''}`,
                 paginaPdf: null,
+                manualComprobanteId: m.id,
                 source: 'system'
             };
         });
@@ -590,13 +601,13 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         (0, ledgerRunningSaldo_1.applyLedgerRunningSaldo)(unified);
         const lastSaldo = (0, ledgerRunningSaldo_1.applyLedgerRunningSaldoSimple)(unified);
         for (const row of unified) {
-            row.saldo = (_s = row.saldoCorrido) !== null && _s !== void 0 ? _s : null;
+            row.saldo = (_a = row.saldoCorrido) !== null && _a !== void 0 ? _a : null;
         }
         res.json({
             customerId: id,
-            legacyCode: (_t = cust.legacy_code) !== null && _t !== void 0 ? _t : null,
-            accountZone: (_u = cust.account_zone) !== null && _u !== void 0 ? _u : null,
-            accountSellerLabel: (_v = cust.account_seller_label) !== null && _v !== void 0 ? _v : null,
+            legacyCode: (_b = cust.legacy_code) !== null && _b !== void 0 ? _b : null,
+            accountZone: (_c = cust.account_zone) !== null && _c !== void 0 ? _c : null,
+            accountSellerLabel: (_d = cust.account_seller_label) !== null && _d !== void 0 ? _d : null,
             movementCount: unified.length,
             lastSaldo,
             entries: unified

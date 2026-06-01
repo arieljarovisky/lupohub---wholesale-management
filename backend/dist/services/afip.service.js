@@ -24,13 +24,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -41,7 +51,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.consultarComprobanteAfip = exports.getCondicionIvaByCuit = exports.emitirNotaCredito = exports.emitirFactura = exports.getAfipIssuerData = exports.isAfipProduction = exports.isAfipConfigured = exports.afipEmitHttpStatusFromMessage = exports.formatAfipError = void 0;
+exports.formatAfipError = formatAfipError;
+exports.afipEmitHttpStatusFromMessage = afipEmitHttpStatusFromMessage;
+exports.isAfipConfigured = isAfipConfigured;
+exports.isAfipProduction = isAfipProduction;
+exports.getAfipIssuerData = getAfipIssuerData;
+exports.emitirFactura = emitirFactura;
+exports.emitirNotaCredito = emitirNotaCredito;
+exports.getCondicionIvaByCuit = getCondicionIvaByCuit;
+exports.consultarComprobanteAfip = consultarComprobanteAfip;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const argentinaDate_1 = require("../utils/argentinaDate");
@@ -106,7 +124,6 @@ function formatAfipError(err) {
     }
     return msg;
 }
-exports.formatAfipError = formatAfipError;
 function afipEmitHttpStatusFromMessage(msg) {
     const m = (msg || '').toLowerCase();
     if (m.includes('no configurado'))
@@ -124,10 +141,9 @@ function afipEmitHttpStatusFromMessage(msg) {
     }
     return 500;
 }
-exports.afipEmitHttpStatusFromMessage = afipEmitHttpStatusFromMessage;
 function withAfipRetry(label, fn) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const deadline = Date.now() + AFIP_MAX_WAIT_MS;
         let lastErr;
         for (let attempt = 0; attempt < AFIP_RETRY_MAX; attempt++) {
@@ -225,12 +241,10 @@ function isAfipConfigured() {
     const hasCertEnv = !!((_d = process.env.AFIP_CERT) === null || _d === void 0 ? void 0 : _d.trim()) && !!((_e = process.env.AFIP_KEY) === null || _e === void 0 ? void 0 : _e.trim());
     return hasToken && (hasCertPaths || hasCertEnv);
 }
-exports.isAfipConfigured = isAfipConfigured;
 /** Indica si la app está configurada para facturar en producción AFIP (si no, es homologación). */
 function isAfipProduction() {
     return process.env.AFIP_PRODUCTION === 'true' || process.env.AFIP_PRODUCTION === '1';
 }
-exports.isAfipProduction = isAfipProduction;
 /** Datos del emisor para mostrar en la factura (desde env). El front puede usarlos si no tiene remitente en localStorage. */
 function getAfipIssuerData() {
     var _a, _b, _c, _d;
@@ -247,7 +261,6 @@ function getAfipIssuerData() {
         city: ((_d = process.env.AFIP_CITY) === null || _d === void 0 ? void 0 : _d.trim()) || undefined
     };
 }
-exports.getAfipIssuerData = getAfipIssuerData;
 /**
  * Emite una factura electrónica en AFIP por el pedido dado.
  * Regla (si no se fuerza tipo):
@@ -256,8 +269,8 @@ exports.getAfipIssuerData = getAfipIssuerData;
  * @param forceCbteTipo - Si es 1 o 6, se usa ese tipo (A o B) en lugar de calcular por cliente.
  */
 function emitirFactura(order, customer, forceCbteTipo) {
-    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
@@ -406,7 +419,6 @@ function emitirFactura(order, customer, forceCbteTipo) {
         };
     });
 }
-exports.emitirFactura = emitirFactura;
 /**
  * Emite una Nota de Crédito en AFIP asociada a una factura existente.
  * @param facturaOriginal - Factura que se está creditando (Pto.Vta, Tipo, Nro)
@@ -415,8 +427,8 @@ exports.emitirFactura = emitirFactura;
  * @param iibbPercepcion - Si la factura original tenía percepción IIBB en AFIP (`invoices.agip_*`), debe informarse igual en la NC (ImpTrib + Tributos Id 99).
  */
 function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercepcion) {
-    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
@@ -575,7 +587,6 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         };
     });
 }
-exports.emitirNotaCredito = emitirNotaCredito;
 /** Mapeo idImpuesto (Padrón) → descripción condición IVA para el cliente */
 const ID_IMPUESTO_A_CONDICION_IVA = {
     30: 'IVA Responsable Inscripto',
@@ -590,8 +601,8 @@ const ID_IMPUESTO_A_CONDICION_IVA = {
  * (además de wsfe); en homologación suele funcionar con el mismo token/cert.
  */
 function getCondicionIvaByCuit(cuit) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
         const config = getConfig();
         const cuitClean = String(cuit).replace(/\D/g, '');
         if (cuitClean.length !== 11) {
@@ -658,15 +669,14 @@ function getCondicionIvaByCuit(cuit) {
         return { condicionIva, businessName, address, city };
     });
 }
-exports.getCondicionIvaByCuit = getCondicionIvaByCuit;
 /**
  * Consulta en AFIP si un comprobante existe (FECompConsultar).
  * Si AFIP responde con datos del comprobante → la factura está registrada.
  * @returns Objeto con existe, datos del comprobante (si existe) y posible error de AFIP.
  */
 function consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const config = getConfig();
         let Afip;
         try {
@@ -703,4 +713,3 @@ function consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro) {
         }
     });
 }
-exports.consultarComprobanteAfip = consultarComprobanteAfip;

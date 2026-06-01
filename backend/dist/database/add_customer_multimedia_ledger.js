@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerMultimediaLedger = void 0;
+exports.addCustomerMultimediaLedger = addCustomerMultimediaLedger;
 const db_1 = require("./db");
 /** Código legacy Multimedias, zona/vendedor de cuenta corriente, y movimientos importados del Excel historial. */
 function addCustomerMultimediaLedger() {
@@ -71,4 +71,3 @@ function addCustomerMultimediaLedger() {
         }
     });
 }
-exports.addCustomerMultimediaLedger = addCustomerMultimediaLedger;

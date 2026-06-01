@@ -12,7 +12,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPendingInvoices = exports.aggregateMercadoLibreInRange = exports.aggregateTiendaNubeInRange = exports.sumDespachosCostInRange = exports.sumReceiptsInRange = exports.sumInvoicedInRange = void 0;
+exports.sumInvoicedInRange = sumInvoicedInRange;
+exports.sumReceiptsInRange = sumReceiptsInRange;
+exports.sumDespachosCostInRange = sumDespachosCostInRange;
+exports.aggregateTiendaNubeInRange = aggregateTiendaNubeInRange;
+exports.aggregateMercadoLibreInRange = aggregateMercadoLibreInRange;
+exports.listPendingInvoices = listPendingInvoices;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("../controllers/integrations.controller");
@@ -52,8 +57,8 @@ function isTnOrderPaid(order) {
  * Misma fórmula que `listPendingInvoices` para consistencia.
  */
 function sumInvoicedInRange(from, to) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const row = (yield (0, db_1.get)(`SELECT
        COALESCE(SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))), 0) AS net,
        COUNT(*) AS cnt
@@ -71,19 +76,17 @@ function sumInvoicedInRange(from, to) {
         return { total, net, iva, count: Number((_b = row === null || row === void 0 ? void 0 : row.cnt) !== null && _b !== void 0 ? _b : 0) };
     });
 }
-exports.sumInvoicedInRange = sumInvoicedInRange;
 function sumReceiptsInRange(from, to) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const row = (yield (0, db_1.get)(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
      FROM payments WHERE date >= ? AND date <= ?`, [from, to]));
         return { total: round2(Number((_a = row === null || row === void 0 ? void 0 : row.total) !== null && _a !== void 0 ? _a : 0)), count: Number((_b = row === null || row === void 0 ? void 0 : row.cnt) !== null && _b !== void 0 ? _b : 0) };
     });
 }
-exports.sumReceiptsInRange = sumReceiptsInRange;
 function sumDespachosCostInRange(from, to) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const rows = (yield (0, db_1.query)(`SELECT d.id, d.valor_cif, d.valor_fob
      FROM despachos d
      WHERE d.fecha_despacho >= ? AND d.fecha_despacho <= ?`, [from, to]));
@@ -106,7 +109,6 @@ function sumDespachosCostInRange(from, to) {
         return { total: round2(total), count: rows.length };
     });
 }
-exports.sumDespachosCostInRange = sumDespachosCostInRange;
 function fetchTnOrdersInRange(from, to) {
     return __awaiter(this, void 0, void 0, function* () {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
@@ -143,8 +145,8 @@ function fetchTnOrdersInRange(from, to) {
     });
 }
 function aggregateTiendaNubeInRange(from, to) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const orders = yield fetchTnOrdersInRange(from, to);
         if (orders.length === 0) {
             const integration = yield (0, db_1.get)(`SELECT id FROM integrations WHERE platform = 'tiendanube' LIMIT 1`);
@@ -176,10 +178,9 @@ function aggregateTiendaNubeInRange(from, to) {
         };
     });
 }
-exports.aggregateTiendaNubeInRange = aggregateTiendaNubeInRange;
 function multigetMlItems(accessToken, itemIds) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const map = new Map();
         const unique = [...new Set(itemIds.filter(Boolean))];
         for (let i = 0; i < unique.length; i += 20) {
@@ -207,8 +208,8 @@ function multigetMlItems(accessToken, itemIds) {
     });
 }
 function aggregateMercadoLibreInRange(from, to) {
-    var _a, _b, _c, _d, _e;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e;
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!(mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) || !(mlToken === null || mlToken === void 0 ? void 0 : mlToken.user_id)) {
             return { sales: 0, fees: 0, orderCount: 0, connected: false };
@@ -281,9 +282,8 @@ function aggregateMercadoLibreInRange(from, to) {
         };
     });
 }
-exports.aggregateMercadoLibreInRange = aggregateMercadoLibreInRange;
-function listPendingInvoices(limit = 200) {
-    return __awaiter(this, void 0, void 0, function* () {
+function listPendingInvoices() {
+    return __awaiter(this, arguments, void 0, function* (limit = 200) {
         const rows = (yield (0, db_1.query)(`SELECT
        o.id AS orderId,
        DATE_FORMAT(o.date, '%Y-%m-%d') AS orderDate,
@@ -318,4 +318,3 @@ function listPendingInvoices(limit = 200) {
         return { items, totalPending };
     });
 }
-exports.listPendingInvoices = listPendingInvoices;

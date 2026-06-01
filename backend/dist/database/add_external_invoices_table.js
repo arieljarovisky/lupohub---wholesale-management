@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addExternalInvoicesTable = void 0;
+exports.addExternalInvoicesTable = addExternalInvoicesTable;
 const db_1 = require("./db");
 /** Facturas AFIP emitidas para órdenes externas (ej. Tienda Nube). */
 function addExternalInvoicesTable() {
@@ -62,4 +62,3 @@ function addExternalInvoicesTable() {
         }
     });
 }
-exports.addExternalInvoicesTable = addExternalInvoicesTable;

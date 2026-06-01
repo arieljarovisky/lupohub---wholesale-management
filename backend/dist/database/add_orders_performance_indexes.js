@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOrdersPerformanceIndexes = void 0;
+exports.addOrdersPerformanceIndexes = addOrdersPerformanceIndexes;
 const db_1 = require("./db");
 /** Índices para acelerar listados de pedidos, ítems e IIBB (AGIP). Idempotente. */
 function addOrdersPerformanceIndexes() {
@@ -44,4 +44,3 @@ function addOrdersPerformanceIndexes() {
         }
     });
 }
-exports.addOrdersPerformanceIndexes = addOrdersPerformanceIndexes;

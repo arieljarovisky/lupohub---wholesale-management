@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOrdersArchived = void 0;
+exports.addOrdersArchived = addOrdersArchived;
 const db_1 = require("./db");
 function addOrdersArchived() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -29,4 +29,3 @@ function addOrdersArchived() {
         }
     });
 }
-exports.addOrdersArchived = addOrdersArchived;

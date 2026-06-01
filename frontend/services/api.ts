@@ -3458,6 +3458,12 @@ export const api = {
   updateImportedPaymentDate: async (payload: { customerId: string; importedLineOrder: number; date: string }): Promise<{ ok: boolean; customerId: string; importedLineOrder: number; date: string }> => {
     return await request<any>(`/payments/imported/date`, 'PATCH', payload) as any;
   },
+  deletePayment: async (
+    paymentId: string,
+    meta?: { customerId: string; importedLineOrder: number }
+  ): Promise<{ ok: boolean; id?: string; customerId?: string; importedLineOrder?: number }> => {
+    return await request(`/payments/${encodeURIComponent(paymentId)}`, 'DELETE', meta || {});
+  },
 
   // --- CATÁLOGOS (Admin sube; vendedores y clientes ven) ---
   getCatalogs: async (): Promise<Array<{ id: string; name: string; fileName: string; mimeType: string; createdAt: string; isUrl?: boolean; url?: string }>> => {

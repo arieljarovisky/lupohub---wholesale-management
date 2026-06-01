@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerInvoiceFields = void 0;
+exports.addCustomerInvoiceFields = addCustomerInvoiceFields;
 const db_1 = require("./db");
 /** Campos comerciales del cliente para imprimir en factura. */
 function addCustomerInvoiceFields() {
@@ -35,4 +35,3 @@ function addCustomerInvoiceFields() {
         }
     });
 }
-exports.addCustomerInvoiceFields = addCustomerInvoiceFields;

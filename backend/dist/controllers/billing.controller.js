@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -32,10 +42,11 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportBillingByCustomersFile = exports.importAgipPadron = exports.importAgipPadronChunk = exports.importAgipPadronStart = exports.exportRetPerTxt = exports.exportVentasJurisdiccionXlsx = exports.printBilling = exports.exportBilling = exports.listBilling = void 0;
+exports.exportBillingByCustomersFile = exports.importAgipPadron = exports.importAgipPadronChunk = exports.importAgipPadronStart = exports.exportRetPerTxt = exports.exportVentasJurisdiccionXlsx = exports.printBilling = exports.exportBilling = exports.deleteLocalAfipComprobante = exports.deleteImportedBillingEntry = exports.listBilling = void 0;
 const db_1 = require("../database/db");
 const XLSX = __importStar(require("xlsx"));
 const cityNormalize_1 = require("../utils/cityNormalize");
+const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
 function parseMoney(value) {
     if (value == null)
         return 0;
@@ -587,6 +598,8 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         agipAlicuota: 0,
                         agipRetPer: 0,
                         manual: false,
+                        imported: true,
+                        importedLineOrder: Number(r.line_order) || 0,
                         sinDetalle: false,
                         hasPdf: false
                     }
@@ -622,6 +635,108 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.listBilling = listBilling;
+const canDeleteBilling = (role) => role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE' || role === 'SELLER';
+const canDeleteLocalAfip = (role) => role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';
+/** Elimina una línea FAC/NC del historial importado Tango (customer_multimedia_entries). */
+const deleteImportedBillingEntry = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const user = req.user;
+        if (!user || !canDeleteBilling(user.role)) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const customerId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.customerId) || '').trim();
+        const lineOrder = Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.importedLineOrder);
+        if (!customerId || !Number.isFinite(lineOrder) || lineOrder <= 0) {
+            return res.status(400).json({ message: 'Indicá customerId e importedLineOrder' });
+        }
+        const cust = (yield (0, db_1.get)('SELECT id, seller_id FROM customers WHERE id = ?', [customerId]));
+        if (!cust)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+            return res.status(403).json({ message: 'Solo podés modificar comprobantes de tus clientes' });
+        }
+        const entry = (yield (0, db_1.get)(`SELECT line_order, tipo, numero FROM customer_multimedia_entries
+       WHERE customer_id = ? AND line_order = ?`, [customerId, lineOrder]));
+        if (!entry)
+            return res.status(404).json({ message: 'Comprobante importado no encontrado' });
+        const t = String(entry.tipo || '').trim().toUpperCase();
+        const isFacNc = t.startsWith('FAC') ||
+            t.startsWith('NC') ||
+            t.includes('NOTA') ||
+            t.includes('CREDIT') ||
+            t.includes('CREDITO');
+        if (!isFacNc) {
+            return res.status(400).json({
+                message: 'Solo se pueden eliminar facturas o notas de crédito importadas (no recibos u otros movimientos).',
+            });
+        }
+        yield (0, db_1.execute)(`DELETE FROM customer_multimedia_entries WHERE customer_id = ? AND line_order = ?`, [customerId, lineOrder]);
+        return res.json({ ok: true, customerId, importedLineOrder: lineOrder });
+    }
+    catch (e) {
+        console.error('deleteImportedBillingEntry:', e);
+        return res.status(500).json({ message: 'Error eliminando comprobante importado', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.deleteImportedBillingEntry = deleteImportedBillingEntry;
+/** Elimina factura o NC emitida en LupoHub (registro local). No anula en AFIP. */
+const deleteLocalAfipComprobante = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const user = req.user;
+        if (!user || !canDeleteLocalAfip(user.role)) {
+            return res.status(403).json({ message: 'Solo administración o depósito puede eliminar comprobantes AFIP locales' });
+        }
+        const id = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const tipo = String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.tipo) || '').trim().toUpperCase();
+        if (!id)
+            return res.status(400).json({ message: 'Falta id' });
+        if (tipo !== 'FACTURA' && tipo !== 'NC') {
+            return res.status(400).json({ message: 'Indicá tipo=FACTURA o tipo=NC' });
+        }
+        if (tipo === 'FACTURA') {
+            const inv = (yield (0, db_1.get)(`SELECT i.id, i.order_id, o.customer_id, c.seller_id
+         FROM invoices i
+         JOIN orders o ON o.id = i.order_id
+         JOIN customers c ON c.id = o.customer_id
+         WHERE i.id = ?`, [id]));
+            if (!inv)
+                return res.status(404).json({ message: 'Factura no encontrada' });
+            const linkedPay = (yield (0, db_1.get)(`SELECT 1 AS x FROM payment_invoices WHERE invoice_id = ? LIMIT 1`, [id]));
+            if (linkedPay) {
+                return res.status(400).json({
+                    message: 'La factura tiene recibos imputados. Desasocialos en Facturación → Recibos antes de eliminarla.',
+                });
+            }
+            yield (0, db_1.execute)('DELETE FROM invoices WHERE id = ?', [id]);
+            yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(inv.order_id);
+            return res.json({ ok: true, id, tipo: 'FACTURA', orderId: inv.order_id });
+        }
+        const cn = (yield (0, db_1.get)(`SELECT cn.id, cn.order_id, cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, o.customer_id, c.seller_id
+       FROM credit_notes cn
+       JOIN orders o ON o.id = cn.order_id
+       JOIN customers c ON c.id = o.customer_id
+       WHERE cn.id = ?
+       LIMIT 1`, [id]));
+        if (!cn)
+            return res.status(404).json({ message: 'Nota de crédito no encontrada' });
+        if (cn.cae && cn.punto_venta != null && cn.cbte_tipo != null && cn.cbte_desde != null) {
+            yield (0, db_1.execute)(`DELETE FROM credit_notes
+         WHERE order_id = ? AND cae = ? AND punto_venta = ? AND cbte_tipo = ? AND cbte_desde = ?`, [cn.order_id, cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde]);
+        }
+        else {
+            yield (0, db_1.execute)('DELETE FROM credit_notes WHERE id = ?', [id]);
+        }
+        yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(cn.order_id);
+        return res.json({ ok: true, id, tipo: 'NC', orderId: cn.order_id });
+    }
+    catch (e) {
+        console.error('deleteLocalAfipComprobante:', e);
+        return res.status(500).json({ message: 'Error eliminando comprobante', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.deleteLocalAfipComprobante = deleteLocalAfipComprobante;
 /** Exporta la lista de facturas y NC en CSV simple. */
 const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -1469,9 +1584,9 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.exportRetPerTxt = exportRetPerTxt;
 /** Importa padrón AGIP resumido (CUIT + alícuota) para un período YYYYMM. */
 const importAgipPadronStart = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c;
+    var _a;
     try {
-        const period = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.period) || '').trim();
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
         if (!/^\d{6}$/.test(period)) {
             return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
         }
@@ -1489,10 +1604,10 @@ const importAgipPadronStart = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.importAgipPadronStart = importAgipPadronStart;
 const importAgipPadronChunk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e;
+    var _a, _b;
     try {
-        const period = String(((_d = req.body) === null || _d === void 0 ? void 0 : _d.period) || '').trim();
-        const rows = Array.isArray((_e = req.body) === null || _e === void 0 ? void 0 : _e.rows) ? req.body.rows : [];
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
+        const rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
         if (!/^\d{6}$/.test(period)) {
             return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
         }
@@ -1534,7 +1649,7 @@ const importAgipPadronChunk = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.importAgipPadronChunk = importAgipPadronChunk;
 const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _f, _g;
+    var _a, _b;
     try {
         const parsePeriodFromFilename = (nameRaw) => {
             const name = String(nameRaw || '');
@@ -1547,8 +1662,8 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
             return '';
         };
         const file = req.file;
-        const period = String(((_f = req.body) === null || _f === void 0 ? void 0 : _f.period) || parsePeriodFromFilename((file === null || file === void 0 ? void 0 : file.originalname) || '')).trim();
-        let rows = Array.isArray((_g = req.body) === null || _g === void 0 ? void 0 : _g.rows) ? req.body.rows : [];
+        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || parsePeriodFromFilename((file === null || file === void 0 ? void 0 : file.originalname) || '')).trim();
+        let rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
         if ((!rows || rows.length === 0) && (file === null || file === void 0 ? void 0 : file.buffer)) {
             const content = file.buffer.toString('utf8');
             const parsed = [];
@@ -1611,7 +1726,7 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
             try {
                 yield conn.rollback();
             }
-            catch ( /* ignore */_h) { /* ignore */ }
+            catch ( /* ignore */_c) { /* ignore */ }
             throw e;
         }
         finally {
@@ -1630,11 +1745,11 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
 exports.importAgipPadron = importAgipPadron;
 /** Exporta comprobantes (facturas + NC) de un mes para clientes en Excel y/o lista pegada de CUIT (campo `cuitsList`). */
 const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _j, _k, _l;
+    var _a, _b, _c;
     try {
         const file = req.file;
-        const month = String(((_j = req.body) === null || _j === void 0 ? void 0 : _j.month) || ((_k = req.query) === null || _k === void 0 ? void 0 : _k.month) || '').trim();
-        const cuitsListRaw = String(((_l = req.body) === null || _l === void 0 ? void 0 : _l.cuitsList) || '').trim();
+        const month = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.month) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.month) || '').trim();
+        const cuitsListRaw = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.cuitsList) || '').trim();
         if (!file && !cuitsListRaw) {
             return res.status(400).json({ message: 'Enviá un archivo Excel (campo file) y/o una lista de CUIT (campo cuitsList).' });
         }

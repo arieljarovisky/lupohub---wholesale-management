@@ -97,9 +97,9 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.refreshToken = refreshToken;
 /** Devuelve el cliente vinculado al usuario cuando el rol es CUSTOMER (cliente directo). */
 const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w;
-    const userId = (_d = req.user) === null || _d === void 0 ? void 0 : _d.id;
-    const role = (_e = req.user) === null || _e === void 0 ? void 0 : _e.role;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+    const role = (_b = req.user) === null || _b === void 0 ? void 0 : _b.role;
     if (!userId)
         return res.status(401).json({ message: 'No autorizado' });
     if (role !== 'CUSTOMER')
@@ -116,37 +116,37 @@ const getMyCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 for (const it of arr) {
                     if (!it || typeof it !== 'object')
                         continue;
-                    const address = String((_f = it.address) !== null && _f !== void 0 ? _f : '').trim();
+                    const address = String((_c = it.address) !== null && _c !== void 0 ? _c : '').trim();
                     if (!address)
                         continue;
                     deliveryAddresses.push({
-                        id: String((_g = it.id) !== null && _g !== void 0 ? _g : '').trim() || `${row.id}-da-${deliveryAddresses.length}`,
-                        label: (String((_h = it.label) !== null && _h !== void 0 ? _h : 'Sucursal').trim() || 'Sucursal'),
+                        id: String((_d = it.id) !== null && _d !== void 0 ? _d : '').trim() || `${row.id}-da-${deliveryAddresses.length}`,
+                        label: (String((_e = it.label) !== null && _e !== void 0 ? _e : 'Sucursal').trim() || 'Sucursal'),
                         address,
-                        city: String((_j = it.city) !== null && _j !== void 0 ? _j : '').trim(),
+                        city: String((_f = it.city) !== null && _f !== void 0 ? _f : '').trim(),
                     });
                 }
             }
         }
-        catch (_x) {
+        catch (_u) {
             deliveryAddresses = [];
         }
         res.json({
             id: row.id,
             userId: row.user_id,
-            sellerId: (_k = row.seller_id) !== null && _k !== void 0 ? _k : '',
+            sellerId: (_g = row.seller_id) !== null && _g !== void 0 ? _g : '',
             name: row.name,
-            businessName: (_l = row.business_name) !== null && _l !== void 0 ? _l : '',
-            email: (_m = row.email) !== null && _m !== void 0 ? _m : '',
-            address: (_o = row.address) !== null && _o !== void 0 ? _o : '',
-            city: (_p = row.city) !== null && _p !== void 0 ? _p : '',
-            cuit: (_q = row.cuit) !== null && _q !== void 0 ? _q : undefined,
-            phone: (_r = row.phone) !== null && _r !== void 0 ? _r : undefined,
-            transportNumber: (_s = row.transport_number) !== null && _s !== void 0 ? _s : undefined,
-            remitoNumber: (_t = row.remito_number) !== null && _t !== void 0 ? _t : undefined,
-            saleCondition: (_u = row.sale_condition) !== null && _u !== void 0 ? _u : undefined,
-            condicionIva: (_v = row.condicion_iva) !== null && _v !== void 0 ? _v : undefined,
-            priceListId: (_w = row.price_list_id) !== null && _w !== void 0 ? _w : undefined,
+            businessName: (_h = row.business_name) !== null && _h !== void 0 ? _h : '',
+            email: (_j = row.email) !== null && _j !== void 0 ? _j : '',
+            address: (_k = row.address) !== null && _k !== void 0 ? _k : '',
+            city: (_l = row.city) !== null && _l !== void 0 ? _l : '',
+            cuit: (_m = row.cuit) !== null && _m !== void 0 ? _m : undefined,
+            phone: (_o = row.phone) !== null && _o !== void 0 ? _o : undefined,
+            transportNumber: (_p = row.transport_number) !== null && _p !== void 0 ? _p : undefined,
+            remitoNumber: (_q = row.remito_number) !== null && _q !== void 0 ? _q : undefined,
+            saleCondition: (_r = row.sale_condition) !== null && _r !== void 0 ? _r : undefined,
+            condicionIva: (_s = row.condicion_iva) !== null && _s !== void 0 ? _s : undefined,
+            priceListId: (_t = row.price_list_id) !== null && _t !== void 0 ? _t : undefined,
             deliveryAddresses
         });
     }

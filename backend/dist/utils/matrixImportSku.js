@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeMatrixImportArticleSku = void 0;
+exports.normalizeMatrixImportArticleSku = normalizeMatrixImportArticleSku;
 /**
  * Importación matriz de pedidos: no rellena a 7 dígitos.
  * Código solo numérico → sin ceros a la izquierda (ej. 22684, no 0022684).
@@ -18,4 +18,3 @@ function normalizeMatrixImportArticleSku(raw) {
     }
     return t;
 }
-exports.normalizeMatrixImportArticleSku = normalizeMatrixImportArticleSku;

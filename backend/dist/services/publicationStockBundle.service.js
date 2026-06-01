@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -32,7 +42,20 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deletePublicationBundle = exports.updatePublicationBundle = exports.createPublicationBundle = exports.listPublicationBundles = exports.syncBundlesContainingVariant = exports.syncBundleListingStock = exports.deductStockForBundleListing = exports.computeAvailableStockFromItems = exports.loadBundleById = exports.savePublicationBundleGroup = exports.syncAllBundlesForProduct = exports.listPublicationBundleGroups = exports.findBundlesByProduct = exports.findBundleByListing = void 0;
+exports.findBundleByListing = findBundleByListing;
+exports.findBundlesByProduct = findBundlesByProduct;
+exports.listPublicationBundleGroups = listPublicationBundleGroups;
+exports.syncAllBundlesForProduct = syncAllBundlesForProduct;
+exports.savePublicationBundleGroup = savePublicationBundleGroup;
+exports.loadBundleById = loadBundleById;
+exports.computeAvailableStockFromItems = computeAvailableStockFromItems;
+exports.deductStockForBundleListing = deductStockForBundleListing;
+exports.syncBundleListingStock = syncBundleListingStock;
+exports.syncBundlesContainingVariant = syncBundlesContainingVariant;
+exports.listPublicationBundles = listPublicationBundles;
+exports.createPublicationBundle = createPublicationBundle;
+exports.updatePublicationBundle = updatePublicationBundle;
+exports.deletePublicationBundle = deletePublicationBundle;
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 function normExtVariantId(v) {
@@ -60,7 +83,6 @@ function findBundleByListing(platform, externalProductId, externalVariantId) {
         return loadBundleById(row.id);
     });
 }
-exports.findBundleByListing = findBundleByListing;
 function findBundlesByProduct(platform, externalProductId) {
     return __awaiter(this, void 0, void 0, function* () {
         const extProd = String(externalProductId || '').trim();
@@ -78,10 +100,9 @@ function findBundlesByProduct(platform, externalProductId) {
         return out;
     });
 }
-exports.findBundlesByProduct = findBundlesByProduct;
 function listPublicationBundleGroups() {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         try {
             const rows = yield (0, db_1.query)(`SELECT platform, external_product_id FROM publication_stock_bundles
        GROUP BY platform, external_product_id
@@ -114,7 +135,6 @@ function listPublicationBundleGroups() {
         }
     });
 }
-exports.listPublicationBundleGroups = listPublicationBundleGroups;
 function syncAllBundlesForProduct(platform, externalProductId) {
     return __awaiter(this, void 0, void 0, function* () {
         const bundles = yield findBundlesByProduct(platform, externalProductId);
@@ -128,10 +148,9 @@ function syncAllBundlesForProduct(platform, externalProductId) {
         }
     });
 }
-exports.syncAllBundlesForProduct = syncAllBundlesForProduct;
 function savePublicationBundleGroup(input) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const extProd = String(input.externalProductId || '').trim();
         if (!extProd)
             throw new Error('externalProductId es requerido');
@@ -182,7 +201,6 @@ function savePublicationBundleGroup(input) {
         };
     });
 }
-exports.savePublicationBundleGroup = savePublicationBundleGroup;
 function loadBundleItems(bundleId) {
     return __awaiter(this, void 0, void 0, function* () {
         const rows = yield (0, db_1.query)(`
@@ -222,8 +240,8 @@ function loadBundleItems(bundleId) {
     });
 }
 function loadBundleById(bundleId) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const row = yield (0, db_1.get)(`SELECT id, platform, external_product_id, external_variant_id, label FROM publication_stock_bundles WHERE id = ?`, [bundleId]);
         if (!(row === null || row === void 0 ? void 0 : row.id))
             return null;
@@ -240,7 +258,6 @@ function loadBundleById(bundleId) {
         };
     });
 }
-exports.loadBundleById = loadBundleById;
 function computeAvailableStockFromItems(items) {
     if (!items.length)
         return 0;
@@ -252,7 +269,6 @@ function computeAvailableStockFromItems(items) {
     }
     return minPacks === Infinity ? 0 : Math.max(0, minPacks);
 }
-exports.computeAvailableStockFromItems = computeAvailableStockFromItems;
 /** Descuenta stock de cada componente al vender `quantitySold` packs de la publicación. */
 function deductStockForBundleListing(bundle, quantitySold, movementType, reference) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -275,7 +291,6 @@ function deductStockForBundleListing(bundle, quantitySold, movementType, referen
         return { ok: allOk, lines };
     });
 }
-exports.deductStockForBundleListing = deductStockForBundleListing;
 /** Sincroniza stock de la publicación del pack según el mínimo de sus componentes. */
 function syncBundleListingStock(bundleId) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -299,7 +314,6 @@ function syncBundleListingStock(bundleId) {
         }
     });
 }
-exports.syncBundleListingStock = syncBundleListingStock;
 /** Tras cambiar stock de una variante, actualizar publicaciones pack que la incluyen. */
 function syncBundlesContainingVariant(variantId) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -316,7 +330,6 @@ function syncBundlesContainingVariant(variantId) {
         }
     });
 }
-exports.syncBundlesContainingVariant = syncBundlesContainingVariant;
 function listPublicationBundles() {
     return __awaiter(this, void 0, void 0, function* () {
         const rows = yield (0, db_1.query)(`SELECT id FROM publication_stock_bundles ORDER BY platform, label, external_product_id`);
@@ -329,10 +342,9 @@ function listPublicationBundles() {
         return out;
     });
 }
-exports.listPublicationBundles = listPublicationBundles;
 function createPublicationBundle(input) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const id = (0, uuid_1.v4)();
         const extVar = normExtVariantId(input.externalVariantId);
         yield (0, db_1.execute)(`INSERT INTO publication_stock_bundles (id, platform, external_product_id, external_variant_id, label)
@@ -349,10 +361,9 @@ function createPublicationBundle(input) {
         return bundle;
     });
 }
-exports.createPublicationBundle = createPublicationBundle;
 function updatePublicationBundle(bundleId, input) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const existing = yield (0, db_1.get)(`SELECT id FROM publication_stock_bundles WHERE id = ?`, [bundleId]);
         if (!existing)
             return null;
@@ -390,11 +401,9 @@ function updatePublicationBundle(bundleId, input) {
         return bundle;
     });
 }
-exports.updatePublicationBundle = updatePublicationBundle;
 function deletePublicationBundle(bundleId) {
     return __awaiter(this, void 0, void 0, function* () {
         const r = yield (0, db_1.execute)(`DELETE FROM publication_stock_bundles WHERE id = ?`, [bundleId]);
         return ((r === null || r === void 0 ? void 0 : r.affectedRows) || 0) > 0;
     });
 }
-exports.deletePublicationBundle = deletePublicationBundle;

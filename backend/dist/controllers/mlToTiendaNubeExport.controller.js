@@ -219,8 +219,8 @@ function buildTiendaNubeBodyFromMlItems(items, published) {
 }
 /** Publicaciones hermanas (mismo modelo, distinto color/talle en títulos separados). */
 function findSiblingMlItems(accessToken, sellerUserId, seedItem) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         if (!seedItem || (seedItem.variations && seedItem.variations.length > 0)) {
             return seedItem ? [seedItem] : [];
         }

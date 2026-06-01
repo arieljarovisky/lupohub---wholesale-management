@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -32,11 +42,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importPaymentsFromExcel = exports.updatePaymentDate = exports.postPaymentAllocatePreview = exports.patchPaymentInvoices = exports.getOrdersOutstandingHandler = exports.getInvoicesOutstandingHandler = exports.createPayment = exports.updateImportedPaymentDate = exports.listPayments = void 0;
+exports.importPaymentsFromExcel = exports.updatePaymentDate = exports.postPaymentAllocatePreview = exports.patchPaymentInvoices = exports.getImportedReceiptLinkInfo = exports.getOrdersOutstandingHandler = exports.getInvoicesOutstandingHandler = exports.createPayment = exports.deletePayment = exports.updateImportedPaymentDate = exports.listPayments = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const XLSX = __importStar(require("xlsx"));
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
+const importedReceiptPayment_service_1 = require("../services/importedReceiptPayment.service");
 function formatAllocationNote(alloc, paymentAmount) {
     const allTargets = [
         ...alloc.invoiceAllocations.map((a) => (Object.assign({ kind: 'factura' }, a))),
@@ -495,9 +506,115 @@ const updateImportedPaymentDate = (req, res) => __awaiter(void 0, void 0, void 0
     }
 });
 exports.updateImportedPaymentDate = updateImportedPaymentDate;
+/** Elimina un recibo del sistema o una línea REC importada de Tango. */
+const deletePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        const user = req.user;
+        if (!user || !canManagePayments(user.role)) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const routeId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const customerId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.customerId) || '').trim();
+        const importedLineOrder = Number((_c = req.body) === null || _c === void 0 ? void 0 : _c.importedLineOrder);
+        if (routeId.startsWith('mm-') || (Number.isFinite(importedLineOrder) && importedLineOrder > 0)) {
+            if (!customerId || !Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+                return res.status(400).json({
+                    message: 'Para un recibo importado de Tango indicá customerId e importedLineOrder',
+                });
+            }
+            const cust = (yield (0, db_1.get)('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [
+                customerId,
+            ]));
+            if (!cust)
+                return res.status(404).json({ message: 'Cliente no encontrado' });
+            if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+                return res.status(403).json({ message: 'Solo podés eliminar recibos de tus clientes' });
+            }
+            const entry = yield (0, importedReceiptPayment_service_1.getImportedReceiptEntry)(customerId, importedLineOrder);
+            if (!entry)
+                return res.status(404).json({ message: 'Recibo importado no encontrado' });
+            const linkedPaymentId = yield (0, importedReceiptPayment_service_1.findExistingPaymentIdForImportedEntry)(entry);
+            if (linkedPaymentId) {
+                const orderRows = (yield (0, db_1.query)(`SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
+           FROM payments p
+           LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+           LEFT JOIN payment_orders po ON po.payment_id = p.id
+           LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
+           WHERE p.id = ?
+             AND COALESCE(i.order_id, po.order_id, p.order_id) IS NOT NULL`, [linkedPaymentId]));
+                yield (0, db_1.execute)('DELETE FROM payment_invoices WHERE payment_id = ?', [linkedPaymentId]);
+                try {
+                    yield (0, db_1.execute)('DELETE FROM payment_orders WHERE payment_id = ?', [linkedPaymentId]);
+                }
+                catch (_d) {
+                    /* tabla opcional */
+                }
+                try {
+                    yield (0, db_1.execute)('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [linkedPaymentId]);
+                }
+                catch (_e) {
+                    /* tabla opcional */
+                }
+                yield (0, db_1.execute)('DELETE FROM payments WHERE id = ?', [linkedPaymentId]);
+                for (const r of orderRows) {
+                    if (r.order_id)
+                        yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(r.order_id);
+                }
+            }
+            yield (0, db_1.execute)(`DELETE FROM customer_multimedia_entries WHERE customer_id = ? AND line_order = ?`, [customerId, importedLineOrder]);
+            yield (0, orderPaymentBalance_service_1.syncAllOrderPaymentStatusForCustomer)(customerId);
+            return res.json({ ok: true, customerId, importedLineOrder });
+        }
+        const paymentId = routeId;
+        if (!paymentId)
+            return res.status(400).json({ message: 'ID de recibo requerido' });
+        const payment = (yield (0, db_1.get)(`SELECT p.id, p.customer_id, c.seller_id
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       WHERE p.id = ?`, [paymentId]));
+        if (!payment)
+            return res.status(404).json({ message: 'Recibo no encontrado' });
+        if (user.role === 'SELLER' && payment.seller_id !== user.id) {
+            return res.status(403).json({ message: 'Solo podés eliminar recibos de tus clientes' });
+        }
+        const orderRows = (yield (0, db_1.query)(`SELECT DISTINCT COALESCE(i.order_id, po.order_id, p.order_id) AS order_id
+       FROM payments p
+       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN payment_orders po ON po.payment_id = p.id
+       LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
+       WHERE p.id = ?
+         AND COALESCE(i.order_id, po.order_id, p.order_id) IS NOT NULL`, [paymentId]));
+        yield (0, db_1.execute)('DELETE FROM payment_invoices WHERE payment_id = ?', [paymentId]);
+        try {
+            yield (0, db_1.execute)('DELETE FROM payment_orders WHERE payment_id = ?', [paymentId]);
+        }
+        catch (_f) {
+            /* tabla opcional */
+        }
+        try {
+            yield (0, db_1.execute)('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [paymentId]);
+        }
+        catch (_g) {
+            /* tabla opcional */
+        }
+        yield (0, db_1.execute)('DELETE FROM payments WHERE id = ?', [paymentId]);
+        const orderIds = new Set(orderRows.map((r) => r.order_id).filter(Boolean));
+        for (const oid of orderIds) {
+            yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(oid);
+        }
+        yield (0, orderPaymentBalance_service_1.syncAllOrderPaymentStatusForCustomer)(payment.customer_id);
+        return res.json({ ok: true, id: paymentId });
+    }
+    catch (e) {
+        console.error('deletePayment:', e);
+        return res.status(500).json({ message: 'Error eliminando recibo', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.deletePayment = deletePayment;
 /** Crear pago/recibo. */
 const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
@@ -530,13 +647,17 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             : (body.sellerId ? String(body.sellerId).trim() : null);
         const orderId = body.orderId ? String(body.orderId).trim() : null;
         const orderIds = Array.isArray(body.orderIds)
-            ? Array.from(new Set(body.orderIds.map((x) => String(x || '').trim()).filter(Boolean)))
+            ? Array.from(new Set(body.orderIds
+                .map((x) => String(x || '').trim())
+                .filter((s) => s.length > 0)))
             : [];
         if (orderId && !orderIds.includes(orderId))
             orderIds.unshift(orderId);
         const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
         const invoiceIds = Array.isArray(body.invoiceIds)
-            ? Array.from(new Set(body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)))
+            ? Array.from(new Set(body.invoiceIds
+                .map((x) => String(x || '').trim())
+                .filter((s) => s.length > 0)))
             : [];
         const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
         if (invoiceId && !invoiceIds.includes(invoiceId))
@@ -585,14 +706,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(200).json({
                 id: row.id,
                 customerId: row.customer_id,
-                sellerId: (_d = row.seller_id) !== null && _d !== void 0 ? _d : undefined,
-                orderId: (_e = row.order_id) !== null && _e !== void 0 ? _e : undefined,
-                invoiceId: (_f = row.invoice_id) !== null && _f !== void 0 ? _f : undefined,
+                sellerId: (_a = row.seller_id) !== null && _a !== void 0 ? _a : undefined,
+                orderId: (_b = row.order_id) !== null && _b !== void 0 ? _b : undefined,
+                invoiceId: (_c = row.invoice_id) !== null && _c !== void 0 ? _c : undefined,
                 invoiceIds: row.invoice_id ? [row.invoice_id] : [],
                 receiptNumber: row.receipt_number,
                 date: row.date,
                 amount: Number(row.amount) || 0,
-                notes: (_g = row.notes) !== null && _g !== void 0 ? _g : undefined,
+                notes: (_d = row.notes) !== null && _d !== void 0 ? _d : undefined,
                 createdAt: row.created_at
             });
         }
@@ -649,14 +770,14 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     return res.status(200).json({
                         id: rowDup.id,
                         customerId: rowDup.customer_id,
-                        sellerId: (_h = rowDup.seller_id) !== null && _h !== void 0 ? _h : undefined,
-                        orderId: (_j = rowDup.order_id) !== null && _j !== void 0 ? _j : undefined,
-                        invoiceId: (_k = rowDup.invoice_id) !== null && _k !== void 0 ? _k : undefined,
+                        sellerId: (_e = rowDup.seller_id) !== null && _e !== void 0 ? _e : undefined,
+                        orderId: (_f = rowDup.order_id) !== null && _f !== void 0 ? _f : undefined,
+                        invoiceId: (_g = rowDup.invoice_id) !== null && _g !== void 0 ? _g : undefined,
                         invoiceIds: rowDup.invoice_id ? [rowDup.invoice_id] : [],
                         receiptNumber: rowDup.receipt_number,
                         date: rowDup.date,
                         amount: Number(rowDup.amount) || 0,
-                        notes: (_l = rowDup.notes) !== null && _l !== void 0 ? _l : undefined,
+                        notes: (_h = rowDup.notes) !== null && _h !== void 0 ? _h : undefined,
                         createdAt: rowDup.created_at
                     });
                 }
@@ -687,13 +808,13 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         res.status(201).json({
             id: row.id,
             customerId: row.customer_id,
-            sellerId: (_m = row.seller_id) !== null && _m !== void 0 ? _m : undefined,
-            orderId: (_o = row.order_id) !== null && _o !== void 0 ? _o : undefined,
+            sellerId: (_j = row.seller_id) !== null && _j !== void 0 ? _j : undefined,
+            orderId: (_k = row.order_id) !== null && _k !== void 0 ? _k : undefined,
             orderIds: String(row.order_ids || row.order_id || '')
                 .split(',')
                 .map((x) => x.trim())
                 .filter(Boolean),
-            invoiceId: (_p = row.invoice_id) !== null && _p !== void 0 ? _p : undefined,
+            invoiceId: (_l = row.invoice_id) !== null && _l !== void 0 ? _l : undefined,
             invoiceIds: Array.from(new Set([
                 ...String(row.invoice_ids || row.invoice_id || '')
                     .split(',')
@@ -707,11 +828,11 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             receiptNumber: row.receipt_number,
             date: row.date,
             amount: Number(row.amount) || 0,
-            notes: (_q = row.notes) !== null && _q !== void 0 ? _q : undefined,
+            notes: (_m = row.notes) !== null && _m !== void 0 ? _m : undefined,
             createdAt: row.created_at,
             allocationNote,
-            invoiceAllocations: (_r = allocationResult === null || allocationResult === void 0 ? void 0 : allocationResult.invoiceAllocations) !== null && _r !== void 0 ? _r : [],
-            orderAllocations: (_s = allocationResult === null || allocationResult === void 0 ? void 0 : allocationResult.orderAllocations) !== null && _s !== void 0 ? _s : []
+            invoiceAllocations: (_o = allocationResult === null || allocationResult === void 0 ? void 0 : allocationResult.invoiceAllocations) !== null && _o !== void 0 ? _o : [],
+            orderAllocations: (_p = allocationResult === null || allocationResult === void 0 ? void 0 : allocationResult.orderAllocations) !== null && _p !== void 0 ? _p : []
         });
     }
     catch (e) {
@@ -764,29 +885,120 @@ const getOrdersOutstandingHandler = (req, res) => __awaiter(void 0, void 0, void
     }
 });
 exports.getOrdersOutstandingHandler = getOrdersOutstandingHandler;
-/** Asocia un recibo ya cargado a facturas y/o pedidos sin factura del mismo cliente. */
-const patchPaymentInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _t, _u, _v, _w, _x, _y;
+/** Datos previos para asociar un recibo importado de Tango (sin crear el pago hasta guardar). */
+const getImportedReceiptLinkInfo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
-        const paymentId = String(((_t = req.params) === null || _t === void 0 ? void 0 : _t.id) || '').trim();
-        if (!paymentId)
-            return res.status(400).json({ message: 'ID de recibo requerido' });
-        if (paymentId.startsWith('mm-')) {
-            return res.status(400).json({
-                message: 'Los recibos importados de Multimedias no se asocian desde acá; cargá un recibo en el sistema.'
-            });
+        const customerId = String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.customerId) || '').trim();
+        const importedLineOrder = Number((_b = req.query) === null || _b === void 0 ? void 0 : _b.importedLineOrder);
+        if (!customerId)
+            return res.status(400).json({ message: 'Falta customerId' });
+        if (!Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+            return res.status(400).json({ message: 'Falta importedLineOrder válido' });
         }
-        const invoiceIds = Array.isArray((_u = req.body) === null || _u === void 0 ? void 0 : _u.invoiceIds)
-            ? req.body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)
+        const cust = yield (0, db_1.get)('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+        if (!cust)
+            return res.status(404).json({ message: 'Cliente no encontrado' });
+        if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+            return res.status(403).json({ message: 'Solo podés ver recibos de tus clientes' });
+        }
+        const entry = yield (0, importedReceiptPayment_service_1.getImportedReceiptEntry)(customerId, importedLineOrder);
+        if (!entry)
+            return res.status(404).json({ message: 'Recibo importado no encontrado' });
+        const paymentId = yield (0, importedReceiptPayment_service_1.findExistingPaymentIdForImportedEntry)(entry);
+        const { invoiceIds, orderIds } = paymentId
+            ? yield (0, importedReceiptPayment_service_1.getPaymentAllocationIds)(paymentId)
+            : { invoiceIds: [], orderIds: [] };
+        return res.json({
+            customerId,
+            importedLineOrder,
+            paymentId: paymentId !== null && paymentId !== void 0 ? paymentId : undefined,
+            receiptNumber: String(entry.numero || ''),
+            date: toSqlDate(entry.line_date),
+            amount: Math.round(parseImportedAmountForApi(entry.importe) * 100) / 100,
+            invoiceIds,
+            orderIds,
+        });
+    }
+    catch (e) {
+        const code = e === null || e === void 0 ? void 0 : e.statusCode;
+        if (code === 400 || code === 404) {
+            return res.status(code).json({ message: e.message });
+        }
+        console.error('getImportedReceiptLinkInfo:', e);
+        return res.status(500).json({ message: 'Error consultando recibo importado', detail: e === null || e === void 0 ? void 0 : e.message });
+    }
+});
+exports.getImportedReceiptLinkInfo = getImportedReceiptLinkInfo;
+function parseImportedAmountForApi(v) {
+    if (v == null)
+        return 0;
+    if (typeof v === 'number')
+        return Number.isFinite(v) ? Math.abs(v) : 0;
+    const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+    if (!s)
+        return 0;
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    let n = 0;
+    if (hasComma && hasDot)
+        n = Number(s.replace(/\./g, '').replace(',', '.'));
+    else if (hasComma)
+        n = Number(s.replace(',', '.'));
+    else
+        n = Number(s);
+    return Number.isFinite(n) ? Math.abs(n) : 0;
+}
+/** Asocia un recibo ya cargado a facturas y/o pedidos sin factura del mismo cliente. */
+const patchPaymentInvoices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    try {
+        const user = req.user;
+        if (!user || !canManagePayments(user.role)) {
+            return res.status(403).json({ message: 'No autorizado' });
+        }
+        const routePaymentId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        if (!routePaymentId)
+            return res.status(400).json({ message: 'ID de recibo requerido' });
+        const invoiceIds = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.invoiceIds)
+            ? req.body.invoiceIds
+                .map((x) => String(x || '').trim())
+                .filter((s) => s.length > 0)
             : [];
-        const orderIds = Array.isArray((_v = req.body) === null || _v === void 0 ? void 0 : _v.orderIds)
-            ? req.body.orderIds.map((x) => String(x || '').trim()).filter(Boolean)
+        const orderIds = Array.isArray((_c = req.body) === null || _c === void 0 ? void 0 : _c.orderIds)
+            ? req.body.orderIds
+                .map((x) => String(x || '').trim())
+                .filter((s) => s.length > 0)
             : [];
+        const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
+        const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
+        const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
+        let paymentId = routePaymentId;
+        if (routePaymentId.startsWith('mm-') || Number((_d = req.body) === null || _d === void 0 ? void 0 : _d.importedLineOrder) > 0) {
+            const customerId = String(((_e = req.body) === null || _e === void 0 ? void 0 : _e.customerId) || '').trim();
+            const importedLineOrder = Number((_f = req.body) === null || _f === void 0 ? void 0 : _f.importedLineOrder);
+            if (!customerId || !Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+                return res.status(400).json({
+                    message: 'Para un recibo importado de Tango indicá customerId e importedLineOrder al guardar la asociación.',
+                });
+            }
+            const cust = (yield (0, db_1.get)('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [
+                customerId,
+            ]));
+            if (!cust)
+                return res.status(404).json({ message: 'Cliente no encontrado' });
+            if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+                return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
+            }
+            const sellerId = user.role === 'SELLER' ? user.id : (_g = cust.seller_id) !== null && _g !== void 0 ? _g : null;
+            paymentId = yield (0, importedReceiptPayment_service_1.findOrCreatePaymentFromImportedReceipt)(customerId, importedLineOrder, sellerId);
+        }
         const paymentOrdersEnabled = yield ensurePaymentOrdersTable();
+        const paymentInvoiceRefsEnabled = yield ensurePaymentInvoiceRefsTable();
         const payment = (yield (0, db_1.get)(`SELECT p.id, p.customer_id, c.seller_id
        FROM payments p
        JOIN customers c ON c.id = p.customer_id
@@ -796,15 +1008,25 @@ const patchPaymentInvoices = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (user.role === 'SELLER' && payment.seller_id !== user.id) {
             return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
         }
-        const result = yield (0, orderPaymentBalance_service_1.relinkPaymentToInvoices)(paymentId, invoiceIds, orderIds);
+        const result = yield (0, orderPaymentBalance_service_1.relinkPaymentToInvoices)(paymentId, systemInvoiceIds, systemOrderIds);
+        if (paymentInvoiceRefsEnabled) {
+            yield (0, db_1.execute)('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [paymentId]);
+            if (importedInvoiceRefs.length > 0) {
+                for (const invRef of importedInvoiceRefs) {
+                    yield (0, db_1.execute)(`INSERT IGNORE INTO payment_invoice_refs (payment_id, invoice_ref, source) VALUES (?, ?, 'IMPORTED')`, [paymentId, invRef]);
+                }
+            }
+        }
         const row = (yield (0, db_1.get)(`SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
-         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`}
+         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
+         ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
        ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
+       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at`, [paymentId]));
@@ -812,20 +1034,26 @@ const patchPaymentInvoices = (req, res) => __awaiter(void 0, void 0, void 0, fun
         return res.json({
             id: row.id,
             customerId: row.customer_id,
-            orderId: (_w = row.order_id) !== null && _w !== void 0 ? _w : undefined,
+            orderId: (_h = row.order_id) !== null && _h !== void 0 ? _h : undefined,
             orderIds: String(row.order_ids || row.order_id || '')
                 .split(',')
                 .map((x) => x.trim())
                 .filter(Boolean),
-            invoiceId: (_x = row.invoice_id) !== null && _x !== void 0 ? _x : undefined,
-            invoiceIds: String(row.invoice_ids || row.invoice_id || '')
-                .split(',')
-                .map((x) => x.trim())
-                .filter(Boolean),
+            invoiceId: (_j = row.invoice_id) !== null && _j !== void 0 ? _j : undefined,
+            invoiceIds: [
+                ...String(row.invoice_ids || row.invoice_id || '')
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                ...String(row.invoice_refs || '')
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean)
+            ],
             receiptNumber: row.receipt_number,
             date: row.date,
             amount: Number(row.amount) || 0,
-            notes: (_y = row.notes) !== null && _y !== void 0 ? _y : undefined,
+            notes: (_k = row.notes) !== null && _k !== void 0 ? _k : undefined,
             allocationNote,
             invoiceAllocations: result.invoiceAllocations,
             orderAllocations: result.orderAllocations
@@ -843,17 +1071,17 @@ const patchPaymentInvoices = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.patchPaymentInvoices = patchPaymentInvoices;
 /** Vista previa: un recibo repartido en varias facturas (sin guardar). */
 const postPaymentAllocatePreview = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _z, _0, _1, _2;
+    var _a, _b, _c, _d;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
-        const amount = Number((_z = req.body) === null || _z === void 0 ? void 0 : _z.amount);
-        const invoiceIds = Array.isArray((_0 = req.body) === null || _0 === void 0 ? void 0 : _0.invoiceIds)
+        const amount = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.amount);
+        const invoiceIds = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.invoiceIds)
             ? req.body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)
             : [];
-        const orderIds = Array.isArray((_1 = req.body) === null || _1 === void 0 ? void 0 : _1.orderIds)
+        const orderIds = Array.isArray((_c = req.body) === null || _c === void 0 ? void 0 : _c.orderIds)
             ? req.body.orderIds.map((x) => String(x || '').trim()).filter(Boolean)
             : [];
         if (!invoiceIds.length && !orderIds.length) {
@@ -862,7 +1090,7 @@ const postPaymentAllocatePreview = (req, res) => __awaiter(void 0, void 0, void 
         if (!Number.isFinite(amount) || amount <= 0) {
             return res.status(400).json({ message: 'Importe inválido' });
         }
-        const excludePaymentId = String(((_2 = req.body) === null || _2 === void 0 ? void 0 : _2.excludePaymentId) || '').trim() || undefined;
+        const excludePaymentId = String(((_d = req.body) === null || _d === void 0 ? void 0 : _d.excludePaymentId) || '').trim() || undefined;
         const preview = yield (0, orderPaymentBalance_service_1.previewPaymentAllocation)(amount, invoiceIds, orderIds, excludePaymentId);
         return res.json(preview);
     }
@@ -874,14 +1102,14 @@ const postPaymentAllocatePreview = (req, res) => __awaiter(void 0, void 0, void 
 exports.postPaymentAllocatePreview = postPaymentAllocatePreview;
 /** Editar fecha de un recibo/pago cargado en el sistema. */
 const updatePaymentDate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _3, _4, _5, _6, _7, _8;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
-        const paymentId = String(((_3 = req.params) === null || _3 === void 0 ? void 0 : _3.id) || '').trim();
-        const nextDate = String(((_4 = req.body) === null || _4 === void 0 ? void 0 : _4.date) || '').trim();
+        const paymentId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const nextDate = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.date) || '').trim();
         if (!paymentId)
             return res.status(400).json({ message: 'Falta ID de pago' });
         if (!nextDate)
@@ -918,14 +1146,14 @@ const updatePaymentDate = (req, res) => __awaiter(void 0, void 0, void 0, functi
         return res.json({
             id: updated.id,
             customerId: updated.customer_id,
-            sellerId: (_5 = updated.seller_id) !== null && _5 !== void 0 ? _5 : undefined,
-            orderId: (_6 = updated.order_id) !== null && _6 !== void 0 ? _6 : undefined,
-            invoiceId: (_7 = updated.invoice_id) !== null && _7 !== void 0 ? _7 : undefined,
+            sellerId: (_c = updated.seller_id) !== null && _c !== void 0 ? _c : undefined,
+            orderId: (_d = updated.order_id) !== null && _d !== void 0 ? _d : undefined,
+            invoiceId: (_e = updated.invoice_id) !== null && _e !== void 0 ? _e : undefined,
             invoiceIds: updated.invoice_id ? [updated.invoice_id] : [],
             receiptNumber: updated.receipt_number,
             date: updated.date,
             amount: Number(updated.amount) || 0,
-            notes: (_8 = updated.notes) !== null && _8 !== void 0 ? _8 : undefined,
+            notes: (_f = updated.notes) !== null && _f !== void 0 ? _f : undefined,
             createdAt: updated.created_at
         });
     }
@@ -963,7 +1191,7 @@ function toSqlDate(value) {
 }
 /** Importar pagos desde uno o más Excel (filas REC). */
 const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _9, _10, _11, _12, _13, _14, _15;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const user = req.user;
         if (!user || !canManagePayments(user.role)) {
@@ -979,9 +1207,9 @@ const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, 
             const k1 = normalizeNameForMatch(c.business_name);
             const k2 = normalizeNameForMatch(c.name);
             if (k1 && !customerByNorm.has(k1))
-                customerByNorm.set(k1, { id: c.id, seller_id: (_9 = c.seller_id) !== null && _9 !== void 0 ? _9 : null });
+                customerByNorm.set(k1, { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null });
             if (k2 && !customerByNorm.has(k2))
-                customerByNorm.set(k2, { id: c.id, seller_id: (_10 = c.seller_id) !== null && _10 !== void 0 ? _10 : null });
+                customerByNorm.set(k2, { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
         }
         let candidates = 0;
         let imported = 0;
@@ -993,18 +1221,18 @@ const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, 
                 const ws = wb.Sheets[sheetName];
                 const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
                 for (const r of rows) {
-                    const tComp = String((_11 = r.T_COMP) !== null && _11 !== void 0 ? _11 : '').trim().toUpperCase();
+                    const tComp = String((_c = r.T_COMP) !== null && _c !== void 0 ? _c : '').trim().toUpperCase();
                     if (tComp !== 'REC')
                         continue;
                     candidates++;
-                    const customerName = String((_12 = r.RAZON_SOC) !== null && _12 !== void 0 ? _12 : '').trim();
+                    const customerName = String((_d = r.RAZON_SOC) !== null && _d !== void 0 ? _d : '').trim();
                     const customer = customerByNorm.get(normalizeNameForMatch(customerName));
                     if (!customer) {
                         notFoundNames.set(customerName, (notFoundNames.get(customerName) || 0) + 1);
                         continue;
                     }
                     const receiptNumber = normalizeReceiptNumber(r.N_COMP);
-                    const date = toSqlDate((_14 = (_13 = r.FECHA_EMIS) !== null && _13 !== void 0 ? _13 : r.FECHA_APL) !== null && _14 !== void 0 ? _14 : r.FECHA);
+                    const date = toSqlDate((_f = (_e = r.FECHA_EMIS) !== null && _e !== void 0 ? _e : r.FECHA_APL) !== null && _f !== void 0 ? _f : r.FECHA);
                     const amountRaw = Number(r.HABER) || Number(r.IMPORTE) || 0;
                     const amount = Math.round(Math.abs(amountRaw) * 100) / 100;
                     if (!receiptNumber || !date || !Number.isFinite(amount) || amount <= 0)
@@ -1031,7 +1259,7 @@ const importPaymentsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, 
              VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)`, [
                         (0, uuid_1.v4)(),
                         customer.id,
-                        (_15 = customer.seller_id) !== null && _15 !== void 0 ? _15 : null,
+                        (_g = customer.seller_id) !== null && _g !== void 0 ? _g : null,
                         receiptNumber,
                         date,
                         amount,

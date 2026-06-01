@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addNoStockImpactToOrders = void 0;
+exports.addNoStockImpactToOrders = addNoStockImpactToOrders;
 const db_1 = require("./db");
 /** Permite marcar pedidos que no deben impactar stock (p/ facturar sin movimiento de inventario). */
 function addNoStockImpactToOrders() {
@@ -33,4 +33,3 @@ function addNoStockImpactToOrders() {
         }
     });
 }
-exports.addNoStockImpactToOrders = addNoStockImpactToOrders;

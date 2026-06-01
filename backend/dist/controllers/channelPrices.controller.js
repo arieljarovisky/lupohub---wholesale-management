@@ -23,8 +23,8 @@ const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lu
 const TN_RATE_LIMIT_DELAY_MS = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function fetchMlPricesForItem(accessToken, itemId, variants, prices) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const headers = { Authorization: `Bearer ${accessToken}` };
         try {
             const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, {
@@ -185,12 +185,12 @@ const getVariantChannelPrices = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.getVariantChannelPrices = getVariantChannelPrices;
 /** POST { updates, applyLocal?, applyML?, applyTN? } */
 const bulkUpdateChannelPrices = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e, _f, _g;
+    var _a, _b, _c, _d;
     try {
-        const updates = Array.isArray((_d = req.body) === null || _d === void 0 ? void 0 : _d.updates) ? req.body.updates.slice(0, 50) : [];
-        const applyLocal = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.applyLocal) !== false;
-        const applyML = ((_f = req.body) === null || _f === void 0 ? void 0 : _f.applyML) !== false;
-        const applyTN = ((_g = req.body) === null || _g === void 0 ? void 0 : _g.applyTN) !== false;
+        const updates = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.updates) ? req.body.updates.slice(0, 50) : [];
+        const applyLocal = ((_b = req.body) === null || _b === void 0 ? void 0 : _b.applyLocal) !== false;
+        const applyML = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.applyML) !== false;
+        const applyTN = ((_d = req.body) === null || _d === void 0 ? void 0 : _d.applyTN) !== false;
         if (updates.length === 0) {
             return res.status(400).json({ message: 'Indicá al menos una variante en updates' });
         }

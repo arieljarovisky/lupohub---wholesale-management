@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPaymentInvoicesTable = void 0;
+exports.addPaymentInvoicesTable = addPaymentInvoicesTable;
 const db_1 = require("./db");
 /**
  * Tabla puente para asociar un recibo con múltiples facturas.
@@ -48,4 +48,3 @@ function addPaymentInvoicesTable() {
         }
     });
 }
-exports.addPaymentInvoicesTable = addPaymentInvoicesTable;

@@ -12,7 +12,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveTnStoreId = exports.fetchTnProductsBatched = exports.fetchMlItemsMultiget = exports.pickTnProductPrice = exports.parseTnPrice = exports.runPool = void 0;
+exports.runPool = runPool;
+exports.parseTnPrice = parseTnPrice;
+exports.pickTnProductPrice = pickTnProductPrice;
+exports.fetchMlItemsMultiget = fetchMlItemsMultiget;
+exports.fetchTnProductsBatched = fetchTnProductsBatched;
+exports.resolveTnStoreId = resolveTnStoreId;
 const axios_1 = __importDefault(require("axios"));
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 /** Ejecuta tareas con concurrencia limitada. */
@@ -30,7 +35,6 @@ function runPool(items, concurrency, fn) {
         })));
     });
 }
-exports.runPool = runPool;
 function parseTnPrice(variant) {
     var _a;
     if (!variant)
@@ -41,7 +45,6 @@ function parseTnPrice(variant) {
     const n = Number(String(raw).replace(',', '.'));
     return Number.isFinite(n) && n > 0 ? n : 0;
 }
-exports.parseTnPrice = parseTnPrice;
 /** Precio representativo del producto TN (todas las variantes suelen tener el mismo). */
 function pickTnProductPrice(tnVariants) {
     for (const tv of tnVariants) {
@@ -51,10 +54,9 @@ function pickTnProductPrice(tnVariants) {
     }
     return 0;
 }
-exports.pickTnProductPrice = pickTnProductPrice;
 function fetchMlItemsMultiget(accessToken, mlItemIds, prices, mlItemCache) {
-    var _a, _b, _c, _d, _e, _f, _g;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g;
         const ids = Array.from(mlItemIds.keys());
         const headers = { Authorization: `Bearer ${accessToken}` };
         const batchSize = 20;
@@ -101,7 +103,6 @@ function fetchMlItemsMultiget(accessToken, mlItemIds, prices, mlItemCache) {
         }
     });
 }
-exports.fetchMlItemsMultiget = fetchMlItemsMultiget;
 function fetchTnProductsBatched(storeId, accessToken, tnProductIds, prices) {
     return __awaiter(this, void 0, void 0, function* () {
         const ids = Array.from(tnProductIds.keys());
@@ -136,17 +137,17 @@ function fetchTnProductsBatched(storeId, accessToken, tnProductIds, prices) {
         // Fallback: productos no devueltos por ?ids= (límite o ID inválido)
         const missing = ids.filter((id) => !tnProductById.has(id));
         yield runPool(missing, 4, (tnProductId) => __awaiter(this, void 0, void 0, function* () {
-            var _b;
+            var _a;
             try {
                 const res = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/products/${tnProductId}`, {
                     headers: tnHeaders,
                     validateStatus: () => true,
                 });
-                if (res.status === 200 && ((_b = res.data) === null || _b === void 0 ? void 0 : _b.id) != null) {
+                if (res.status === 200 && ((_a = res.data) === null || _a === void 0 ? void 0 : _a.id) != null) {
                     tnProductById.set(String(res.data.id), res.data);
                 }
             }
-            catch (_c) {
+            catch (_b) {
                 /* ignore */
             }
         }));
@@ -167,8 +168,6 @@ function fetchTnProductsBatched(storeId, accessToken, tnProductIds, prices) {
         }
     });
 }
-exports.fetchTnProductsBatched = fetchTnProductsBatched;
 function resolveTnStoreId(integration) {
     return String((integration === null || integration === void 0 ? void 0 : integration.store_id) || (integration === null || integration === void 0 ? void 0 : integration.user_id) || '').trim();
 }
-exports.resolveTnStoreId = resolveTnStoreId;

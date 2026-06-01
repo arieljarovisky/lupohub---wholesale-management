@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addExternalSkuToVariants = void 0;
+exports.addExternalSkuToVariants = addExternalSkuToVariants;
 const db_1 = require("./db");
 function addExternalSkuToVariants() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -35,4 +35,3 @@ function addExternalSkuToVariants() {
         }
     });
 }
-exports.addExternalSkuToVariants = addExternalSkuToVariants;

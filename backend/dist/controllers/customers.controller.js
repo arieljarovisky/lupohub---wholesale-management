@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -252,7 +262,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.getCustomers = getCustomers;
 /** Exportar clientes individuales (1 fila por cliente) en Excel (.xlsx). */
 const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
     try {
         const authUser = req.user;
         const sellerFilter = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? ' WHERE c.seller_id = ?' : '';
@@ -306,23 +316,23 @@ const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, vo
         ws.views = [{ state: 'frozen', ySplit: 1 }];
         for (const r of rows) {
             ws.addRow({
-                id: (_c = r.id) !== null && _c !== void 0 ? _c : '',
-                legacy_code: (_d = r.legacy_code) !== null && _d !== void 0 ? _d : '',
-                business_name: (_e = r.business_name) !== null && _e !== void 0 ? _e : '',
-                name: (_f = r.name) !== null && _f !== void 0 ? _f : '',
-                email: (_g = r.email) !== null && _g !== void 0 ? _g : '',
-                phone: (_h = r.phone) !== null && _h !== void 0 ? _h : '',
-                cuit: (_j = r.cuit) !== null && _j !== void 0 ? _j : '',
-                city: (_k = r.city) !== null && _k !== void 0 ? _k : '',
-                address: (_l = r.address) !== null && _l !== void 0 ? _l : '',
-                sale_condition: (_m = r.sale_condition) !== null && _m !== void 0 ? _m : '',
-                condicion_iva: (_o = r.condicion_iva) !== null && _o !== void 0 ? _o : '',
-                transport_number: (_p = r.transport_number) !== null && _p !== void 0 ? _p : '',
-                remito_number: (_q = r.remito_number) !== null && _q !== void 0 ? _q : '',
-                account_zone: (_r = r.account_zone) !== null && _r !== void 0 ? _r : '',
-                account_seller_label: (_s = r.account_seller_label) !== null && _s !== void 0 ? _s : '',
-                seller_id: (_t = r.seller_id) !== null && _t !== void 0 ? _t : '',
-                seller_name: (_u = r.seller_name) !== null && _u !== void 0 ? _u : ''
+                id: (_a = r.id) !== null && _a !== void 0 ? _a : '',
+                legacy_code: (_b = r.legacy_code) !== null && _b !== void 0 ? _b : '',
+                business_name: (_c = r.business_name) !== null && _c !== void 0 ? _c : '',
+                name: (_d = r.name) !== null && _d !== void 0 ? _d : '',
+                email: (_e = r.email) !== null && _e !== void 0 ? _e : '',
+                phone: (_f = r.phone) !== null && _f !== void 0 ? _f : '',
+                cuit: (_g = r.cuit) !== null && _g !== void 0 ? _g : '',
+                city: (_h = r.city) !== null && _h !== void 0 ? _h : '',
+                address: (_j = r.address) !== null && _j !== void 0 ? _j : '',
+                sale_condition: (_k = r.sale_condition) !== null && _k !== void 0 ? _k : '',
+                condicion_iva: (_l = r.condicion_iva) !== null && _l !== void 0 ? _l : '',
+                transport_number: (_m = r.transport_number) !== null && _m !== void 0 ? _m : '',
+                remito_number: (_o = r.remito_number) !== null && _o !== void 0 ? _o : '',
+                account_zone: (_p = r.account_zone) !== null && _p !== void 0 ? _p : '',
+                account_seller_label: (_q = r.account_seller_label) !== null && _q !== void 0 ? _q : '',
+                seller_id: (_r = r.seller_id) !== null && _r !== void 0 ? _r : '',
+                seller_name: (_s = r.seller_name) !== null && _s !== void 0 ? _s : ''
             });
         }
         const out = yield workbook.xlsx.writeBuffer();
@@ -340,10 +350,10 @@ const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, vo
 exports.exportCustomersIndividualXlsx = exportCustomersIndividualXlsx;
 /** Exportar clientes en un Excel con una hoja por cliente. */
 const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9;
     try {
         const authUser = req.user;
-        const requestedIds = Array.isArray((_v = req.body) === null || _v === void 0 ? void 0 : _v.customerIds)
+        const requestedIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.customerIds)
             ? req.body.customerIds
                 .filter((x) => typeof x === 'string' && x.trim().length > 0)
                 .map((x) => String(x).trim())
@@ -419,13 +429,13 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             return name;
         };
         for (const r of rows) {
-            const customerName = String((_x = (_w = r.business_name) !== null && _w !== void 0 ? _w : r.name) !== null && _x !== void 0 ? _x : 'Cliente');
+            const customerName = String((_c = (_b = r.business_name) !== null && _b !== void 0 ? _b : r.name) !== null && _c !== void 0 ? _c : 'Cliente');
             wsSummary.addRow({
                 cliente: customerName,
-                contacto: (_y = r.name) !== null && _y !== void 0 ? _y : '',
-                cuit: (_z = r.cuit) !== null && _z !== void 0 ? _z : '',
-                email: (_0 = r.email) !== null && _0 !== void 0 ? _0 : '',
-                vendedor: (_2 = (_1 = r.seller_name) !== null && _1 !== void 0 ? _1 : r.seller_id) !== null && _2 !== void 0 ? _2 : ''
+                contacto: (_d = r.name) !== null && _d !== void 0 ? _d : '',
+                cuit: (_e = r.cuit) !== null && _e !== void 0 ? _e : '',
+                email: (_f = r.email) !== null && _f !== void 0 ? _f : '',
+                vendedor: (_h = (_g = r.seller_name) !== null && _g !== void 0 ? _g : r.seller_id) !== null && _h !== void 0 ? _h : ''
             });
             const ws = workbook.addWorksheet(uniqueSheetName(customerName, String(r.id)));
             ws.columns = [
@@ -435,24 +445,24 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             ws.getRow(1).font = { bold: true };
             ws.views = [{ state: 'frozen', ySplit: 1 }];
             ws.addRows([
-                { campo: 'ID', valor: (_3 = r.id) !== null && _3 !== void 0 ? _3 : '' },
-                { campo: 'Código legacy', valor: (_4 = r.legacy_code) !== null && _4 !== void 0 ? _4 : '' },
-                { campo: 'Razón social', valor: (_5 = r.business_name) !== null && _5 !== void 0 ? _5 : '' },
-                { campo: 'Contacto', valor: (_6 = r.name) !== null && _6 !== void 0 ? _6 : '' },
-                { campo: 'Email', valor: (_7 = r.email) !== null && _7 !== void 0 ? _7 : '' },
-                { campo: 'Teléfono', valor: (_8 = r.phone) !== null && _8 !== void 0 ? _8 : '' },
-                { campo: 'CUIT', valor: (_9 = r.cuit) !== null && _9 !== void 0 ? _9 : '' },
-                { campo: 'Ciudad', valor: (_10 = r.city) !== null && _10 !== void 0 ? _10 : '' },
-                { campo: 'Dirección', valor: (_11 = r.address) !== null && _11 !== void 0 ? _11 : '' },
-                { campo: 'Condición de venta', valor: (_12 = r.sale_condition) !== null && _12 !== void 0 ? _12 : '' },
-                { campo: 'Condición IVA', valor: (_13 = r.condicion_iva) !== null && _13 !== void 0 ? _13 : '' },
-                { campo: 'N° transporte', valor: (_14 = r.transport_number) !== null && _14 !== void 0 ? _14 : '' },
-                { campo: 'N° remito', valor: (_15 = r.remito_number) !== null && _15 !== void 0 ? _15 : '' },
-                { campo: 'Transportes', valor: (_16 = r.transportes) !== null && _16 !== void 0 ? _16 : '' },
-                { campo: 'Zona', valor: (_17 = r.account_zone) !== null && _17 !== void 0 ? _17 : '' },
-                { campo: 'Vendedor habitual', valor: (_18 = r.account_seller_label) !== null && _18 !== void 0 ? _18 : '' },
-                { campo: 'Seller ID', valor: (_19 = r.seller_id) !== null && _19 !== void 0 ? _19 : '' },
-                { campo: 'Seller Name', valor: (_20 = r.seller_name) !== null && _20 !== void 0 ? _20 : '' }
+                { campo: 'ID', valor: (_j = r.id) !== null && _j !== void 0 ? _j : '' },
+                { campo: 'Código legacy', valor: (_k = r.legacy_code) !== null && _k !== void 0 ? _k : '' },
+                { campo: 'Razón social', valor: (_l = r.business_name) !== null && _l !== void 0 ? _l : '' },
+                { campo: 'Contacto', valor: (_m = r.name) !== null && _m !== void 0 ? _m : '' },
+                { campo: 'Email', valor: (_o = r.email) !== null && _o !== void 0 ? _o : '' },
+                { campo: 'Teléfono', valor: (_p = r.phone) !== null && _p !== void 0 ? _p : '' },
+                { campo: 'CUIT', valor: (_q = r.cuit) !== null && _q !== void 0 ? _q : '' },
+                { campo: 'Ciudad', valor: (_r = r.city) !== null && _r !== void 0 ? _r : '' },
+                { campo: 'Dirección', valor: (_s = r.address) !== null && _s !== void 0 ? _s : '' },
+                { campo: 'Condición de venta', valor: (_t = r.sale_condition) !== null && _t !== void 0 ? _t : '' },
+                { campo: 'Condición IVA', valor: (_u = r.condicion_iva) !== null && _u !== void 0 ? _u : '' },
+                { campo: 'N° transporte', valor: (_v = r.transport_number) !== null && _v !== void 0 ? _v : '' },
+                { campo: 'N° remito', valor: (_w = r.remito_number) !== null && _w !== void 0 ? _w : '' },
+                { campo: 'Transportes', valor: (_x = r.transportes) !== null && _x !== void 0 ? _x : '' },
+                { campo: 'Zona', valor: (_y = r.account_zone) !== null && _y !== void 0 ? _y : '' },
+                { campo: 'Vendedor habitual', valor: (_z = r.account_seller_label) !== null && _z !== void 0 ? _z : '' },
+                { campo: 'Seller ID', valor: (_0 = r.seller_id) !== null && _0 !== void 0 ? _0 : '' },
+                { campo: 'Seller Name', valor: (_1 = r.seller_name) !== null && _1 !== void 0 ? _1 : '' }
             ]);
             const customerOrders = yield (0, db_1.query)(`SELECT id, date, status, total, payment_status
          FROM orders
@@ -509,10 +519,10 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             ws.getRow(rowCursor).font = { bold: true };
             rowCursor += 1;
             for (const o of customerOrders) {
-                ws.getCell(`A${rowCursor}`).value = (_21 = o.id) !== null && _21 !== void 0 ? _21 : '';
+                ws.getCell(`A${rowCursor}`).value = (_2 = o.id) !== null && _2 !== void 0 ? _2 : '';
                 ws.getCell(`B${rowCursor}`).value = o.date ? new Date(o.date) : null;
-                ws.getCell(`C${rowCursor}`).value = (_22 = o.status) !== null && _22 !== void 0 ? _22 : '';
-                ws.getCell(`D${rowCursor}`).value = (_23 = o.payment_status) !== null && _23 !== void 0 ? _23 : '';
+                ws.getCell(`C${rowCursor}`).value = (_3 = o.status) !== null && _3 !== void 0 ? _3 : '';
+                ws.getCell(`D${rowCursor}`).value = (_4 = o.payment_status) !== null && _4 !== void 0 ? _4 : '';
                 ws.getCell(`E${rowCursor}`).value = Number(o.total || 0);
                 rowCursor += 1;
             }
@@ -529,9 +539,9 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             rowCursor += 1;
             for (const b of customerBilling) {
                 ws.getCell(`A${rowCursor}`).value = b.fecha ? new Date(b.fecha) : null;
-                ws.getCell(`B${rowCursor}`).value = (_24 = b.tipo) !== null && _24 !== void 0 ? _24 : '';
-                ws.getCell(`C${rowCursor}`).value = (_25 = b.comprobante) !== null && _25 !== void 0 ? _25 : '';
-                ws.getCell(`D${rowCursor}`).value = (_26 = b.order_id) !== null && _26 !== void 0 ? _26 : '';
+                ws.getCell(`B${rowCursor}`).value = (_5 = b.tipo) !== null && _5 !== void 0 ? _5 : '';
+                ws.getCell(`C${rowCursor}`).value = (_6 = b.comprobante) !== null && _6 !== void 0 ? _6 : '';
+                ws.getCell(`D${rowCursor}`).value = (_7 = b.order_id) !== null && _7 !== void 0 ? _7 : '';
                 ws.getCell(`E${rowCursor}`).value = Number(b.importe || 0);
                 rowCursor += 1;
             }
@@ -547,9 +557,9 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             rowCursor += 1;
             for (const p of customerPayments) {
                 ws.getCell(`A${rowCursor}`).value = p.date ? new Date(p.date) : null;
-                ws.getCell(`B${rowCursor}`).value = (_27 = p.receipt_number) !== null && _27 !== void 0 ? _27 : '';
+                ws.getCell(`B${rowCursor}`).value = (_8 = p.receipt_number) !== null && _8 !== void 0 ? _8 : '';
                 ws.getCell(`C${rowCursor}`).value = Number(p.amount || 0);
-                ws.getCell(`D${rowCursor}`).value = (_28 = p.notes) !== null && _28 !== void 0 ? _28 : '';
+                ws.getCell(`D${rowCursor}`).value = (_9 = p.notes) !== null && _9 !== void 0 ? _9 : '';
                 rowCursor += 1;
             }
             ws.getColumn('B').numFmt = 'dd/mm/yyyy';
@@ -571,12 +581,12 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
 exports.exportCustomersBySheetsXlsx = exportCustomersBySheetsXlsx;
 /** Crear cliente. */
 const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
     try {
         const body = req.body;
-        const name = ((_29 = body.name) !== null && _29 !== void 0 ? _29 : '').toString().trim();
-        const businessName = ((_30 = body.businessName) !== null && _30 !== void 0 ? _30 : '').toString().trim();
-        const email = ((_31 = body.email) !== null && _31 !== void 0 ? _31 : '').toString().trim();
+        const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
+        const businessName = ((_b = body.businessName) !== null && _b !== void 0 ? _b : '').toString().trim();
+        const email = ((_c = body.email) !== null && _c !== void 0 ? _c : '').toString().trim();
         if (!businessName && !name) {
             return res.status(400).json({ message: 'Razón social o nombre de contacto es requerido' });
         }
@@ -584,19 +594,19 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ message: 'El email es requerido' });
         }
         const id = body.id && body.id.trim() ? body.id.trim() : (0, uuid_1.v4)();
-        const sellerId = ((_32 = body.sellerId) === null || _32 === void 0 ? void 0 : _32.trim()) || null;
-        const address = ((_33 = body.address) !== null && _33 !== void 0 ? _33 : '').toString().trim() || null;
+        const sellerId = ((_d = body.sellerId) === null || _d === void 0 ? void 0 : _d.trim()) || null;
+        const address = ((_e = body.address) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
         const city = (0, cityNormalize_1.canonicalizeCityInput)(body.city);
-        const cuit = ((_34 = body.cuit) !== null && _34 !== void 0 ? _34 : '').toString().trim() || null;
-        const phone = ((_35 = body.phone) !== null && _35 !== void 0 ? _35 : '').toString().trim() || null;
-        const transportNumber = ((_36 = body.transportNumber) !== null && _36 !== void 0 ? _36 : '').toString().trim() || null;
-        const remitoNumber = ((_37 = body.remitoNumber) !== null && _37 !== void 0 ? _37 : '').toString().trim() || null;
-        const saleCondition = ((_38 = body.saleCondition) !== null && _38 !== void 0 ? _38 : '').toString().trim() || null;
-        const condicionIva = ((_39 = body.condicionIva) !== null && _39 !== void 0 ? _39 : '').toString().trim() || null;
-        const priceListId = ((_40 = body.priceListId) === null || _40 === void 0 ? void 0 : _40.trim()) || null;
-        const legacyCode = ((_41 = body.legacyCode) !== null && _41 !== void 0 ? _41 : '').toString().trim() || null;
-        const accountZone = ((_42 = body.accountZone) !== null && _42 !== void 0 ? _42 : '').toString().trim() || null;
-        const accountSellerLabel = ((_43 = body.accountSellerLabel) !== null && _43 !== void 0 ? _43 : '').toString().trim() || null;
+        const cuit = ((_f = body.cuit) !== null && _f !== void 0 ? _f : '').toString().trim() || null;
+        const phone = ((_g = body.phone) !== null && _g !== void 0 ? _g : '').toString().trim() || null;
+        const transportNumber = ((_h = body.transportNumber) !== null && _h !== void 0 ? _h : '').toString().trim() || null;
+        const remitoNumber = ((_j = body.remitoNumber) !== null && _j !== void 0 ? _j : '').toString().trim() || null;
+        const saleCondition = ((_k = body.saleCondition) !== null && _k !== void 0 ? _k : '').toString().trim() || null;
+        const condicionIva = ((_l = body.condicionIva) !== null && _l !== void 0 ? _l : '').toString().trim() || null;
+        const priceListId = ((_m = body.priceListId) === null || _m === void 0 ? void 0 : _m.trim()) || null;
+        const legacyCode = ((_o = body.legacyCode) !== null && _o !== void 0 ? _o : '').toString().trim() || null;
+        const accountZone = ((_p = body.accountZone) !== null && _p !== void 0 ? _p : '').toString().trim() || null;
+        const accountSellerLabel = ((_q = body.accountSellerLabel) !== null && _q !== void 0 ? _q : '').toString().trim() || null;
         const deliveryJson = normalizeDeliveryAddressesForDb(body.deliveryAddresses);
         // Guardar nombre de contacto y razón social en columnas separadas:
         // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
@@ -628,7 +638,7 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.createCustomer = createCustomer;
 /** Actualizar cliente (ej. vendedor, razón social, price_list_id, etc.). */
 const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _44, _45, _46, _47, _48, _49, _50, _51, _52, _53, _54, _55, _56;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
     try {
         const { id } = req.params;
         const body = req.body;
@@ -643,15 +653,15 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         if (body.businessName !== undefined) {
             updates.push('business_name = ?');
-            params.push(((_44 = body.businessName) === null || _44 === void 0 ? void 0 : _44.trim()) || null);
+            params.push(((_a = body.businessName) === null || _a === void 0 ? void 0 : _a.trim()) || null);
         }
         if (body.email !== undefined) {
             updates.push('email = ?');
-            params.push(((_45 = body.email) === null || _45 === void 0 ? void 0 : _45.trim()) || null);
+            params.push(((_b = body.email) === null || _b === void 0 ? void 0 : _b.trim()) || null);
         }
         if (body.address !== undefined) {
             updates.push('address = ?');
-            params.push(((_46 = body.address) === null || _46 === void 0 ? void 0 : _46.trim()) || null);
+            params.push(((_c = body.address) === null || _c === void 0 ? void 0 : _c.trim()) || null);
         }
         if (body.city !== undefined) {
             updates.push('city = ?');
@@ -659,31 +669,31 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         if (body.cuit !== undefined) {
             updates.push('cuit = ?');
-            params.push(((_47 = body.cuit) === null || _47 === void 0 ? void 0 : _47.trim()) || null);
+            params.push(((_d = body.cuit) === null || _d === void 0 ? void 0 : _d.trim()) || null);
         }
         if (body.phone !== undefined) {
             updates.push('phone = ?');
-            params.push(((_48 = body.phone) === null || _48 === void 0 ? void 0 : _48.trim()) || null);
+            params.push(((_e = body.phone) === null || _e === void 0 ? void 0 : _e.trim()) || null);
         }
         if (body.transportNumber !== undefined) {
             updates.push('transport_number = ?');
-            params.push(((_49 = body.transportNumber) === null || _49 === void 0 ? void 0 : _49.trim()) || null);
+            params.push(((_f = body.transportNumber) === null || _f === void 0 ? void 0 : _f.trim()) || null);
         }
         if (body.remitoNumber !== undefined) {
             updates.push('remito_number = ?');
-            params.push(((_50 = body.remitoNumber) === null || _50 === void 0 ? void 0 : _50.trim()) || null);
+            params.push(((_g = body.remitoNumber) === null || _g === void 0 ? void 0 : _g.trim()) || null);
         }
         if (body.saleCondition !== undefined) {
             updates.push('sale_condition = ?');
-            params.push(((_51 = body.saleCondition) === null || _51 === void 0 ? void 0 : _51.trim()) || null);
+            params.push(((_h = body.saleCondition) === null || _h === void 0 ? void 0 : _h.trim()) || null);
         }
         if (body.condicionIva !== undefined) {
             updates.push('condicion_iva = ?');
-            params.push(((_52 = body.condicionIva) === null || _52 === void 0 ? void 0 : _52.trim()) || null);
+            params.push(((_j = body.condicionIva) === null || _j === void 0 ? void 0 : _j.trim()) || null);
         }
         if (body.sellerId !== undefined) {
             updates.push('seller_id = ?');
-            params.push(((_53 = body.sellerId) === null || _53 === void 0 ? void 0 : _53.trim()) || null);
+            params.push(((_k = body.sellerId) === null || _k === void 0 ? void 0 : _k.trim()) || null);
         }
         if (body.sellerCommissionPercentage !== undefined) {
             const pct = parseSellerCommissionPercentage(body.sellerCommissionPercentage);
@@ -699,15 +709,15 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         if (body.legacyCode !== undefined) {
             updates.push('legacy_code = ?');
-            params.push(((_54 = body.legacyCode) === null || _54 === void 0 ? void 0 : _54.trim()) || null);
+            params.push(((_l = body.legacyCode) === null || _l === void 0 ? void 0 : _l.trim()) || null);
         }
         if (body.accountZone !== undefined) {
             updates.push('account_zone = ?');
-            params.push(((_55 = body.accountZone) === null || _55 === void 0 ? void 0 : _55.trim()) || null);
+            params.push(((_m = body.accountZone) === null || _m === void 0 ? void 0 : _m.trim()) || null);
         }
         if (body.accountSellerLabel !== undefined) {
             updates.push('account_seller_label = ?');
-            params.push(((_56 = body.accountSellerLabel) === null || _56 === void 0 ? void 0 : _56.trim()) || null);
+            params.push(((_o = body.accountSellerLabel) === null || _o === void 0 ? void 0 : _o.trim()) || null);
         }
         if (body.deliveryAddresses !== undefined) {
             updates.push('delivery_addresses = ?');
@@ -737,7 +747,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.updateCustomer = updateCustomer;
 /** Crear o vincular usuario de acceso directo a un cliente (rol CUSTOMER). Solo ADMIN. */
 const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _57, _58, _59;
+    var _a, _b, _c;
     try {
         const authUser = req.user;
         if (!authUser || authUser.role !== 'ADMIN') {
@@ -747,9 +757,9 @@ const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!id)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const body = req.body;
-        const name = ((_57 = body.name) !== null && _57 !== void 0 ? _57 : '').toString().trim();
-        const email = ((_58 = body.email) !== null && _58 !== void 0 ? _58 : '').toString().trim();
-        const password = ((_59 = body.password) !== null && _59 !== void 0 ? _59 : '').toString();
+        const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
+        const email = ((_b = body.email) !== null && _b !== void 0 ? _b : '').toString().trim();
+        const password = ((_c = body.password) !== null && _c !== void 0 ? _c : '').toString();
         if (!email || !password) {
             return res.status(400).json({ message: 'Email y contraseña son requeridos para crear el usuario del cliente' });
         }
@@ -824,25 +834,25 @@ const deleteCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.deleteCustomer = deleteCustomer;
 /** Importar clientes en lote. Se exige razón social y CUIT. No duplica por CUIT ni por email. */
 const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _60, _61, _62, _63, _64, _65, _66, _67;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     try {
         const body = req.body;
         const rows = Array.isArray(body.customers) ? body.customers : [];
-        const sellerId = ((_60 = body.sellerId) === null || _60 === void 0 ? void 0 : _60.trim()) || null;
+        const sellerId = ((_a = body.sellerId) === null || _a === void 0 ? void 0 : _a.trim()) || null;
         let created = 0;
         let skipped = 0;
         const errors = [];
         for (let i = 0; i < rows.length; i++) {
             const r = rows[i];
-            const name = ((_61 = r.name) !== null && _61 !== void 0 ? _61 : '').toString().trim();
-            const businessName = ((_62 = r.businessName) !== null && _62 !== void 0 ? _62 : '').toString().trim();
-            let email = ((_63 = r.email) !== null && _63 !== void 0 ? _63 : '').toString().trim();
-            const address = ((_64 = r.address) !== null && _64 !== void 0 ? _64 : '').toString().trim() || null;
+            const name = ((_b = r.name) !== null && _b !== void 0 ? _b : '').toString().trim();
+            const businessName = ((_c = r.businessName) !== null && _c !== void 0 ? _c : '').toString().trim();
+            let email = ((_d = r.email) !== null && _d !== void 0 ? _d : '').toString().trim();
+            const address = ((_e = r.address) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
             const city = (0, cityNormalize_1.canonicalizeCityInput)(r.city);
-            const cuit = ((_65 = r.cuit) !== null && _65 !== void 0 ? _65 : '').toString().trim() || null;
+            const cuit = ((_f = r.cuit) !== null && _f !== void 0 ? _f : '').toString().trim() || null;
             const cuitSolo = (cuit || '').replace(/\D/g, '');
-            const phone = ((_66 = r.phone) !== null && _66 !== void 0 ? _66 : '').toString().trim() || null;
-            const condicionIva = ((_67 = r.condicionIva) !== null && _67 !== void 0 ? _67 : '').toString().trim() || null;
+            const phone = ((_g = r.phone) !== null && _g !== void 0 ? _g : '').toString().trim() || null;
+            const condicionIva = ((_h = r.condicionIva) !== null && _h !== void 0 ? _h : '').toString().trim() || null;
             const rowNum = i + 1;
             if (!businessName && !name) {
                 errors.push({ row: rowNum, message: 'Falta razón social' });
@@ -892,7 +902,7 @@ const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.importCustomers = importCustomers;
 /** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
 const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _68, _69, _70, _71, _72;
+    var _a, _b, _c, _d, _e;
     try {
         const body = req.body;
         const updates = Array.isArray(body.updates) ? body.updates : [];
@@ -901,11 +911,11 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const errors = [];
         for (let i = 0; i < updates.length; i++) {
             const u = updates[i];
-            const cuit = ((_68 = u.cuit) !== null && _68 !== void 0 ? _68 : '').toString().trim().replace(/\D/g, '').slice(0, 11);
-            const email = ((_69 = u.email) !== null && _69 !== void 0 ? _69 : '').toString().trim() || null;
-            const businessName = ((_70 = u.businessName) !== null && _70 !== void 0 ? _70 : '').toString().trim() || null;
-            const newBusinessName = ((_71 = u.newBusinessName) !== null && _71 !== void 0 ? _71 : '').toString().trim() || null;
-            const condicionIva = ((_72 = u.condicionIva) !== null && _72 !== void 0 ? _72 : '').toString().trim() || null;
+            const cuit = ((_a = u.cuit) !== null && _a !== void 0 ? _a : '').toString().trim().replace(/\D/g, '').slice(0, 11);
+            const email = ((_b = u.email) !== null && _b !== void 0 ? _b : '').toString().trim() || null;
+            const businessName = ((_c = u.businessName) !== null && _c !== void 0 ? _c : '').toString().trim() || null;
+            const newBusinessName = ((_d = u.newBusinessName) !== null && _d !== void 0 ? _d : '').toString().trim() || null;
+            const condicionIva = ((_e = u.condicionIva) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
             if (!cuit) {
                 errors.push({ row: i + 1, message: 'CUIT vacío' });
                 continue;
@@ -960,13 +970,16 @@ function parseSaldoNumero(v) {
  * Si entran en el saldo, el cliente figura con saldo a favor erróneo.
  */
 const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
-  COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
-  AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  (
+    COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+    AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  )
+  OR EXISTS (SELECT 1 FROM payment_invoices pi_comm WHERE pi_comm.payment_id = p.id)
+  OR EXISTS (SELECT 1 FROM payment_orders po_comm WHERE po_comm.payment_id = p.id)
+  OR (p.invoice_id IS NOT NULL AND TRIM(COALESCE(p.invoice_id, '')) <> '')
+  OR (p.order_id IS NOT NULL AND TRIM(COALESCE(p.order_id, '')) <> '')
 )`;
-const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = `(
-  COALESCE(notes, '') NOT LIKE '%comisión vendedor%'
-  AND COALESCE(notes, '') NOT LIKE '%comision vendedor%'
-)`;
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT;
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
     agg.customer_id,
@@ -1636,7 +1649,7 @@ function fetchCarteraSaldoUnificadoMap(sellerIdFilter, user) {
 }
 /** Exporta saldos pendientes en CSV (UTF-8 con BOM para Excel). */
 const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _73, _74, _75, _76, _77;
+    var _a, _b, _c, _d, _e;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -1780,7 +1793,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
     try {
         rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
     }
-    catch (_78) {
+    catch (_f) {
         rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
     }
     const header = [
@@ -1800,11 +1813,11 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
         const esc = (s) => `"${String(s !== null && s !== void 0 ? s : '').replace(/"/g, '""')}"`;
         lines.push([
             r.customerId,
-            esc((_73 = r.businessName) !== null && _73 !== void 0 ? _73 : ''),
-            esc((_74 = r.contactName) !== null && _74 !== void 0 ? _74 : ''),
-            (_75 = r.cuit) !== null && _75 !== void 0 ? _75 : '',
-            esc((_76 = r.city) !== null && _76 !== void 0 ? _76 : ''),
-            esc((_77 = r.email) !== null && _77 !== void 0 ? _77 : ''),
+            esc((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
+            esc((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
+            (_c = r.cuit) !== null && _c !== void 0 ? _c : '',
+            esc((_d = r.city) !== null && _d !== void 0 ? _d : ''),
+            esc((_e = r.email) !== null && _e !== void 0 ? _e : ''),
             Number(r.pedidosPendientes) || 0,
             (Number(r.totalCargosPendiente) || 0).toFixed(2).replace('.', ','),
             (Number(r.totalPagos) || 0).toFixed(2).replace('.', ','),
@@ -1824,7 +1837,7 @@ exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
  * Hoja 2: detalle de comprobantes y recibos por cliente.
  */
 const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _79, _80, _81, _82, _83, _84;
+    var _a, _b, _c, _d, _e, _f;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2022,7 +2035,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     totalFacturas += debe;
                 else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA')
                     totalNc += haber;
-                else if (comprobanteIndicaNotaCredito(String((_79 = m.comprobante) !== null && _79 !== void 0 ? _79 : '')) &&
+                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
                     Number(m.haber || 0) > 0.001 &&
                     Number(m.debe || 0) <= 0.001) {
                     totalNc += haber;
@@ -2031,11 +2044,11 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     totalRecibos += haber;
                 wsDetail.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_81 = (_80 = c.seller_name) !== null && _80 !== void 0 ? _80 : c.seller_id) !== null && _81 !== void 0 ? _81 : '',
+                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_82 = m.order_id) !== null && _82 !== void 0 ? _82 : '',
+                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
                     debe,
                     haber,
                     saldo: running
@@ -2045,7 +2058,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
             if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_84 = (_83 = c.seller_name) !== null && _83 !== void 0 ? _83 : c.seller_id) !== null && _84 !== void 0 ? _84 : '',
+                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
                     facturas: totalFacturas,
                     nc: totalNc,
                     recibos: totalRecibos,
@@ -2082,7 +2095,7 @@ exports.exportSaldosPendientesDetalleXlsx = exportSaldosPendientesDetalleXlsx;
  * Excluye importaciones Multimedia/Tango y comprobantes externos por CUIT.
  */
 const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _85, _86, _87, _88, _89, _90;
+    var _a, _b, _c, _d, _e, _f;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2226,7 +2239,7 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
                     totalFacturas += debe;
                 else if (m.tipo === 'NOTA_CREDITO')
                     totalNc += haber;
-                else if (comprobanteIndicaNotaCredito(String((_85 = m.comprobante) !== null && _85 !== void 0 ? _85 : '')) &&
+                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
                     Number(m.haber || 0) > 0.001 &&
                     Number(m.debe || 0) <= 0.001) {
                     totalNc += haber;
@@ -2235,11 +2248,11 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
                     totalRecibos += haber;
                 wsDetail.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_87 = (_86 = c.seller_name) !== null && _86 !== void 0 ? _86 : c.seller_id) !== null && _87 !== void 0 ? _87 : '',
+                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_88 = m.order_id) !== null && _88 !== void 0 ? _88 : '',
+                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
                     debe,
                     haber,
                     saldo: running
@@ -2249,7 +2262,7 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
             if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_90 = (_89 = c.seller_name) !== null && _89 !== void 0 ? _89 : c.seller_id) !== null && _90 !== void 0 ? _90 : '',
+                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
                     facturas: totalFacturas,
                     nc: totalNc,
                     recibos: totalRecibos,
@@ -2286,7 +2299,7 @@ exports.exportSaldosMovimientosSistemaXlsx = exportSaldosMovimientosSistemaXlsx;
  * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
  */
 const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _91, _92, _93, _94, _95, _96, _97;
+    var _a, _b, _c, _d, _e, _f, _g;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2309,16 +2322,11 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
         const sellerParams = sellerIdFilter ? [sellerIdFilter] : [];
         /**
-         * Rango visible en el Excel: solo movimientos dentro del período (no se listan anteriores).
-         * El saldo corrido y el total deben coincidir con el historial unificado: se suma primero
-         * todo lo anterior a `from` como saldo de apertura (misma lógica de ramas que el historial).
+         * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen en la URL).
+         * El saldo corrido arranca en «Saldo al inicio del período» y cierra en saldo pendiente (cartera).
          */
         const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
         const invoiceOpeningFilter = ' AND DATE(COALESCE(i.created_at, o.date)) < ?';
-        /**
-         * NC del sistema: rango por fecha de emisión de la NC o, en su defecto, factura/pedido
-         * (evita que queden fuera del export cuando el rango no coincide con la fecha de la factura).
-         */
         const ncRangeFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
         const ncOpeningFilter = ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) < ?';
         const externalNcRangeFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
@@ -2327,6 +2335,8 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         const receiptOpeningFilter = ' AND DATE(p.date) < ?';
         const importedRangeFilter = `${from ? ' AND DATE(e.line_date) >= ?' : ''}${to ? ' AND DATE(e.line_date) <= ?' : ''}`;
         const importedOpeningFilter = ' AND DATE(e.line_date) < ?';
+        const manualRangeFilter = `${from ? ' AND DATE(m.fecha) >= ?' : ''}${to ? ' AND DATE(m.fecha) <= ?' : ''}`;
+        const manualOpeningFilter = ' AND DATE(m.fecha) < ?';
         const branchFacturaSistema = `
         SELECT
           c.id AS customer_id,
@@ -2527,6 +2537,68 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         JOIN customers c ON c.id = p.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${receiptOpeningFilter}`;
+        const branchManualComprobante = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          m.fecha AS fecha,
+          CASE WHEN m.tipo = 'NC' THEN 'NOTA_CREDITO' ELSE 'FACTURA' END AS tipo,
+          CONCAT(
+            CASE
+              WHEN m.cbte_tipo IN (1, 3) THEN 'A '
+              WHEN m.cbte_tipo IN (6, 8) THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(m.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(m.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          m.ref_order_id AS order_id,
+          CASE
+            WHEN m.tipo = 'FACTURA' THEN ROUND(COALESCE(m.importe_neto, 0) + COALESCE(m.agip_ret_per, 0), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_manual_comprobantes m
+        JOIN customers c ON c.id = m.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${manualRangeFilter}`;
+        const branchManualComprobanteOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          m.fecha AS fecha,
+          CASE WHEN m.tipo = 'NC' THEN 'NOTA_CREDITO' ELSE 'FACTURA' END AS tipo,
+          CONCAT(
+            CASE
+              WHEN m.cbte_tipo IN (1, 3) THEN 'A '
+              WHEN m.cbte_tipo IN (6, 8) THEN 'B '
+              ELSE ''
+            END,
+            LPAD(COALESCE(m.punto_venta, 0), 5, '0'),
+            '-',
+            LPAD(COALESCE(m.cbte_desde, 0), 8, '0')
+          ) AS comprobante,
+          m.ref_order_id AS order_id,
+          CASE
+            WHEN m.tipo = 'FACTURA' THEN ROUND(COALESCE(m.importe_neto, 0) + COALESCE(m.agip_ret_per, 0), 2)
+            ELSE 0
+          END AS debe,
+          CASE
+            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0), 2)
+            ELSE 0
+          END AS haber
+        FROM customer_manual_comprobantes m
+        JOIN customers c ON c.id = m.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE 1=1 ${manualOpeningFilter}`;
         /**
          * Rama de importados Multimedia (Tango). En modo `tango` no se deduplican recibos
          * contra `payments` porque por definición el export es solo lo importado.
@@ -2689,9 +2761,15 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 branchNcSistema,
                 branchNcExterna,
                 branchReciboSistema,
+                branchManualComprobante,
                 branchImportado
             ],
-            sistema: [branchFacturaSistema, branchNcSistema, branchReciboSistema],
+            sistema: [
+                branchFacturaSistema,
+                branchNcSistema,
+                branchReciboSistema,
+                branchManualComprobante
+            ],
             tango: [branchImportado]
         };
         const branchesOpeningByMode = {
@@ -2700,9 +2778,15 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 branchNcSistemaOpening,
                 branchNcExternaOpening,
                 branchReciboSistemaOpening,
+                branchManualComprobanteOpening,
                 branchImportadoOpening
             ],
-            sistema: [branchFacturaSistemaOpening, branchNcSistemaOpening, branchReciboSistemaOpening],
+            sistema: [
+                branchFacturaSistemaOpening,
+                branchNcSistemaOpening,
+                branchReciboSistemaOpening,
+                branchManualComprobanteOpening
+            ],
             tango: [branchImportadoOpening]
         };
         const branches = branchesByMode[mode];
@@ -2807,14 +2891,14 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
             }
             const saldoPeriodo = Math.round(running * 100) / 100;
-            const saldoCartera = (_91 = carteraByCustomerId.get(c.id)) !== null && _91 !== void 0 ? _91 : saldoPeriodo;
-            if (Math.abs(saldoCartera) > 0.01 || Math.abs(saldoPeriodo) > 0.01) {
-                wsSummary.addRow({
-                    cliente: c.customer_name,
-                    vendedor: (_93 = (_92 = c.seller_name) !== null && _92 !== void 0 ? _92 : c.seller_id) !== null && _93 !== void 0 ? _93 : '',
-                    saldo: saldoCartera
-                });
-            }
+            const saldoCartera = (_a = carteraByCustomerId.get(c.id)) !== null && _a !== void 0 ? _a : saldoPeriodo;
+            if (Math.abs(saldoCartera) <= 0.005)
+                continue;
+            wsSummary.addRow({
+                cliente: c.customer_name,
+                vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                saldo: saldoCartera
+            });
             // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
             if (!sellerIdFilter) {
                 const sellerGroup = String(c.seller_name || c.seller_id || 'Sin vendedor');
@@ -2831,7 +2915,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             const saldoCarteraLabel = saldoCartera.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const titleRow = wsDetalle.addRow([
                 `CLIENTE: ${c.customer_name}`,
-                `VENDEDOR: ${(_95 = (_94 = c.seller_name) !== null && _94 !== void 0 ? _94 : c.seller_id) !== null && _95 !== void 0 ? _95 : '-'}`,
+                `VENDEDOR: ${(_e = (_d = c.seller_name) !== null && _d !== void 0 ? _d : c.seller_id) !== null && _e !== void 0 ? _e : '-'}`,
                 '',
                 '',
                 '',
@@ -2851,37 +2935,53 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
                 cell.alignment = { horizontal: 'left', vertical: 'middle' };
             });
-            let saldo = openingBalance;
-            let totalDebeMovs = 0;
-            let totalHaberMovs = 0;
-            for (const m of movs) {
+            const movsOrdenados = [...movs].sort((a, b) => {
+                const da = new Date(a.fecha || 0).getTime() || 0;
+                const db = new Date(b.fecha || 0).getTime() || 0;
+                if (da !== db)
+                    return da - db;
+                return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
+            });
+            let netoTabla = 0;
+            for (const m of movsOrdenados) {
+                netoTabla = Math.round((netoTabla + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+            }
+            /** Saldo al empezar el período listado: cierra en saldo pendiente (cartera) al final de las filas. */
+            let saldoCorrido = Math.round((saldoCartera - netoTabla) * 100) / 100;
+            const showSaldoInicioPeriodo = movsOrdenados.length > 0 && (from || Math.abs(saldoCorrido) > 0.005);
+            if (showSaldoInicioPeriodo) {
+                const saldoIniRow = wsDetalle.addRow({
+                    fecha: from ? new Date(from) : movsOrdenados[0].fecha ? new Date(movsOrdenados[0].fecha) : null,
+                    tipo: from ? 'Saldo al inicio del período' : 'Saldo inicial',
+                    comprobante: '',
+                    pedido: '',
+                    debe: 0,
+                    haber: 0,
+                    saldo: saldoCorrido,
+                });
+                saldoIniRow.font = { italic: true, color: { argb: 'FF64748B' } };
+            }
+            for (let i = 0; i < movsOrdenados.length; i += 1) {
+                const m = movsOrdenados[i];
                 const debe = Number(m.debe || 0);
                 const haber = Number(m.haber || 0);
-                totalDebeMovs = Math.round((totalDebeMovs + debe) * 100) / 100;
-                totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
-                saldo = Math.round((saldo + debe - haber) * 100) / 100;
+                saldoCorrido = Math.round((saldoCorrido + debe - haber) * 100) / 100;
+                if (i === movsOrdenados.length - 1) {
+                    saldoCorrido = Math.round(saldoCartera * 100) / 100;
+                }
                 wsDetalle.addRow({
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_96 = m.order_id) !== null && _96 !== void 0 ? _96 : '',
+                    pedido: (_f = m.order_id) !== null && _f !== void 0 ? _f : '',
                     debe,
                     haber,
-                    saldo
+                    saldo: saldoCorrido,
                 });
             }
-            const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
-            const concStartRow = wsDetalle.rowCount + 1;
-            wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
-            const mainSaldoRow = wsDetalle.addRow([
-                'Saldo pendiente (deuda actual — mismo número que la ficha del cliente en LupoHub)',
-                '',
-                '',
-                '',
-                '',
-                '',
-                saldoCartera,
-            ]);
+            const resumenLabelRow = wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
+            const mainSaldoRow = wsDetalle.addRow(['Saldo pendiente', '', '', '', '', '', saldoCartera]);
+            resumenLabelRow.font = { bold: true };
             mainSaldoRow.getCell(1).font = { bold: true, size: 11 };
             mainSaldoRow.getCell(7).font = { bold: true, size: 12 };
             mainSaldoRow.getCell(7).fill = {
@@ -2889,43 +2989,17 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                 pattern: 'solid',
                 fgColor: { argb: 'FFD1FAE5' },
             };
-            if (movs.length > 0) {
-                wsDetalle.addRow([
-                    `Solo en las filas de arriba (rango de fechas del export): facturas/pedidos ${totalDebeMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} − NC/recibos ${totalHaberMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} = ${netoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                ]);
-            }
-            if (from && Math.abs(saldoCartera - saldoPeriodo) > 1) {
-                wsDetalle.addRow([
-                    `El saldo del período con arrastre (${saldoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}) incluye movimientos anteriores al «desde» (arrastre ${openingBalance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}). Para cobrar al cliente, usá siempre el saldo pendiente de arriba.`,
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    saldoPeriodo,
-                ]);
-            }
-            for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
-                wsDetalle.mergeCells(r, 1, r, 6);
-                const row = wsDetalle.getRow(r);
-                row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-                if (r === mainSaldoRow.number)
-                    continue;
-                row.getCell(1).font = { italic: true, size: 10, color: { argb: 'FF475569' } };
-            }
+            wsDetalle.mergeCells(resumenLabelRow.number, 1, resumenLabelRow.number, 6);
+            wsDetalle.mergeCells(mainSaldoRow.number, 1, mainSaldoRow.number, 6);
+            resumenLabelRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+            mainSaldoRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
             wsDetalle.addRow(['', '', '', '', '', '', '']);
         }
         const out = yield workbook.xlsx.writeBuffer();
         const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
         const datePart = new Date().toISOString().slice(0, 10);
         const sellerNameFromFilter = sellerIdFilter && customers.length > 0
-            ? String(((_97 = customers.find((x) => String(x.seller_id || '') === sellerIdFilter)) === null || _97 === void 0 ? void 0 : _97.seller_name) || '').trim()
+            ? String(((_g = customers.find((x) => String(x.seller_id || '') === sellerIdFilter)) === null || _g === void 0 ? void 0 : _g.seller_name) || '').trim()
             : '';
         const sellerLabelRaw = (user.role === 'SELLER' ? String(user.name || '').trim() : '') ||
             sellerNameFromFilter ||
@@ -2956,7 +3030,7 @@ exports.exportSaldosPendientesByCustomerSheetsXlsx = exportSaldosPendientesByCus
  * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
  */
 const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _98, _99, _100, _101, _102, _103, _104, _105;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -3080,7 +3154,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     try {
         rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
     }
-    catch (_106) {
+    catch (_j) {
         rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
     }
     const sqlMultimediaSaldos = `
@@ -3123,7 +3197,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     try {
         mmRows = (yield (0, db_1.query)(sqlMultimediaSaldos, mmParams));
     }
-    catch (_107) {
+    catch (_k) {
         mmRows = [];
     }
     const byId = new Map();
@@ -3137,9 +3211,9 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
             account_zone: r.account_zone,
             account_seller_label: r.account_seller_label,
             seller_id: r.seller_id,
-            businessName: String((_98 = r.businessName) !== null && _98 !== void 0 ? _98 : ''),
-            contactName: String((_99 = r.contactName) !== null && _99 !== void 0 ? _99 : ''),
-            cuit: String((_100 = r.cuit) !== null && _100 !== void 0 ? _100 : ''),
+            businessName: String((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
+            contactName: String((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
+            cuit: String((_c = r.cuit) !== null && _c !== void 0 ? _c : ''),
             totalCargosPendiente: C,
             totalPagos: P,
             multimediaSaldo: 0,
@@ -3155,8 +3229,8 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         const mmCnt = Number(m.movementCount) || 0;
         const Pmm = Number(m.totalPagos) || 0;
         const existing = byId.get(id);
-        const C = (_101 = existing === null || existing === void 0 ? void 0 : existing.totalCargosPendiente) !== null && _101 !== void 0 ? _101 : 0;
-        const P = (_102 = existing === null || existing === void 0 ? void 0 : existing.totalPagos) !== null && _102 !== void 0 ? _102 : Pmm;
+        const C = (_d = existing === null || existing === void 0 ? void 0 : existing.totalCargosPendiente) !== null && _d !== void 0 ? _d : 0;
+        const P = (_e = existing === null || existing === void 0 ? void 0 : existing.totalPagos) !== null && _e !== void 0 ? _e : Pmm;
         const unified = Math.round((C + excelSaldo - P) * 100) / 100;
         if (existing) {
             existing.multimediaSaldo = excelSaldo;
@@ -3171,9 +3245,9 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
                 account_zone: m.account_zone,
                 account_seller_label: m.account_seller_label,
                 seller_id: m.seller_id,
-                businessName: String((_103 = m.businessName) !== null && _103 !== void 0 ? _103 : ''),
-                contactName: String((_104 = m.contactName) !== null && _104 !== void 0 ? _104 : ''),
-                cuit: String((_105 = m.cuit) !== null && _105 !== void 0 ? _105 : ''),
+                businessName: String((_f = m.businessName) !== null && _f !== void 0 ? _f : ''),
+                contactName: String((_g = m.contactName) !== null && _g !== void 0 ? _g : ''),
+                cuit: String((_h = m.cuit) !== null && _h !== void 0 ? _h : ''),
                 totalCargosPendiente: 0,
                 totalPagos: Pmm,
                 multimediaSaldo: excelSaldo,
@@ -3700,8 +3774,8 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
 });
 exports.clearDispatchedPendingsForCustomer = clearDispatchedPendingsForCustomer;
 function buildCustomerFinancialSummary(customerId) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const movements = (yield (0, db_1.query)(`
     SELECT
       m.fecha,
@@ -3918,9 +3992,31 @@ function buildCustomerFinancialSummary(customerId) {
             const tipo = String(m.tipo || '').toUpperCase();
             existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
         }
+        const invoicedOrderTokens = new Set();
+        const orderRowsWithInvoice = (yield (0, db_1.query)(`SELECT o.id FROM orders o INNER JOIN invoices i ON i.order_id = o.id WHERE o.customer_id = ?`, [customerId]));
+        for (const row of orderRowsWithInvoice) {
+            const id = String(row.id || '').trim();
+            if (!id)
+                continue;
+            invoicedOrderTokens.add(id.toUpperCase());
+            if (id.startsWith('O-'))
+                invoicedOrderTokens.add(id.replace(/^O-/, '0-').toUpperCase());
+            if (id.startsWith('0-'))
+                invoicedOrderTokens.add(id.replace(/^0-/, 'O-').toUpperCase());
+        }
+        const detalleRefsInvoicedOrder = (detalle) => {
+            const d = String(detalle || '').toUpperCase();
+            for (const tok of invoicedOrderTokens) {
+                if (tok && d.includes(tok))
+                    return true;
+            }
+            return false;
+        };
         for (const e of importedEntries) {
             const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
             if (!tipo)
+                continue;
+            if (tipo === 'FACTURA' && detalleRefsInvoicedOrder(String(e.detalle || '')))
                 continue;
             const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
             if (importe <= 0)
@@ -3986,13 +4082,13 @@ function buildCustomerFinancialSummary(customerId) {
 }
 /** Detalle por comprobante: LupoHub + líneas FAC/REC/N/C importadas (deduplicadas). El saldo de cartera usa además el último saldo de cuenta importada. */
 const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _108, _109, _110, _111, _112;
+    var _a, _b, _c, _d, _e;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para ver saldos del cliente' });
         }
-        const customerId = String(((_108 = req.params) === null || _108 === void 0 ? void 0 : _108.id) || '').trim();
+        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -4005,7 +4101,7 @@ const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void
             return res.status(403).json({ message: 'Solo podés ver clientes asignados a tu usuario' });
         }
         const summary = yield buildCustomerFinancialSummary(customerId);
-        return res.json(Object.assign({ customerId: customer.id, customerName: (_110 = (_109 = customer.business_name) !== null && _109 !== void 0 ? _109 : customer.name) !== null && _110 !== void 0 ? _110 : 'Cliente', sellerName: (_112 = (_111 = customer.seller_name) !== null && _111 !== void 0 ? _111 : customer.seller_id) !== null && _112 !== void 0 ? _112 : null }, summary));
+        return res.json(Object.assign({ customerId: customer.id, customerName: (_c = (_b = customer.business_name) !== null && _b !== void 0 ? _b : customer.name) !== null && _c !== void 0 ? _c : 'Cliente', sellerName: (_e = (_d = customer.seller_name) !== null && _d !== void 0 ? _d : customer.seller_id) !== null && _e !== void 0 ? _e : null }, summary));
     }
     catch (error) {
         console.error('getCustomerFinancialSummary:', error);
@@ -4015,13 +4111,13 @@ const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void
 exports.getCustomerFinancialSummary = getCustomerFinancialSummary;
 /** Exporta Excel del saldo por facturas/NC/recibos para un cliente. */
 const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _113, _114;
+    var _a, _b;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para exportar saldo del cliente' });
         }
-        const customerId = String(((_113 = req.params) === null || _113 === void 0 ? void 0 : _113.id) || '').trim();
+        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -4073,7 +4169,7 @@ const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 
                 fecha: m.fecha ? new Date(m.fecha) : null,
                 tipo: m.tipo,
                 comprobante: m.comprobante,
-                orderId: (_114 = m.orderId) !== null && _114 !== void 0 ? _114 : '',
+                orderId: (_b = m.orderId) !== null && _b !== void 0 ? _b : '',
                 debe: m.debe,
                 haber: m.haber,
                 saldo: running,
@@ -4099,13 +4195,13 @@ const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 
 exports.exportCustomerFinancialSummaryXlsx = exportCustomerFinancialSummaryXlsx;
 /** Exporta en Excel el detalle del cliente como un único sistema de movimientos, filtrable por fecha. */
 const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _115, _116, _117, _118, _119, _120, _121, _122, _123;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para exportar detalle de cliente' });
         }
-        const customerId = String(((_115 = req.params) === null || _115 === void 0 ? void 0 : _115.id) || '').trim();
+        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -4117,8 +4213,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
         if (authUser.role === 'SELLER' && customer.seller_id !== authUser.id) {
             return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
         }
-        const from = (_117 = (_116 = req.query) === null || _116 === void 0 ? void 0 : _116.from) === null || _117 === void 0 ? void 0 : _117.trim();
-        const to = (_119 = (_118 = req.query) === null || _118 === void 0 ? void 0 : _118.to) === null || _119 === void 0 ? void 0 : _119.trim();
+        const from = (_c = (_b = req.query) === null || _b === void 0 ? void 0 : _b.from) === null || _c === void 0 ? void 0 : _c.trim();
+        const to = (_e = (_d = req.query) === null || _d === void 0 ? void 0 : _d.to) === null || _e === void 0 ? void 0 : _e.trim();
         const entriesWhere = ['e.customer_id = ?'];
         const entriesParams = [customerId];
         if (from) {
@@ -4324,11 +4420,11 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: normalizeUnifiedType(e.tipo),
-                numero: (_120 = e.numero) !== null && _120 !== void 0 ? _120 : '',
+                numero: (_f = e.numero) !== null && _f !== void 0 ? _f : '',
                 importe: e.importe != null ? Number(e.importe) : null,
                 // En modo unificado no mostramos saldo histórico por línea importada.
                 saldo: null,
-                detalle: (_121 = e.detalle) !== null && _121 !== void 0 ? _121 : '',
+                detalle: (_g = e.detalle) !== null && _g !== void 0 ? _g : '',
                 sortTs: ts,
                 sortSeq: Number(e.line_order || 0),
                 sortNumero: String(e.numero || '')
@@ -4341,7 +4437,7 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: 'FAC',
-                numero: (_122 = o.id) !== null && _122 !== void 0 ? _122 : '',
+                numero: (_h = o.id) !== null && _h !== void 0 ? _h : '',
                 importe: Number(o.total || 0),
                 saldo: null,
                 detalle: `Cobro: ${o.payment_status || 'pendiente'}`,
@@ -4359,7 +4455,7 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: 'REC',
-                numero: (_123 = p.receipt_number) !== null && _123 !== void 0 ? _123 : '',
+                numero: (_j = p.receipt_number) !== null && _j !== void 0 ? _j : '',
                 importe: Number(p.amount || 0),
                 saldo: null,
                 detalle: `Factura (CAE): ${caeFromNumero || (caes.length ? caes.join(' | ') : '-')}${p.notes ? ` | ${p.notes}` : ''}`,

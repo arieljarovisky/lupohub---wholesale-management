@@ -12,7 +12,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPackListingAndBundle = exports.createTiendaNubePackListingWithVariants = exports.createTiendaNubePackListingFromProduct = exports.createMercadoLibrePackListingWithVariants = exports.createMercadoLibrePackListingFromItem = exports.fetchMercadoLibreItemResolved = exports.fetchListingPackVariations = exports.splitColorComboLabel = exports.fetchPublicationSourcePreview = exports.buildMlFashionGridPreview = exports.mlItemUsesFamilyNameModel = exports.mlCreateErrorRequiresUserProduct = exports.summarizeMlItemCreateBody = exports.mlPayloadForMercadoLibreApiPost = exports.sanitizeMercadoLibreItemCreateBody = exports.validateMlPayload = exports.buildMercadoLibreItemPayload = exports.mlBestPictureUrl = void 0;
+exports.mlBestPictureUrl = mlBestPictureUrl;
+exports.buildMercadoLibreItemPayload = buildMercadoLibreItemPayload;
+exports.validateMlPayload = validateMlPayload;
+exports.sanitizeMercadoLibreItemCreateBody = sanitizeMercadoLibreItemCreateBody;
+exports.mlPayloadForMercadoLibreApiPost = mlPayloadForMercadoLibreApiPost;
+exports.summarizeMlItemCreateBody = summarizeMlItemCreateBody;
+exports.mlCreateErrorRequiresUserProduct = mlCreateErrorRequiresUserProduct;
+exports.mlItemUsesFamilyNameModel = mlItemUsesFamilyNameModel;
+exports.buildMlFashionGridPreview = buildMlFashionGridPreview;
+exports.fetchPublicationSourcePreview = fetchPublicationSourcePreview;
+exports.splitColorComboLabel = splitColorComboLabel;
+exports.fetchListingPackVariations = fetchListingPackVariations;
+exports.fetchMercadoLibreItemResolved = fetchMercadoLibreItemResolved;
+exports.createMercadoLibrePackListingFromItem = createMercadoLibrePackListingFromItem;
+exports.createMercadoLibrePackListingWithVariants = createMercadoLibrePackListingWithVariants;
+exports.createTiendaNubePackListingFromProduct = createTiendaNubePackListingFromProduct;
+exports.createTiendaNubePackListingWithVariants = createTiendaNubePackListingWithVariants;
+exports.createPackListingAndBundle = createPackListingAndBundle;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("../controllers/integrations.controller");
@@ -46,7 +63,6 @@ function mlBestPictureUrl(p) {
     }
     return '';
 }
-exports.mlBestPictureUrl = mlBestPictureUrl;
 function collectMlPicturesFromItem(item) {
     const seen = new Set();
     const out = [];
@@ -764,8 +780,8 @@ function mlChartRowMatchesSizeLabel(row, sizeLabel) {
     return false;
 }
 function mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const chartKey = String(chartId !== null && chartId !== void 0 ? chartId : '').trim();
         if (!chartKey)
             return null;
@@ -806,8 +822,8 @@ function mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel) {
     });
 }
 function mlFetchSizeGridRowIdForSize(accessToken, chartId, sizeLabel) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const found = yield mlFetchSizeGridRowForSize(accessToken, chartId, sizeLabel);
         return (_a = found === null || found === void 0 ? void 0 : found.rowId) !== null && _a !== void 0 ? _a : '';
     });
@@ -823,8 +839,8 @@ function mlDomainIdForChartSearch(domainId) {
     return m ? m[1] : d;
 }
 function mlDiscoverDomainId(accessToken, siteId, query, categoryId) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const q = String(query || '').trim();
         if (q) {
             try {
@@ -914,8 +930,8 @@ function mlPickChartIdFromSearchResponse(data, preferredChartId) {
     return (_b = (_a = charts[0]) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : '';
 }
 function mlSearchCatalogChartId(accessToken, opts) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const sellerNum = Number(opts.sellerId);
         if (!Number.isFinite(sellerNum) || sellerNum <= 0)
             return '';
@@ -979,8 +995,8 @@ function mlSearchCatalogChartId(accessToken, opts) {
     });
 }
 function mlResolveFashionGridViaMercadoLibreApi(sourceItem, size, accessToken, sellerId, familyName) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const siteId = mlSiteIdFromItem(sourceItem);
         const query = String(familyName || (sourceItem === null || sourceItem === void 0 ? void 0 : sourceItem.family_name) || (sourceItem === null || sourceItem === void 0 ? void 0 : sourceItem.title) || '').trim();
         const domainId = yield mlDiscoverDomainId(accessToken, siteId, query, String((sourceItem === null || sourceItem === void 0 ? void 0 : sourceItem.category_id) || ''));
@@ -1048,8 +1064,8 @@ function mlFashionSizeAttrForPack(sourceItem, sizeLabel, chartRow) {
  * No sustituye por charts/search: el pack debe compartir la misma guía que el ítem modelo.
  */
 function mlFashionAttrsFromSourcePublication(sourceItem, sizeLabel, accessToken) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const chartId = mlSourceSizeGridId(sourceItem);
         if (!chartId) {
             throw new Error('La publicación origen no tiene SIZE_GRID_ID (guía de talles). ' +
@@ -1085,8 +1101,8 @@ function mlFashionAttrsFromSourcePublication(sourceItem, sizeLabel, accessToken)
     });
 }
 function mlAssertSourceItemSameSeller(sourceItem, integrationSellerId) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const sourceSeller = String((_a = sourceItem === null || sourceItem === void 0 ? void 0 : sourceItem.seller_id) !== null && _a !== void 0 ? _a : '').trim();
         const tokenSeller = String(integrationSellerId !== null && integrationSellerId !== void 0 ? integrationSellerId : '').trim();
         if (!sourceSeller || !tokenSeller || sourceSeller === tokenSeller)
@@ -1193,7 +1209,6 @@ function buildMercadoLibreItemPayload(input) {
         payload.shipping = shipping;
     return JSON.parse(JSON.stringify(payload));
 }
-exports.buildMercadoLibreItemPayload = buildMercadoLibreItemPayload;
 function validateMlPayload(payload, opts) {
     var _a, _b, _c, _d, _e, _f, _g, _h;
     const categoryId = String((_a = payload.category_id) !== null && _a !== void 0 ? _a : '').trim();
@@ -1288,7 +1303,6 @@ function validateMlPayload(payload, opts) {
         }
     }
 }
-exports.validateMlPayload = validateMlPayload;
 function mlDraftToPayloadInput(draft, opts) {
     var _a, _b, _c, _d, _e, _f, _g, _h;
     const pictures = [];
@@ -1387,7 +1401,6 @@ function sanitizeMercadoLibreItemCreateBody(body) {
         out.shipping = shipping;
     return stripMlInternalBodyKeys(out);
 }
-exports.sanitizeMercadoLibreItemCreateBody = sanitizeMercadoLibreItemCreateBody;
 function mlIsUserProductPostPayload(body) {
     var _a;
     const hasFamilyName = Boolean(String((_a = body.family_name) !== null && _a !== void 0 ? _a : '').trim());
@@ -1431,7 +1444,6 @@ function mlPayloadForMercadoLibreApiPost(body) {
     console.log('[ML PAYLOAD CLEAN]', JSON.stringify(payload, null, 2));
     return payload;
 }
-exports.mlPayloadForMercadoLibreApiPost = mlPayloadForMercadoLibreApiPost;
 function buildMlItemCreateDebugFlags(safe) {
     var _a, _b;
     const variations = Array.isArray(safe.variations) ? safe.variations : [];
@@ -1677,7 +1689,6 @@ function summarizeMlItemCreateBody(body) {
         _flags: buildMlItemCreateDebugFlags(payload)
     };
 }
-exports.summarizeMlItemCreateBody = summarizeMlItemCreateBody;
 /** Error ML que exige User Product (family_name sin variations en el mismo body). */
 function mlCreateErrorRequiresUserProduct(message) {
     const m = String(message || '').toLowerCase();
@@ -1686,7 +1697,6 @@ function mlCreateErrorRequiresUserProduct(message) {
         (m.includes('family_name') && m.includes('required_fields')) ||
         (m.includes('family_name') && m.includes('does not contains')));
 }
-exports.mlCreateErrorRequiresUserProduct = mlCreateErrorRequiresUserProduct;
 function mlPostPayloadFashionFields(payload) {
     var _a, _b;
     const attrs = Array.isArray(payload.attributes) ? payload.attributes : [];
@@ -1747,8 +1757,8 @@ function upsertMlItemAttribute(attrs, attrId, valueName) {
     return upsertMlCreateAttribute(attrs, { id: attrId, value_name: value });
 }
 function resolvePackVariantColorSize(packItems, sourceItem, label) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         let color = '';
         let size = '';
         const ids = packItems.map((i) => i.variantId).filter(Boolean);
@@ -1813,7 +1823,6 @@ function mlItemUsesFamilyNameModel(item) {
         return true;
     return false;
 }
-exports.mlItemUsesFamilyNameModel = mlItemUsesFamilyNameModel;
 function packListingBaseTitle(sourceItem, opts) {
     var _a, _b;
     const raw = ((_b = (_a = opts.content) === null || _a === void 0 ? void 0 : _a.title) === null || _b === void 0 ? void 0 : _b.trim()) ||
@@ -1874,8 +1883,8 @@ function mlFamilyNameFromItem(item) {
     return '';
 }
 function postMercadoLibreNewItem(accessToken, body, debugContext, logExtra) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const payloadToSend = mlPayloadForMercadoLibreApiPost(body);
         const pics = payloadToSend.pictures;
         if (!Array.isArray(pics) || !pics.length) {
@@ -1910,8 +1919,8 @@ function postMercadoLibreNewItem(accessToken, body, debugContext, logExtra) {
     });
 }
 function applyDescriptionFromSource(newItemId, sourceItem, accessToken, descriptionOverride) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         let description = (descriptionOverride === null || descriptionOverride === void 0 ? void 0 : descriptionOverride.trim()) || '';
         if (!description) {
             try {
@@ -1956,8 +1965,8 @@ function buildMlPackVariations(sourceItem, packVariants, opts) {
     });
 }
 function buildMercadoLibrePackListingBodyClassic(sourceItem, packVariants, opts) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         if (!packVariants.length)
             throw new Error('Agregá al menos una combinación de colores');
         const pictures = mlPicturesPayload(opts.content, sourceItem);
@@ -2006,8 +2015,8 @@ function buildMercadoLibrePackListingBodyClassic(sourceItem, packVariants, opts)
 }
 /** User Product: una publicación por talle, con family_name y sin variations. */
 function mlMercadoLibreSellerId(sourceItem, accessToken) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const fromItem = String((_a = sourceItem === null || sourceItem === void 0 ? void 0 : sourceItem.seller_id) !== null && _a !== void 0 ? _a : '').trim();
         if (fromItem)
             return fromItem;
@@ -2026,8 +2035,8 @@ function mlMercadoLibreSellerId(sourceItem, accessToken) {
     });
 }
 function buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, packVariant, opts) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const pictures = mlPicturesPayload(opts.content, sourceItem);
         if (!pictures.length)
             throw new Error('Seleccioná al menos una foto para la publicación');
@@ -2077,8 +2086,8 @@ function buildMercadoLibrePackListingBodyUserProductSingle(sourceItem, packVaria
     });
 }
 function createMercadoLibrePackListingUserProduct(sourceItem, packVariants, opts) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!mlToken)
             throw new Error('No hay integración con Mercado Libre');
@@ -2163,7 +2172,6 @@ function buildMlFashionGridPreview(sourceItem, integrationSellerId) {
         rows
     };
 }
-exports.buildMlFashionGridPreview = buildMlFashionGridPreview;
 function localizedTnText(field) {
     if (field == null)
         return '';
@@ -2183,8 +2191,8 @@ function localizedTnText(field) {
     return '';
 }
 function fetchPublicationSourcePreview(platform, rawId) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const id = String(rawId || '').trim();
         if (!id)
             return null;
@@ -2257,7 +2265,6 @@ function fetchPublicationSourcePreview(platform, rawId) {
         };
     });
 }
-exports.fetchPublicationSourcePreview = fetchPublicationSourcePreview;
 const COLOR_COMBO_SEPARATORS = /\s*(?:[-/·,+|\\]| y | e | x |\s\+\s)\s*/gi;
 const ASSORTED_COLOR_PATTERN = /^(?:surtido|surtidos|variado|variados|varios|mix|combo|multicolor|assorted|aleatorio)$/i;
 /** Parte un nombre de variación como "Negro-Gris-Blanco" en colores individuales. */
@@ -2275,7 +2282,6 @@ function splitColorComboLabel(raw) {
         return [trimmed];
     return parts;
 }
-exports.splitColorComboLabel = splitColorComboLabel;
 function tnVariantColorSize(variant) {
     const values = Array.isArray(variant === null || variant === void 0 ? void 0 : variant.values) ? variant.values : [];
     if (values.length === 0)
@@ -2286,8 +2292,8 @@ function tnVariantColorSize(variant) {
     return { color, size };
 }
 function fetchListingPackVariations(platform, rawId) {
-    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         const id = String(rawId || '').trim();
         if (!id)
             return null;
@@ -2359,7 +2365,6 @@ function fetchListingPackVariations(platform, rawId) {
         };
     });
 }
-exports.fetchListingPackVariations = fetchListingPackVariations;
 /** Completa attributes de cada variación (el GET del ítem a veces no los trae). */
 function enrichMercadoLibreItemVariations(item, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -2480,7 +2485,6 @@ function fetchMercadoLibreItemResolved(rawItemId) {
         return null;
     });
 }
-exports.fetchMercadoLibreItemResolved = fetchMercadoLibreItemResolved;
 function createMercadoLibrePackListingFromItem(sourceItem, opts) {
     return __awaiter(this, void 0, void 0, function* () {
         const created = yield createMercadoLibrePackListingWithVariants(sourceItem, [{ label: (opts.packLabel || '').trim(), items: opts.packItems || [] }], {
@@ -2492,10 +2496,9 @@ function createMercadoLibrePackListingFromItem(sourceItem, opts) {
         return { itemId: created.itemId, item: created.item };
     });
 }
-exports.createMercadoLibrePackListingFromItem = createMercadoLibrePackListingFromItem;
 function createMercadoLibrePackListingWithVariants(sourceItem, packVariants, opts) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const mlToken = yield (0, integrations_controller_1.getValidMLToken)();
         if (!mlToken)
             throw new Error('No hay integración con Mercado Libre');
@@ -2521,7 +2524,6 @@ function createMercadoLibrePackListingWithVariants(sourceItem, packVariants, opt
         }
     });
 }
-exports.createMercadoLibrePackListingWithVariants = createMercadoLibrePackListingWithVariants;
 function tnImagesFromContent(content, product) {
     var _a;
     if ((_a = content === null || content === void 0 ? void 0 : content.pictures) === null || _a === void 0 ? void 0 : _a.length) {
@@ -2607,8 +2609,8 @@ function fetchAllTnVariants(storeId, accessToken, productId) {
     });
 }
 function createTiendaNubePackListingFromProduct(sourceProductId, opts) {
-    var _a, _b, _c, _d, _e, _f, _g;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g;
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
             throw new Error('No hay integración con Tienda Nube');
@@ -2670,10 +2672,9 @@ function createTiendaNubePackListingFromProduct(sourceProductId, opts) {
         return { productId: newId, variantId };
     });
 }
-exports.createTiendaNubePackListingFromProduct = createTiendaNubePackListingFromProduct;
 function createTiendaNubePackListingWithVariants(sourceProductId, packVariants, opts) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
             throw new Error('No hay integración con Tienda Nube');
@@ -2757,10 +2758,9 @@ function createTiendaNubePackListingWithVariants(sourceProductId, packVariants, 
         return { productId: newId, variantIds };
     });
 }
-exports.createTiendaNubePackListingWithVariants = createTiendaNubePackListingWithVariants;
 function bundleItemsWithStock(items) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const out = [];
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
@@ -2781,8 +2781,8 @@ function bundleItemsWithStock(items) {
     });
 }
 function createPackListingAndBundle(input) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         const variantInputs = ((_a = input.variants) === null || _a === void 0 ? void 0 : _a.length)
             ? input.variants
             : ((_b = input.items) === null || _b === void 0 ? void 0 : _b.length)
@@ -2935,4 +2935,3 @@ function createPackListingAndBundle(input) {
         };
     });
 }
-exports.createPackListingAndBundle = createPackListingAndBundle;

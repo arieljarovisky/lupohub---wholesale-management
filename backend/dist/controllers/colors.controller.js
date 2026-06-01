@@ -93,14 +93,14 @@ exports.createColor = createColor;
  * No modifica filas ya cargadas.
  */
 const importStandardColorCatalog = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c, _d;
+    var _a, _b;
     try {
         const tblCheck = yield (0, db_1.query)(`
       SELECT COUNT(*) AS cnt
       FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'colors'
     `);
-        const hasColorsTable = Number(((_c = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _c === void 0 ? void 0 : _c.cnt) || 0) > 0;
+        const hasColorsTable = Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) > 0;
         if (!hasColorsTable) {
             return res.status(400).json({ message: 'La tabla colors no existe en esta base de datos.' });
         }
@@ -109,7 +109,7 @@ const importStandardColorCatalog = (req, res) => __awaiter(void 0, void 0, void 
       FROM information_schema.columns
       WHERE table_schema = DATABASE() AND table_name = 'colors' AND column_name = 'hex'
     `);
-        const hasHex = Number(((_d = hexColCheck === null || hexColCheck === void 0 ? void 0 : hexColCheck[0]) === null || _d === void 0 ? void 0 : _d.cnt) || 0) > 0;
+        const hasHex = Number(((_b = hexColCheck === null || hexColCheck === void 0 ? void 0 : hexColCheck[0]) === null || _b === void 0 ? void 0 : _b.cnt) || 0) > 0;
         let inserted = 0;
         let skipped = 0;
         for (const row of standardColorCatalog_1.STANDARD_COLOR_CATALOG) {
@@ -152,13 +152,13 @@ exports.importStandardColorCatalog = importStandardColorCatalog;
  * dado por los primeros 3 caracteres (ej. 2021 → 202). Mueve `product_colors` / variantes hacia el color canónico.
  */
 const mergeFourDigitColorCodes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _e;
+    var _a;
     try {
         const tblCheck = yield (0, db_1.query)(`
       SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'colors'
     `);
-        if (Number(((_e = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _e === void 0 ? void 0 : _e.cnt) || 0) === 0) {
+        if (Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) === 0) {
             return res.status(400).json({ message: 'La tabla colors no existe.' });
         }
         const badRows = (yield (0, db_1.query)(`SELECT id, TRIM(CAST(code AS CHAR)) AS c FROM colors WHERE TRIM(CAST(code AS CHAR)) REGEXP '^[0-9]{4,}$' ORDER BY LENGTH(TRIM(CAST(code AS CHAR))) DESC, id ASC`));
@@ -261,7 +261,7 @@ const mergeFourDigitColorCodes = (req, res) => __awaiter(void 0, void 0, void 0,
 });
 exports.mergeFourDigitColorCodes = mergeFourDigitColorCodes;
 const updateColor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _f, _g, _h;
+    var _a, _b, _c;
     try {
         const colorId = req.params.id;
         if (!colorId)
@@ -288,7 +288,7 @@ const updateColor = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
       SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'colors'
     `);
-        const hasColorsTable = Number(((_f = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _f === void 0 ? void 0 : _f.cnt) || 0) > 0;
+        const hasColorsTable = Number(((_a = tblCheck === null || tblCheck === void 0 ? void 0 : tblCheck[0]) === null || _a === void 0 ? void 0 : _a.cnt) || 0) > 0;
         if (hasColorsTable) {
             const existing = yield (0, db_1.get)(`SELECT id FROM colors WHERE id = ?`, [colorId]);
             if (!existing)
@@ -305,7 +305,7 @@ const updateColor = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const attrParams = [];
         if (code !== undefined || name !== undefined) {
             attrUpdates.push('name = ?');
-            attrParams.push(String((_g = name !== null && name !== void 0 ? name : code) !== null && _g !== void 0 ? _g : '').trim() || String(code !== null && code !== void 0 ? code : '').trim());
+            attrParams.push(String((_b = name !== null && name !== void 0 ? name : code) !== null && _b !== void 0 ? _b : '').trim() || String(code !== null && code !== void 0 ? code : '').trim());
         }
         if (hex !== undefined) {
             attrUpdates.push('value = ?');
@@ -316,7 +316,7 @@ const updateColor = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             yield (0, db_1.execute)(`UPDATE attributes SET ${attrUpdates.join(', ')} WHERE id = ? AND type = 'color'`, attrParams);
         }
         const updated = yield (0, db_1.get)(`SELECT id, name, value FROM attributes WHERE id = ? AND type = 'color'`, [colorId]);
-        return res.json({ id: updated.id, code: updated.name, name: updated.name, hex: (_h = updated.value) !== null && _h !== void 0 ? _h : null });
+        return res.json({ id: updated.id, code: updated.name, name: updated.name, hex: (_c = updated.value) !== null && _c !== void 0 ? _c : null });
     }
     catch (error) {
         console.error('Error actualizando color:', error);

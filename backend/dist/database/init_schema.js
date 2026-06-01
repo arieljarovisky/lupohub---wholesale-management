@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.initSchema = void 0;
+exports.initSchema = initSchema;
 /**
  * Crea todas las tablas base necesarias para la app (DB vacía, ej. Railway).
  * Se ejecuta al arranque antes de las migraciones add_*.
@@ -179,4 +179,3 @@ function initSchema() {
         console.log('[DB] Esquema base listo');
     });
 }
-exports.initSchema = initSchema;

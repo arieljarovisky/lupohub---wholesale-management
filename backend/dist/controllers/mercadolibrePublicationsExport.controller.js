@@ -75,8 +75,8 @@ function parseListingPricesSaleFee(data, listingTypeId) {
  * Incluye cargo variable de ML por categoría/tipo de publicación; no incluye IVA propio ni retenciones fuera de este cálculo.
  */
 function fetchListingSaleFeeAmount(accessToken, item, price, cache) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const siteId = String((item === null || item === void 0 ? void 0 : item.site_id) || '').trim();
         const categoryId = String((item === null || item === void 0 ? void 0 : item.category_id) || '').trim();
         const listingTypeId = String((item === null || item === void 0 ? void 0 : item.listing_type_id) || '').trim();
@@ -167,8 +167,8 @@ function resolveHubVariantFull(itemIdNorm, variationId, skuMlNorm, hubBySku, hub
 }
 /** Suma costo Product Ads por ítem ML, solo campañas con estado active en el período. */
 function fetchActiveCampaignProductAdsCostByItem(accessToken, dateFrom, dateTo) {
-    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const costByItem = new Map();
         try {
             const advRes = yield axios_1.default.get('https://api.mercadolibre.com/advertising/advertisers', {
@@ -261,8 +261,8 @@ function fetchActiveCampaignProductAdsCostByItem(accessToken, dateFrom, dateTo) 
 }
 /** Campañas Product Ads del período (todas) con métricas agregadas por campaña. */
 function fetchProductAdsCampaignRows(accessToken, dateFrom, dateTo) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const out = [];
         try {
             const advRes = yield axios_1.default.get('https://api.mercadolibre.com/advertising/advertisers', {
@@ -334,8 +334,8 @@ function fetchProductAdsCampaignRows(accessToken, dateFrom, dateTo) {
  * Clave: `normalizeMercadoLibreItemId(itemId)|variationId` (variationId vacío si la publicación no tiene variaciones).
  */
 function fetchMercadoLibreSalesCountInDateRange(accessToken, sellerUserId, dateFromYmd, dateToYmd) {
-    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const map = new Map();
         let offset = 0;
         const limit = 50;
@@ -580,7 +580,7 @@ const exportMercadolibrePublicationsXlsx = (req, res) => __awaiter(void 0, void 
                     continue;
                 const itemIdNorm = (0, integrations_controller_1.normalizeMercadoLibreItemId)(String(item.id));
                 const bump = (variationId, skuMl, price) => __awaiter(void 0, void 0, void 0, function* () {
-                    var _r, _s, _t, _u;
+                    var _a, _b, _c, _d;
                     const skuNorm = normalizeSkuForMatch(skuMl);
                     const hub = resolveHubVariantFull(itemIdNorm, variationId, skuNorm, hubBySku, hubByMlItem, hubByMlProduct, pubMap);
                     if (hub) {
@@ -588,9 +588,9 @@ const exportMercadolibrePublicationsXlsx = (req, res) => __awaiter(void 0, void 
                         if (!(meta === null || meta === void 0 ? void 0 : meta.hasCodigo))
                             return;
                         const codigo = meta.codigo;
-                        const nombre = (_r = meta.nombre) !== null && _r !== void 0 ? _r : hub.product_name;
-                        const bp = (_s = meta.base_price) !== null && _s !== void 0 ? _s : hub.base_price;
-                        const pk = (_t = meta.mayorista_pack) !== null && _t !== void 0 ? _t : hub.mayorista_pack_size;
+                        const nombre = (_a = meta.nombre) !== null && _a !== void 0 ? _a : hub.product_name;
+                        const bp = (_b = meta.base_price) !== null && _b !== void 0 ? _b : hub.base_price;
+                        const pk = (_c = meta.mayorista_pack) !== null && _c !== void 0 ? _c : hub.mayorista_pack_size;
                         const key = `p:${hub.product_id}`;
                         const b = ensureBucket(key, {
                             codigo,
@@ -603,7 +603,7 @@ const exportMercadolibrePublicationsXlsx = (req, res) => __awaiter(void 0, void 
                         b.ml_sale_fees.push(saleFee);
                         const vid = variationId != null && String(variationId).trim() !== '' ? String(variationId).trim() : '';
                         const soldKey = `${itemIdNorm}|${vid}`;
-                        b.ventas_periodo_suma += (_u = salesCountByItemVariation.get(soldKey)) !== null && _u !== void 0 ? _u : 0;
+                        b.ventas_periodo_suma += (_d = salesCountByItemVariation.get(soldKey)) !== null && _d !== void 0 ? _d : 0;
                         b.variant_ids.add(hub.variant_id);
                         b.ml_item_ids.add(itemIdNorm);
                         const pl = (item.permalink || '').toString().trim();

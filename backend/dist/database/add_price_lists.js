@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPriceLists = void 0;
+exports.addPriceLists = addPriceLists;
 /**
  * Crea tablas de listas de precios y agrega price_list_id a users y customers.
  */
@@ -70,4 +70,3 @@ function addPriceLists() {
         }
     });
 }
-exports.addPriceLists = addPriceLists;

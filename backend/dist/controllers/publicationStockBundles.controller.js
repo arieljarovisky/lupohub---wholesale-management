@@ -138,10 +138,10 @@ const saveBundleGroup = (req, res) => __awaiter(void 0, void 0, void 0, function
 });
 exports.saveBundleGroup = saveBundleGroup;
 const syncListingBundlesStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _b;
+    var _a;
     try {
         const body = req.body;
-        if (!body.platform || !((_b = body.externalProductId) === null || _b === void 0 ? void 0 : _b.trim())) {
+        if (!body.platform || !((_a = body.externalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
             return res.status(400).json({ message: 'platform y externalProductId son requeridos' });
         }
         yield (0, publicationStockBundle_service_1.syncAllBundlesForProduct)(body.platform, body.externalProductId);
@@ -168,13 +168,13 @@ const getBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getBundle = getBundle;
 const createBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _c;
+    var _a;
     try {
         const body = req.body;
         if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
             return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
         }
-        if (!((_c = body.externalProductId) === null || _c === void 0 ? void 0 : _c.trim())) {
+        if (!((_a = body.externalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
             return res.status(400).json({ message: 'externalProductId es requerido (ID publicación ML o producto TN)' });
         }
         if (!Array.isArray(body.items) || body.items.length === 0) {
@@ -227,13 +227,13 @@ const removeBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 });
 exports.removeBundle = removeBundle;
 const createListingFromSource = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _d, _e;
+    var _a, _b;
     try {
         const body = req.body;
         if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
             return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
         }
-        if (!((_d = body.sourceExternalProductId) === null || _d === void 0 ? void 0 : _d.trim())) {
+        if (!((_a = body.sourceExternalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
             return res.status(400).json({ message: 'sourceExternalProductId es requerido (publicación individual)' });
         }
         const hasVariants = Array.isArray(body.variants) && body.variants.length > 0;
@@ -249,7 +249,7 @@ const createListingFromSource = (req, res) => __awaiter(void 0, void 0, void 0, 
             label: body.label,
             published: body.published,
             items: body.items,
-            variants: (_e = body.variants) === null || _e === void 0 ? void 0 : _e.map((v) => {
+            variants: (_b = body.variants) === null || _b === void 0 ? void 0 : _b.map((v) => {
                 var _a;
                 return ({
                     label: v.label,

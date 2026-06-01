@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rgbToHex = exports.STANDARD_COLOR_CATALOG = void 0;
+exports.STANDARD_COLOR_CATALOG = void 0;
+exports.rgbToHex = rgbToHex;
 exports.STANDARD_COLOR_CATALOG = [
     { code: '111', name: 'Blanco', rgb: [255, 255, 255] },
     { code: '112', name: 'Natural / Crudo', rgb: [245, 240, 225] },
@@ -45,4 +46,3 @@ function rgbToHex(r, g, b) {
             .join('')
             .toUpperCase());
 }
-exports.rgbToHex = rgbToHex;

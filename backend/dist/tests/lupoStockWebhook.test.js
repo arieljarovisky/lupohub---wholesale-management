@@ -69,7 +69,7 @@ function testIdempotentWebhookIdOnRetry() {
     return __awaiter(this, void 0, void 0, function* () {
         const seenIds = [];
         let calls = 0;
-        const transport = ({ headers }) => __awaiter(this, void 0, void 0, function* () {
+        const transport = (_a) => __awaiter(this, [_a], void 0, function* ({ headers }) {
             calls += 1;
             seenIds.push(headers['x-webhook-id']);
             if (calls === 1)

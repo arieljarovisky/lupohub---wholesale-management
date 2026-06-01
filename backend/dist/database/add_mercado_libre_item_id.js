@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addMercadoLibreItemIdToVariants = void 0;
+exports.addMercadoLibreItemIdToVariants = addMercadoLibreItemIdToVariants;
 const db_1 = require("./db");
 /** Agrega mercado_libre_item_id en product_variants para variantes que tienen su propia publicación ML (una publicación por variante). */
 function addMercadoLibreItemIdToVariants() {
@@ -36,4 +36,3 @@ function addMercadoLibreItemIdToVariants() {
         }
     });
 }
-exports.addMercadoLibreItemIdToVariants = addMercadoLibreItemIdToVariants;

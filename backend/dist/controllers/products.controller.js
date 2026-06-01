@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -32,7 +42,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualVariants = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.deleteProductById = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualVariants = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
+exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const talles_tango_1 = require("../talles-tango");
@@ -345,9 +356,9 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.getProductById = getProductById;
 const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _1;
+    var _a;
     const { sku } = req.params;
-    const includeRelatedRaw = (_1 = req.query) === null || _1 === void 0 ? void 0 : _1.includeRelated;
+    const includeRelatedRaw = (_a = req.query) === null || _a === void 0 ? void 0 : _a.includeRelated;
     const includeRelated = includeRelatedRaw !== '0' &&
         includeRelatedRaw !== 'false' &&
         includeRelatedRaw !== 'no';
@@ -500,7 +511,7 @@ const updateProductExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
 });
 exports.updateProductExternalIds = updateProductExternalIds;
 const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _2, _3, _4;
+    var _a, _b, _c;
     const { variantId } = req.params;
     const body = req.body || {};
     const hasTnVar = Object.prototype.hasOwnProperty.call(body, 'tiendaNubeVariantId');
@@ -564,8 +575,8 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
         }
         const tnVariantId = tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
         const tnProductId = ((productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : null;
-        const tnPack = (_2 = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _2 !== void 0 ? _2 : 1;
-        const mlPack = (_3 = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _3 !== void 0 ? _3 : 1;
+        const tnPack = (_a = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _a !== void 0 ? _a : 1;
+        const mlPack = (_b = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _b !== void 0 ? _b : 1;
         const mlPubItemId = mlItemOnVariant
             || (mlVarOnVariant && (productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) ? String(productRow.mercado_libre_id).trim() : null);
         if (hasTnVar && (!tnProductId || !tnVariantId)) {
@@ -592,7 +603,7 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
         // Después de vincular, usar el stock local como fuente de verdad y enviarlo a ML/TN
         try {
             const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-            const currentStock = Number((_4 = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _4 !== void 0 ? _4 : 0);
+            const currentStock = Number((_c = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _c !== void 0 ? _c : 0);
             yield (0, stock_controller_1.syncStockToExternalPlatforms)(variantId, currentStock);
         }
         catch (syncErr) {
@@ -676,7 +687,7 @@ exports.unlinkProductPlatforms = unlinkProductPlatforms;
  *  Usa el stock local como fuente de verdad y lo envía a ML/TN (no importa stock desde ML).
  */
 const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _5, _6, _7;
+    var _a, _b, _c;
     const body = req.body || {};
     const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = body;
     if (!links || !Array.isArray(links) || links.length === 0) {
@@ -697,7 +708,7 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
          JOIN product_colors pc ON pc.product_id = p.id
          JOIN product_variants pv ON pv.product_color_id = pc.id
          WHERE pv.id = ? LIMIT 1`, [links[0].variantId]);
-            resolvedProductId = (_5 = row === null || row === void 0 ? void 0 : row.product_id) !== null && _5 !== void 0 ? _5 : undefined;
+            resolvedProductId = (_a = row === null || row === void 0 ? void 0 : row.product_id) !== null && _a !== void 0 ? _a : undefined;
         }
         if (resolvedProductId) {
             if (tiendaNubeProductId != null && tiendaNubeProductId !== '') {
@@ -725,8 +736,8 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
             : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
                 ((productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) && String(productRow.mercado_libre_id).trim()) ||
                 null;
-        const tnPack = Number((_6 = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _6 !== void 0 ? _6 : 1) || 1;
-        const mlPack = Number((_7 = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _7 !== void 0 ? _7 : 1) || 1;
+        const tnPack = Number((_b = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _b !== void 0 ? _b : 1) || 1;
+        const mlPack = Number((_c = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _c !== void 0 ? _c : 1) || 1;
         for (const link of links) {
             const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
             if (!variantId)
@@ -781,10 +792,10 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
         for (let i = 0; i < toSync.length; i += SYNC_BATCH) {
             const batch = toSync.slice(i, i + SYNC_BATCH);
             const batchCounts = yield Promise.all(batch.map((link) => __awaiter(void 0, void 0, void 0, function* () {
-                var _8;
+                var _a;
                 try {
                     const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
-                    const currentStock = Number((_8 = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _8 !== void 0 ? _8 : 0);
+                    const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);
                     yield (0, stock_controller_1.syncStockToExternalPlatforms)(link.variantId, currentStock);
                     return 1;
                 }
@@ -955,7 +966,6 @@ function deleteProductById(productId) {
         return { deleted: true };
     });
 }
-exports.deleteProductById = deleteProductById;
 /** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
 const deleteProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const productId = req.params.id;
@@ -1262,7 +1272,7 @@ function maybeUpgradeTrivialProductNameFromImport(productId, sku, currentName, d
     });
 }
 const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _9, _10, _11, _12, _13, _14, _15;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         const body = req.body;
         const { rows: rawRows, onlyComplete = true } = body;
@@ -1274,7 +1284,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
             if (!(dRow === null || dRow === void 0 ? void 0 : dRow.id)) {
                 return res.status(400).json({ message: 'despachoId no válido: no existe ese despacho.' });
             }
-            despachoLink = { id: dRow.id, pais_origen: (_9 = dRow.pais_origen) !== null && _9 !== void 0 ? _9 : null };
+            despachoLink = { id: dRow.id, pais_origen: (_a = dRow.pais_origen) !== null && _a !== void 0 ? _a : null };
         }
         if (!Array.isArray(rawRows) || rawRows.length === 0) {
             return res.status(400).json({
@@ -1290,7 +1300,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (layout.mode === 'triple') {
             const { articuloKey, talleKey, colorKey, descKey, colorNameKey, modeloKey, cantidadKey, rgbKey } = layout;
             for (const row of rawRows) {
-                const articulo = String((_10 = row[articuloKey]) !== null && _10 !== void 0 ? _10 : '').trim();
+                const articulo = String((_b = row[articuloKey]) !== null && _b !== void 0 ? _b : '').trim();
                 const talle = normalizeTalleForImport(row[talleKey]);
                 const color = normalizeColorCodeForImport(row[colorKey]);
                 const parsed = { articulo, talle, color, codigoCompleto: `${articulo}${talle}${color}` };
@@ -1300,7 +1310,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 const descripcion = (descKey && row[descKey] != null && String(row[descKey]).trim()) ||
                     (modeloKey && row[modeloKey] != null && String(row[modeloKey]).trim()) ||
                     parsed.articulo;
-                const colorName = colorNameKey ? String((_11 = row[colorNameKey]) !== null && _11 !== void 0 ? _11 : '').trim() : '';
+                const colorName = colorNameKey ? String((_c = row[colorNameKey]) !== null && _c !== void 0 ? _c : '').trim() : '';
                 const initialStock = cantidadKey ? parseCantidadCell(row[cantidadKey]) : undefined;
                 const colorHex = rgbKey ? parseRgbToHex(row[rgbKey]) : null;
                 const rec = {
@@ -1367,20 +1377,20 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                     yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`, [productId, r.articulo, name, 'General', 0, null]);
                     productsCreated++;
                 }
-                let sizeId = (_12 = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _12 === void 0 ? void 0 : _12.id;
+                let sizeId = (_d = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _d === void 0 ? void 0 : _d.id;
                 if (!sizeId) {
                     sizeId = (0, uuid_1.v4)();
                     const talleNombre = (0, talles_tango_1.nombreTalleDesdeCodigo)(r.talle);
                     yield (0, db_1.execute)(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, talleNombre]);
                 }
-                let colorId = (_13 = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _13 === void 0 ? void 0 : _13.id;
+                let colorId = (_e = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _e === void 0 ? void 0 : _e.id;
                 if (!colorId) {
                     colorId = (0, uuid_1.v4)();
                     const name = (r.colorName && r.colorName.trim()) || r.color;
                     const hex = r.colorHex || '#000000';
                     yield (0, db_1.execute)(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, name, r.color, hex]);
                 }
-                let productColorId = (_14 = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _14 === void 0 ? void 0 : _14.id;
+                let productColorId = (_f = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _f === void 0 ? void 0 : _f.id;
                 if (!productColorId) {
                     productColorId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
@@ -1390,7 +1400,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 if (!existingVariant) {
                     variantId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, r.codigo13]);
-                    const qty = (_15 = r.initialStock) !== null && _15 !== void 0 ? _15 : 0;
+                    const qty = (_g = r.initialStock) !== null && _g !== void 0 ? _g : 0;
                     yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
                     variantsCreated++;
                 }
@@ -1600,14 +1610,14 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getDuplicateProducts = getDuplicateProducts;
 /** Fusiona artículos elegidos manualmente en un “principal”. Body: { keeperProductId, duplicateProductIds: string[], dryRun?: boolean }. Solo ADMIN o DEPÓSITO. */
 const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _16, _17, _18, _19, _20;
+    var _a, _b, _c, _d, _e;
     try {
-        const keeperProductId = String(((_16 = req.body) === null || _16 === void 0 ? void 0 : _16.keeperProductId) || '').trim();
-        const raw = (_17 = req.body) === null || _17 === void 0 ? void 0 : _17.duplicateProductIds;
+        const keeperProductId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperProductId) || '').trim();
+        const raw = (_b = req.body) === null || _b === void 0 ? void 0 : _b.duplicateProductIds;
         const duplicateProductIds = Array.isArray(raw)
             ? raw.map((x) => String(x !== null && x !== void 0 ? x : '').trim()).filter(Boolean)
             : [];
-        const dryRun = ((_18 = req.body) === null || _18 === void 0 ? void 0 : _18.dryRun) === true || ((_19 = req.query) === null || _19 === void 0 ? void 0 : _19.dryRun) === 'true' || ((_20 = req.query) === null || _20 === void 0 ? void 0 : _20.dryRun) === '1';
+        const dryRun = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.dryRun) === true || ((_d = req.query) === null || _d === void 0 ? void 0 : _d.dryRun) === 'true' || ((_e = req.query) === null || _e === void 0 ? void 0 : _e.dryRun) === '1';
         if (!keeperProductId) {
             return res.status(400).json({ message: 'Indicá el artículo principal (keeperProductId).' });
         }
@@ -1628,10 +1638,10 @@ const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.mergeManualProducts = mergeManualProducts;
 /** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
 const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _21, _22;
+    var _a, _b;
     try {
-        const keeperVariantId = String(((_21 = req.body) === null || _21 === void 0 ? void 0 : _21.keeperVariantId) || '').trim();
-        const absorbVariantId = String(((_22 = req.body) === null || _22 === void 0 ? void 0 : _22.absorbVariantId) || '').trim();
+        const keeperVariantId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperVariantId) || '').trim();
+        const absorbVariantId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.absorbVariantId) || '').trim();
         if (!keeperVariantId || !absorbVariantId) {
             return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
         }
@@ -1654,9 +1664,9 @@ const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.mergeManualVariants = mergeManualVariants;
 /** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
 const mergeDuplicateProductsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _23, _24, _25;
+    var _a, _b, _c;
     try {
-        const dryRun = ((_23 = req.body) === null || _23 === void 0 ? void 0 : _23.dryRun) === true || ((_24 = req.query) === null || _24 === void 0 ? void 0 : _24.dryRun) === 'true' || ((_25 = req.query) === null || _25 === void 0 ? void 0 : _25.dryRun) === '1';
+        const dryRun = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.dryRun) === true || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.dryRun) === 'true' || ((_c = req.query) === null || _c === void 0 ? void 0 : _c.dryRun) === '1';
         const result = yield (0, mergeDuplicateProductsBySku_1.runMergeDuplicateProductsBySku)({ dryRun });
         res.json(result);
     }

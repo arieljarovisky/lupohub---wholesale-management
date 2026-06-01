@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOrderMatrixImportLabel = void 0;
+exports.addOrderMatrixImportLabel = addOrderMatrixImportLabel;
 const db_1 = require("./db");
 /** Etiqueta opcional (p. ej. import matriz: a facturar vs pendiente según color de celda). */
 function addOrderMatrixImportLabel() {
@@ -30,4 +30,3 @@ function addOrderMatrixImportLabel() {
         }
     });
 }
-exports.addOrderMatrixImportLabel = addOrderMatrixImportLabel;

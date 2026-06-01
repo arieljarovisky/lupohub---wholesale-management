@@ -55,13 +55,13 @@ const listAssignedUserTasks = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.listAssignedUserTasks = listAssignedUserTasks;
 const createAssignedUserTask = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _b, _c, _d;
+    var _a, _b, _c;
     try {
         if (!isTasksOwner(req))
             return res.status(403).json({ message: 'Sin permiso' });
-        const message = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.message) || '').trim();
-        const assignedToEmail = normalizeEmail((_c = req.body) === null || _c === void 0 ? void 0 : _c.assignedToEmail);
-        const expiresAt = String(((_d = req.body) === null || _d === void 0 ? void 0 : _d.expiresAt) || '').trim();
+        const message = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.message) || '').trim();
+        const assignedToEmail = normalizeEmail((_b = req.body) === null || _b === void 0 ? void 0 : _b.assignedToEmail);
+        const expiresAt = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.expiresAt) || '').trim();
         if (!message)
             return res.status(400).json({ message: 'La tarea no puede estar vacía' });
         if (!assignedToEmail || !assignedToEmail.includes('@')) {

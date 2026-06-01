@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerPhoneIva = void 0;
+exports.addCustomerPhoneIva = addCustomerPhoneIva;
 const db_1 = require("./db");
 /** Agrega teléfono y condición de IVA a clientes. */
 function addCustomerPhoneIva() {
@@ -34,4 +34,3 @@ function addCustomerPhoneIva() {
         }
     });
 }
-exports.addCustomerPhoneIva = addCustomerPhoneIva;

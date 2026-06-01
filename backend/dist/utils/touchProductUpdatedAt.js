@@ -9,7 +9,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.touchProductUpdatedAtByVariantId = exports.touchProductUpdatedAt = void 0;
+exports.touchProductUpdatedAt = touchProductUpdatedAt;
+exports.touchProductUpdatedAtByVariantId = touchProductUpdatedAtByVariantId;
 const db_1 = require("../database/db");
 /** Marca el artículo padre como modificado (p. ej. tras cambio de stock en una variante). */
 function touchProductUpdatedAt(productId) {
@@ -19,7 +20,6 @@ function touchProductUpdatedAt(productId) {
         yield (0, db_1.execute)(`UPDATE products SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [productId]);
     });
 }
-exports.touchProductUpdatedAt = touchProductUpdatedAt;
 function touchProductUpdatedAtByVariantId(variantId) {
     return __awaiter(this, void 0, void 0, function* () {
         if (!variantId)
@@ -31,4 +31,3 @@ function touchProductUpdatedAtByVariantId(variantId) {
      WHERE pv.id = ?`, [variantId]);
     });
 }
-exports.touchProductUpdatedAtByVariantId = touchProductUpdatedAtByVariantId;

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerDirect = void 0;
+exports.addCustomerDirect = addCustomerDirect;
 const db_1 = require("./db");
 /** Agrega user_id a customers (cliente directo) y permite seller_id NULL en orders. */
 function addCustomerDirect() {
@@ -39,4 +39,3 @@ function addCustomerDirect() {
         }
     });
 }
-exports.addCustomerDirect = addCustomerDirect;

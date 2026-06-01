@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerDeliveryAddresses = void 0;
+exports.addCustomerDeliveryAddresses = addCustomerDeliveryAddresses;
 const db_1 = require("./db");
 /** Direcciones adicionales de entrega / sucursales (JSON en customers.delivery_addresses). */
 function addCustomerDeliveryAddresses() {
@@ -27,4 +27,3 @@ function addCustomerDeliveryAddresses() {
         }
     });
 }
-exports.addCustomerDeliveryAddresses = addCustomerDeliveryAddresses;

@@ -28,6 +28,9 @@ router.get('/manual-comprobantes/:id/pdf', manualComprobantes_controller_1.getMa
 router.get('/manual-comprobantes/:id', manualComprobantes_controller_1.getManualComprobante);
 router.patch('/manual-comprobantes/:id', manualComprobantes_controller_1.updateManualComprobante);
 router.patch('/manual-comprobantes/:id/upload', manualComprobantes_controller_1.uploadManualComprobantePdfHandler, manualComprobantes_controller_1.updateManualComprobanteMultipart);
+router.delete('/manual-comprobantes/:id', manualComprobantes_controller_1.deleteManualComprobante);
+router.delete('/imported-entries', billing_controller_1.deleteImportedBillingEntry);
+router.delete('/local-afip/:id', billing_controller_1.deleteLocalAfipComprobante);
 router.get('/export', billing_controller_1.exportBilling);
 router.get('/print', billing_controller_1.printBilling);
 router.get('/export-retper', billing_controller_1.exportRetPerTxt);

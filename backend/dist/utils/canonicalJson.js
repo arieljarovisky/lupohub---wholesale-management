@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.canonicalStringify = exports.canonicalizeJsonValue = void 0;
+exports.canonicalizeJsonValue = canonicalizeJsonValue;
+exports.canonicalStringify = canonicalStringify;
 function isPlainObject(value) {
     return Object.prototype.toString.call(value) === '[object Object]';
 }
@@ -29,8 +30,6 @@ function normalizeValue(value) {
 function canonicalizeJsonValue(value) {
     return normalizeValue(value);
 }
-exports.canonicalizeJsonValue = canonicalizeJsonValue;
 function canonicalStringify(value) {
     return JSON.stringify(canonicalizeJsonValue(value));
 }
-exports.canonicalStringify = canonicalStringify;

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOrderCreatedBy = void 0;
+exports.addOrderCreatedBy = addOrderCreatedBy;
 const db_1 = require("./db");
 /** Quién creó el pedido (usuario de la sesión). Pedidos viejos quedan NULL. */
 function addOrderCreatedBy() {
@@ -38,4 +38,3 @@ function addOrderCreatedBy() {
         }
     });
 }
-exports.addOrderCreatedBy = addOrderCreatedBy;

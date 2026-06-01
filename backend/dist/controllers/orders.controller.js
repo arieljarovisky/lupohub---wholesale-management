@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -182,8 +192,8 @@ function allocateOldestDespachosForVariant(variantId, requestedQty) {
     });
 }
 function resolveDespachoIdForItem(item, variantId) {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const raw = (_a = item === null || item === void 0 ? void 0 : item.despachoId) !== null && _a !== void 0 ? _a : item === null || item === void 0 ? void 0 : item.despacho_id;
         if (raw != null && raw !== '') {
             const id = String(raw).trim();
@@ -700,8 +710,8 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getOrders = getOrders;
 function buildPersistedOrderResponse(orderId, newOrder, despachoWarnings) {
-    var _a, _b, _c, _d, _e;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e;
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
             o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
@@ -771,8 +781,8 @@ function buildPersistedOrderResponse(orderId, newOrder, despachoWarnings) {
     });
 }
 function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
-    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f;
         if (!newOrder.customerId || !((_a = newOrder.items) === null || _a === void 0 ? void 0 : _a.length)) {
             const err = new Error('Datos de pedido inválidos');
             err.statusCode = 400;
@@ -1034,14 +1044,14 @@ function resolveMatrixImportLinePrice(priceListId, skuPad, excelUnitPrice) {
 }
 /** Crea un borrador por cada cliente distinto a partir de líneas ya aplanadas (código+color+talle+cantidad). */
 const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _m, _o, _p, _q, _r, _s, _t;
+    var _a, _b, _c, _d, _e, _f, _g;
     const user = req.user;
     if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO', 'SELLER'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para importar pedidos' });
     }
     const padSku = (s) => (0, matrixImportSku_1.normalizeMatrixImportArticleSku)(String(s !== null && s !== void 0 ? s : ''));
     const findCustomer = (customerRef) => __awaiter(void 0, void 0, void 0, function* () {
-        var _u;
+        var _a;
         const ref = String(customerRef !== null && customerRef !== void 0 ? customerRef : '').trim();
         if (!ref)
             return null;
@@ -1068,7 +1078,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
             sql2 += ` LIMIT 1`;
             c = yield (0, db_1.get)(sql2, p2);
         }
-        return c ? { id: c.id, seller_id: (_u = c.seller_id) !== null && _u !== void 0 ? _u : null } : null;
+        return c ? { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null } : null;
     });
     try {
         const body = req.body || {};
@@ -1077,11 +1087,11 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
             return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
         }
-        const bodyPriceListRaw = (_m = body.priceListId) !== null && _m !== void 0 ? _m : body.price_list_id;
+        const bodyPriceListRaw = (_a = body.priceListId) !== null && _a !== void 0 ? _a : body.price_list_id;
         const bodyPriceListId = bodyPriceListRaw != null && String(bodyPriceListRaw).trim() !== '' ? String(bodyPriceListRaw).trim() : null;
         const byRefKey = new Map();
         for (const ln of linesRaw) {
-            const refTrim = String((_o = ln.customerRef) !== null && _o !== void 0 ? _o : '').trim();
+            const refTrim = String((_b = ln.customerRef) !== null && _b !== void 0 ? _b : '').trim();
             if (!refTrim)
                 continue;
             const refKey = normalizeMatrixCustomerRefKey(refTrim);
@@ -1095,7 +1105,7 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
         for (const [, refGroupLines] of byRefKey) {
             if (!refGroupLines.length)
                 continue;
-            const ref0 = String((_q = (_p = refGroupLines[0]) === null || _p === void 0 ? void 0 : _p.customerRef) !== null && _q !== void 0 ? _q : '').trim();
+            const ref0 = String((_d = (_c = refGroupLines[0]) === null || _c === void 0 ? void 0 : _c.customerRef) !== null && _d !== void 0 ? _d : '').trim();
             const customer = yield findCustomer(ref0);
             if (!customer) {
                 errors.push({
@@ -1127,9 +1137,9 @@ const importOrdersFromMatrix = (req, res) => __awaiter(void 0, void 0, void 0, f
                     const qty = Math.max(0, Math.floor(Number(ln.quantity) || 0));
                     if (qty <= 0)
                         continue;
-                    const codigo = padSku(String((_r = ln.codigo) !== null && _r !== void 0 ? _r : '').trim());
-                    const color = String((_s = ln.color) !== null && _s !== void 0 ? _s : '').trim();
-                    const sizeCode = String((_t = ln.sizeCode) !== null && _t !== void 0 ? _t : '').trim();
+                    const codigo = padSku(String((_e = ln.codigo) !== null && _e !== void 0 ? _e : '').trim());
+                    const color = String((_f = ln.color) !== null && _f !== void 0 ? _f : '').trim();
+                    const sizeCode = String((_g = ln.sizeCode) !== null && _g !== void 0 ? _g : '').trim();
                     if (!codigo || !color || !sizeCode)
                         continue;
                     const k = `${codigo}\t${color}\t${sizeCode}`;
@@ -1261,10 +1271,10 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.updateOrderStatus = updateOrderStatus;
 const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _v, _w, _x, _y, _z, _0, _1;
+    var _a, _b, _c, _d, _e, _f, _g;
     const { id } = req.params;
     const updated = req.body;
-    if (!id || !updated || !((_v = updated.items) === null || _v === void 0 ? void 0 : _v.length)) {
+    if (!id || !updated || !((_a = updated.items) === null || _a === void 0 ? void 0 : _a.length)) {
         return res.status(400).json({ message: "Datos de pedido inválidos" });
     }
     try {
@@ -1281,7 +1291,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         };
         const sqlDate = toSqlDate(updated.date);
-        const sellerId = (_w = updated.sellerId) !== null && _w !== void 0 ? _w : null;
+        const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
         const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = updated.noStockImpact === true || updated.no_stock_impact === 1 ? 1 : 0;
         yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]);
@@ -1370,14 +1380,14 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             id: created.id,
             customerId: created.customer_id,
             sellerId: created.seller_id,
-            createdBy: (_x = created.created_by) !== null && _x !== void 0 ? _x : undefined,
-            createdByName: (_y = created.created_by_name) !== null && _y !== void 0 ? _y : undefined,
-            createdByRole: (_z = created.created_by_role) !== null && _z !== void 0 ? _z : undefined,
-            sellerName: (_0 = created.seller_name) !== null && _0 !== void 0 ? _0 : undefined,
+            createdBy: (_c = created.created_by) !== null && _c !== void 0 ? _c : undefined,
+            createdByName: (_d = created.created_by_name) !== null && _d !== void 0 ? _d : undefined,
+            createdByRole: (_e = created.created_by_role) !== null && _e !== void 0 ? _e : undefined,
+            sellerName: (_f = created.seller_name) !== null && _f !== void 0 ? _f : undefined,
             date: created.date,
             status: created.status,
             total: Number(created.total),
-            pickedBy: (_1 = created.picked_by) !== null && _1 !== void 0 ? _1 : undefined,
+            pickedBy: (_g = created.picked_by) !== null && _g !== void 0 ? _g : undefined,
             dispatchedAt: created.dispatched_at ? new Date(created.dispatched_at).toISOString() : undefined,
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
@@ -1393,13 +1403,13 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.updateOrder = updateOrder;
 /** Marca si un pedido sin factura (o cualquier pedido) suma al saldo pendiente del cliente. */
 const patchOrderIncludeInSaldo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _2, _3, _4;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para modificar saldo del pedido' });
     }
-    const raw = (_3 = (_2 = req.body) === null || _2 === void 0 ? void 0 : _2.includeInSaldo) !== null && _3 !== void 0 ? _3 : (_4 = req.body) === null || _4 === void 0 ? void 0 : _4.include_in_saldo;
+    const raw = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.includeInSaldo) !== null && _b !== void 0 ? _b : (_c = req.body) === null || _c === void 0 ? void 0 : _c.include_in_saldo;
     const includeInSaldo = raw === true || raw === 1 || raw === '1' || raw === 'true';
     if (!id)
         return res.status(400).json({ message: 'ID inválido' });
@@ -1442,13 +1452,13 @@ const patchOrderIncludeInSaldo = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.patchOrderIncludeInSaldo = patchOrderIncludeInSaldo;
 /** Marca cobro del pedido (pendiente / pagado) sin reenviar ítems. */
 const patchOrderPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _5, _6, _7;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para modificar cobranza' });
     }
-    const raw = (_6 = (_5 = req.body) === null || _5 === void 0 ? void 0 : _5.paymentStatus) !== null && _6 !== void 0 ? _6 : (_7 = req.body) === null || _7 === void 0 ? void 0 : _7.payment_status;
+    const raw = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.paymentStatus) !== null && _b !== void 0 ? _b : (_c = req.body) === null || _c === void 0 ? void 0 : _c.payment_status;
     const paymentStatus = raw === 'pagado' || raw === 'PAGADO' ? 'pagado' : 'pendiente';
     if (!id)
         return res.status(400).json({ message: 'ID inválido' });
@@ -1489,7 +1499,7 @@ exports.patchOrderPaymentStatus = patchOrderPaymentStatus;
  * Si el pedido está en Borrador, pasa a Confirmado y luego desconta (mismo criterio que al confirmar).
  */
 const applyMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _8;
+    var _a;
     const { id } = req.params;
     const user = req.user;
     if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
@@ -1528,7 +1538,7 @@ const applyMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, voi
         const result = yield (0, stock_controller_1.deductStockForOrder)(id);
         if (!result.success) {
             return res.status(500).json({
-                message: 'Error al descontar stock: ' + (((_8 = result.errors) === null || _8 === void 0 ? void 0 : _8.join(', ')) || 'desconocido'),
+                message: 'Error al descontar stock: ' + (((_a = result.errors) === null || _a === void 0 ? void 0 : _a.join(', ')) || 'desconocido'),
                 errors: result.errors
             });
         }
@@ -1544,7 +1554,7 @@ exports.applyMayoristaStockDeduction = applyMayoristaStockDeduction;
  * Devuelve al inventario el stock descontado por este pedido, sin cancelarlo ni modificar su estado.
  */
 const restoreMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _9;
+    var _a;
     const { id } = req.params;
     const user = req.user;
     if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
@@ -1583,7 +1593,7 @@ const restoreMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, v
         const result = yield (0, stock_controller_1.restoreStockForOrder)(id, (0, stock_controller_1.wholesaleOrderStockManualRestoreReference)(id));
         if (!result.success) {
             return res.status(500).json({
-                message: 'Error al restaurar stock: ' + (((_9 = result.errors) === null || _9 === void 0 ? void 0 : _9.join(', ')) || 'desconocido'),
+                message: 'Error al restaurar stock: ' + (((_a = result.errors) === null || _a === void 0 ? void 0 : _a.join(', ')) || 'desconocido'),
                 errors: result.errors,
             });
         }
@@ -1597,9 +1607,9 @@ const restoreMayoristaStockDeduction = (req, res) => __awaiter(void 0, void 0, v
 exports.restoreMayoristaStockDeduction = restoreMayoristaStockDeduction;
 /** Archiva o desarchiva un pedido (ocultar/mostrar en lista). */
 const archiveOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _10, _11;
+    var _a, _b;
     const { id } = req.params;
-    const archived = ((_10 = req.body) === null || _10 === void 0 ? void 0 : _10.archived) === true || ((_11 = req.body) === null || _11 === void 0 ? void 0 : _11.archived) === 1;
+    const archived = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.archived) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.archived) === 1;
     if (!id)
         return res.status(400).json({ message: "ID de pedido inválido" });
     try {
@@ -1616,7 +1626,7 @@ const archiveOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 });
 exports.archiveOrder = archiveOrder;
 const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _12;
+    var _a;
     const { id } = req.params;
     const user = req.user;
     if (!user)
@@ -1652,7 +1662,7 @@ const deleteOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const result = yield restoreStockForOrder(id);
             if (!result.success) {
                 console.error('Errores restaurando stock al eliminar pedido:', result.errors);
-                return res.status(500).json({ message: 'Error restaurando stock: ' + (((_12 = result.errors) === null || _12 === void 0 ? void 0 : _12.join(', ')) || 'desconocido') });
+                return res.status(500).json({ message: 'Error restaurando stock: ' + (((_a = result.errors) === null || _a === void 0 ? void 0 : _a.join(', ')) || 'desconocido') });
             }
         }
         yield (0, db_1.execute)("DELETE FROM orders WHERE id = ?", [id]);
@@ -1720,7 +1730,7 @@ exports.recalculateStoredInvoiceAgip = recalculateStoredInvoiceAgip;
  * devuelve percepción > 0 para el neto del pedido.
  */
 const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _13, _14, _15, _16, _17;
+    var _a, _b, _c, _d, _e;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -1761,7 +1771,7 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
                 message: `No hay percepción IIBB calculable para reemitir (CUIT incompleto o sin alícuota en padrón AGIP${orderPeriod ? ` para ${orderPeriod}` : ''}). Cargá el padrón del mes o usá “Guardar IIBB” si solo querés actualizar el PDF sin nuevo CAE.`
             });
         }
-        const cbteTipoFromBody = (_13 = req.body) === null || _13 === void 0 ? void 0 : _13.cbteTipo;
+        const cbteTipoFromBody = (_a = req.body) === null || _a === void 0 ? void 0 : _a.cbteTipo;
         const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
         const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         // NC total de reemisión: solo neto + IVA en AFIP (sin percepción IIBB). El IIBB se informa en la factura nueva.
@@ -1771,9 +1781,9 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
             cbteDesde: invRow.cbte_desde
         }, {
             id: customerRow.id,
-            businessName: (_14 = customerRow.business_name) !== null && _14 !== void 0 ? _14 : '',
+            businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '',
             cuit: customerRow.cuit,
-            condicionIva: (_15 = customerRow.condicion_iva) !== null && _15 !== void 0 ? _15 : undefined
+            condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined
         }, totalForAfip, undefined);
         const creditNoteId = (0, uuid_1.v4)();
         yield (0, db_1.execute)(`INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
@@ -1811,9 +1821,9 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
                 iibbPercepcion
             }, {
                 id: customerRow.id,
-                businessName: (_16 = customerRow.business_name) !== null && _16 !== void 0 ? _16 : '',
+                businessName: (_d = customerRow.business_name) !== null && _d !== void 0 ? _d : '',
                 cuit: customerRow.cuit,
-                condicionIva: (_17 = customerRow.condicion_iva) !== null && _17 !== void 0 ? _17 : null
+                condicionIva: (_e = customerRow.condicion_iva) !== null && _e !== void 0 ? _e : null
             }, forceCbteTipo);
             const { nowMysqlArgentina } = yield Promise.resolve().then(() => __importStar(require('../utils/argentinaDate')));
             yield (0, db_1.execute)(`UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?, created_at = ?
@@ -1887,7 +1897,7 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.reemitirFacturaConAgip = reemitirFacturaConAgip;
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _18, _19, _20;
+    var _a, _b, _c;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
@@ -1911,13 +1921,13 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
                 customerCuit: inv.customer_cuit,
                 netAmount
             });
-            agip = { alicuota: (_18 = calc === null || calc === void 0 ? void 0 : calc.alicuota) !== null && _18 !== void 0 ? _18 : 0, amount: (_19 = calc === null || calc === void 0 ? void 0 : calc.amount) !== null && _19 !== void 0 ? _19 : 0 };
+            agip = { alicuota: (_a = calc === null || calc === void 0 ? void 0 : calc.alicuota) !== null && _a !== void 0 ? _a : 0, amount: (_b = calc === null || calc === void 0 ? void 0 : calc.amount) !== null && _b !== void 0 ? _b : 0 };
         }
         res.json({
             id: inv.id,
             orderId: inv.order_id,
             cae: inv.cae,
-            caeFchVto: (_20 = inv.cae_fch_vto) !== null && _20 !== void 0 ? _20 : undefined,
+            caeFchVto: (_c = inv.cae_fch_vto) !== null && _c !== void 0 ? _c : undefined,
             puntoVta: inv.punto_venta,
             cbteTipo: inv.cbte_tipo,
             cbteDesde: inv.cbte_desde,
@@ -1935,7 +1945,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _21, _22, _23;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -1947,7 +1957,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const orderRow = yield (0, db_1.get)('SELECT id, customer_id, date, total, no_stock_impact, status FROM orders WHERE id = ?', [id]);
         if (!orderRow)
             return res.status(404).json({ message: 'Pedido no encontrado' });
-        const wantsNoStockImpact = ((_21 = req.body) === null || _21 === void 0 ? void 0 : _21.noStockImpact) === true || ((_22 = req.body) === null || _22 === void 0 ? void 0 : _22.no_stock_impact) === 1;
+        const wantsNoStockImpact = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.noStockImpact) === true || ((_b = req.body) === null || _b === void 0 ? void 0 : _b.no_stock_impact) === 1;
         if (wantsNoStockImpact) {
             return res.status(400).json({
                 message: 'Ya no se puede facturar sin picking. Completá el picking, pasá el pedido a control y emití la factura desde ahí.',
@@ -1959,7 +1969,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
-        const cbteTipoFromBody = (_23 = req.body) === null || _23 === void 0 ? void 0 : _23.cbteTipo;
+        const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         const netFromItems = yield getOrderNetFromLineItems(id);
         if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
@@ -1986,7 +1996,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         let work = emitFacturaInFlight.get(id);
         if (!work) {
             work = (() => __awaiter(void 0, void 0, void 0, function* () {
-                var _24, _25, _26, _27, _28, _29;
+                var _a, _b, _c, _d, _e, _f;
                 const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
                 const result = yield emitirAfip({
                     id: orderRow.id,
@@ -1996,9 +2006,9 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     iibbPercepcion: iibbPercepcion !== null && iibbPercepcion !== void 0 ? iibbPercepcion : null
                 }, {
                     id: customerRow.id,
-                    businessName: (_24 = customerRow.business_name) !== null && _24 !== void 0 ? _24 : '',
+                    businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
                     cuit: customerRow.cuit,
-                    condicionIva: (_25 = customerRow.condicion_iva) !== null && _25 !== void 0 ? _25 : null
+                    condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : null
                 }, forceCbteTipo);
                 const invCheck = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
                 if (invCheck) {
@@ -2015,8 +2025,8 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     result.cbteTipo,
                     result.cbteDesde,
                     result.cbteHasta,
-                    (_26 = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _26 !== void 0 ? _26 : 0,
-                    (_27 = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _27 !== void 0 ? _27 : 0
+                    (_c = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _c !== void 0 ? _c : 0,
+                    (_d = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _d !== void 0 ? _d : 0
                 ]);
                 yield (0, db_1.execute)('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
                 return {
@@ -2028,8 +2038,8 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     cbteTipo: result.cbteTipo,
                     cbteDesde: result.cbteDesde,
                     cbteHasta: result.cbteHasta,
-                    agipAlicuota: (_28 = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _28 !== void 0 ? _28 : 0,
-                    agipRetPer: (_29 = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _29 !== void 0 ? _29 : 0
+                    agipAlicuota: (_e = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _e !== void 0 ? _e : 0,
+                    agipRetPer: (_f = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _f !== void 0 ? _f : 0
                 };
             }))();
             emitFacturaInFlight.set(id, work);
@@ -2062,7 +2072,7 @@ exports.emitirFactura = emitirFactura;
  *  para que el PDF muestre todos los renglones (no solo el primero).
  */
 const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
@@ -2077,26 +2087,26 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
         itemRows.forEach((it, idx) => itemPriceByIndex.set(idx, Number(it.price_at_moment) || 0));
         const groups = new Map();
         for (const r of rows) {
-            const key = `${(_30 = r.cae) !== null && _30 !== void 0 ? _30 : ''}|${(_31 = r.punto_venta) !== null && _31 !== void 0 ? _31 : ''}|${(_32 = r.cbte_tipo) !== null && _32 !== void 0 ? _32 : ''}|${(_33 = r.cbte_desde) !== null && _33 !== void 0 ? _33 : ''}|${(_34 = r.cbte_hasta) !== null && _34 !== void 0 ? _34 : ''}`;
+            const key = `${(_a = r.cae) !== null && _a !== void 0 ? _a : ''}|${(_b = r.punto_venta) !== null && _b !== void 0 ? _b : ''}|${(_c = r.cbte_tipo) !== null && _c !== void 0 ? _c : ''}|${(_d = r.cbte_desde) !== null && _d !== void 0 ? _d : ''}|${(_e = r.cbte_hasta) !== null && _e !== void 0 ? _e : ''}`;
             let g = groups.get(key);
             if (!g) {
                 g = {
                     id: r.id,
                     orderId: r.order_id,
-                    invoiceId: (_35 = r.invoice_id) !== null && _35 !== void 0 ? _35 : null,
+                    invoiceId: (_f = r.invoice_id) !== null && _f !== void 0 ? _f : null,
                     cae: r.cae,
-                    caeFchVto: (_36 = r.cae_fch_vto) !== null && _36 !== void 0 ? _36 : undefined,
+                    caeFchVto: (_g = r.cae_fch_vto) !== null && _g !== void 0 ? _g : undefined,
                     puntoVta: r.punto_venta,
                     cbteTipo: r.cbte_tipo,
                     cbteDesde: r.cbte_desde,
                     cbteHasta: r.cbte_hasta,
                     amountCredited: 0,
-                    scope: ((_37 = r.scope) !== null && _37 !== void 0 ? _37 : 'total'),
-                    itemIndex: (_38 = r.item_index) !== null && _38 !== void 0 ? _38 : undefined,
+                    scope: ((_h = r.scope) !== null && _h !== void 0 ? _h : 'total'),
+                    itemIndex: (_j = r.item_index) !== null && _j !== void 0 ? _j : undefined,
                     itemIndexes: [],
                     amountByItemIndex: {},
                     quantityByItemIndex: {},
-                    createdAt: (_39 = r.created_at) !== null && _39 !== void 0 ? _39 : null,
+                    createdAt: (_k = r.created_at) !== null && _k !== void 0 ? _k : null,
                     voidedInvoice: r.voided_invoice_cae
                         ? {
                             cae: String(r.voided_invoice_cae),
@@ -2112,7 +2122,7 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
             const amount = Number(r.amount_credited || 0);
             g.amountCredited = Math.round((g.amountCredited + amount) * 100) / 100;
             // Si al menos una fila es 'item' o tiene item_index, considerar el grupo como 'item'.
-            if (((_40 = r.scope) !== null && _40 !== void 0 ? _40 : 'total') === 'item' || r.item_index != null) {
+            if (((_l = r.scope) !== null && _l !== void 0 ? _l : 'total') === 'item' || r.item_index != null) {
                 g.scope = 'item';
                 const idx = Number(r.item_index);
                 if (Number.isInteger(idx) && idx >= 0) {
@@ -2143,7 +2153,7 @@ const getOrderCreditNotes = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getOrderCreditNotes = getOrderCreditNotes;
 /** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
 const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _41, _42, _43;
+    var _a, _b, _c;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -2231,7 +2241,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 const idx = typeof (it === null || it === void 0 ? void 0 : it.itemIndex) === 'number' ? it.itemIndex : parseInt(String(it === null || it === void 0 ? void 0 : it.itemIndex), 10);
                 const qty = typeof (it === null || it === void 0 ? void 0 : it.quantity) === 'number' ? it.quantity : parseInt(String(it === null || it === void 0 ? void 0 : it.quantity), 10);
                 if (isNaN(idx) || idx < 0 || idx >= orderItems.length) {
-                    return res.status(400).json({ message: `itemIndex inválido en selección múltiple: ${String((_41 = it === null || it === void 0 ? void 0 : it.itemIndex) !== null && _41 !== void 0 ? _41 : '')}` });
+                    return res.status(400).json({ message: `itemIndex inválido en selección múltiple: ${String((_a = it === null || it === void 0 ? void 0 : it.itemIndex) !== null && _a !== void 0 ? _a : '')}` });
                 }
                 if (isNaN(qty) || qty <= 0) {
                     return res.status(400).json({ message: `quantity inválida para itemIndex ${idx}. Debe ser mayor a 0.` });
@@ -2269,7 +2279,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const netOrderTotal = netFromOrder > 0 ? netFromOrder : Number(orderRow.total) || 0;
         const iibbNc = iibbPercepcionForOrderCreditNote(Number(invRow.agip_alicuota || 0), Number(invRow.agip_ret_per || 0), amountToCredit, netOrderTotal);
         const { emitirNotaCredito: emitirNCAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_42 = customerRow.business_name) !== null && _42 !== void 0 ? _42 : '', cuit: customerRow.cuit, condicionIva: (_43 = customerRow.condicion_iva) !== null && _43 !== void 0 ? _43 : undefined }, amountToCredit, iibbNc);
+        const result = yield emitirNCAfip({ puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde }, { id: customerRow.id, businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '', cuit: customerRow.cuit, condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : undefined }, amountToCredit, iibbNc);
         const scope = tipo === 'items' ? 'item' : tipo;
         const itemIndexVal = tipo === 'item' ? (typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10)) : null;
         const firstCreditNoteId = (0, uuid_1.v4)();
@@ -2383,7 +2393,7 @@ const emitirNotaCredito = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.emitirNotaCredito = emitirNotaCredito;
 /** Exporta métricas mayoristas: artículos más pedidos (ranking). */
 const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _44, _45, _46, _47;
+    var _a, _b, _c, _d;
     try {
         const user = req.user;
         if (!user || !['ADMIN', 'SELLER', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
@@ -2391,8 +2401,8 @@ const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, vo
         }
         const where = [`o.status NOT IN ('Cancelado', 'Borrador')`];
         const params = [];
-        const from = (_45 = (_44 = req.query) === null || _44 === void 0 ? void 0 : _44.from) === null || _45 === void 0 ? void 0 : _45.trim();
-        const to = (_47 = (_46 = req.query) === null || _46 === void 0 ? void 0 : _46.to) === null || _47 === void 0 ? void 0 : _47.trim();
+        const from = (_b = (_a = req.query) === null || _a === void 0 ? void 0 : _a.from) === null || _b === void 0 ? void 0 : _b.trim();
+        const to = (_d = (_c = req.query) === null || _c === void 0 ? void 0 : _c.to) === null || _d === void 0 ? void 0 : _d.trim();
         if (from) {
             where.push('o.date >= ?');
             params.push(from);
@@ -2582,9 +2592,9 @@ exports.getOrderItemsMissingDespacho = getOrderItemsMissingDespacho;
  * Solo afecta a items del pedido indicado y, por seguridad, solo si actualmente tienen despacho_id NULL.
  */
 const assignDespachosToOrderItems = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _48, _49;
+    var _a, _b;
     const { id } = req.params;
-    const assignmentsRaw = Array.isArray((_48 = req.body) === null || _48 === void 0 ? void 0 : _48.assignments) ? req.body.assignments : [];
+    const assignmentsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.assignments) ? req.body.assignments : [];
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     if (assignmentsRaw.length === 0) {
@@ -2665,7 +2675,7 @@ const assignDespachosToOrderItems = (req, res) => __awaiter(void 0, void 0, void
             }
             resolved.push({
                 orderItemId,
-                productId: (_49 = itemRow.product_id) !== null && _49 !== void 0 ? _49 : null,
+                productId: (_b = itemRow.product_id) !== null && _b !== void 0 ? _b : null,
                 despachoId: despachoId,
                 numeroDespacho: resolvedNumero,
                 paisOrigen: resolvedPais,

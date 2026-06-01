@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPaymentStatusToOrders = void 0;
+exports.addPaymentStatusToOrders = addPaymentStatusToOrders;
 const db_1 = require("./db");
 /** Estado de cobro del pedido mayorista (cuenta corriente / saldos pendientes). */
 function addPaymentStatusToOrders() {
@@ -31,4 +31,3 @@ function addPaymentStatusToOrders() {
         }
     });
 }
-exports.addPaymentStatusToOrders = addPaymentStatusToOrders;

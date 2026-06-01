@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addRemitenteTable = void 0;
+exports.addRemitenteTable = addRemitenteTable;
 const db_1 = require("./db");
 /** Guarda los datos del remitente (para remitos + factura) en la DB. */
 function addRemitenteTable() {
@@ -45,4 +45,3 @@ function addRemitenteTable() {
         }
     });
 }
-exports.addRemitenteTable = addRemitenteTable;

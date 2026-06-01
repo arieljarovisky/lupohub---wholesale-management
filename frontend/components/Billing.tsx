@@ -716,69 +716,31 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
-  const canDeleteComprobante = (item: any) => {
-    if (!item?.id) return false;
-    if (item.manual) return true;
-    const isImportedTango =
-      (item.imported && item.importedLineOrder && item.customerId) ||
-      (String(item.id || '').startsWith('mm-fac-') && item.customerId && item.importedLineOrder);
-    if (isImportedTango) return true;
-    if (
-      canAfipInvoiceActions &&
-      !item.manual &&
-      !item.imported &&
-      !String(item.id || '').startsWith('mm-')
-    ) {
-      return item.tipo === 'FACTURA' || item.tipo === 'NC';
-    }
-    return false;
-  };
-
-  const handleDeleteComprobante = (item: any) => {
-    if (!canDeleteComprobante(item)) return;
-
-    const isImported = !!(item.imported && item.importedLineOrder && item.customerId);
-    const isManual = !!item.manual;
-    const isLocalAfip = !isManual && !isImported;
-
-    const label = isManual
-      ? item.tipo === 'NC'
-        ? 'nota de crédito manual'
-        : 'comprobante manual'
-      : isImported
-        ? `comprobante Tango (${item.tipo === 'NC' ? 'NC' : 'factura'})`
-        : item.tipo === 'NC'
-          ? 'nota de crédito (LupoHub)'
-          : 'factura (LupoHub)';
-
-    const afipNote = isLocalAfip
-      ? ' Solo se borra el registro en LupoHub; el comprobante sigue vigente en AFIP si ya fue emitido.'
-      : '';
-
+  const handleDeletePayment = (p: any) => {
+    const isImported =
+      (p.source === 'imported' || String(p.id || '').startsWith('mm-')) &&
+      p.importedLineOrder &&
+      p.customerId;
+    const label = isImported ? 'recibo importado de Tango' : 'recibo';
     showConfirm({
       title: `Eliminar ${label}`,
-      message: `¿Eliminar ${formatComprobanteNumero(item)} de ${item.customerBusinessName || 'este cliente'}? El saldo pendiente se recalculará.${afipNote}`,
+      message: `¿Eliminar el recibo ${p.receiptNumber || ''} de ${p.customerBusinessName || 'este cliente'}? Se quitará del saldo y de la cuenta corriente.`,
       confirmLabel: 'Eliminar',
       onConfirm: async () => {
         try {
-          if (isManual) {
-            await api.deleteManualComprobante(item.id);
-            if (manualEditingId === item.id) {
-              setShowManualComprobanteModal(false);
-              resetManualComprobanteForm();
-            }
-          } else if (isImported) {
-            await api.deleteImportedBillingEntry({
-              customerId: item.customerId,
-              importedLineOrder: item.importedLineOrder,
+          if (isImported) {
+            await api.deletePayment(String(p.id), {
+              customerId: p.customerId,
+              importedLineOrder: p.importedLineOrder,
             });
           } else {
-            await api.deleteLocalAfipComprobante(item.id, item.tipo === 'NC' ? 'NC' : 'FACTURA');
+            await api.deletePayment(p.id);
           }
-          showToast('success', 'Comprobante eliminado');
+          showToast('success', 'Recibo eliminado');
+          await loadPayments();
           await load();
         } catch (err: any) {
-          showToast('error', err?.message || 'No se pudo eliminar');
+          showToast('error', err?.response?.data?.message || err?.message || 'No se pudo eliminar');
         }
       },
     });
@@ -1519,16 +1481,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         PDF
                       </button>
                     )}
-                    {canDeleteComprobante(item) && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteComprobante(item)}
-                        className="px-3 py-2 rounded-xl bg-red-950/50 text-red-200 text-xs font-bold border border-red-800/60 touch-manipulation inline-flex items-center gap-1"
-                      >
-                        <Trash2 size={14} />
-                        Eliminar
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => handleVer(item)}
@@ -1631,16 +1583,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             title="Ver PDF adjunto"
                           >
                             <FileText size={15} />
-                          </button>
-                        )}
-                        {canDeleteComprobante(item) && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteComprobante(item)}
-                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-red-950/40 text-red-200 hover:bg-red-900/60 border border-red-800/60"
-                            title="Eliminar comprobante"
-                          >
-                            <Trash2 size={15} />
                           </button>
                         )}
                         <button
@@ -1889,6 +1831,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     Asociar comprobantes
                   </button>
                   {!isSeller && (
+                  <>
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg bg-red-950/50 border border-red-800/60 text-[11px] font-bold text-red-200 hover:bg-red-900/60 touch-manipulation inline-flex items-center gap-1"
+                    onClick={() => handleDeletePayment(p)}
+                    title="Eliminar recibo"
+                  >
+                    <Trash2 size={12} />
+                    Eliminar
+                  </button>
                   <button
                     type="button"
                     className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation"
@@ -1920,6 +1872,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   >
                     Editar fecha
                   </button>
+                  </>
                   )}
                   <div className="text-sm font-black text-emerald-300 tabular-nums">${formatMoneyAr(Number(p.amount || 0))}</div>
                 </div>
