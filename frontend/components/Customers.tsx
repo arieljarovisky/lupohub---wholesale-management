@@ -1487,8 +1487,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Cuenta importada (Tango / Multimedias) más facturas y pedidos LupoHub pendientes, menos notas de crédito y recibos.
-                  Abajo, el detalle de cada comprobante (importado y LupoHub).
+                  Es la <span className="text-slate-300">deuda actual</span>: cierre Tango + pedidos LupoHub pendientes − recibos.
+                  La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
@@ -1585,22 +1585,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     ) : null}
                   </p>
                 ) : null}
-                {carteraById[selectedCustomer.id] &&
+                <div className="mb-3 rounded-xl border border-slate-600/60 bg-slate-950/60 px-3 py-2.5 text-xs text-slate-400 leading-relaxed space-y-1.5">
+                  <p>
+                    <span className="font-bold text-amber-200">Saldo pendiente</span> (arriba) = cuánto debe el cliente
+                    hoy. Usá ese número para cobranza.
+                  </p>
+                  <p>
+                    <span className="font-bold text-slate-300">Saldo corrido</span> (columna de la tabla) = historial
+                    movimiento por movimiento; puede ser distinto si el cierre Tango ya descontó NC o recibos.
+                  </p>
+                  {carteraById[selectedCustomer.id] &&
                   ledgerSaldoHistorialFinal != null &&
-                  Math.abs(ledgerSaldoHistorialFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 && (
-                    <div className="mb-3 rounded-xl border border-amber-600/40 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100/90 leading-relaxed">
-                      El <span className="font-bold">saldo pendiente</span> ($
-                      {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
-                        minimumFractionDigits: 2
-                      })}
-                      ) es la deuda actual (cierre importado + pedidos LupoHub − recibos). El{' '}
-                      <span className="font-bold">saldo corrido</span> de la tabla ($
-                      {ledgerSaldoHistorialFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                      ) reconstruye el historial; en filas importadas usa el saldo del Excel Tango. En el export por
-                      vendedor, <span className="font-bold">CARTERA</span> coincide con este saldo pendiente;{' '}
-                      <span className="font-bold">PERÍODO</span> es solo el rango de fechas elegido.
-                    </div>
-                  )}
+                  Math.abs(ledgerSaldoHistorialFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 ? (
+                    <p className="text-amber-100/80">
+                      En el Excel por vendedor: ignorá el «saldo del período con arrastre» si no coincide; el que dice{' '}
+                      <span className="font-bold">Saldo pendiente</span> en verde es el mismo que acá.
+                    </p>
+                  ) : null}
+                </div>
                 {renderLedgerTable(
                   'Facturas, NC y recibos',
                   <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />,

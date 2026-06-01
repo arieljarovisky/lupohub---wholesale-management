@@ -2981,6 +2981,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         }
       }
 
+      const saldoCarteraLabel = saldoCartera.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const titleRow = wsDetalle.addRow([
         `CLIENTE: ${c.customer_name}`,
         `VENDEDOR: ${c.seller_name ?? c.seller_id ?? '-'}`,
@@ -2988,7 +2989,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         '',
         '',
         '',
-        `CARTERA: ${saldoCartera.toFixed(2)} · PERÍODO: ${saldoPeriodo.toFixed(2)}`,
+        `SALDO A COBRAR: ${saldoCarteraLabel}`,
       ]);
       wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
       wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
@@ -3025,32 +3026,56 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         });
       }
 
-      // Bloque de conciliación para mostrar cómo se llega al saldo final.
+      const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
       const concStartRow = wsDetalle.rowCount + 1;
-      wsDetalle.addRow(['RESUMEN DE CONCILIACION', '', '', '', '', '', '']);
-      if (from) {
+      wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
+      const mainSaldoRow = wsDetalle.addRow([
+        'Saldo pendiente (deuda actual — mismo número que la ficha del cliente en LupoHub)',
+        '',
+        '',
+        '',
+        '',
+        '',
+        saldoCartera,
+      ]);
+      mainSaldoRow.getCell(1).font = { bold: true, size: 11 };
+      mainSaldoRow.getCell(7).font = { bold: true, size: 12 };
+      mainSaldoRow.getCell(7).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD1FAE5' },
+      };
+
+      if (movs.length > 0) {
         wsDetalle.addRow([
-          'Saldo arrastrado (movimientos con fecha anterior al período; no se listan arriba)',
+          `Solo en las filas de arriba (rango de fechas del export): facturas/pedidos ${totalDebeMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} − NC/recibos ${totalHaberMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} = ${netoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
           '',
           '',
           '',
           '',
           '',
-          openingBalance
+          '',
         ]);
       }
-      wsDetalle.addRow(['Total debe (movimientos del período)', '', '', '', totalDebeMovs, '', '']);
-      wsDetalle.addRow(['Total haber (movimientos del período)', '', '', '', '', totalHaberMovs, '']);
-      const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
-      wsDetalle.addRow(['Saldo neto del período (debe − haber)', '', '', '', '', '', netoPeriodo]);
-      wsDetalle.addRow(['Saldo acumulado al cierre del período (arrastre + período)', '', '', '', '', '', saldo]);
-      wsDetalle.addRow(['Saldo movimientos del período (debe − haber + arrastre)', '', '', '', '', '', saldoPeriodo]);
-      wsDetalle.addRow(['Saldo pendiente cartera (LupoHub — mismo que ficha cliente)', '', '', '', '', '', saldoCartera]);
+
+      if (from && Math.abs(saldoCartera - saldoPeriodo) > 1) {
+        wsDetalle.addRow([
+          `El saldo del período con arrastre (${saldoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}) incluye movimientos anteriores al «desde» (arrastre ${openingBalance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}). Para cobrar al cliente, usá siempre el saldo pendiente de arriba.`,
+          '',
+          '',
+          '',
+          '',
+          '',
+          saldoPeriodo,
+        ]);
+      }
+
       for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
-        wsDetalle.mergeCells(r, 1, r, 4);
+        wsDetalle.mergeCells(r, 1, r, 6);
         const row = wsDetalle.getRow(r);
-        row.getCell(1).font = { bold: true };
-        row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+        row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        if (r === mainSaldoRow.number) continue;
+        row.getCell(1).font = { italic: true, size: 10, color: { argb: 'FF475569' } };
       }
 
       wsDetalle.addRow(['', '', '', '', '', '', '']);
