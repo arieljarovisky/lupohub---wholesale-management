@@ -1145,10 +1145,12 @@ AND NOT EXISTS (
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
 
-/** Saldo unificado: arrastre importado + saldo residual por pedido − recibos sin imputar − dedupe import. */
+/** Saldo unificado: arrastre + pedidos + comprobantes manuales − recibos sin imputar − dedupe import. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
     COALESCE(ob.facturas_bruto, 0)
+    + COALESCE(mfac.manual_fac, 0)
+    - COALESCE(mnc.manual_nc, 0)
     + COALESCE(mm.last_saldo, 0)
     - COALESCE(pay.total_pagos, 0)
     - CASE
@@ -1432,8 +1434,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   const sqlWithNc = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
+      ROUND(COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
@@ -1452,6 +1454,18 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto * 1.21 + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'FACTURA'
+      GROUP BY customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto * 1.21, 2)) AS manual_nc
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'NC'
+      GROUP BY customer_id
+    ) mnc ON mnc.customer_id = c.id
     LEFT JOIN (
       SELECT
         o.customer_id,
@@ -1479,8 +1493,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   const sqlSimple = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
+      ROUND(COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0), 2) AS orderCargosPendientes,
+      ROUND(COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0), 2) AS totalNotasCredito,
       ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
@@ -1499,6 +1513,18 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto * 1.21 + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'FACTURA'
+      GROUP BY customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto * 1.21, 2)) AS manual_nc
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'NC'
+      GROUP BY customer_id
+    ) mnc ON mnc.customer_id = c.id
     LEFT JOIN (
       SELECT
         o.customer_id,
@@ -4010,7 +4036,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
           LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
         ) AS comprobante,
         o.id AS order_id,
-        ROUND(COALESCE(o.total, 0), 2) AS debe,
+        ROUND(COALESCE(o.total, 0) * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS debe,
         0 AS haber,
         CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
       FROM invoices i
@@ -4034,7 +4060,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         ) AS comprobante,
         cn.order_id AS order_id,
         0 AS debe,
-        ROUND(COALESCE(cn.amount_credited, 0), 2) AS haber,
+        ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
         CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
@@ -4043,19 +4069,45 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       UNION ALL
 
       SELECT
+        m.fecha AS fecha,
+        m.tipo AS tipo,
+        CONCAT(
+          CASE
+            WHEN m.cbte_tipo IN (1, 3) THEN CASE WHEN m.tipo = 'NC' THEN 'NC A ' ELSE 'A ' END
+            WHEN m.cbte_tipo IN (6, 8) THEN CASE WHEN m.tipo = 'NC' THEN 'NC B ' ELSE 'B ' END
+            ELSE ''
+          END,
+          LPAD(COALESCE(m.punto_venta, 0), 5, '0'),
+          '-',
+          LPAD(COALESCE(m.cbte_desde, 0), 8, '0')
+        ) AS comprobante,
+        m.ref_order_id AS order_id,
+        CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto * 1.21 + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
+        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto * 1.21, 2) ELSE 0 END AS haber,
+        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle
+      FROM customer_manual_comprobantes m
+      WHERE m.customer_id = ?
+
+      UNION ALL
+
+      SELECT
         o.date AS fecha,
         'PEDIDO' AS tipo,
         o.id AS comprobante,
         o.id AS order_id,
-        ${SQL_ORDER_CARGO_CON_IVA} AS debe,
+        (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
         0 AS haber,
-        'Pedido sin facturar (suma al saldo)' AS detalle
+        'Saldo pendiente del pedido' AS detalle
       FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
       WHERE o.customer_id = ?
-        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
         AND ${SQL_ORDER_ACTIVE_COND}
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
-        AND ${SQL_ORDER_ACTIVE_COND}
+        AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
 
       UNION ALL
 
@@ -4102,7 +4154,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
     `,
-    [customerId, customerId, customerId, customerId]
+    [customerId, customerId, customerId, customerId, customerId]
   )) as any[];
 
   const importedEntries = (await query(
@@ -4532,11 +4584,22 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
        ) d`,
       [customerId]
     ) as any;
-    const facturasBruto = Number(orderAgg?.facturas_bruto || 0);
-    const ncIva = Number(orderAgg?.nc_iva || 0);
+    const manualAgg = await get(
+      `SELECT
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'FACTURA' THEN importe_neto * 1.21 + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_fac,
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto * 1.21 ELSE 0 END), 0), 2) AS manual_nc
+       FROM customer_manual_comprobantes
+       WHERE customer_id = ?`,
+      [customerId]
+    ) as any;
+    const facturasBruto =
+      Number(orderAgg?.facturas_bruto || 0) + Number(manualAgg?.manual_fac || 0);
+    const ncIva = Number(orderAgg?.nc_iva || 0) + Number(manualAgg?.manual_nc || 0);
     const multimediaSaldo = Number(multimediaAgg?.multimediaSaldo || 0);
     const totalPagos = Number(paymentsAgg?.totalPagos || 0);
-    const saldoUnificado = Math.round((multimediaSaldo + facturasBruto - totalPagos) * 100) / 100;
+    const saldoUnificado = Math.round(
+      (multimediaSaldo + facturasBruto - ncIva - totalPagos) * 100
+    ) / 100;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';

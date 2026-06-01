@@ -436,20 +436,29 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        ORDER BY p.created_at ASC, p.date ASC`,
       [id]
     )) as any[];
-    const invoiceRows = (await query(
+    const orderSaldoRows = (await query(
       `SELECT
-         i.id AS invoice_id,
-         i.order_id,
+         o.id AS order_id,
+         o.date AS order_date,
+         o.created_at,
+         o.remito_number,
+         (${SQL_ORDER_SALDO_RESIDUAL}) AS residual,
          i.cbte_tipo,
          i.punto_venta,
          i.cbte_desde,
-         i.created_at,
-         o.date AS order_date,
-         o.total AS order_total
-       FROM invoices i
-       JOIN orders o ON o.id = i.order_id
+         CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END AS has_invoice
+       FROM orders o
+       LEFT JOIN (
+         SELECT order_id, SUM(amount_credited) AS cn_total
+         FROM credit_notes
+         GROUP BY order_id
+       ) cn ON cn.order_id = o.id
+       LEFT JOIN invoices i ON i.order_id = o.id
        WHERE o.customer_id = ?
-       ORDER BY COALESCE(i.created_at, o.date) ASC, i.id ASC`,
+         AND ${SQL_ORDER_ACTIVE_COND}
+         AND ${SQL_ORDER_IN_SALDO_SCOPE}
+         AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+       ORDER BY COALESCE(o.date, o.created_at) ASC, o.id ASC`,
       [id]
     )) as any[];
     const creditNoteRows = (await query(
@@ -467,35 +476,24 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        ORDER BY cn.created_at ASC, cn.id ASC`,
       [id]
     )) as any[];
-    const orderWithoutInvoiceRows = (await query(
-      `SELECT
-         o.id,
-         o.date,
-         o.remito_number,
-         o.created_at,
-         ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2) AS cargo_neto,
-         (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
-       FROM orders o
-       LEFT JOIN (
-         SELECT order_id, SUM(amount_credited) AS cn_total
-         FROM credit_notes
-         GROUP BY order_id
-       ) cn ON cn.order_id = o.id
-       WHERE o.customer_id = ?
-         AND ${SQL_ORDER_ACTIVE_COND}
-         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
-         AND (
-           COALESCE(o.include_in_saldo, 0) = 1
-           OR EXISTS (
-             SELECT 1 FROM payment_orders po
-             INNER JOIN payments p ON p.id = po.payment_id
-             WHERE po.order_id = o.id AND p.customer_id = o.customer_id
-           )
-           OR (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
-         )
-       ORDER BY COALESCE(o.date, o.created_at) ASC, o.id ASC`,
-      [id]
-    )) as any[];
+    let manualComprobanteRows: any[] = [];
+    try {
+      manualComprobanteRows = (await query(
+        `SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, sin_detalle, pdf_path, created_at
+         FROM customer_manual_comprobantes
+         WHERE customer_id = ?
+         ORDER BY fecha ASC, created_at ASC`,
+        [id]
+      )) as any[];
+    } catch {
+      manualComprobanteRows = (await query(
+        `SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, created_at
+         FROM customer_manual_comprobantes
+         WHERE customer_id = ?
+         ORDER BY fecha ASC, created_at ASC`,
+        [id]
+      )) as any[];
+    }
     const normalizeDocNumber = (value: any) => {
       const raw = String(value || '').trim().toUpperCase();
       if (!raw) return '';
@@ -513,24 +511,28 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       return String(tipo || '').trim().toUpperCase();
     };
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
-    const invoiceAsEntries = invoiceRows.map((inv, idx) => {
-      const neto = Number(inv.order_total || 0);
-      const importe = Math.round(neto * 1.21 * 100) / 100;
-      const numero = formatLedgerAfipNumero(
-        Number(inv.cbte_tipo || 0),
-        Number(inv.punto_venta || 0),
-        Number(inv.cbte_desde || 0)
-      );
+    const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
+      const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
+      const hasInvoice = !!Number(ord.has_invoice);
+      const numero = hasInvoice
+        ? formatLedgerAfipNumero(
+            Number(ord.cbte_tipo || 0),
+            Number(ord.punto_venta || 0),
+            Number(ord.cbte_desde || 0)
+          )
+        : ord.remito_number != null && Number(ord.remito_number) > 0
+          ? String(Number(ord.remito_number))
+          : String(ord.order_id || '').slice(0, 12);
       return {
         lineOrder: maxLineOrder + 50000 + idx,
-        lineDate: inv.created_at || inv.order_date,
-        tipo: 'FAC',
+        lineDate: ord.order_date || ord.created_at,
+        tipo: hasInvoice ? 'FAC' : 'PED',
         numero,
         edc: null,
         vto: null,
-        importe: importe > 0 ? importe : null,
+        importe: residual > 0 ? residual : null,
         saldo: null,
-        detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
+        detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente${hasInvoice ? ' (facturado)' : ' (sin factura)'}`,
         paginaPdf: null,
         source: 'system' as const
       };
@@ -556,22 +558,33 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         source: 'system' as const
       };
     });
-    const orderWithoutInvoiceAsEntries = orderWithoutInvoiceRows.map((ord, idx) => {
-      const importe = Math.round(Number(ord.cargo_neto || 0) * 100) / 100;
-      const remito =
-        ord.remito_number != null && Number(ord.remito_number) > 0
-          ? String(Number(ord.remito_number))
-          : String(ord.id || '').slice(0, 12);
+    const manualComprobanteAsEntries = manualComprobanteRows.map((m, idx) => {
+      const importe =
+        m.tipo === 'FACTURA'
+          ? Math.round((Number(m.importe_neto || 0) * 1.21 + Number(m.agip_ret_per || 0)) * 100) / 100
+          : Math.round(Number(m.importe_neto || 0) * 1.21 * 100) / 100;
+      const sinDetalle = !!Number(m.sin_detalle);
+      const numero = sinDetalle
+        ? 'Sin nº AFIP'
+        : formatLedgerAfipNumero(
+            Number(m.cbte_tipo || 0),
+            Number(m.punto_venta || 0),
+            Number(m.cbte_desde || 0)
+          );
+      const tipoLabel = m.tipo === 'NC' ? 'NC' : 'FAC';
+      const detalleExtra = m.notes ? String(m.notes).trim() : '';
+      const pdfNote = m.pdf_path ? ' · PDF adjunto' : '';
+      const pedidoRef = m.ref_order_id ? `Pedido ${m.ref_order_id}` : 'Sin pedido';
       return {
-        lineOrder: maxLineOrder + 55000 + idx,
-        lineDate: ord.date || ord.created_at,
-        tipo: 'PED',
-        numero: remito,
+        lineOrder: maxLineOrder + 70000 + idx,
+        lineDate: m.fecha || m.created_at,
+        tipo: tipoLabel,
+        numero,
         edc: null,
         vto: null,
         importe: importe > 0 ? importe : null,
         saldo: null,
-        detalle: `Pedido ${ord.id || ''} · Sin factura AFIP (neto)`,
+        detalle: `${pedidoRef} · Comprobante manual${pdfNote}${detalleExtra ? ` · ${detalleExtra}` : ''}`,
         paginaPdf: null,
         source: 'system' as const
       };
@@ -618,9 +631,9 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         paginaPdf: e.pagina_pdf,
         source: 'imported' as const
       })),
-      ...invoiceAsEntries,
+      ...orderSaldoAsEntries,
       ...creditNoteAsEntries,
-      ...orderWithoutInvoiceAsEntries,
+      ...manualComprobanteAsEntries,
       ...paymentAsEntries
     ];
 

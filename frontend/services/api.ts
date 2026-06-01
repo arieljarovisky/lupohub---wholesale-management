@@ -1888,7 +1888,7 @@ export const api = {
     saldoPendiente: number;
     movements: Array<{
       fecha: string | null;
-      tipo: 'FACTURA' | 'NC' | 'RECIBO';
+      tipo: string;
       comprobante: string;
       orderId: string | null;
       debe: number;
@@ -3016,6 +3016,71 @@ export const api = {
     return handleRequest(async () => {
       return await request<any[]>(`/billing${qs ? '?' + qs : ''}`, 'GET');
     }, [], 'getBilling');
+  },
+
+  getManualComprobanteRefs: async (
+    customerId: string
+  ): Promise<
+    Array<{
+      invoiceId?: string;
+      manualComprobanteId?: string;
+      orderId?: string;
+      label: string;
+      fecha: string;
+      importeNeto: number;
+      importeConIva: number;
+    }>
+  > => {
+    return await request(
+      `/customers/${encodeURIComponent(customerId)}/manual-comprobante-refs`,
+      'GET'
+    );
+  },
+
+  createManualComprobante: async (payload: {
+    customerId: string;
+    tipo: 'FACTURA' | 'NC';
+    fecha: string;
+    puntoVenta?: number;
+    cbteTipo?: number;
+    cbteDesde?: number;
+    cbteHasta?: number;
+    letra?: 'A' | 'B';
+    sinDetalle?: boolean;
+    cae?: string;
+    caeFchVto?: string;
+    importeNeto: number;
+    agipRetPer?: number;
+    notes?: string;
+    refInvoiceId?: string;
+    refManualComprobanteId?: string;
+    pdf?: File | null;
+  }): Promise<{
+    id: string;
+    comprobante: string;
+    importeConIva: number;
+    sinDetalle?: boolean;
+    hasPdf?: boolean;
+    allocationNote?: string;
+  }> => {
+    const { pdf, ...fields } = payload;
+    if (pdf) {
+      const form = new FormData();
+      Object.entries(fields).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        form.append(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
+      });
+      form.append('pdf', pdf);
+      return await requestFormData('/billing/manual-comprobantes/upload', form, 120000);
+    }
+    return await request('/billing/manual-comprobantes', 'POST', fields);
+  },
+
+  openManualComprobantePdf: async (id: string): Promise<void> => {
+    const blob = await getBlob(`/billing/manual-comprobantes/${encodeURIComponent(id)}/pdf`);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
   },
 
   exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {

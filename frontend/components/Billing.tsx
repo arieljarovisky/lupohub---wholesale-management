@@ -8,7 +8,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
@@ -116,6 +116,26 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showManualComprobanteModal, setShowManualComprobanteModal] = useState(false);
+  const [manualTipo, setManualTipo] = useState<'FACTURA' | 'NC'>('FACTURA');
+  const [manualCustomerId, setManualCustomerId] = useState('ALL');
+  const [manualFecha, setManualFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualLetra, setManualLetra] = useState<'A' | 'B'>('B');
+  const [manualPuntoVta, setManualPuntoVta] = useState('21');
+  const [manualNumero, setManualNumero] = useState('');
+  const [manualCae, setManualCae] = useState('');
+  const [manualImporteNeto, setManualImporteNeto] = useState('');
+  const [manualAgip, setManualAgip] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualRefKey, setManualRefKey] = useState('');
+  const [manualRefs, setManualRefs] = useState<
+    Array<{ invoiceId?: string; manualComprobanteId?: string; label: string }>
+  >([]);
+  const [manualRefsLoading, setManualRefsLoading] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualSinDetalle, setManualSinDetalle] = useState(false);
+  const [manualPdfFile, setManualPdfFile] = useState<File | null>(null);
+  const manualPdfInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
@@ -648,13 +668,40 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const formatTipo = (item: any) => {
+    if (item.sinDetalle) {
+      return item.tipo === 'NC' ? 'NC (manual)' : 'Factura (manual)';
+    }
     if (item.tipo === 'NC') {
       return item.cbteTipo === 3 ? 'NC A' : item.cbteTipo === 8 ? 'NC B' : 'NC';
     }
     return item.cbteTipo === 1 ? 'Factura A' : item.cbteTipo === 6 ? 'Factura B' : 'Factura';
   };
 
+  const formatComprobanteNumero = (item: any) => {
+    if (item.sinDetalle || (!item.puntoVta && !item.numeroDesde)) return 'Sin nº AFIP';
+    const numero =
+      item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
+    return `PV ${item.puntoVta} · Nº ${numero}`;
+  };
+
+  const openManualPdf = async (item: any) => {
+    if (!item?.id) return;
+    try {
+      await api.openManualComprobantePdf(item.id);
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo abrir el PDF');
+    }
+  };
+
   const handleVer = async (item: any) => {
+    if (item?.manual) {
+      if (item.hasPdf) {
+        await openManualPdf(item);
+        return;
+      }
+      showToast('info', 'Comprobante manual sin pedido ni PDF adjunto.');
+      return;
+    }
     if (!item?.orderId) {
       showToast('error', 'No se encontró el pedido para este comprobante');
       return;
@@ -885,6 +932,53 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     else loadPayments();
   };
 
+  const cbteTipoFromLetra = (letra: 'A' | 'B', tipo: 'FACTURA' | 'NC') => {
+    if (tipo === 'FACTURA') return letra === 'A' ? 1 : 6;
+    return letra === 'A' ? 3 : 8;
+  };
+
+  const openManualComprobanteModal = () => {
+    setManualTipo('FACTURA');
+    setManualCustomerId(customerId !== 'ALL' ? customerId : 'ALL');
+    setManualFecha(new Date().toISOString().slice(0, 10));
+    setManualLetra('B');
+    setManualPuntoVta('21');
+    setManualNumero('');
+    setManualCae('');
+    setManualImporteNeto('');
+    setManualAgip('');
+    setManualNotes('');
+    setManualRefKey('');
+    setManualRefs([]);
+    setManualSinDetalle(false);
+    setManualPdfFile(null);
+    if (manualPdfInputRef.current) manualPdfInputRef.current.value = '';
+    setShowManualComprobanteModal(true);
+  };
+
+  useEffect(() => {
+    if (!showManualComprobanteModal || manualTipo !== 'NC' || !manualCustomerId || manualCustomerId === 'ALL') {
+      setManualRefs([]);
+      return;
+    }
+    let cancelled = false;
+    setManualRefsLoading(true);
+    api
+      .getManualComprobanteRefs(manualCustomerId)
+      .then((rows) => {
+        if (!cancelled) setManualRefs(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setManualRefs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setManualRefsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showManualComprobanteModal, manualTipo, manualCustomerId]);
+
   const actionMenuItemClass =
     'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left text-sm text-slate-200 hover:bg-slate-800/90 disabled:opacity-45 disabled:pointer-events-none transition-colors';
 
@@ -1048,6 +1142,23 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     >
                       {exportingByCustomerFile ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-teal-400 shrink-0" />}
                       Comprobantes por Excel / lista
+                    </button>
+
+                    <div className="my-1.5 border-t border-slate-800" />
+                    <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Cargas
+                    </p>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={actionMenuItemClass}
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        openManualComprobanteModal();
+                      }}
+                    >
+                      <FilePlus size={16} className="text-violet-400 shrink-0" />
+                      Factura o NC manual
                     </button>
 
                     <div className="my-1.5 border-t border-slate-800" />
@@ -1240,18 +1351,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             </div>
           )}
           {pagedItems.map((item: any) => {
-            const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
             return (
               <div key={`m-${item.tipo}-${item.id}`} className="p-4 space-y-2 bg-slate-900/40">
                 <div className="flex items-start justify-between gap-2">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                     {formatTipo(item)}
+                    {item.manual && <span className="ml-1 opacity-80">· manual</span>}
                   </span>
                   <span className="text-xs text-slate-500 tabular-nums">{formatDate(item.fecha)}</span>
                 </div>
-                <p className="font-mono text-lg font-bold text-white">
-                  PV {item.puntoVta} · Nº {numero}
-                </p>
+                <p className="font-mono text-lg font-bold text-white">{formatComprobanteNumero(item)}</p>
                 <p className="text-sm text-slate-300 truncate" title={item.customerBusinessName}>
                   {item.customerBusinessName}
                 </p>
@@ -1260,13 +1369,25 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 )}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <span className="text-base font-black text-white tabular-nums">${formatMoneyAr(item.importe ?? 0)}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleVer(item)}
-                    className="px-3 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 touch-manipulation"
-                  >
-                    Ver
-                  </button>
+                  <div className="flex gap-2">
+                    {item.manual && item.hasPdf && (
+                      <button
+                        type="button"
+                        onClick={() => openManualPdf(item)}
+                        className="px-3 py-2 rounded-xl bg-violet-900/50 text-violet-200 text-xs font-bold border border-violet-700/60 touch-manipulation inline-flex items-center gap-1"
+                      >
+                        <FileText size={14} />
+                        PDF
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleVer(item)}
+                      className="px-3 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 touch-manipulation"
+                    >
+                      {item.manual && item.hasPdf ? 'Ver' : 'Ver'}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -1298,18 +1419,30 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </tr>
               )}
               {pagedItems.map((item: any) => {
-                const numero = item.numeroDesde === item.numeroHasta ? item.numeroDesde : `${item.numeroDesde}-${item.numeroHasta}`;
+                const numero =
+                  item.sinDetalle || (!item.puntoVta && !item.numeroDesde)
+                    ? '—'
+                    : item.numeroDesde === item.numeroHasta
+                      ? item.numeroDesde
+                      : `${item.numeroDesde}-${item.numeroHasta}`;
                 return (
                   <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60 group">
                     <td className="px-3 py-2 align-middle whitespace-nowrap">{formatDate(item.fecha)}</td>
                     <td className="px-3 py-2 align-middle">
                       <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
                         {formatTipo(item)}
+                        {item.manual && (
+                          <span className="ml-1.5 text-[9px] font-semibold text-violet-300/90">manual</span>
+                        )}
                       </span>
                     </td>
-                    <td className="px-3 py-2 align-middle whitespace-nowrap">{item.puntoVta}</td>
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">
+                      {item.sinDetalle ? '—' : item.puntoVta}
+                    </td>
                     <td className="px-3 py-2 align-middle whitespace-nowrap">{numero}</td>
-                    <td className="px-3 py-2 align-middle font-mono text-xs whitespace-nowrap">{item.orderId}</td>
+                    <td className="px-3 py-2 align-middle font-mono text-xs whitespace-nowrap text-slate-400">
+                      {item.orderId || (item.manual ? '—' : '')}
+                    </td>
                     <td className="px-3 py-2 align-middle max-w-[200px] truncate" title={item.customerBusinessName}>
                       {item.customerBusinessName}
                     </td>
@@ -1331,11 +1464,21 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </td>
                     <td className="px-2 py-1.5 align-middle text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800/60 shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
                       <div className="inline-flex flex-nowrap items-center justify-end gap-0.5">
+                        {item.manual && item.hasPdf && (
+                          <button
+                            type="button"
+                            onClick={() => openManualPdf(item)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-violet-900/40 text-violet-200 hover:bg-violet-800/60 border border-violet-700/60"
+                            title="Ver PDF adjunto"
+                          >
+                            <FileText size={15} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleVer(item)}
                           className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700/80"
-                          title="Ver comprobante"
+                          title={item.manual && item.hasPdf ? 'Ver PDF' : 'Ver comprobante'}
                         >
                           <Eye size={15} />
                         </button>
@@ -1966,6 +2109,284 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   : paymentModalMode === 'link'
                     ? 'Guardar asociación'
                     : 'Guardar pago'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showManualComprobanteModal && !isSeller && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <h3 className="text-white font-black text-lg">Comprobante manual</h3>
+              <button
+                type="button"
+                onClick={() => setShowManualComprobanteModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Para facturas o NC emitidas fuera de LupoHub. El importe es{' '}
+                <span className="text-slate-200">neto gravado</span> (IVA 21% en saldo). Podés cargar solo importe y
+                PDF, sin número AFIP.
+              </p>
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualSinDetalle}
+                  onChange={(e) => setManualSinDetalle(e.target.checked)}
+                  className="mt-1 rounded border-slate-600"
+                />
+                <span className="text-sm text-slate-300">
+                  <span className="font-bold text-white">Sin datos AFIP</span> — no pido punto de venta, número ni
+                  CAE (ideal si solo tenés el PDF y el importe).
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">PDF del comprobante (opcional)</label>
+                  <input
+                    ref={manualPdfInputRef}
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
+                    onChange={(e) => setManualPdfFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-violet-800 file:text-white file:font-bold"
+                  />
+                  {manualPdfFile && (
+                    <p className="text-xs text-slate-500 mt-1 truncate" title={manualPdfFile.name}>
+                      {manualPdfFile.name} ({Math.round(manualPdfFile.size / 1024)} KB)
+                    </p>
+                  )}
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cliente</label>
+                  <select
+                    value={manualCustomerId}
+                    onChange={(e) => {
+                      setManualCustomerId(e.target.value);
+                      setManualRefKey('');
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                  >
+                    <option value="ALL">Seleccionar…</option>
+                    {customersFilteredByProvince.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.businessName || c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Tipo</label>
+                  <select
+                    value={manualTipo}
+                    onChange={(e) => {
+                      setManualTipo(e.target.value as 'FACTURA' | 'NC');
+                      setManualRefKey('');
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                  >
+                    <option value="FACTURA">Factura</option>
+                    <option value="NC">Nota de crédito</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Fecha</label>
+                  <input
+                    type="date"
+                    value={manualFecha}
+                    onChange={(e) => setManualFecha(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                  />
+                </div>
+                {!manualSinDetalle && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Letra</label>
+                      <select
+                        value={manualLetra}
+                        onChange={(e) => setManualLetra(e.target.value as 'A' | 'B')}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                      >
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Punto venta</label>
+                      <input
+                        value={manualPuntoVta}
+                        onChange={(e) => setManualPuntoVta(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                        placeholder="21"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1">Nº comprobante</label>
+                      <input
+                        value={manualNumero}
+                        onChange={(e) => setManualNumero(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none font-mono"
+                        placeholder="00001234"
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="col-span-2">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe neto</label>
+                  <input
+                    value={manualImporteNeto}
+                    onChange={(e) => setManualImporteNeto(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                    placeholder="0"
+                  />
+                </div>
+                {manualTipo === 'FACTURA' && (
+                  <div className="col-span-2">
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">
+                      Percepción IIBB (opcional)
+                    </label>
+                    <input
+                      value={manualAgip}
+                      onChange={(e) => setManualAgip(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                      placeholder="0"
+                    />
+                  </div>
+                )}
+                {!manualSinDetalle && (
+                  <div className="col-span-2">
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">CAE (opcional)</label>
+                    <input
+                      value={manualCae}
+                      onChange={(e) => setManualCae(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none font-mono text-sm"
+                    />
+                  </div>
+                )}
+                {manualTipo === 'NC' && manualCustomerId !== 'ALL' && (
+                  <div className="col-span-2">
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">
+                      Factura de referencia (opcional)
+                    </label>
+                    <select
+                      value={manualRefKey}
+                      onChange={(e) => setManualRefKey(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none text-sm"
+                      disabled={manualRefsLoading}
+                    >
+                      <option value="">Sin referencia</option>
+                      {manualRefs.map((r) => {
+                        const key = r.invoiceId
+                          ? `inv:${r.invoiceId}`
+                          : `man:${r.manualComprobanteId}`;
+                        return (
+                          <option key={key} value={key}>
+                            {r.label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+                <div className="col-span-2">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
+                  <textarea
+                    value={manualNotes}
+                    onChange={(e) => setManualNotes(e.target.value)}
+                    rows={2}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowManualComprobanteModal(false)}
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl font-bold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={manualSubmitting}
+                onClick={async () => {
+                  if (manualSubmitting) return;
+                  const neto = parseMoneyInput(manualImporteNeto);
+                  if (!manualCustomerId || manualCustomerId === 'ALL') {
+                    showToast('error', 'Seleccioná un cliente');
+                    return;
+                  }
+                  if (!manualFecha) {
+                    showToast('error', 'Falta la fecha');
+                    return;
+                  }
+                  let pv: number | undefined;
+                  let num: number | undefined;
+                  if (!manualSinDetalle) {
+                    pv = parseInt(manualPuntoVta, 10);
+                    num = parseInt(manualNumero, 10);
+                    if (!Number.isFinite(pv) || !Number.isFinite(num)) {
+                      showToast('error', 'Punto de venta y número inválidos');
+                      return;
+                    }
+                  }
+                  if (!Number.isFinite(neto) || neto <= 0) {
+                    showToast('error', 'Importe neto inválido');
+                    return;
+                  }
+                  let refInvoiceId: string | undefined;
+                  let refManualComprobanteId: string | undefined;
+                  if (manualRefKey.startsWith('inv:')) {
+                    refInvoiceId = manualRefKey.slice(4);
+                  } else if (manualRefKey.startsWith('man:')) {
+                    refManualComprobanteId = manualRefKey.slice(4);
+                  }
+                  try {
+                    setManualSubmitting(true);
+                    const created = await api.createManualComprobante({
+                      customerId: manualCustomerId,
+                      tipo: manualTipo,
+                      fecha: manualFecha,
+                      sinDetalle: manualSinDetalle,
+                      letra: manualLetra,
+                      ...(manualSinDetalle
+                        ? {}
+                        : {
+                            puntoVenta: pv,
+                            cbteTipo: cbteTipoFromLetra(manualLetra, manualTipo),
+                            cbteDesde: num,
+                            cbteHasta: num,
+                            cae: manualCae.trim() || undefined
+                          }),
+                      importeNeto: neto,
+                      agipRetPer: manualTipo === 'FACTURA' ? parseMoneyInput(manualAgip || '0') : 0,
+                      notes: manualNotes.trim() || undefined,
+                      refInvoiceId,
+                      refManualComprobanteId,
+                      pdf: manualPdfFile
+                    });
+                    showToast(
+                      'success',
+                      `${manualTipo === 'FACTURA' ? 'Factura' : 'NC'} ${created.comprobante} cargada ($${formatMoneyAr(created.importeConIva)} c/ IVA).`
+                    );
+                    setShowManualComprobanteModal(false);
+                    load();
+                  } catch (err: any) {
+                    showToast('error', err?.response?.data?.message || err?.message || 'Error guardando');
+                  } finally {
+                    setManualSubmitting(false);
+                  }
+                }}
+                className="flex-1 bg-violet-700 hover:bg-violet-600 text-white px-4 py-3 rounded-2xl font-black disabled:opacity-60 inline-flex items-center justify-center gap-2"
+              >
+                {manualSubmitting && <Loader2 size={18} className="animate-spin" />}
+                {manualSubmitting ? 'Guardando…' : 'Guardar'}
               </button>
             </div>
           </div>

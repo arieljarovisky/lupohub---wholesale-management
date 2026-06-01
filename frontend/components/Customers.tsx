@@ -132,17 +132,34 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   useEffect(() => {
     if (!selectedCustomer?.id || !canViewSaldos) {
       setMultimediaLedger(null);
+      setFinancialSummaryMovements([]);
       return;
     }
     let cancelled = false;
     setMultimediaLedgerLoading(true);
+    setFinancialSummaryMovements([]);
+    const loadFinancialFallback = () =>
+      api
+        .getCustomerFinancialSummary(selectedCustomer.id)
+        .then((summary) => {
+          if (!cancelled) setFinancialSummaryMovements(summary.movements || []);
+        })
+        .catch(() => {
+          if (!cancelled) setFinancialSummaryMovements([]);
+        });
+
     api
       .getCustomerMultimediaLedger(selectedCustomer.id)
       .then((d) => {
-        if (!cancelled) setMultimediaLedger(d);
+        if (cancelled) return;
+        setMultimediaLedger(d);
+        if (!d.entries?.length) loadFinancialFallback();
       })
-      .catch(() => {
-        if (!cancelled) setMultimediaLedger(null);
+      .catch((err: any) => {
+        if (cancelled) return;
+        setMultimediaLedger(null);
+        showToast('error', err?.message || 'No se pudo cargar el detalle de movimientos');
+        loadFinancialFallback();
       })
       .finally(() => {
         if (!cancelled) setMultimediaLedgerLoading(false);
@@ -235,6 +252,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
+  const [financialSummaryMovements, setFinancialSummaryMovements] = useState<
+    Awaited<ReturnType<typeof api.getCustomerFinancialSummary>>['movements']
+  >([]);
 
   /** Filtro por vendedor (solo ADMIN): '' = todos, '__none__' = sin vendedor, o id de usuario SELLER */
   const [sellerFilterId, setSellerFilterId] = useState<string>('');
@@ -608,8 +628,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
   type LedgerEntry = NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number];
 
+  const financialSummaryAsLedger = useMemo((): LedgerEntry[] => {
+    if (!financialSummaryMovements.length) return [];
+    const tipoMap: Record<string, string> = {
+      FACTURA: 'FAC',
+      NC: 'NC',
+      RECIBO: 'REC',
+      PEDIDO: 'PED'
+    };
+    return financialSummaryMovements.map((m, idx) => {
+      const importe = Number(m.debe || 0) > 0 ? Number(m.debe) : Number(m.haber || 0);
+      return {
+        lineOrder: 300000 + idx,
+        lineDate: m.fecha || '',
+        tipo: tipoMap[String(m.tipo || '').toUpperCase()] || String(m.tipo || ''),
+        numero: m.comprobante || '',
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: m.detalle || '',
+        paginaPdf: null
+      };
+    });
+  }, [financialSummaryMovements]);
+
   const unifiedLedgerEntries = useMemo(() => {
-    const entries = multimediaLedger?.entries;
+    const entries = multimediaLedger?.entries?.length
+      ? multimediaLedger.entries
+      : financialSummaryAsLedger;
     if (!entries?.length) return [];
     const normalizeDocType = (tipo: string, detalle?: string | null) => {
       const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
@@ -644,7 +691,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
       return next;
     });
-  }, [multimediaLedger]);
+  }, [multimediaLedger, financialSummaryAsLedger]);
 
   const ledgerDateMs = (raw: string | null | undefined) => {
     if (!raw) return 0;
